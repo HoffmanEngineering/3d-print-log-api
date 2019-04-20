@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -30,8 +31,14 @@ namespace PrintLogApi
         {
             services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_2);
 
+            services.AddCors();
+
             ConfigureAuthentication(services);
 
+            services.AddDbContext<PrintLogContext>(opts =>
+            {
+                opts.UseSqlServer(Configuration["ConnectionString:PrintLogDb"]);
+            });
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
         }
 
@@ -86,6 +93,11 @@ namespace PrintLogApi
                 // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
             }
+
+            app.UseCors(builder =>
+            {
+                builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+            });
 
             app.UseHttpsRedirection();
             app.UseAuthentication();
