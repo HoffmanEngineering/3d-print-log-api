@@ -10,7 +10,7 @@ namespace PrintLogApi
 {
     public class PrintLogContext : DbContext
     {
-        public PrintLogContext(DbContextOptions options) : base(options)
+        public PrintLogContext(DbContextOptions<PrintLogContext> options) : base(options)
         {
         }
 

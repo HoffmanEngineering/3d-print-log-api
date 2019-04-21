@@ -11,8 +11,7 @@ namespace PrintLogApi.Models
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-        public long UserId { get; set; }
-        public string OAuthUserID { get; set; }
-        public DateTime LastUpdated { get; set; }
+        public long Id { get; set; }
+        public string OAuthUserId { get; set; }
     }
 }

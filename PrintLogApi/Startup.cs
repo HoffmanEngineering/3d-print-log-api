@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -14,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication;
+using PrintLogApi.Users;
 
 namespace PrintLogApi
 {
@@ -37,9 +41,13 @@ namespace PrintLogApi
 
             services.AddDbContext<PrintLogContext>(opts =>
             {
+                var test = Configuration["ConnectionString:PrintLogDb"];
                 opts.UseSqlServer(Configuration["ConnectionString:PrintLogDb"]);
             });
+
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
+            services.AddTransient<UserService>();
+            services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
         }
 
         private void ConfigureAuthentication(IServiceCollection services)
@@ -100,7 +108,11 @@ namespace PrintLogApi
             });
 
             app.UseHttpsRedirection();
+
             app.UseAuthentication();
+            // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
+            JwtSecurityTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
+
             app.UseMvc();
 
             
