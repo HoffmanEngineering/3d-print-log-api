@@ -13,5 +13,7 @@ namespace PrintLogApi.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public long Id { get; set; }
         public string OAuthUserId { get; set; }
+
+        public virtual ICollection<Printer> printers { get; set; }
     }
 }

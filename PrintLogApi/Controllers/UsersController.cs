@@ -146,7 +146,7 @@ namespace PrintLogApi.Controllers
         }
 
         // POST: api/Printers
-        [HttpPost("{userId}/printers/")]
+        [HttpPost("{userId}/printers")]
         public async Task<ActionResult<Printer>> PostPrinter(long userId, Printer printer)
         {
             printer.UserId = userId;

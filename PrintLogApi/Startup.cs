@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication;
 using PrintLogApi.Users;
+using Microsoft.OpenApi.Models;
 
 namespace PrintLogApi
 {
@@ -33,7 +34,12 @@ namespace PrintLogApi
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_2);
+            services
+                .AddMvc()
+                .SetCompatibilityVersion(CompatibilityVersion.Version_2_2)
+                .AddJsonOptions(
+                    options => options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
+                );
 
             services.AddCors();
 
@@ -41,7 +47,13 @@ namespace PrintLogApi
 
             services.AddDbContext<PrintLogContext>(opts =>
             {
+                opts.UseLazyLoadingProxies();
                 opts.UseSqlServer(Configuration["ConnectionString:PrintLogDb"]);
+            });
+
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Print Log Api", Version = "v1" });
             });
 
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
@@ -86,6 +98,7 @@ namespace PrintLogApi
                     policy.Requirements.Add(new HasScopeRequirement("read:messages", domain));
                 });
             });
+
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -112,7 +125,19 @@ namespace PrintLogApi
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
             JwtSecurityTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
+            // Enable middleware to serve generated Swagger as a JSON endpoint.
+            app.UseSwagger();
+
+            // Enable middleware to serve swagger-ui (HTML, JS, CSS, etc.),
+            // specifying the Swagger JSON endpoint.
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
+            });
+
             app.UseMvc();
+
+
 
             
         }
