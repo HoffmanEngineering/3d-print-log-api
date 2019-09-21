@@ -41,7 +41,6 @@ namespace PrintLogApi
 
             services.AddDbContext<PrintLogContext>(opts =>
             {
-                var test = Configuration["ConnectionString:PrintLogDb"];
                 opts.UseSqlServer(Configuration["ConnectionString:PrintLogDb"]);
             });
 

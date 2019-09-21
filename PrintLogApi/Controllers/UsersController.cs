@@ -98,9 +98,88 @@ namespace PrintLogApi.Controllers
             return user;
         }
 
+
         private bool UserExists(long id)
         {
             return _context.Users.Any(e => e.Id == id);
+        }
+
+        // GET: api/users/{id}/printers
+        [HttpGet("{userId}/printers")]
+        public async Task<ActionResult<IEnumerable<Printer>>> GetPrintersForUser(long userId)
+        {
+            return await _context.Printers.Where(p => p.UserId == userId).ToListAsync();
+        }
+
+
+        // PUT: api/Printers/5
+        [HttpPut("{userId}/printers/{printerId}")]
+        public async Task<IActionResult> PutPrinter(long userId, long printerId, Printer printer)
+        {
+            if (printerId != printer.Id)
+            {
+                return BadRequest();
+            }
+
+            printer.UserId = userId;
+
+
+            _context.Entry(printer).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!PrinterExists(printerId))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
+        }
+
+        // POST: api/Printers
+        [HttpPost("{userId}/printers/")]
+        public async Task<ActionResult<Printer>> PostPrinter(long userId, Printer printer)
+        {
+            printer.UserId = userId;
+            _context.Printers.Add(printer);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction("GetPrinter", new { id = printer.Id }, printer);
+        }
+
+        // DELETE: api/Printers/5
+        [HttpDelete("{userId}/printers/{id}")]
+        public async Task<ActionResult<Printer>> DeletePrinter(long userId, long id)
+        {
+            var printer = await _context.Printers.FindAsync(id);
+            if (printer == null)
+            {
+                return NotFound();
+            }
+
+            if (printer.UserId != userId)
+            {
+                return BadRequest("Cannot delete printer for other user");
+            }
+
+            _context.Printers.Remove(printer);
+            await _context.SaveChangesAsync();
+
+            return printer;
+        }
+
+        private bool PrinterExists(long id)
+        {
+            return _context.Printers.Any(e => e.Id == id);
         }
     }
 }

@@ -15,5 +15,7 @@ namespace PrintLogApi
         }
 
         public DbSet<User> Users { get; set; }
+
+        public DbSet<Printer> Printers { get; set; }
     }
 }
