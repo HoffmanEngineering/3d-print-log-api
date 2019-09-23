@@ -19,6 +19,9 @@ using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication;
 using PrintLogApi.Users;
 using Microsoft.OpenApi.Models;
+using AutoMapper;
+using Microsoft.AspNetCore.Http;
+using System.Security.Principal;
 
 namespace PrintLogApi
 {
@@ -41,6 +44,8 @@ namespace PrintLogApi
                     options => options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
                 );
 
+            services.AddAutoMapper(typeof(Startup));
+
             services.AddCors();
 
             ConfigureAuthentication(services);
@@ -57,8 +62,13 @@ namespace PrintLogApi
             });
 
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
-            services.AddTransient<UserService>();
             services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
+            services.AddHttpContextAccessor();
+            services.AddScoped<IPrincipal>(
+                (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
+            );
+            services.AddTransient<UserService>();
+
         }
 
         private void ConfigureAuthentication(IServiceCollection services)

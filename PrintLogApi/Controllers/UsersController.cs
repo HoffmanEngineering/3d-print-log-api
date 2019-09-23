@@ -1,24 +1,33 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
+using System.Security.Principal;
 using System.Threading.Tasks;
+using AutoMapper;
+using AutoMapper.QueryableExtensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs;
 
 namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class UsersController : ControllerBase
     {
         private readonly PrintLogContext _context;
+        private readonly IMapper _mapper;
 
-        public UsersController(PrintLogContext context)
+        public UsersController(PrintLogContext context, IMapper mapper)
         {
             _context = context;
+            _mapper = mapper;
         }
 
         // GET: api/Users
@@ -106,9 +115,12 @@ namespace PrintLogApi.Controllers
 
         // GET: api/users/{id}/printers
         [HttpGet("{userId}/printers")]
-        public async Task<ActionResult<IEnumerable<Printer>>> GetPrintersForUser(long userId)
+        public async Task<ActionResult<IEnumerable<UserPrinterDTO>>> GetPrintersForUser(long userId)
         {
-            return await _context.Printers.Where(p => p.UserId == userId).ToListAsync();
+            return await _context.Printers
+                .Where(p => p.UserId == userId)
+                .ProjectTo<UserPrinterDTO>(_mapper.ConfigurationProvider)
+                .ToListAsync();
         }
 
 
