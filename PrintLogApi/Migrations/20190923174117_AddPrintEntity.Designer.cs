@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20190923174117_AddPrintEntity")]
+    partial class AddPrintEntity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -24,10 +26,6 @@ namespace PrintLogApi.Migrations
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
                         .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.IdentityColumn);
-
-                    b.Property<long>("CreatedById");
-
-                    b.Property<DateTime>("CreatedDate");
 
                     b.Property<int?>("EstimatedFilamentUsageMg");
 
@@ -46,20 +44,12 @@ namespace PrintLogApi.Migrations
 
                     b.Property<int>("Status");
 
-                    b.Property<long>("UpdatedById");
-
-                    b.Property<DateTime>("UpdatedDate");
-
                     b.Property<string>("Url")
                         .HasMaxLength(1000);
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedById");
-
                     b.HasIndex("PrinterId");
-
-                    b.HasIndex("UpdatedById");
 
                     b.ToTable("Prints");
                 });
@@ -107,19 +97,9 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
                 {
-                    b.HasOne("PrintLogApi.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("PrintLogApi.Models.Printer", "printer")
                         .WithMany()
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
-                        .WithMany()
-                        .HasForeignKey("UpdatedById")
                         .OnDelete(DeleteBehavior.Cascade);
                 });
 
