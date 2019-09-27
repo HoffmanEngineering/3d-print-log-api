@@ -22,6 +22,11 @@ namespace PrintLogApi.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public long Id { get; set; }
 
+        [MaxLength(100)]
+        public string Title { get; set; }
+
+        public DateTimeOffset? StartDate { get; set; }
+
         public long PrinterId { get; set; }
         public virtual Printer printer { get; set; }
 

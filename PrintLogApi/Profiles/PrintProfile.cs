@@ -14,6 +14,13 @@ namespace PrintLogApi.Profiles
         public PrintProfile()
         {
             CreateMap<AddPrintDTO, Print>();
+
+            CreateMap<Print, PrintSummaryDTO>();
+            CreateMap<Print, PrintDetailDTO>()
+                .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src.printer.Id));
+
+            CreateMap<PrintDetailDTO, Print>()
+                .ForMember(dest => dest.printer, opt => opt.Ignore());
         }
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using PrintLogApi.Models.DTOs.Printer;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,8 +7,14 @@ using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print
 {
-    public class AddPrintDTO
+    public class PrintDetailDTO
     {
+        public long Id { get; set; }
+
+        public string Title { get; set; }
+
+        public DateTimeOffset? StartDate { get; set; }
+
         public long PrinterId { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
@@ -23,10 +30,6 @@ namespace PrintLogApi.Models.DTOs.Print
         public string Notes { get; set; }
 
         public string Url { get; set; }
-
-        public string Title { get; set; }
-
-        public DateTimeOffset? StartDate { get; set; }
 
         public PrintStatus Status { get; set; }
     }
