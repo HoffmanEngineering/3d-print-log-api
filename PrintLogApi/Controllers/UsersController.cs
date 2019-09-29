@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Controllers
 {
@@ -115,11 +116,23 @@ namespace PrintLogApi.Controllers
 
         // GET: api/users/{id}/printers
         [HttpGet("{userId}/printers")]
-        public async Task<ActionResult<IEnumerable<UserPrinterDTO>>> GetPrintersForUser(long userId)
+        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintersForUser(long userId)
         {
             return await _context.Printers
                 .Where(p => p.UserId == userId)
-                .ProjectTo<UserPrinterDTO>(_mapper.ConfigurationProvider)
+                .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider)
+                .ToListAsync();
+        }
+
+        // GET: api/users/{id}/printers
+        [HttpGet("me/printers")]
+        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintersForCurrentUser()
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            return await _context.Printers
+                .Where(p => p.UserId == userId)
+                .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider)
                 .ToListAsync();
         }
 
