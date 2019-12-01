@@ -12,18 +12,19 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
     public class PrintsController : ControllerBase
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly IAuthorizationService _authorizationService;
 
-        public PrintsController(PrintLogContext context, IMapper mapper)
+        public PrintsController(PrintLogContext context, IMapper mapper, IAuthorizationService authorizationService)
         {
             _context = context;
             _mapper = mapper;
@@ -31,6 +32,7 @@ namespace PrintLogApi.Controllers
 
         // GET: api/Prints
         [HttpGet]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<Print>>> GetPrints()
         {
             return await _context.Prints.ToListAsync();
@@ -41,6 +43,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<PrintSummaryDTO>>> GetPrintSummary()
         {
             var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
@@ -58,6 +61,12 @@ namespace PrintLogApi.Controllers
         {
             var print = await _context.Prints.FindAsync(id);
 
+            if (print.ViewStatus == PrintViewStatus.Private) {
+                var result = await _authorizationService.AuthorizeAsync(this.User, "read:messages");
+
+                var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            }
+
             if (print == null)
             {
                 return NotFound();
@@ -68,6 +77,7 @@ namespace PrintLogApi.Controllers
 
         // PUT: api/Prints/5
         [HttpPut("{id}")]
+        [Authorize]
         public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PrintDetailDTO printDTO)
         {
             if (id != printDTO.Id)
@@ -110,6 +120,7 @@ namespace PrintLogApi.Controllers
 
         // POST: api/Prints
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
         {
             Print newPrint = _mapper.Map<Print>(print);
@@ -128,6 +139,7 @@ namespace PrintLogApi.Controllers
 
         // DELETE: api/Prints/5
         [HttpDelete("{id}")]
+        [Authorize]
         public async Task<ActionResult<Print>> DeletePrint(long id)
         {
             var print = await _context.Prints.FindAsync(id);
