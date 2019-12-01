@@ -18,6 +18,13 @@ namespace PrintLogApi.Models
             Failed
         }
 
+        public enum PrintViewStatus
+        {
+            Public = 1,
+            Unlisted = 2,
+            Private = 3,
+        }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public long Id { get; set; }
@@ -47,5 +54,7 @@ namespace PrintLogApi.Models
         public string Url { get; set; }
 
         public PrintStatus Status { get; set; }
+
+        public PrintViewStatus ViewStatus { get; set; }
     }
 }
