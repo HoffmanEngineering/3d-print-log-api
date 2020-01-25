@@ -41,15 +41,17 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
-        public async Task<ActionResult<IEnumerable<PrintSummaryDTO>>> GetPrintSummary()
+        public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest)
         {
             var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            return await _context.Prints
-                .Where(p => p.CreatedById == userId || p.printer.UserId == userId)
+            var prints = _context.Prints
+                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
                 .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
-                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider)
-                .ToListAsync();
+                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider);
+
+            var response = await PagedList<PrintSummaryDTO>.CreateAsync(prints, pagingRequest.PageNumber, pagingRequest.PageSize);
+            return Ok(response);
         }
 
         // GET: api/Prints/5
@@ -77,13 +79,26 @@ namespace PrintLogApi.Controllers
 
             Print existingPrint = await _context.Prints.FindAsync(id);
 
+            if (existingPrint == null)
+            {
+                return NotFound();
+            }
+
+
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != existingPrint.CreatedById)
+            {
+                return Forbid();
+            }
+
             existingPrint = _mapper.Map<PrintDetailDTO, Print>(printDTO, existingPrint);
 
             var printer = await _context.Printers.FindAsync(printDTO.PrinterId);
-            existingPrint.printer = printer;
+            existingPrint.Printer = printer;
 
             // Set UpdatedByIds
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            
             existingPrint.UpdatedById = userId;
 
 
