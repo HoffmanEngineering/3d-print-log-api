@@ -14,7 +14,7 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public string Title { get; set; }
 
-        public PrinterSummary printer { get; set; }
+        public PrinterSummary Printer { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 

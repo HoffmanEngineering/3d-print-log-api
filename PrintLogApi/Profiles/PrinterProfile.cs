@@ -17,6 +17,8 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src));
 
             CreateMap<Printer, PrinterSummary>();
+
+            CreateMap<AddPrinterDTO, Printer>();
         }
     }
 }

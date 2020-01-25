@@ -1,18 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
+using AutoMapper.QueryableExtensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class PrintersController : ControllerBase
     {
         private readonly PrintLogContext _context;
@@ -31,6 +36,25 @@ namespace PrintLogApi.Controllers
             return await _context.Printers.ToListAsync();
         }
 
+        /// <summary>
+        /// Get Print Summaries for current user
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet("summary")]
+        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest)
+        {
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var printers = _context.Printers
+                .Where(p => p.UserId == userId)
+                .OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
+                .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider);
+
+            var response = await PagedList<PrinterSummary>.CreateAsync(printers, pagingRequest.PageNumber, pagingRequest.PageSize);
+
+            return Ok(response);
+        }
+
         // GET: api/Printers/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Printer>> GetPrinter(long id)
@@ -41,20 +65,44 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (printer.UserId != userId)
+            {
+                return Forbid();
+            }
 
             return printer;
         }
 
         // PUT: api/Printers/5
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutPrinter(long id, Printer printer)
+        public async Task<IActionResult> PutPrinter(long id, AddPrinterDTO printer)
         {
             if (id != printer.Id)
             {
                 return BadRequest();
             }
 
-            _context.Entry(printer).State = EntityState.Modified;
+  
+
+             Printer existingPrinter = await _context.Printers.FindAsync(id);
+
+            if (existingPrinter == null)
+            {
+
+                return NotFound();
+            }
+
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (existingPrinter.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
+
+            _context.Entry(existingPrinter).State = EntityState.Modified;
 
             try
             {
@@ -72,17 +120,23 @@ namespace PrintLogApi.Controllers
                 }
             }
 
-            return NoContent();
+            return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, existingPrinter);
         }
 
         // POST: api/Printers
         [HttpPost]
-        public async Task<ActionResult<Printer>> PostPrinter(Printer printer)
+        public async Task<ActionResult<Printer>> PostPrinter(AddPrinterDTO printer)
         {
-            _context.Printers.Add(printer);
+            Printer newPrinter = _mapper.Map<Printer>(printer);
+
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            newPrinter.UserId = userId;
+
+            _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetPrinter", new { id = printer.Id }, printer);
+            return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<Printer>(newPrinter));
         }
 
         // DELETE: api/Printers/5

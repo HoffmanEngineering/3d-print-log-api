@@ -35,7 +35,7 @@ namespace PrintLogApi.Models
         public DateTimeOffset? StartDate { get; set; }
 
         public long PrinterId { get; set; }
-        public virtual Printer printer { get; set; }
+        public virtual Printer Printer { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg  { get; set; }
