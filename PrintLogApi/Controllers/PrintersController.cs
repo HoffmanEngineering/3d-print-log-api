@@ -41,16 +41,27 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
-        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest)
+        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var printers = _context.Printers
-                .Where(p => p.UserId == userId)
-                .OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
+                .Where(p => p.UserId == userId);
+
+            if (!includeInactive)
+            {
+                printers = printers.Where(p => p.IsActive == true);
+            }
+            
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                printers = printers.Where(p => p.Name.Contains(searchText) || p.Make.Contains(searchText) || p.Model.Contains(searchText));
+            }
+
+            var result = printers.OrderByDescending(p => p.Name).OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
                 .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider);
 
-            var response = await PagedList<PrinterSummary>.CreateAsync(printers, pagingRequest.PageNumber, pagingRequest.PageSize);
+            var response = await PagedList<PrinterSummary>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
 
             return Ok(response);
         }
