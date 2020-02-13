@@ -54,6 +54,57 @@ namespace PrintLogApi.Controllers
             return Ok(response);
         }
 
+        /// <summary>
+        /// Get Print Statistics
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet("statistics")]
+        public async Task<ActionResult<object>> GetPrintStatistics([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
+        {
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var baseQuery = _context.Prints
+                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
+
+            var numberOfPrints = await baseQuery.CountAsync();
+            var groupByStatus = await baseQuery
+                .GroupBy(p => p.Status)
+                .Select(group => new { status = group.Key, count = group.Count() })
+                .ToListAsync();
+
+            var estimatedPrintTime = await baseQuery
+                .Where(p => p.EstimatedPrintTimeInSeconds.HasValue)
+                .Select(p => p.EstimatedPrintTimeInSeconds)
+                .SumAsync();
+            var totalPrintTime = await baseQuery
+                .Where(p => p.PrintTimeInSeconds.HasValue)
+                .Select(p => p.PrintTimeInSeconds)
+                .SumAsync();
+
+            var estimatedFilamentUsage = await baseQuery
+                .Where(p => p.EstimatedFilamentUsageMg.HasValue)
+                .Select(p => p.EstimatedFilamentUsageMg)
+                .SumAsync();
+            var totalFilamentUsage = await baseQuery
+                .Where(p => p.FilamentUsageMg.HasValue)
+                .Select(p => p.FilamentUsageMg)
+                .SumAsync();
+
+            var printTimeForPrinters = await baseQuery
+                .Where(p => p.PrintTimeInSeconds.HasValue || p.EstimatedPrintTimeInSeconds.HasValue)
+                .Select(p => new { printerId = p.PrinterId, printTime = p.PrintTimeInSeconds.HasValue ? p.PrintTimeInSeconds : p.EstimatedPrintTimeInSeconds })
+                .GroupBy(p => p.printerId)
+                .Select(group => new
+                {
+                    printerId = group.Key,
+                    printTime = group.Sum(p => p.printTime)
+                })
+                .ToListAsync();
+
+            return Ok(new { numberOfPrints, groupByStatus, estimatedPrintTime, totalPrintTime, estimatedFilamentUsage, totalFilamentUsage, printTimeForPrinters });
+        }
+
         // GET: api/Prints/5
         [HttpGet("{id}")]
         public async Task<ActionResult<PrintDetailDTO>> GetPrint(long id)
