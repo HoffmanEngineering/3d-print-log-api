@@ -21,6 +21,10 @@ namespace PrintLogApi
 
         public DbSet<Print> Prints { get; set; }
 
+        public DbSet<File> Files { get; set; }
+
+        public DbSet<PrintImage> PrintImages { get; set; }
+
         public override int SaveChanges()
         {
             UpdateTimestamps();

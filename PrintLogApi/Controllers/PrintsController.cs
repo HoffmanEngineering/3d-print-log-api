@@ -1,17 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using PrintLogApi;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using File = PrintLogApi.Models.File;
 
 namespace PrintLogApi.Controllers
 {
@@ -23,10 +28,16 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
 
-        public PrintsController(PrintLogContext context, IMapper mapper)
+        private readonly string printImageContainerName = "printimages";
+        private readonly BlobContainerClient printImageContainer;
+
+        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config)
         {
             _context = context;
             _mapper = mapper;
+
+            BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
+            printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
         }
 
         // GET: api/Prints
@@ -48,7 +59,8 @@ namespace PrintLogApi.Controllers
             var prints = _context.Prints
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
                 .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
-                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider);
+                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider)
+                .AsNoTracking();
 
             var response = await PagedList<PrintSummaryDTO>.CreateAsync(prints, pagingRequest.PageNumber, pagingRequest.PageSize);
             return Ok(response);
@@ -206,6 +218,107 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return print;
+        }
+
+        [HttpGet("{printId}/image/{imageId}")]
+        [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Client, NoStore = false)]
+        public async Task<IActionResult> PostImage(long printId,  int imageId)
+        {
+            Print existingPrint = await _context.Prints.FindAsync(printId);
+
+            if (existingPrint == null)
+            {
+                return NotFound();
+            }
+
+
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != existingPrint.CreatedById)
+            {
+                return Forbid();
+            }
+
+            File imageFile = existingPrint.Images.Where(i => i.Id == imageId).Select(i => i.File).Single();
+
+            var fileName = Path.GetFileName(imageFile.Path);
+            BlobClient blobClient = printImageContainer.GetBlobClient(fileName);
+
+            if ( await blobClient.ExistsAsync())
+            {
+                MemoryStream ms = new MemoryStream();
+                var stream = await blobClient.DownloadToAsync(ms);
+                ms.Position = 0;
+
+                new FileExtensionContentTypeProvider().TryGetContentType(fileName, out string contentType);
+                return File(ms, contentType);
+
+            } else
+            {
+                return NotFound();
+            }
+        }
+
+        [HttpPost("{id}/image")]
+        public async Task<ActionResult> PostImage(long id, IFormFile image, bool isDefault = false)
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var print = await _context.Prints.FindAsync(id);
+
+            if (print == null)
+            {
+                return NotFound();
+            }
+
+            //foreach (IFormFile image in images)
+            //{
+                Guid fileId = Guid.NewGuid();
+                string fileName = fileId + Path.GetExtension(image.FileName);
+
+
+
+                BlobClient blobClient = printImageContainer.GetBlobClient(fileName);
+
+                using (Stream uploadFileStream = image.OpenReadStream())
+                {
+                    await blobClient.UploadAsync(uploadFileStream);
+                };
+
+                var file = new Models.File()
+                {
+                    Size = image.Length,
+                    Path = $"{this.printImageContainerName}/{fileName}",
+                    Id = fileId,
+                    CreatedById = userId,
+                    UpdatedById = userId,
+                };
+                _context.Files.Add(file);
+
+                var printImage = new PrintImage()
+                {
+                    File = file,
+                    CreatedById = userId,
+                    UpdatedById = userId,
+                    Print = print,
+                    IsDefault = isDefault,
+                };
+                _context.PrintImages.Add(printImage);            
+
+            //}
+
+            if(isDefault)
+            {
+                // Set other defaults to false;
+                var otherEntities = await _context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                otherEntities.ForEach(p => p.IsDefault = false);
+            }
+            
+            await _context.SaveChangesAsync();
+
+            return Ok();
+
+            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         private bool PrintExists(long id)
