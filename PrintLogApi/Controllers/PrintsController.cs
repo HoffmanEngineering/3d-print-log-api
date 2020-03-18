@@ -259,6 +259,33 @@ namespace PrintLogApi.Controllers
             }
         }
 
+        [HttpPost("{printid}/image/{imageId}/set-as-default")]
+        public async Task<ActionResult> SetImageAsDefault(long printid, int imageId)
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var print = await _context.Prints.FindAsync(printid);
+
+            if (print == null || !print.Images.Any(i => i.Id == imageId))
+            {
+                return NotFound();
+            }
+
+            var selectedImage = await _context.PrintImages.FindAsync(imageId);
+            selectedImage.IsDefault = true;
+
+
+            // Set other defaults to false;
+            var otherEntities = await _context.PrintImages.Where(p => p.PrintId == printid && p.IsDefault == true && p.PrintId != imageId).ToListAsync();
+            otherEntities.ForEach(p => p.IsDefault = false);
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
+
+            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+        }
+
         [HttpPost("{id}/image")]
         public async Task<ActionResult> PostImage(long id, IFormFile image, bool isDefault = false)
         {

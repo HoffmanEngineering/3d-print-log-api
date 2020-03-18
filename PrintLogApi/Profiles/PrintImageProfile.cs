@@ -16,6 +16,8 @@ namespace PrintLogApi.Profiles
             CreateMap<PrintImage, PrintImageDto>()
                 .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.Id))
                 .ForMember(dest => dest.IsDefault, opt => opt.MapFrom(src=> src.IsDefault));
+
+            CreateMap<PrintImageDto, PrintImage>();
         }
     }
 }

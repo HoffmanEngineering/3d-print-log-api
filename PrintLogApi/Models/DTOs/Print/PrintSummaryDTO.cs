@@ -19,5 +19,7 @@ namespace PrintLogApi.Models.DTOs.Print
         public DateTimeOffset? StartDate { get; set; }
 
         public PrintStatus Status { get; set; }
+
+        public int? DefaultPrintImageId { get; set; }
     }
 }
