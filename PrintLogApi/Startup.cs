@@ -22,6 +22,7 @@ using Microsoft.OpenApi.Models;
 using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using System.Security.Principal;
+using Prometheus;
 
 namespace PrintLogApi
 {
@@ -148,6 +149,9 @@ namespace PrintLogApi
             {
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
             });
+
+            app.UseMetricServer();
+            app.UseHttpMetrics();
 
             app.UseMvc();
 

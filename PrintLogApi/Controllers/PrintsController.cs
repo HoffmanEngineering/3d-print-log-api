@@ -222,7 +222,7 @@ namespace PrintLogApi.Controllers
 
         [HttpGet("{printId}/image/{imageId}")]
         [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Client, NoStore = false)]
-        public async Task<IActionResult> PostImage(long printId,  int imageId)
+        public async Task<IActionResult> GetImage(long printId,  int imageId)
         {
             Print existingPrint = await _context.Prints.FindAsync(printId);
 
