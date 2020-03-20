@@ -131,7 +131,7 @@ namespace PrintLogApi
 
             app.UseCors(builder =>
             {
-                builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+                builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
             });
 
             app.UseHttpsRedirection();
