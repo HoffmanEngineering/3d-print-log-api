@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
@@ -16,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 using PrintLogApi;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.SortEnums;
 using File = PrintLogApi.Models.File;
 
 namespace PrintLogApi.Controllers
@@ -52,13 +55,57 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
-        public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest)
+        public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary(
+            [FromQuery] PagedRequest pagingRequest,
+            [FromQuery, MaxLength(50)] string searchText,
+            [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
+            [FromQuery] Print.PrintStatus? filterByStatus)
         {
             var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            var prints = _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
-                .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
+            var printQuery = _context.Prints
+                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId);
+
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                printQuery = printQuery.Where(p => p.Title.Contains(searchText) || p.Notes.Contains(searchText));
+            }
+
+            if (filterByStatus != null)
+            {
+                printQuery = printQuery.Where(p => p.Status == filterByStatus);
+            }
+
+
+            if (sortRequest != null)
+            {
+                if (sortRequest.SortColumn == PrintSummarySortColumn.Title)
+                {
+                    if (sortRequest.SortDirection == SortDirection.Asc)
+                    {
+                        printQuery = printQuery.OrderBy(p => p.Title).ThenByDescending(p => p.CreatedDate);
+                    } else
+                    {
+                        printQuery = printQuery.OrderByDescending(p => p.Title).ThenByDescending(p => p.CreatedDate);
+                    }
+                } else
+                {
+                    if (sortRequest.SortDirection == SortDirection.Asc)
+                    {
+                        printQuery = printQuery.OrderBy(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
+                    }
+                    else
+                    {
+                        printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
+                    }
+                }
+            } else
+            {
+                printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
+            }
+            
+
+            var prints = printQuery
                 .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider)
                 .AsNoTracking();
 
