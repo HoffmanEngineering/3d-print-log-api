@@ -15,6 +15,8 @@
     <Compile Remove="Migrations\20190923172809_AddPrintEntity.Designer.cs" />
     <Compile Remove="Migrations\20190923180255_AddTimestampToPrint.cs" />
     <Compile Remove="Migrations\20190923180255_AddTimestampToPrint.Designer.cs" />
+    <Compile Remove="Migrations\20200405162306_UpdatePrintStatusEnum.cs" />
+    <Compile Remove="Migrations\20200405162306_UpdatePrintStatusEnum.Designer.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,7 +30,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="2.2.6" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.4.10" />
-    <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="2.2.3" />
+    <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="2.2.4" />
     <PackageReference Include="prometheus-net" Version="3.5.0" />
     <PackageReference Include="prometheus-net.AspNetCore" Version="3.5.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="5.0.0-rc2" />

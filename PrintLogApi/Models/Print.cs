@@ -45,6 +45,7 @@ namespace PrintLogApi.Models
         /// </summary>
         public int? FilamentUsageMg { get; set; }
 
+        [MaxLength(100)]
         public string FilamentType { get; set; }
 
         [MaxLength(1000)]
