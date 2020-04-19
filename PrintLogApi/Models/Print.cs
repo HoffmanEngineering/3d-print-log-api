@@ -11,11 +11,11 @@ namespace PrintLogApi.Models
     {
         public enum PrintStatus
         {
-            Pending,
-            Printing,
-            Success,
-            Cancelled,
-            Failed
+            Pending = 1,
+            Printing = 2,
+            Success = 3,
+            Cancelled = 4,
+            Failed = 5
         }
 
         public enum PrintViewStatus
