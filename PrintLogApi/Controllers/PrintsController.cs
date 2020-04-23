@@ -175,6 +175,13 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != print.CreatedById)
+            {
+                return Forbid();
+            }
+
             return _mapper.Map<PrintDetailDTO>(print);
         }
 
@@ -197,7 +204,7 @@ namespace PrintLogApi.Controllers
 
             long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            if (userId != existingPrint.CreatedById)
+            if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
@@ -207,8 +214,14 @@ namespace PrintLogApi.Controllers
             var printer = await _context.Printers.FindAsync(printDTO.PrinterId);
             existingPrint.Printer = printer;
 
+            // Check if the user had access to that printer!
+            if (userId != printer.UserId)
+            {
+                return BadRequest();
+            }
+
             // Set UpdatedByIds
-            
+
             existingPrint.UpdatedById = userId;
 
 
@@ -249,22 +262,6 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
-        }
-
-        // DELETE: api/Prints/5
-        [HttpDelete("{id}")]
-        public async Task<ActionResult<Print>> DeletePrint(long id)
-        {
-            var print = await _context.Prints.FindAsync(id);
-            if (print == null)
-            {
-                return NotFound();
-            }
-
-            _context.Prints.Remove(print);
-            await _context.SaveChangesAsync();
-
-            return print;
         }
 
         [HttpGet("{printId}/image/{imageId}")]
