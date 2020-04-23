@@ -334,7 +334,7 @@ namespace PrintLogApi.Controllers
         }
 
         [HttpPost("{id}/image")]
-        public async Task<ActionResult> PostImage(long id, IFormFile image, bool isDefault = false)
+        public async Task<ActionResult> PostImage(long id, [FromForm] IFormFile image, [FromForm] bool isDefault = false)
         {
             long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
@@ -393,6 +393,31 @@ namespace PrintLogApi.Controllers
             return Ok();
 
             //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+        }
+
+        [HttpDelete("{printid}/image/{imageId}")]
+        public async Task<ActionResult> RemoveImage(long printid, int imageId)
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var print = await _context.Prints.FindAsync(printid);
+
+            if (print == null || !print.Images.Any(i => i.Id == imageId))
+            {
+                return NotFound();
+            }
+
+            if (userId != print.CreatedById)
+            {
+                return Forbid();
+            }
+
+            var selectedImage = await _context.PrintImages.FindAsync(imageId);
+            _context.PrintImages.Remove(selectedImage);
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
         }
 
         private bool PrintExists(long id)
