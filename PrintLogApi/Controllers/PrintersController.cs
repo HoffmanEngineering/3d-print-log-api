@@ -150,21 +150,22 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<Printer>(newPrinter));
         }
 
-        // DELETE: api/Printers/5
-        [HttpDelete("{id}")]
-        public async Task<ActionResult<Printer>> DeletePrinter(long id)
-        {
-            var printer = await _context.Printers.FindAsync(id);
-            if (printer == null)
-            {
-                return NotFound();
-            }
+        // TODO: Make the delete be a soft-inactive delete.
+        //// DELETE: api/Printers/5
+        //[HttpDelete("{id}")]
+        //public async Task<ActionResult<Printer>> DeletePrinter(long id)
+        //{
+        //    var printer = await _context.Printers.FindAsync(id);
+        //    if (printer == null)
+        //    {
+        //        return NotFound();
+        //    }
 
-            _context.Printers.Remove(printer);
-            await _context.SaveChangesAsync();
+        //    _context.Printers.Remove(printer);
+        //    await _context.SaveChangesAsync();
 
-            return printer;
-        }
+        //    return printer;
+        //}
 
         private bool PrinterExists(long id)
         {
