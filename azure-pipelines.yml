@@ -28,6 +28,6 @@ steps:
       ConnectionType: "AzureRM"
       azureSubscription: "Pay-As-You-Go(29db28c6-5b46-4b30-be91-db289749cab3)"
       appType: "webAppLinux"
-      WebAppName: "3d-print-log-api"
+      WebAppName: "3d-print-log-api-prod"
       packageForLinux: "$(Build.ArtifactStagingDirectory)/**/*.zip"
       RuntimeStack: "DOTNETCORE|2.2"
