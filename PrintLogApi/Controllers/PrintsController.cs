@@ -164,6 +164,27 @@ namespace PrintLogApi.Controllers
             return Ok(new { numberOfPrints, groupByStatus, estimatedPrintTime, totalPrintTime, estimatedFilamentUsage, totalFilamentUsage, printTimeForPrinters });
         }
 
+        /// <summary>
+        /// Get Print Statistics
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet("stats")]
+        [ResponseCache(Duration = 15, Location = ResponseCacheLocation.Client, NoStore = false)]
+        public async Task<ActionResult<List<PrintStatistic>>> GetPrintStats([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
+        {
+            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var printStats = await _context.Prints
+                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
+                .OrderByDescending(p => p.StartDate)
+                .ProjectTo<PrintStatistic>(_mapper.ConfigurationProvider)
+                .AsNoTracking()
+                .ToListAsync();
+
+            return printStats;
+        }
+
         // GET: api/Prints/5
         [HttpGet("{id}")]
         public async Task<ActionResult<PrintDetailDTO>> GetPrint(long id)
@@ -265,7 +286,7 @@ namespace PrintLogApi.Controllers
         }
 
         [HttpGet("{printId}/image/{imageId}")]
-        [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Client, NoStore = false)]
+        [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<IActionResult> GetImage(long printId,  int imageId)
         {
             Print existingPrint = await _context.Prints.FindAsync(printId);

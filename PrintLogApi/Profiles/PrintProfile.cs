@@ -24,6 +24,9 @@ namespace PrintLogApi.Profiles
             CreateMap<PrintDetailDTO, Print>()
                 .ForMember(dest => dest.Printer, opt => opt.Ignore())
                 .ForMember(dest => dest.Images, opt => opt.Ignore());
+
+            CreateMap<Print, PrintStatistic>();
+
         }
     }
 }
