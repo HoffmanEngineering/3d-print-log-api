@@ -29,12 +29,6 @@ namespace PrintLogApi.Controllers
             _mapper = mapper;
         }
 
-        // GET: api/Printers
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Printer>>> GetPrinters()
-        {
-            return await _context.Printers.ToListAsync();
-        }
 
         /// <summary>
         /// Get Print Summaries for current user
@@ -94,7 +88,6 @@ namespace PrintLogApi.Controllers
                 return BadRequest();
             }
 
-  
 
              Printer existingPrinter = await _context.Printers.FindAsync(id);
 

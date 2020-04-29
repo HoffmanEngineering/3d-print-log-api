@@ -1,8 +1,5 @@
 ﻿using PrintLogApi.Models.DTOs.Printer;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print

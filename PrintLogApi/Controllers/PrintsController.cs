@@ -43,13 +43,6 @@ namespace PrintLogApi.Controllers
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
         }
 
-        // GET: api/Prints
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Print>>> GetPrints()
-        {
-            return await _context.Prints.ToListAsync();
-        }
-
         /// <summary>
         /// Get Print Summaries for current user
         /// </summary>
@@ -169,7 +162,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("stats")]
-        [ResponseCache(Duration = 15, Location = ResponseCacheLocation.Client, NoStore = false)]
+        [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<ActionResult<List<PrintStatistic>>> GetPrintStats([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
             var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
@@ -336,6 +329,12 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
+            // You can only change defaults for prints you created.
+            if (userId != print.CreatedById)
+            {
+                return Forbid();
+            }
+
             var selectedImage = await _context.PrintImages.FindAsync(imageId);
             selectedImage.IsDefault = true;
 
@@ -363,9 +362,15 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
+            // You can only upload images for prints you own.
+            if (userId != print.CreatedById)
+            {
+                return Forbid();
+            }
+
             //foreach (IFormFile image in images)
             //{
-                Guid fileId = Guid.NewGuid();
+            Guid fileId = Guid.NewGuid();
                 string fileName = fileId + Path.GetExtension(image.FileName);
 
 
