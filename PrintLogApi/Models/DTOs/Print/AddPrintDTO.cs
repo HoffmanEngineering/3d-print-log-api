@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print
@@ -18,12 +16,17 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public int? FilamentUsageMg { get; set; }
 
+        [StringLength(100)]
         public string FilamentType { get; set; }
 
+        [StringLength(1000)]
         public string Notes { get; set; }
 
+        [StringLength(1000)]
         public string Url { get; set; }
 
+        [Required(AllowEmptyStrings = false)]
+        [StringLength(100)]
         public string Title { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
