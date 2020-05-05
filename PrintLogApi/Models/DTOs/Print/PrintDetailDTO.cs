@@ -1,4 +1,5 @@
-﻿using System;
+﻿using PrintLogApi.Models.DTOs.Printer;
+using System;
 using System.Collections.Generic;
 using static PrintLogApi.Models.Print;
 
@@ -13,6 +14,8 @@ namespace PrintLogApi.Models.DTOs.Print
         public DateTimeOffset? StartDate { get; set; }
 
         public long PrinterId { get; set; }
+
+        public virtual PrinterSummary Printer { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg { get; set; }

@@ -23,6 +23,7 @@ using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using System.Security.Principal;
 using Prometheus;
+using PrintLogApi.Authentication.Handlers;
 
 namespace PrintLogApi
 {
@@ -108,7 +109,12 @@ namespace PrintLogApi
                 {
                     policy.Requirements.Add(new HasScopeRequirement("read:messages", domain));
                 });
+
+                options.AddPolicy("ViewPrint", policy =>
+                    policy.Requirements.Add(new PublicOrCreatorRequirement()));
             });
+
+            services.AddSingleton<IAuthorizationHandler, PrintViewStatusAuthorizationHandler>();
 
         }
 

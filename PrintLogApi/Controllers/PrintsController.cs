@@ -30,14 +30,16 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly IAuthorizationService _authorizationService;
 
         private readonly string printImageContainerName = "printimages";
         private readonly BlobContainerClient printImageContainer;
 
-        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config)
+        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService)
         {
             _context = context;
             _mapper = mapper;
+            _authorizationService = authorizationService;
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -180,6 +182,7 @@ namespace PrintLogApi.Controllers
 
         // GET: api/Prints/5
         [HttpGet("{id}")]
+        [AllowAnonymous]
         public async Task<ActionResult<PrintDetailDTO>> GetPrint(long id)
         {
             var print = await _context.Prints.FindAsync(id);
@@ -189,15 +192,15 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            if (userId != print.CreatedById)
+            if (!await CanViewPrint(print))
             {
                 return Forbid();
             }
 
             return _mapper.Map<PrintDetailDTO>(print);
         }
+
+        
 
         // PUT: api/Prints/5
         [HttpPut("{id}")]
@@ -289,10 +292,7 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            if (userId != existingPrint.CreatedById)
+            if (!await CanViewPrint(existingPrint))
             {
                 return Forbid();
             }
@@ -441,6 +441,20 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return Ok();
+        }
+
+        /// <summary>
+        /// Helper method to  check if the current user can view print
+        /// </summary>
+        /// <param name="print"></param>
+        /// <returns></returns>
+        private async Task<bool> CanViewPrint(Print print)
+        {
+            var authorizationResult = await _authorizationService
+                            .AuthorizeAsync(User, print, "ViewPrint");
+
+            return authorizationResult.Succeeded;
+
         }
 
         private bool PrintExists(long id)
