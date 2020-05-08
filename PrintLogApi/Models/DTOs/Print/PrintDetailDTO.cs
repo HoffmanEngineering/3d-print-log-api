@@ -31,7 +31,11 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public string Url { get; set; }
 
+        public long CreatedByUserId { get; set; }
+
         public PrintStatus Status { get; set; }
+
+        public PrintViewStatus ViewStatus { get; set; }
 
         public ICollection<PrintImageDto> Images { get; set; }
     }

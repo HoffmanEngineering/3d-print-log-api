@@ -200,7 +200,19 @@ namespace PrintLogApi.Migrations
                         .ValueGeneratedOnAdd()
                         .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.IdentityColumn);
 
+                    b.Property<string>("Bio")
+                        .HasMaxLength(1000);
+
+                    b.Property<string>("CoverPicture");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(30);
+
                     b.Property<string>("OAuthUserId");
+
+                    b.Property<string>("ProfilePicture");
+
+                    b.Property<int>("ViewStatus");
 
                     b.HasKey("Id");
 
