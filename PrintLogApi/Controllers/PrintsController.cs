@@ -281,6 +281,7 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
+        [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<IActionResult> GetImage(long printId,  int imageId)
