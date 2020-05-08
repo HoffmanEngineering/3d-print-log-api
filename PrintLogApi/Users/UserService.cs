@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Models;
+﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,11 +20,19 @@ namespace PrintLogApi.Users
             return _context.Users.Where(u => u.OAuthUserId == authUserId).FirstOrDefault();
         }
 
+       
+
+        public async Task<long> GetLocalUserIdByAuthUserId(string authUserId)
+        {
+            return await _context.Users.Where(u => u.OAuthUserId == authUserId).Select(u=> u.Id).FirstOrDefaultAsync();
+        }
+
         public async Task<User> CreateUserFromAuthId(string authUserId)
         {
             var newUser = new User
             {
-                OAuthUserId = authUserId
+                OAuthUserId = authUserId,
+                ViewStatus = User.ProfileViewStatus.Public
             };
 
             _context.Users.Add(newUser);
