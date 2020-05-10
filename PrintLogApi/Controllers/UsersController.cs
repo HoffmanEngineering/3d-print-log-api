@@ -24,14 +24,16 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly IAuthorizationService _authorizationService;
 
         private readonly string profileImageContainerName = "userprofile";
         private readonly BlobContainerClient userProfileImageContainer;
 
-        public UsersController(PrintLogContext context, IMapper mapper, IConfiguration config)
+        public UsersController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService)
         {
             _context = context;
             _mapper = mapper;
+            _authorizationService = authorizationService;
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
@@ -63,6 +65,23 @@ namespace PrintLogApi.Controllers
                 .SingleAsync();
 
             return user;
+        }
+
+        [HttpGet("{id}")]
+        [AllowAnonymous]
+        public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
+        {
+            User user = await _context.Users
+            .Where(u => u.Id == id)
+            .AsNoTracking()
+            .SingleAsync();
+
+            if (!await CanViewUserProfile(user))
+            {
+                return Forbid();
+            }
+
+            return this._mapper.Map<UserDetailDto>(user);
         }
 
         [HttpPut("me")]
@@ -178,11 +197,25 @@ namespace PrintLogApi.Controllers
             };
             _context.Files.Add(file);
 
-            user.ProfilePicture = blobClient.Uri.AbsoluteUri;
+            user.CoverPicture = blobClient.Uri.AbsoluteUri;
 
             await _context.SaveChangesAsync();
 
             return blobClient.Uri.AbsoluteUri;
+        }
+
+        /// <summary>
+        /// Helper method to  check if the current user can view print
+        /// </summary>
+        /// <param name="print"></param>
+        /// <returns></returns>
+        private async Task<bool> CanViewUserProfile(User profileToView)
+        {
+            var authorizationResult = await _authorizationService
+                            .AuthorizeAsync(User, profileToView, "ViewUserProfile");
+
+            return authorizationResult.Succeeded;
+
         }
 
         private bool UserExists(long id)

@@ -112,9 +112,13 @@ namespace PrintLogApi
 
                 options.AddPolicy("ViewPrint", policy =>
                     policy.Requirements.Add(new PublicOrCreatorRequirement()));
+
+                options.AddPolicy("ViewUserProfile", policy =>
+                    policy.Requirements.Add(new PublicOrUnlistedUserProfileRequirement()));
             });
 
             services.AddSingleton<IAuthorizationHandler, PrintViewStatusAuthorizationHandler>();
+            services.AddSingleton<IAuthorizationHandler, UserProfileViewStatusAuthorizationHandler>();
 
         }
 
