@@ -32,5 +32,7 @@ namespace PrintLogApi.Models.DTOs.Print
         public DateTimeOffset? StartDate { get; set; }
 
         public PrintStatus Status { get; set; }
+
+        public PrintViewStatus ViewStatus { get; set; }
     }
 }

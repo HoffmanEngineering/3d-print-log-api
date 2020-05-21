@@ -22,15 +22,15 @@ namespace PrintLogApi.Authentication
 
             string authUserId = existingClaimsIdentity.Claims.Where(c => c.Type == ClaimTypes.Upn).FirstOrDefault().Value;
 
-            var localUser = this.userService.GetLocalUserByAuthUserId(authUserId);
+            long localUserId = await this.userService.GetLocalUserIdByAuthUserId(authUserId);
 
-            if (localUser == null)
+            if (localUserId == 0)
             {
                 var newUser = await this.userService.CreateUserFromAuthId(authUserId);
                 existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, newUser.Id.ToString()));
             } else
             {
-                existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUser.Id.ToString()));
+                existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()));
             }
 
 

@@ -16,10 +16,15 @@ namespace PrintLogApi.Profiles
             CreateMap<AddPrintDTO, Print>();
 
             CreateMap<Print, PrintSummaryDTO>()
-                .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images.Where(i => i.IsDefault == true).Select(i => i.Id).FirstOrDefault()));
+                .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images
+                                                                        .Where(i => i.IsDefault == true)
+                                                                        .Select(i => i.Id)
+                                                                        .FirstOrDefault()))
+                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById));
             CreateMap<Print, PrintDetailDTO>()
                 .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src.Printer.Id))
-                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images));
+                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images))
+                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById));
 
             CreateMap<PrintDetailDTO, Print>()
                 .ForMember(dest => dest.Printer, opt => opt.Ignore())
