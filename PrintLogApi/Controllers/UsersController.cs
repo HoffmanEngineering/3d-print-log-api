@@ -123,7 +123,7 @@ namespace PrintLogApi.Controllers
         }
 
         [HttpPost("me/profile-image")]
-        public async Task<ActionResult<string>> PostProfileImage([FromForm] IFormFile image)
+        public async Task<ActionResult<UserUrlDto>> PostProfileImage([FromForm] IFormFile image)
         {
             long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
@@ -160,11 +160,11 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
 
-            return blobClient.Uri.AbsoluteUri;
+            return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
         }
 
         [HttpPost("me/cover-image")]
-        public async Task<ActionResult<string>> PostCoverImage([FromForm] IFormFile image)
+        public async Task<ActionResult<UserUrlDto>> PostCoverImage([FromForm] IFormFile image)
         {
             long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
@@ -183,7 +183,6 @@ namespace PrintLogApi.Controllers
             using (Stream uploadFileStream = image.OpenReadStream())
             {
                 var info = await blobClient.UploadAsync(uploadFileStream);
-
             };
 
 
@@ -201,7 +200,7 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
 
-            return blobClient.Uri.AbsoluteUri;
+            return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
         }
 
         /// <summary>
