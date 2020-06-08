@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20200525143705_AddUserSettings")]
+    partial class AddUserSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -268,20 +270,6 @@ namespace PrintLogApi.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("UserSettingTypes");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Description = "The Default View Status for a print.",
-                            Name = "Prints_DefaultPrintViewStatus"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Description = "The Id of the printer that was last selected.",
-                            Name = "Prints_LastSelectedPrinterId"
-                        });
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Feedback", b =>

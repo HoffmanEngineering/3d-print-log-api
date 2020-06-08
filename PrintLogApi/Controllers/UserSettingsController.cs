@@ -1,0 +1,119 @@
+﻿using AutoMapper;
+using AutoMapper.QueryableExtensions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.UserSetting;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace PrintLogApi.Controllers
+{
+    [Route("api/Users/me/user-settings")]
+    [ApiController]
+    [Authorize]
+    public class UserSettingsController : ControllerBase
+    {
+        private readonly PrintLogContext _context;
+        private readonly IMapper _mapper;
+
+        public UserSettingsController(PrintLogContext context, IMapper mapper, IConfiguration config)
+        {
+            _context = context;
+            _mapper = mapper;
+
+        }
+
+        /// <summary>
+        /// Returns the list of the current user's UserSettings.
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<UserSettingDto>>> GetCurrentUsersSettings()
+        {
+            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var settings = await _context.UserSettings
+                .Where(u => u.UserId == userId)
+                .AsNoTracking()
+                .ProjectTo<UserSettingDto>(_mapper.ConfigurationProvider)
+                .ToListAsync();
+
+            return settings;
+        }
+
+        [HttpPut]
+        public async Task<ActionResult<UserSettingDto>> UpdateUserSetting([FromBody] UpdateUserSettingDto updateSettingDto)
+        {
+            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var existingSetting = await _context.UserSettings
+                .Where(setting => setting.Id == updateSettingDto.Id && setting.UserId == userId)
+                .SingleOrDefaultAsync();
+
+            if (existingSetting == null)
+            {
+                return NotFound();
+            }
+
+            existingSetting = _mapper.Map(updateSettingDto, existingSetting);
+
+            _context.Entry(existingSetting).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!UserSettingExists(updateSettingDto.Id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return _mapper.Map<UserSettingDto>(existingSetting);
+        }
+
+
+        [HttpPost]
+        public async Task<ActionResult<UserSettingDto>> CreateUserSetting([FromBody] AddUserSettingDto newSettingDto)
+        {
+            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var existingSetting = await _context.UserSettings
+                .Where(setting => setting.UserSettingTypeId == newSettingDto.UserSettingTypeId && setting.UserId == userId)
+                .SingleOrDefaultAsync();
+
+            if (existingSetting != null)
+            {
+                return BadRequest("UserSetting for this SettingTypeId already exists.");
+            }
+
+            UserSetting newSetting = _mapper.Map<UserSetting>(newSettingDto);
+
+            newSetting.UserId = userId;
+            newSetting.CreatedById = userId;
+            newSetting.UpdatedById = userId;
+
+
+            _context.UserSettings.Add(newSetting);
+            await _context.SaveChangesAsync();
+
+            return _mapper.Map<UserSettingDto>(newSetting);
+        }
+
+        private bool UserSettingExists(long id)
+        {
+            return _context.UserSettings.Any(e => e.Id == id);
+        }
+    }
+}
