@@ -37,6 +37,7 @@ namespace PrintLogApi.Controllers
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
+            userProfileImageContainer.CreateIfNotExists();
         }
 
         [HttpGet("{id}/summary")]
