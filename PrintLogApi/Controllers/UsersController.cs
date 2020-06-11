@@ -37,6 +37,7 @@ namespace PrintLogApi.Controllers
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
+            userProfileImageContainer.CreateIfNotExists();
         }
 
         [HttpGet("{id}/summary")]
@@ -201,6 +202,29 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
+        }
+
+        /// <summary>
+        /// Remove the current user's cover-image.
+        /// </summary>
+        /// <returns></returns>
+        [HttpDelete("me/cover-image")]
+        public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var user = await _context.Users.FindAsync(userId);
+
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            user.CoverPicture = null;
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
         }
 
         /// <summary>

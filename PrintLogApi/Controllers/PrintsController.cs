@@ -50,16 +50,46 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
+        [AllowAnonymous]
         public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary(
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery, MaxLength(50)] string searchText,
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
-            [FromQuery] Print.PrintStatus? filterByStatus)
+            [FromQuery] Print.PrintStatus? filterByStatus,
+            [FromQuery] long? userId)
         {
-            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            var printQuery = _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId);
+            long? currentUserId = null;
+            try
+            {
+                currentUserId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            } catch (Exception ex)
+            {
+                currentUserId = null;
+            }
+
+            
+            IQueryable<Print> printQuery;
+            // if a userId is provided, filter by 
+            if (userId.HasValue && userId != currentUserId)
+            {
+                // Get the user's public prints
+                printQuery = _context.Prints
+                .Where(p => p.CreatedById == userId)
+                .Where(p => p.ViewStatus == Print.PrintViewStatus.Public);
+
+            } else
+            {
+                // Throw a bad request if we aren't filtering by a user, and the current user isn't logged in.
+                if (!currentUserId.HasValue)
+                {
+                    return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
+                }
+
+                printQuery = _context.Prints
+                .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId);
+            }
+            
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
