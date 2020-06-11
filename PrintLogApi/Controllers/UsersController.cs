@@ -204,6 +204,29 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
+        /// Remove the current user's cover-image.
+        /// </summary>
+        /// <returns></returns>
+        [HttpDelete("me/cover-image")]
+        public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var user = await _context.Users.FindAsync(userId);
+
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            user.CoverPicture = null;
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        /// <summary>
         /// Helper method to  check if the current user can view print
         /// </summary>
         /// <param name="print"></param>
