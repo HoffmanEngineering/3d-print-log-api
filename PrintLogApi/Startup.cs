@@ -65,6 +65,7 @@ namespace PrintLogApi
                 (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
             );
             services.AddTransient<UserService>();
+            services.AddApplicationInsightsTelemetry();
 
         }
 
