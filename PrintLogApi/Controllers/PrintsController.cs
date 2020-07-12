@@ -135,7 +135,7 @@ namespace PrintLogApi.Controllers
                 .AsNoTracking();
 
             var response = await PagedList<PrintSummaryDTO>.CreateAsync(prints, pagingRequest.PageNumber, pagingRequest.PageSize);
-            return Ok(response);
+            return response;
         }
 
         /// <summary>

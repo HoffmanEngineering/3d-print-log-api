@@ -39,12 +39,7 @@ namespace PrintLogApi
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services
-                .AddMvc()
-                .SetCompatibilityVersion(CompatibilityVersion.Version_2_2)
-                .AddJsonOptions(
-                    options => options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
-                );
+            services.AddControllers();
 
             services.AddAutoMapper(typeof(Startup));
 
@@ -146,7 +141,10 @@ namespace PrintLogApi
 
             app.UseHttpsRedirection();
 
+            app.UseRouting();
+
             app.UseAuthentication();
+            app.UseAuthorization();
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
             JwtSecurityTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
@@ -163,11 +161,16 @@ namespace PrintLogApi
             app.UseMetricServer();
             app.UseHttpMetrics();
 
-            app.UseMvc();
-
-
-
             
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
+
+
+
+
         }
     }
 }

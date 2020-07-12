@@ -8,9 +8,9 @@ namespace PrintLogApi.Models
 {
     public class PagedList<T>
     {
-        public PageInfo Paging;
+        public PageInfo Paging { get; set; }
 
-        public List<T> Items;
+        public List<T> Items { get; set; }
 
         public PagedList(List<T> items, int totalCount, int pageNumber, int pageSize)
         {
