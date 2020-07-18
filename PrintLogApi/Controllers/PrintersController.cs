@@ -62,7 +62,7 @@ namespace PrintLogApi.Controllers
 
         // GET: api/Printers/5
         [HttpGet("{id}")]
-        public async Task<ActionResult<Printer>> GetPrinter(long id)
+        public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
         {
             var printer = await _context.Printers.FindAsync(id);
 
@@ -76,7 +76,7 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            return printer;
+            return _mapper.Map<PrinterDetailDto>(printer);
         }
 
         // PUT: api/Printers/5
