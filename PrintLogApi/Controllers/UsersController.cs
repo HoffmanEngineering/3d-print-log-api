@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Azure.Storage.Blobs;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -25,26 +26,26 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly IAuthorizationService _authorizationService;
+        private readonly TelemetryClient _telemetry;
 
         private readonly string profileImageContainerName = "userprofile";
         private readonly BlobContainerClient userProfileImageContainer;
 
-        public UsersController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService)
+        public UsersController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService, TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
             _authorizationService = authorizationService;
+            _telemetry = telemetry;
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
-            userProfileImageContainer.CreateIfNotExists();
         }
 
         [HttpGet("{id}/summary")]
         [AllowAnonymous]
         public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
         {
-
             UserSummaryDto user = await _context.Users
                 .Where(u => u.Id == id)
                 .ProjectTo<UserSummaryDto>(_mapper.ConfigurationProvider)
@@ -160,6 +161,7 @@ namespace PrintLogApi.Controllers
             user.ProfilePicture = blobClient.Uri.AbsoluteUri;
 
             await _context.SaveChangesAsync();
+            _telemetry.TrackEvent("UserProfilePictureUploaded");
 
             return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
         }
@@ -200,6 +202,7 @@ namespace PrintLogApi.Controllers
             user.CoverPicture = blobClient.Uri.AbsoluteUri;
 
             await _context.SaveChangesAsync();
+            _telemetry.TrackEvent("UserCoverPictureUploaded");
 
             return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
         }
