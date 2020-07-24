@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Azure.Storage.Blobs;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -31,15 +32,17 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly IAuthorizationService _authorizationService;
+        private readonly TelemetryClient _telemetry;
 
         private readonly string printImageContainerName = "printimages";
         private readonly BlobContainerClient printImageContainer;
 
-        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService)
+        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService, TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
             _authorizationService = authorizationService;
+            _telemetry = telemetry;
 
             BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -290,6 +293,8 @@ namespace PrintLogApi.Controllers
                 }
             }
 
+            _telemetry.TrackEvent("PrintEdit");
+
             return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
         }
 
@@ -307,6 +312,8 @@ namespace PrintLogApi.Controllers
 
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("PrintAdded");
 
             return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
@@ -402,36 +409,36 @@ namespace PrintLogApi.Controllers
             //foreach (IFormFile image in images)
             //{
             Guid fileId = Guid.NewGuid();
-                string fileName = fileId + Path.GetExtension(image.FileName);
+            string fileName = fileId + Path.GetExtension(image.FileName);
 
 
 
-                BlobClient blobClient = printImageContainer.GetBlobClient(fileName);
+            BlobClient blobClient = printImageContainer.GetBlobClient(fileName);
 
-                using (Stream uploadFileStream = image.OpenReadStream())
-                {
-                    await blobClient.UploadAsync(uploadFileStream);
-                };
+            using (Stream uploadFileStream = image.OpenReadStream())
+            {
+                await blobClient.UploadAsync(uploadFileStream);
+            };
 
-                var file = new Models.File()
-                {
-                    Size = image.Length,
-                    Path = $"{this.printImageContainerName}/{fileName}",
-                    Id = fileId,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                };
-                _context.Files.Add(file);
+            var file = new Models.File()
+            {
+                Size = image.Length,
+                Path = $"{this.printImageContainerName}/{fileName}",
+                Id = fileId,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            _context.Files.Add(file);
 
-                var printImage = new PrintImage()
-                {
-                    File = file,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                    Print = print,
-                    IsDefault = isDefault,
-                };
-                _context.PrintImages.Add(printImage);            
+            var printImage = new PrintImage()
+            {
+                File = file,
+                CreatedById = userId,
+                UpdatedById = userId,
+                Print = print,
+                IsDefault = isDefault,
+            };
+            _context.PrintImages.Add(printImage);            
 
             //}
 
@@ -443,6 +450,8 @@ namespace PrintLogApi.Controllers
             }
             
             await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("PrintPictureAdded");
 
             return Ok();
 

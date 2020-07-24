@@ -1,13 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
-using AutoMapper;
-using Microsoft.AspNetCore.Http;
+﻿using AutoMapper;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Feedback;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace PrintLogApi.Controllers
 {
@@ -17,26 +14,14 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly TelemetryClient _telemetry;
 
-        public FeedbacksController(PrintLogContext context, IMapper mapper)
+        public FeedbacksController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
+            _telemetry = telemetry;
         }
-
-        // GET: api/Feedbacks
-        //[HttpGet]
-        //public IEnumerable<string> Get()
-        //{
-        //    return new string[] { "value1", "value2" };
-        //}
-
-        // GET: api/Feedbacks/5
-        //[HttpGet("{id}", Name = "Get")]
-        //public string Get(int id)
-        //{
-        //    return "value";
-        //}
 
         // POST: api/Feedbacks
         [HttpPost]
@@ -49,25 +34,12 @@ namespace PrintLogApi.Controllers
             newFeedback.CreatedById = userId;
             newFeedback.UpdatedById = userId;
 
-
             _context.Feedback.Add(newFeedback);
             await _context.SaveChangesAsync();
 
-
+            _telemetry.TrackEvent("FeedbackAdded");
 
             return StatusCode(201);
         }
-
-        // PUT: api/Feedbacks/5
-        //[HttpPut("{id}")]
-        //public void Put(int id, [FromBody] string value)
-        //{
-        //}
-
-        //// DELETE: api/ApiWithActions/5
-        //[HttpDelete("{id}")]
-        //public void Delete(int id)
-        //{
-        //}
     }
 }

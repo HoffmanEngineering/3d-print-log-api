@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,11 +23,13 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly TelemetryClient _telemetry;
 
-        public PrintersController(PrintLogContext context, IMapper mapper)
+        public PrintersController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
+            _telemetry = telemetry;
         }
 
 
@@ -124,6 +127,8 @@ namespace PrintLogApi.Controllers
                 }
             }
 
+            _telemetry.TrackEvent("PrinterEdit");
+
             return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, existingPrinter);
         }
 
@@ -139,6 +144,8 @@ namespace PrintLogApi.Controllers
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("PrinterAdded");
 
             return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<Printer>(newPrinter));
         }
