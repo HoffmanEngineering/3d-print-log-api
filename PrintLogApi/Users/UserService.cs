@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using System;
 using System.Collections.Generic;
@@ -10,6 +11,7 @@ namespace PrintLogApi.Users
     public class UserService
     {
         private readonly PrintLogContext _context;
+
         public UserService(PrintLogContext context)
         {
             _context = context;
@@ -19,8 +21,6 @@ namespace PrintLogApi.Users
         {
             return _context.Users.Where(u => u.OAuthUserId == authUserId).FirstOrDefault();
         }
-
-       
 
         public async Task<long> GetLocalUserIdByAuthUserId(string authUserId)
         {
@@ -36,7 +36,32 @@ namespace PrintLogApi.Users
             };
 
             _context.Users.Add(newUser);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException dbUpdateEx) {
+                // Check to see if there is a unique index exception thrown, 
+                // due to a new user sending multiple HTTP requests at the same time and multiple local users trying to be created from the same auth id.
+                if (dbUpdateEx.InnerException != null)
+                {
+                    if (dbUpdateEx.InnerException is SqlException sqlException)
+                    {
+                        switch (sqlException.Number)
+                        {
+                            case 2627:  // Unique constraint error
+                            case 547:   // Constraint check violation
+                            case 2601:  // Duplicated key row error
+                                        // Constraint violation exception
+                                        // A custom exception of yours for concurrency issues
+
+                                // If we get a unique constraint error, then query for the user that was created.
+                                return GetLocalUserByAuthUserId(authUserId);
+                        }
+                    }
+                }
+            }
 
             return newUser;
         }
