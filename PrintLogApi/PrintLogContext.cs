@@ -38,6 +38,7 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 2, Name = "Prints_LastSelectedPrinterId", Description = "The Id of the printer that was last selected." }
                 );
 
+            modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
         }
 
         public override int SaveChanges()
