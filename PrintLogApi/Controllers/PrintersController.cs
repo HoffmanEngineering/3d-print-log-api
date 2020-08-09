@@ -129,7 +129,7 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrinterEdit");
 
-            return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, existingPrinter);
+            return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, _mapper.Map<PrinterDetailDto>(existingPrinter));
         }
 
         // POST: api/Printers
@@ -147,7 +147,7 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrinterAdded");
 
-            return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<Printer>(newPrinter));
+            return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<PrinterDetailDto>(newPrinter));
         }
 
         // TODO: Make the delete be a soft-inactive delete.
