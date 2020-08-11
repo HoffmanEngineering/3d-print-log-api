@@ -24,6 +24,7 @@ using Microsoft.AspNetCore.Http;
 using System.Security.Principal;
 using Prometheus;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.TestData;
 
 namespace PrintLogApi
 {
@@ -121,9 +122,18 @@ namespace PrintLogApi
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IHostingEnvironment env, PrintLogContext context)
         {
+            if (env.IsEnvironment("E2ETesting"))
+            {
+                context.Database.EnsureDeleted(); // Delete the test database
+            }
 
             // Automatically apply any migrations.
             context.Database.Migrate();
+
+            if (env.IsEnvironment("E2ETesting"))
+            {
+                DataSeeder.Seed(context);
+            }
 
             if (env.IsDevelopment())
             {
