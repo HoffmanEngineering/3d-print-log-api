@@ -56,6 +56,8 @@ namespace PrintLogApi.Models
 
         public virtual ICollection<PrintImage> Images { get; set; }
 
+        public virtual ICollection<PrintComment> Comments { get; set; }
+
         public PrintStatus Status { get; set; }
 
         public PrintViewStatus ViewStatus { get; set; }

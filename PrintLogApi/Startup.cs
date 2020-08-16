@@ -167,6 +167,7 @@ namespace PrintLogApi
             app.UseSwaggerUI(c =>
             {
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
+            
             });
 
             app.UseMetricServer();

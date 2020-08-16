@@ -17,9 +17,12 @@ namespace PrintLogApi
 
         public DbSet<User> Users { get; set; }
 
+        public DbSet<Comment> Comments { get; set; }
+
         public DbSet<Printer> Printers { get; set; }
 
         public DbSet<Print> Prints { get; set; }
+        public DbSet<PrintComment> PrintComments { get; set; }
 
         public DbSet<File> Files { get; set; }
 
@@ -39,6 +42,8 @@ namespace PrintLogApi
                 );
 
             modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
+
+            //modelBuilder.Entity<Print>().HasMany<Comment>(p => p.Comments).WithOne()
         }
 
         public override int SaveChanges()

@@ -20,11 +20,15 @@ namespace PrintLogApi.Profiles
                                                                         .Where(i => i.IsDefault == true)
                                                                         .Select(i => i.Id)
                                                                         .FirstOrDefault()))
-                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById));
+                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
+                //.ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()))
+                .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment)))
+                //.AfterMap((src, dest) => dest.CommentCount = dest.Comments.SelectMany(c => c.Comments).Count());                ;
             CreateMap<Print, PrintDetailDTO>()
                 .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src.Printer.Id))
                 .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images))
-                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById));
+                .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
+                .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment)));
 
             CreateMap<PrintDetailDTO, Print>()
                 .ForMember(dest => dest.Printer, opt => opt.Ignore())
@@ -32,6 +36,14 @@ namespace PrintLogApi.Profiles
 
             CreateMap<Print, PrintStatistic>();
 
+        }
+    }
+
+    public class CustomResolver : IValueResolver<Print, PrintSummaryDTO, int?>
+    {
+        public int? Resolve(Print source, PrintSummaryDTO destination, int? member, ResolutionContext context)
+        {
+            return source.Comments.Select(c => c.Comment).Count() + source.Comments.Count;
         }
     }
 }

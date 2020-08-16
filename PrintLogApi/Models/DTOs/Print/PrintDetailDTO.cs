@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Models.DTOs.Printer;
+﻿using PrintLogApi.Models.DTOs.Comments;
+using PrintLogApi.Models.DTOs.Printer;
 using System;
 using System.Collections.Generic;
 using static PrintLogApi.Models.Print;
@@ -38,5 +39,7 @@ namespace PrintLogApi.Models.DTOs.Print
         public PrintViewStatus ViewStatus { get; set; }
 
         public ICollection<PrintImageDto> Images { get; set; }
+
+        public ICollection<CommentDetailDto> Comments { get; set; }
     }
 }

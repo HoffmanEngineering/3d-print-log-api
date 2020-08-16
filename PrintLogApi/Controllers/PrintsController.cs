@@ -13,11 +13,13 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using PrintLogApi;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
 using File = PrintLogApi.Models.File;
@@ -481,6 +483,59 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return Ok();
+        }
+
+        // POST: api/Prints
+        [HttpPost("{printId}/comment")]
+        public async Task<ActionResult> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
+        {
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var print = await _context.Prints.FindAsync(printId);
+
+            if (print == null)
+            {
+                return NotFound();
+            }
+
+
+            Comment comment = new Comment()
+            {
+                Body = newComment.Body,
+                CreatedById = userId,
+                UpdatedById = userId,
+                UserId = userId,
+                ParentId = null,
+            };
+            _context.Comments.Add(comment);
+
+            PrintComment printComment = new PrintComment()
+            {
+                Print = print,
+                Comment = comment,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            _context.PrintComments.Add(printComment);
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
+
+            //Print newPrint = _mapper.Map<Print>(print);
+
+            //long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            //newPrint.CreatedById = userId;
+            //newPrint.UpdatedById = userId;
+
+
+            //_context.Prints.Add(newPrint);
+            //await _context.SaveChangesAsync();
+
+            //_telemetry.TrackEvent("PrintAdded");
+
+            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         /// <summary>

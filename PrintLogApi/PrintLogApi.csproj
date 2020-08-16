@@ -16,6 +16,18 @@
     <Compile Remove="Migrations\20190923180255_AddTimestampToPrint.Designer.cs" />
     <Compile Remove="Migrations\20200405162306_UpdatePrintStatusEnum.cs" />
     <Compile Remove="Migrations\20200405162306_UpdatePrintStatusEnum.Designer.cs" />
+    <Compile Remove="Migrations\20200811225108_AddComments.cs" />
+    <Compile Remove="Migrations\20200811225108_AddComments.Designer.cs" />
+    <Compile Remove="Migrations\20200811230118_AddComments.cs" />
+    <Compile Remove="Migrations\20200811230118_AddComments.Designer.cs" />
+    <Compile Remove="Migrations\20200811230553_AddComments.cs" />
+    <Compile Remove="Migrations\20200811230553_AddComments.Designer.cs" />
+    <Compile Remove="Migrations\20200811231033_AddComments.cs" />
+    <Compile Remove="Migrations\20200811231033_AddComments.Designer.cs" />
+    <Compile Remove="Migrations\20200811231534_AddComments.cs" />
+    <Compile Remove="Migrations\20200811231534_AddComments.Designer.cs" />
+    <Compile Remove="Migrations\20200811231626_AddComments.cs" />
+    <Compile Remove="Migrations\20200811231626_AddComments.Designer.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +41,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="3.1.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="3.1.6" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="3.1.6" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="3.1.6">
       <PrivateAssets>all</PrivateAssets>

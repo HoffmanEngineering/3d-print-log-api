@@ -1,5 +1,7 @@
-﻿using PrintLogApi.Models.DTOs.Printer;
+﻿using PrintLogApi.Models.DTOs.Comments;
+using PrintLogApi.Models.DTOs.Printer;
 using System;
+using System.Collections.Generic;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print
@@ -20,5 +22,10 @@ namespace PrintLogApi.Models.DTOs.Print
         public long CreatedByUserId { get; set; }
 
         public int? DefaultPrintImageId { get; set; }
+
+        public int? CommentCount { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public ICollection<CommentDetailDto> Comments { get; set; }
     }
 }
