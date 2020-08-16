@@ -15,13 +15,5 @@ namespace PrintLogApi.Models
 
         public string Body { get; set; }
 
-        public virtual User User { get; set; }
-
-        public long UserId { get; set; }
-
-        public long? ParentId { get; set; }
-        public virtual Comment Parent { get; set; }
-        public virtual List<Comment> Comments { get; set; }
-
     }
 }

@@ -232,7 +232,11 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            return _mapper.Map<PrintDetailDTO>(print);
+            var printDetailDto = _mapper.Map<PrintDetailDTO>(print);
+
+            printDetailDto.Comments.OrderBy(c => c.CreatedDate);
+
+            return printDetailDto;
         }
 
         
@@ -504,8 +508,6 @@ namespace PrintLogApi.Controllers
                 Body = newComment.Body,
                 CreatedById = userId,
                 UpdatedById = userId,
-                UserId = userId,
-                ParentId = null,
             };
             _context.Comments.Add(comment);
 

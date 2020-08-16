@@ -43,7 +43,6 @@ namespace PrintLogApi
 
             modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
 
-            //modelBuilder.Entity<Print>().HasMany<Comment>(p => p.Comments).WithOne()
         }
 
         public override int SaveChanges()
@@ -69,11 +68,12 @@ namespace PrintLogApi
 
             foreach (var entityEntry in entries)
             {
-                ((TimestampEntity)entityEntry.Entity).UpdatedDate = DateTime.UtcNow;
+                var saveDateTime = DateTime.UtcNow;
+                ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
 
                 if (entityEntry.State == EntityState.Added)
                 {
-                    ((TimestampEntity)entityEntry.Entity).CreatedDate = DateTime.UtcNow;
+                    ((TimestampEntity)entityEntry.Entity).CreatedDate = saveDateTime;
                 }
             }
         }

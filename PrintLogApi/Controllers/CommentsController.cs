@@ -27,13 +27,6 @@ namespace PrintLogApi.Controllers
             _mapper = mapper;
         }
 
-        // GET: api/Comments
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Comment>>> GetComments()
-        {
-            return await _context.Comments.ToListAsync();
-        }
-
         // GET: api/Comments/5
         [HttpGet("{id}")]
         public async Task<ActionResult<CommentDetailDto>> GetComment(long id)
@@ -84,50 +77,6 @@ namespace PrintLogApi.Controllers
             return NoContent();
         }
 
-        // POST: api/Comments
-        // To protect from overposting attacks, enable the specific properties you want to bind to, for
-        // more details, see https://go.microsoft.com/fwlink/?linkid=2123754.
-        [HttpPost("{parentCommentId}")]
-        public async Task<ActionResult<CommentDetailDto>> PostComment(long parentCommentId, AddCommentDto comment)
-        {
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
-            var parentComment = await _context.Comments.FindAsync(parentCommentId);
-
-            if (parentComment == null)
-            {
-                return NotFound();
-            }
-
-            var newComment = new Comment()
-            {
-                Body = comment.Body,
-                Parent = parentComment,
-                CreatedById = userId,
-                UpdatedById = userId,
-                UserId = userId,
-            };
-
-            _context.Comments.Add(newComment);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction("GetComment", new { id = newComment.Id }, _mapper.Map<CommentDetailDto>(newComment));
-        }
-
-        // DELETE: api/Comments/5
-        [HttpDelete("{id}")]
-        public async Task<ActionResult<Comment>> DeleteComment(long id)
-        {
-            var comment = await _context.Comments.FindAsync(id);
-            if (comment == null)
-            {
-                return NotFound();
-            }
-
-            _context.Comments.Remove(comment);
-            await _context.SaveChangesAsync();
-
-            return comment;
-        }
 
         private bool CommentExists(long id)
         {

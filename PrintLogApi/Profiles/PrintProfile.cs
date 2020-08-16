@@ -21,9 +21,8 @@ namespace PrintLogApi.Profiles
                                                                         .Select(i => i.Id)
                                                                         .FirstOrDefault()))
                 .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
-                //.ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()))
-                .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment)))
-                //.AfterMap((src, dest) => dest.CommentCount = dest.Comments.SelectMany(c => c.Comments).Count());                ;
+                .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()));
+
             CreateMap<Print, PrintDetailDTO>()
                 .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src.Printer.Id))
                 .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images))
@@ -32,7 +31,8 @@ namespace PrintLogApi.Profiles
 
             CreateMap<PrintDetailDTO, Print>()
                 .ForMember(dest => dest.Printer, opt => opt.Ignore())
-                .ForMember(dest => dest.Images, opt => opt.Ignore());
+                .ForMember(dest => dest.Images, opt => opt.Ignore())
+                .ForMember(dest => dest.Comments, opt => opt.Ignore());
 
             CreateMap<Print, PrintStatistic>();
 

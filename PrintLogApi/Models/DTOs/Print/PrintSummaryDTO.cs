@@ -24,8 +24,5 @@ namespace PrintLogApi.Models.DTOs.Print
         public int? DefaultPrintImageId { get; set; }
 
         public int? CommentCount { get; set; }
-
-        [System.Text.Json.Serialization.JsonIgnore]
-        public ICollection<CommentDetailDto> Comments { get; set; }
     }
 }

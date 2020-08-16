@@ -13,7 +13,8 @@ namespace PrintLogApi.Profiles
         public CommentProfile()
         {
             CreateMap<Comment, CommentDetailDto>()
-                .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments));
+                .ForMember(dest => dest.CreatedBy, opt => opt.MapFrom(src => src.CreatedBy))
+                .ForMember(dest => dest.UpdatedBy, opt => opt.MapFrom(src => src.UpdatedBy));
 
         }
     }
