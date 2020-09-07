@@ -522,7 +522,16 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok();
+            _telemetry.TrackEvent("CommentAdded");
+
+            var mappedComment = await _context.Comments
+                .Where(c => c.Id == comment.Id)
+                .AsNoTracking()
+                .ProjectTo<CommentDetailDto>(_mapper.ConfigurationProvider)
+                .SingleOrDefaultAsync();
+
+
+            return CreatedAtRoute("GetComment", new { id = comment.Id }, mappedComment);
 
             //Print newPrint = _mapper.Map<Print>(print);
 
@@ -535,7 +544,7 @@ namespace PrintLogApi.Controllers
             //_context.Prints.Add(newPrint);
             //await _context.SaveChangesAsync();
 
-            //_telemetry.TrackEvent("PrintAdded");
+            //
 
             //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }

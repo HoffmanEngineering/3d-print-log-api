@@ -39,11 +39,4 @@ namespace PrintLogApi.Profiles
         }
     }
 
-    public class CustomResolver : IValueResolver<Print, PrintSummaryDTO, int?>
-    {
-        public int? Resolve(Print source, PrintSummaryDTO destination, int? member, ResolutionContext context)
-        {
-            return source.Comments.Select(c => c.Comment).Count() + source.Comments.Count;
-        }
-    }
 }

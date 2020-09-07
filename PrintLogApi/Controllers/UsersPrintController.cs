@@ -31,7 +31,7 @@ namespace PrintLogApi.Controllers
         private readonly IMapper _mapper;
         private readonly IAuthorizationService _authorizationService;
 
-        public UsersPrintsController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService)
+        public UsersPrintsController(PrintLogContext context, IMapper mapper, IAuthorizationService authorizationService)
         {
             _context = context;
             _mapper = mapper;

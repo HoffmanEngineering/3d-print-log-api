@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,15 +21,17 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly TelemetryClient _telemetry;
 
-        public CommentsController(PrintLogContext context, IMapper mapper)
+        public CommentsController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
+            _telemetry = telemetry;
         }
 
         // GET: api/Comments/5
-        [HttpGet("{id}")]
+        [HttpGet("{id}", Name = "GetComment")]
         public async Task<ActionResult<CommentDetailDto>> GetComment(long id)
         {
             var comment = await _context.Comments
@@ -45,18 +48,27 @@ namespace PrintLogApi.Controllers
             return comment;
         }
 
-        // PUT: api/Comments/5
-        // To protect from overposting attacks, enable the specific properties you want to bind to, for
-        // more details, see https://go.microsoft.com/fwlink/?linkid=2123754.
+
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutComment(long id, Comment comment)
+        public async Task<ActionResult<CommentDetailDto>> PutComment([FromRoute] long id, [FromBody] EditCommentDto edittedComment)
         {
-            if (id != comment.Id)
+            var existingComment = await _context.Comments.FindAsync(id);
+
+            if (existingComment == null)
             {
-                return BadRequest();
+                return NotFound();
             }
 
-            _context.Entry(comment).State = EntityState.Modified;
+            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != existingComment.CreatedById)
+            {
+                return Forbid();
+            }
+
+            existingComment.Body = edittedComment.Body;
+
+            _context.Entry(existingComment).State = EntityState.Modified;
 
             try
             {
@@ -74,7 +86,9 @@ namespace PrintLogApi.Controllers
                 }
             }
 
-            return NoContent();
+            _telemetry.TrackEvent("PrintEdit");
+
+            return CreatedAtAction("GetComment", new { id = existingComment.Id }, _mapper.Map<CommentDetailDto>(existingComment));
         }
 
 

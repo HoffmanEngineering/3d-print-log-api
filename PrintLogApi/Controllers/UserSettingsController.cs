@@ -21,7 +21,7 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
 
-        public UserSettingsController(PrintLogContext context, IMapper mapper, IConfiguration config)
+        public UserSettingsController(PrintLogContext context, IMapper mapper)
         {
             _context = context;
             _mapper = mapper;
