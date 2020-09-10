@@ -1,20 +1,11 @@
-﻿using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Azure.Storage.Blobs;
+﻿using System;
+using System.Linq;
+using System.Threading.Tasks;
+using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using PrintLogApi.Models;
-using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.Print;
-using PrintLogApi.Models.DTOs.User;
-using System;
-using System.IO;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Controllers
 {
@@ -49,7 +40,7 @@ namespace PrintLogApi.Controllers
 
 
             var actualFilamentUsage = await baseQuery
-                .Where(p => p.FilamentUsageMg.HasValue  && p.FilamentUsageMg.Value > 0)
+                .Where(p => p.FilamentUsageMg.HasValue && p.FilamentUsageMg.Value > 0)
                 .Select(p => p.FilamentUsageMg)
                 .SumAsync();
 
@@ -58,9 +49,9 @@ namespace PrintLogApi.Controllers
                 .Select(p => p.EstimatedFilamentUsageMg)
                 .SumAsync();
 
-            int totalFilamentUsage = (actualFilamentUsage ?? 0) + (estimatedFilamentUsageWhenNoActualWasRecorded ?? 0);
+            var totalFilamentUsage = (actualFilamentUsage ?? 0) + (estimatedFilamentUsageWhenNoActualWasRecorded ?? 0);
 
-            return new SinglePrintStat() { Stat = totalFilamentUsage.ToString()};
+            return new SinglePrintStat() { Stat = totalFilamentUsage.ToString() };
         }
 
         [HttpGet("{userId}/print-count")]
@@ -84,7 +75,7 @@ namespace PrintLogApi.Controllers
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                 .Where(p => p.PrintTimeInSeconds.HasValue || p.EstimatedPrintTimeInSeconds.HasValue)
-                .Select(p => p.PrintTimeInSeconds.HasValue ? p.PrintTimeInSeconds : p.EstimatedPrintTimeInSeconds )
+                .Select(p => p.PrintTimeInSeconds.HasValue ? p.PrintTimeInSeconds : p.EstimatedPrintTimeInSeconds)
                 .SumAsync();
 
 

@@ -1,10 +1,7 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using PrintLogApi.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using PrintLogApi.Models;
 
 namespace PrintLogApi.Authentication.Handlers
 {
@@ -18,7 +15,8 @@ namespace PrintLogApi.Authentication.Handlers
             if (resource?.ViewStatus == User.ProfileViewStatus.Public || resource?.ViewStatus == User.ProfileViewStatus.Unlisted)
             {
                 context.Succeed(requirement);
-            } else
+            }
+            else
             {
                 if (context.User.Identity.IsAuthenticated)
                 {
@@ -30,7 +28,7 @@ namespace PrintLogApi.Authentication.Handlers
                         context.Succeed(requirement);
                     }
                 }
-  
+
             }
 
 

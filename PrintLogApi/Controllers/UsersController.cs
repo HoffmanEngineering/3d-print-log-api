@@ -1,4 +1,9 @@
-﻿using AutoMapper;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
@@ -10,11 +15,6 @@ using Microsoft.Extensions.Configuration;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
-using System;
-using System.IO;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Controllers
 {
@@ -38,7 +38,7 @@ namespace PrintLogApi.Controllers
             _authorizationService = authorizationService;
             _telemetry = telemetry;
 
-            BlobServiceClient blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
+            var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
         }
 
@@ -46,7 +46,7 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
         {
-            UserSummaryDto user = await _context.Users
+            var user = await _context.Users
                 .Where(u => u.Id == id)
                 .ProjectTo<UserSummaryDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking()
@@ -58,9 +58,9 @@ namespace PrintLogApi.Controllers
         [HttpGet("me")]
         public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
         {
-            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            UserDetailDto user = await _context.Users
+            var user = await _context.Users
                 .Where(u => u.Id == userId)
                 .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking()
@@ -73,7 +73,7 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
         {
-            User user = await _context.Users
+            var user = await _context.Users
             .Where(u => u.Id == id)
             .AsNoTracking()
             .SingleAsync();
@@ -83,13 +83,13 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            return this._mapper.Map<UserDetailDto>(user);
+            return _mapper.Map<UserDetailDto>(user);
         }
 
         [HttpPut("me")]
         public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
         {
-            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var existingUser = await _context.Users
                 .Where(u => u.Id == userId)
@@ -127,7 +127,7 @@ namespace PrintLogApi.Controllers
         [HttpPost("me/profile-image")]
         public async Task<ActionResult<UserUrlDto>> PostProfileImage([FromForm] IFormFile image)
         {
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var user = await _context.Users.FindAsync(userId);
 
@@ -136,22 +136,21 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            Guid fileId = Guid.NewGuid();
-            string fileName = fileId + Path.GetExtension(image.FileName);
+            var fileId = Guid.NewGuid();
+            var fileName = fileId + Path.GetExtension(image.FileName);
 
-            BlobClient blobClient = userProfileImageContainer.GetBlobClient(fileName);
+            var blobClient = userProfileImageContainer.GetBlobClient(fileName);
 
-            using (Stream uploadFileStream = image.OpenReadStream())
+            using (var uploadFileStream = image.OpenReadStream())
             {
                 var info = await blobClient.UploadAsync(uploadFileStream);
-
             };
 
-            
+
             var file = new Models.File()
             {
                 Size = image.Length,
-                Path = $"{this.profileImageContainerName}/{fileName}",
+                Path = $"{profileImageContainerName}/{fileName}",
                 Id = fileId,
                 CreatedById = userId,
                 UpdatedById = userId,
@@ -169,7 +168,7 @@ namespace PrintLogApi.Controllers
         [HttpPost("me/cover-image")]
         public async Task<ActionResult<UserUrlDto>> PostCoverImage([FromForm] IFormFile image)
         {
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var user = await _context.Users.FindAsync(userId);
 
@@ -178,12 +177,12 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            Guid fileId = Guid.NewGuid();
-            string fileName = fileId + Path.GetExtension(image.FileName);
+            var fileId = Guid.NewGuid();
+            var fileName = fileId + Path.GetExtension(image.FileName);
 
-            BlobClient blobClient = userProfileImageContainer.GetBlobClient(fileName);
+            var blobClient = userProfileImageContainer.GetBlobClient(fileName);
 
-            using (Stream uploadFileStream = image.OpenReadStream())
+            using (var uploadFileStream = image.OpenReadStream())
             {
                 var info = await blobClient.UploadAsync(uploadFileStream);
             };
@@ -192,7 +191,7 @@ namespace PrintLogApi.Controllers
             var file = new Models.File()
             {
                 Size = image.Length,
-                Path = $"{this.profileImageContainerName}/{fileName}",
+                Path = $"{profileImageContainerName}/{fileName}",
                 Id = fileId,
                 CreatedById = userId,
                 UpdatedById = userId,
@@ -214,7 +213,7 @@ namespace PrintLogApi.Controllers
         [HttpDelete("me/cover-image")]
         public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
         {
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var user = await _context.Users.FindAsync(userId);
 

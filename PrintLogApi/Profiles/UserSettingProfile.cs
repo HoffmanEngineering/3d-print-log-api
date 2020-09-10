@@ -12,7 +12,6 @@ namespace PrintLogApi.Profiles
 
             CreateMap<AddUserSettingDto, UserSetting>();
             CreateMap<UpdateUserSettingDto, UserSetting>();
-
         }
     }
 }

@@ -1,10 +1,8 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Users
 {
@@ -24,7 +22,7 @@ namespace PrintLogApi.Users
 
         public async Task<long> GetLocalUserIdByAuthUserId(string authUserId)
         {
-            return await _context.Users.Where(u => u.OAuthUserId == authUserId).Select(u=> u.Id).FirstOrDefaultAsync();
+            return await _context.Users.Where(u => u.OAuthUserId == authUserId).Select(u => u.Id).FirstOrDefaultAsync();
         }
 
         public async Task<User> CreateUserFromAuthId(string authUserId)
@@ -41,7 +39,8 @@ namespace PrintLogApi.Users
             {
                 await _context.SaveChangesAsync();
             }
-            catch (DbUpdateException dbUpdateEx) {
+            catch (DbUpdateException dbUpdateEx)
+            {
                 // Check to see if there is a unique index exception thrown, 
                 // due to a new user sending multiple HTTP requests at the same time and multiple local users trying to be created from the same auth id.
                 if (dbUpdateEx.InnerException != null)

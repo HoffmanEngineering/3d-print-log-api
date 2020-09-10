@@ -14,6 +14,6 @@ namespace PrintLogApi.Profiles
 
             CreateMap<UpdateUserDetailDto, User>();
         }
-        
+
     }
 }

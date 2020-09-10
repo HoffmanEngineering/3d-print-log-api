@@ -68,10 +68,10 @@ namespace PrintLogApi.TestData
         {
             List<Print> testPrinters = new List<Print>()
             {
-                
+
             };
 
-            for(int i = 1; i <= 10000; i++)
+            for (int i = 1; i <= 10000; i++)
             {
                 var createdDate = new DateTime();
                 var print = new Print()
