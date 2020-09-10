@@ -34,5 +34,7 @@ namespace PrintLogApi.Models.DTOs.Print
         public PrintStatus Status { get; set; }
 
         public PrintViewStatus ViewStatus { get; set; }
+
+        public bool AllowComments { get; set; }
     }
 }

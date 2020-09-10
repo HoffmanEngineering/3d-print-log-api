@@ -491,6 +491,7 @@ namespace PrintLogApi.Controllers
 
         // POST: api/Prints
         [HttpPost("{printId}/comment")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
         public async Task<ActionResult> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
         {
             long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
@@ -501,6 +502,19 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
+
+            // Validation for adding new comments.
+            if (!print.AllowComments)
+            {
+                return BadRequest("Comments are disabled for this print.");
+            }
+
+            // Only the original creator should be able to comment on private prints.
+            if (print.ViewStatus == Print.PrintViewStatus.Private && userId != print.CreatedById)
+            {
+                return Forbid();
+            }
+
 
 
             Comment comment = new Comment()
@@ -532,21 +546,6 @@ namespace PrintLogApi.Controllers
 
 
             return CreatedAtRoute("GetComment", new { id = comment.Id }, mappedComment);
-
-            //Print newPrint = _mapper.Map<Print>(print);
-
-            //long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            //newPrint.CreatedById = userId;
-            //newPrint.UpdatedById = userId;
-
-
-            //_context.Prints.Add(newPrint);
-            //await _context.SaveChangesAsync();
-
-            //
-
-            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         /// <summary>

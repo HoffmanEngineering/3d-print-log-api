@@ -68,19 +68,49 @@ namespace PrintLogApi.TestData
         {
             List<Print> testPrinters = new List<Print>()
             {
-                new Print()
+                
+            };
+
+            for(int i = 1; i <= 10000; i++)
+            {
+                var createdDate = new DateTime();
+                var print = new Print()
                 {
-                    Id = 1,
+                    Id = i,
+                    StartDate = DateTimeOffset.Now.AddDays(-1),
+                    Notes = "A Test Note!",
+                    EstimatedFilamentUsageMg = i * 100,
+                    EstimatedPrintTimeInSeconds = i,
                     CreatedById = 1,
-                    CreatedDate = new DateTime(),
+                    CreatedDate = createdDate,
                     UpdatedById = 1,
-                    UpdatedDate = new DateTime(),
+                    UpdatedDate = createdDate,
                     PrinterId = 1,
                     Status = Print.PrintStatus.Success,
-                    Title = "Test Successful Print",
-                    ViewStatus = Print.PrintViewStatus.Public
-                }
-            };
+                    Title = "Test Successful Print" + i,
+                    ViewStatus = Print.PrintViewStatus.Public,
+                    AllowComments = true,
+                    //Comments = new List<PrintComment>()
+                    //{
+                    //    new PrintComment
+                    //    {
+                    //        Id = i,
+                    //        PrintId = i,
+                    //        Comment = new Comment
+                    //        {
+                    //            Id = i,
+                    //            Body = "Test Comment",
+                    //            CreatedById = 1,
+                    //            UpdatedById = 1,
+                    //            CreatedDate= createdDate,
+                    //            UpdatedDate = createdDate,
+                    //        }
+                    //    }
+                    //}
+                };
+
+                testPrinters.Add(print);
+            }
 
             return testPrinters;
         }
