@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -7,10 +6,8 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using PrintLogApi;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 
@@ -40,7 +37,7 @@ namespace PrintLogApi.Controllers
         [HttpGet("summary")]
         public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
-            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var printers = _context.Printers
                 .Where(p => p.UserId == userId);
@@ -49,7 +46,7 @@ namespace PrintLogApi.Controllers
             {
                 printers = printers.Where(p => p.IsActive == true);
             }
-            
+
             if (!string.IsNullOrWhiteSpace(searchText))
             {
                 printers = printers.Where(p => p.Name.Contains(searchText) || p.Make.Contains(searchText) || p.Model.Contains(searchText));
@@ -73,7 +70,7 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
-            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
             if (printer.UserId != userId)
             {
                 return Forbid();
@@ -92,7 +89,7 @@ namespace PrintLogApi.Controllers
             }
 
 
-             Printer existingPrinter = await _context.Printers.FindAsync(id);
+            var existingPrinter = await _context.Printers.FindAsync(id);
 
             if (existingPrinter == null)
             {
@@ -100,7 +97,7 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             if (existingPrinter.UserId != userId)
             {
@@ -136,9 +133,9 @@ namespace PrintLogApi.Controllers
         [HttpPost]
         public async Task<ActionResult<Printer>> PostPrinter(AddPrinterDTO printer)
         {
-            Printer newPrinter = _mapper.Map<Printer>(printer);
+            var newPrinter = _mapper.Map<Printer>(printer);
 
-            var userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             newPrinter.UserId = userId;
 

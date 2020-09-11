@@ -1,10 +1,8 @@
-﻿using Microsoft.AspNetCore.Authentication;
-using PrintLogApi.Users;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication;
+using PrintLogApi.Users;
 
 namespace PrintLogApi.Authentication
 {
@@ -20,15 +18,16 @@ namespace PrintLogApi.Authentication
         {
             var existingClaimsIdentity = (ClaimsIdentity)principal.Identity;
 
-            string authUserId = existingClaimsIdentity.Claims.Where(c => c.Type == ClaimTypes.Upn).FirstOrDefault().Value;
+            var authUserId = existingClaimsIdentity.Claims.Where(c => c.Type == ClaimTypes.Upn).FirstOrDefault().Value;
 
-            long localUserId = await this.userService.GetLocalUserIdByAuthUserId(authUserId);
+            var localUserId = await userService.GetLocalUserIdByAuthUserId(authUserId);
 
             if (localUserId == 0)
             {
-                var newUser = await this.userService.CreateUserFromAuthId(authUserId);
+                var newUser = await userService.CreateUserFromAuthId(authUserId);
                 existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, newUser.Id.ToString()));
-            } else
+            }
+            else
             {
                 existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()));
             }

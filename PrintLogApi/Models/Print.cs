@@ -54,7 +54,11 @@ namespace PrintLogApi.Models
         [MaxLength(1000)]
         public string Url { get; set; }
 
+        public bool AllowComments { get; set; }
+
         public virtual ICollection<PrintImage> Images { get; set; }
+
+        public virtual ICollection<PrintComment> Comments { get; set; }
 
         public PrintStatus Status { get; set; }
 

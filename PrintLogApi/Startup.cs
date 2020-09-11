@@ -1,29 +1,22 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
-using System.Linq;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Threading.Tasks;
+using System.Security.Principal;
+using AutoMapper;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using PrintLogApi.Authentication;
-using PrintLogApi.Users;
 using Microsoft.OpenApi.Models;
-using AutoMapper;
-using Microsoft.AspNetCore.Http;
-using System.Security.Principal;
-using Prometheus;
+using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.TestData;
+using PrintLogApi.Users;
+using Prometheus;
 
 namespace PrintLogApi
 {
@@ -71,7 +64,7 @@ namespace PrintLogApi
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            string domain = $"https://{Configuration["Auth0:Domain"]}/";
+            var domain = $"https://{Configuration["Auth0:Domain"]}/";
             services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -121,9 +114,18 @@ namespace PrintLogApi
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IHostingEnvironment env, PrintLogContext context)
         {
+            if (env.IsEnvironment("E2ETesting"))
+            {
+                context.Database.EnsureDeleted(); // Delete the test database
+            }
 
             // Automatically apply any migrations.
             context.Database.Migrate();
+
+            if (env.IsEnvironment("E2ETesting"))
+            {
+                DataSeeder.Seed(context);
+            }
 
             if (env.IsDevelopment())
             {
@@ -157,20 +159,16 @@ namespace PrintLogApi
             app.UseSwaggerUI(c =>
             {
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
+
             });
 
             app.UseMetricServer();
             app.UseHttpMetrics();
 
-            
-
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
             });
-
-
-
 
         }
     }

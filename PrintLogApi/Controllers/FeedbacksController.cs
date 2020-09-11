@@ -1,10 +1,10 @@
-﻿using AutoMapper;
+﻿using System.Security.Claims;
+using System.Threading.Tasks;
+using AutoMapper;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Feedback;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Controllers
 {
@@ -27,9 +27,9 @@ namespace PrintLogApi.Controllers
         [HttpPost]
         public async Task<ActionResult> Post([FromBody] AddFeedbackDto requestDto)
         {
-            Feedback newFeedback = _mapper.Map<Feedback>(requestDto);
+            var newFeedback = _mapper.Map<Feedback>(requestDto);
 
-            long userId = long.Parse(this.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             newFeedback.CreatedById = userId;
             newFeedback.UpdatedById = userId;

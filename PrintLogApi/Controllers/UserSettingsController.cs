@@ -1,15 +1,14 @@
-﻿using AutoMapper;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Controllers
 {
@@ -21,7 +20,7 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
 
-        public UserSettingsController(PrintLogContext context, IMapper mapper, IConfiguration config)
+        public UserSettingsController(PrintLogContext context, IMapper mapper)
         {
             _context = context;
             _mapper = mapper;
@@ -35,7 +34,7 @@ namespace PrintLogApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserSettingDto>>> GetCurrentUsersSettings()
         {
-            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var settings = await _context.UserSettings
                 .Where(u => u.UserId == userId)
@@ -49,7 +48,7 @@ namespace PrintLogApi.Controllers
         [HttpPut]
         public async Task<ActionResult<UserSettingDto>> UpdateUserSetting([FromBody] UpdateUserSettingDto updateSettingDto)
         {
-            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var existingSetting = await _context.UserSettings
                 .Where(setting => setting.Id == updateSettingDto.Id && setting.UserId == userId)
@@ -83,11 +82,10 @@ namespace PrintLogApi.Controllers
             return _mapper.Map<UserSettingDto>(existingSetting);
         }
 
-
         [HttpPost]
         public async Task<ActionResult<UserSettingDto>> CreateUserSetting([FromBody] AddUserSettingDto newSettingDto)
         {
-            long userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             var existingSetting = await _context.UserSettings
                 .Where(setting => setting.UserSettingTypeId == newSettingDto.UserSettingTypeId && setting.UserId == userId)
@@ -98,7 +96,7 @@ namespace PrintLogApi.Controllers
                 return BadRequest("UserSetting for this SettingTypeId already exists.");
             }
 
-            UserSetting newSetting = _mapper.Map<UserSetting>(newSettingDto);
+            var newSetting = _mapper.Map<UserSetting>(newSettingDto);
 
             newSetting.UserId = userId;
             newSetting.CreatedById = userId;

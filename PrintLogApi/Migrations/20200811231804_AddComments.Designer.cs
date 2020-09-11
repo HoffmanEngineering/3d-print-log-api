@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20200811231804_AddComments")]
+    partial class AddComments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -27,8 +29,7 @@ namespace PrintLogApi.Migrations
                         .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.IdentityColumn);
 
                     b.Property<string>("Body")
-                        .HasColumnType("nvarchar(2000)")
-                        .HasMaxLength(2000);
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<long>("CreatedById")
                         .HasColumnType("bigint");
@@ -36,17 +37,27 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("CreatedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<long?>("ParentId")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("UpdatedById")
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedById");
 
+                    b.HasIndex("ParentId");
+
                     b.HasIndex("UpdatedById");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("Comments");
                 });
@@ -128,9 +139,6 @@ namespace PrintLogApi.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
                         .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.IdentityColumn);
-
-                    b.Property<bool>("AllowComments")
-                        .HasColumnType("bit");
 
                     b.Property<long>("CreatedById")
                         .HasColumnType("bigint");
@@ -425,12 +433,6 @@ namespace PrintLogApi.Migrations
                             Id = 2,
                             Description = "The Id of the printer that was last selected.",
                             Name = "Prints_LastSelectedPrinterId"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Description = "The value of the last changed Allow Comments on prints.",
-                            Name = "Prints_LastSelectedAllowComments"
                         });
                 });
 
@@ -442,9 +444,19 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PrintLogApi.Models.Comment", "Parent")
+                        .WithMany("Comments")
+                        .HasForeignKey("ParentId");
+
                     b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
