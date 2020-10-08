@@ -326,6 +326,46 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
+        // PUT: api/Prints/5
+        [HttpDelete("{id}")]
+        public async Task<ActionResult<PrintDetailDTO>> DeletePrint(long id)
+        {
+            var existingPrint = await _context.Prints.FindAsync(id);
+
+            if (existingPrint == null)
+            {
+                return NotFound();
+            }
+
+
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != existingPrint.CreatedById)
+            {
+                return Forbid();
+            }
+
+            foreach(var comment in existingPrint.Comments.ToArray())
+            {
+                _context.Comments.Remove(comment.Comment);
+            }
+            _context.PrintComments.RemoveRange(existingPrint.Comments.ToArray());
+
+            foreach (var image in existingPrint.Images.ToArray())
+            {
+                _context.Files.Remove(image.File);
+            }
+            _context.PrintImages.RemoveRange(existingPrint.Images.ToArray());
+
+            _context.Prints.Remove(existingPrint);
+
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("PrintDeleted");
+
+            return Ok();
+        }
+
         [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
