@@ -19,6 +19,9 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public PrintStatus Status { get; set; }
 
+        public int? EstimatedPrintTimeInSeconds { get; set; }
+        public int? PrintTimeInSeconds { get; set; }
+
         public long CreatedByUserId { get; set; }
 
         public int? DefaultPrintImageId { get; set; }

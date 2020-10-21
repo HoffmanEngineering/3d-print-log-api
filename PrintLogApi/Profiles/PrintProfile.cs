@@ -32,6 +32,11 @@ namespace PrintLogApi.Profiles
 
             CreateMap<Print, PrintStatistic>();
 
+            CreateMap<Print, PrintDetailReport>()
+                .ForMember(dest => dest.PrinterName, opt => opt.MapFrom(src => src.Printer.Name))
+                .ForMember(dest => dest.PrinterMake, opt => opt.MapFrom(src => src.Printer.Make))
+                .ForMember(dest => dest.PrinterModel, opt => opt.MapFrom(src => src.Printer.Model));
+
         }
     }
 
