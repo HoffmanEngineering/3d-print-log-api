@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
@@ -8,7 +9,9 @@ using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Azure.Storage.Blobs;
+using CsvHelper;
 using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +23,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
+using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {
@@ -241,6 +245,42 @@ namespace PrintLogApi.Controllers
             return printDetailDto;
         }
 
+        [HttpGet("csv")]
+        public async Task<IActionResult> GetAllPrintDetailsAsCsv()
+        {
+            long currentUserId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var prints = _context.Prints
+                .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId)
+                .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
+                .ProjectTo<PrintDetailReport>(_mapper.ConfigurationProvider)
+                .AsNoTracking();
+
+
+            List<PrintDetailReport> reportCSVModels = await prints.ToListAsync();
+            var printCount = reportCSVModels.Count;
+            //var props = new Dictionary<string, string> { {"PrintCount",} }
+
+            var stream = new MemoryStream();
+
+            using (var operation = _telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
+            using (var writeFile = new StreamWriter(stream, leaveOpen: true))
+            using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
+            {
+                csv.Configuration.RegisterClassMap<PrintDetailReportMap>();
+                csv.WriteRecords(reportCSVModels);
+
+            }
+            stream.Position = 0; //reset stream
+
+            var lengthInBytes = stream.Length;
+            var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", lengthInBytes } };
+            _telemetry.TrackEvent("PrintReportExport", metrics: metrics);
+        
+                //_telemetry.
+            return File(stream, "application/octet-stream", "PrintReports.csv");
+        }
+
 
 
         // PUT: api/Prints/5
@@ -302,6 +342,52 @@ namespace PrintLogApi.Controllers
             }
 
             _telemetry.TrackEvent("PrintEdit");
+
+            return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+        }
+
+        // PUT: api/Prints/5/status/1
+        [HttpPut("{id}/status/{newStatus}")]
+        public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PrintStatus newStatus)
+        {
+
+            var existingPrint = await _context.Prints.FindAsync(id);
+
+            if (existingPrint == null)
+            {
+                return NotFound();
+            }
+
+            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            {
+                return Forbid();
+            }
+
+            // Set the new status
+            existingPrint.Status = newStatus;
+            existingPrint.UpdatedById = userId;
+
+            _context.Entry(existingPrint).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!PrintExists(id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            _telemetry.TrackEvent("PrintStatusEdit");
 
             return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
         }
