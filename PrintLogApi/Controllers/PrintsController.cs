@@ -24,6 +24,7 @@ using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
+using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -65,17 +66,8 @@ namespace PrintLogApi.Controllers
             [FromQuery] long? userId)
         {
 
-            long? currentUserId = null;
-            try
-            {
-                currentUserId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
-            }
-            catch (Exception)
-            {
-                currentUserId = null;
-            }
-
-
+            long? currentUserId = User.GetUserId();
+           
             IQueryable<Print> printQuery;
             // if a userId is provided, filter by 
             if (userId.HasValue && userId != currentUserId)
@@ -156,7 +148,11 @@ namespace PrintLogApi.Controllers
         [HttpGet("statistics")]
         public async Task<ActionResult<object>> GetPrintStatistics([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var baseQuery = _context.Prints
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
@@ -208,7 +204,14 @@ namespace PrintLogApi.Controllers
         [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<ActionResult<List<PrintStatistic>>> GetPrintStats([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var userId = User.GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
 
             var printStats = await _context.Prints
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
@@ -240,7 +243,7 @@ namespace PrintLogApi.Controllers
 
             var printDetailDto = _mapper.Map<PrintDetailDTO>(print);
 
-            printDetailDto.Comments.OrderBy(c => c.CreatedDate);
+            printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
 
             return printDetailDto;
         }
@@ -248,7 +251,12 @@ namespace PrintLogApi.Controllers
         [HttpGet("csv")]
         public async Task<IActionResult> GetAllPrintDetailsAsCsv()
         {
-            long currentUserId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            long? currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var prints = _context.Prints
                 .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId)
@@ -259,7 +267,6 @@ namespace PrintLogApi.Controllers
 
             List<PrintDetailReport> reportCSVModels = await prints.ToListAsync();
             var printCount = reportCSVModels.Count;
-            //var props = new Dictionary<string, string> { {"PrintCount",} }
 
             var stream = new MemoryStream();
 
@@ -300,7 +307,11 @@ namespace PrintLogApi.Controllers
             }
 
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
             {
@@ -320,7 +331,7 @@ namespace PrintLogApi.Controllers
 
             // Set UpdatedByIds
 
-            existingPrint.UpdatedById = userId;
+            existingPrint.UpdatedById = userId.Value;
 
 
             _context.Entry(existingPrint).State = EntityState.Modified;
@@ -358,16 +369,19 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+            if ( userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
 
             // Set the new status
             existingPrint.Status = newStatus;
-            existingPrint.UpdatedById = userId;
+            existingPrint.UpdatedById = userId.Value;
 
             _context.Entry(existingPrint).State = EntityState.Modified;
 
@@ -396,12 +410,17 @@ namespace PrintLogApi.Controllers
         [HttpPost]
         public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
         {
+            var userId = User.GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             var newPrint = _mapper.Map<Print>(print);
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            newPrint.CreatedById = userId;
-            newPrint.UpdatedById = userId;
+            newPrint.CreatedById = userId.Value;
+            newPrint.UpdatedById = userId.Value;
 
 
             _context.Prints.Add(newPrint);
@@ -424,7 +443,11 @@ namespace PrintLogApi.Controllers
             }
 
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             if (userId != existingPrint.CreatedById)
             {
@@ -493,7 +516,11 @@ namespace PrintLogApi.Controllers
         [HttpPost("{printid}/image/{imageId}/set-as-default")]
         public async Task<ActionResult> SetImageAsDefault(long printid, int imageId)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var print = await _context.Prints.FindAsync(printid);
 
@@ -526,7 +553,11 @@ namespace PrintLogApi.Controllers
         [HttpPost("{id}/image")]
         public async Task<ActionResult> PostImage(long id, [FromForm] IFormFile image, [FromForm] bool isDefault = false)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var print = await _context.Prints.FindAsync(id);
 
@@ -560,16 +591,16 @@ namespace PrintLogApi.Controllers
                 Size = image.Length,
                 Path = $"{printImageContainerName}/{fileName}",
                 Id = fileId,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
             };
             _context.Files.Add(file);
 
             var printImage = new PrintImage()
             {
                 File = file,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
                 Print = print,
                 IsDefault = isDefault,
             };
@@ -596,7 +627,7 @@ namespace PrintLogApi.Controllers
         [HttpDelete("{printid}/image/{imageId}")]
         public async Task<ActionResult> RemoveImage(long printid, int imageId)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
 
             var print = await _context.Prints.FindAsync(printid);
 
@@ -605,7 +636,7 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            if (userId != print.CreatedById)
+            if (!userId.HasValue || userId != print.CreatedById)
             {
                 return Forbid();
             }
@@ -623,7 +654,11 @@ namespace PrintLogApi.Controllers
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
         public async Task<ActionResult> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var print = await _context.Prints.FindAsync(printId);
 
@@ -649,8 +684,8 @@ namespace PrintLogApi.Controllers
             var comment = new Comment()
             {
                 Body = newComment.Body,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
             };
             _context.Comments.Add(comment);
 
@@ -658,8 +693,8 @@ namespace PrintLogApi.Controllers
             {
                 Print = print,
                 Comment = comment,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
             };
             _context.PrintComments.Add(printComment);
 

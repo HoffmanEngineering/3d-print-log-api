@@ -7,6 +7,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models.DTOs.Comments;
+using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -47,14 +48,18 @@ namespace PrintLogApi.Controllers
         [HttpPut("{id}")]
         public async Task<ActionResult<CommentDetailDto>> PutComment([FromRoute] long id, [FromBody] EditCommentDto edittedComment)
         {
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             var existingComment = await _context.Comments.FindAsync(id);
 
             if (existingComment == null)
             {
                 return NotFound();
             }
-
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             if (userId != existingComment.CreatedById)
             {

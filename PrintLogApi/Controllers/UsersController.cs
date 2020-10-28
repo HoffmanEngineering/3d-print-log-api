@@ -16,6 +16,7 @@ using Microsoft.Extensions.Configuration;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
+using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -59,7 +60,11 @@ namespace PrintLogApi.Controllers
         [HttpGet("me")]
         public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var user = await _context.Users
                 .Where(u => u.Id == userId)
@@ -90,7 +95,11 @@ namespace PrintLogApi.Controllers
         [HttpPut("me")]
         public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var existingUser = await _context.Users
                 .Where(u => u.Id == userId)
@@ -112,7 +121,7 @@ namespace PrintLogApi.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!UserExists(userId))
+                if (!UserExists(userId.Value))
                 {
                     return NotFound();
                 }
@@ -128,7 +137,11 @@ namespace PrintLogApi.Controllers
         [HttpPost("me/profile-image")]
         public async Task<ActionResult<UserUrlDto>> PostProfileImage([FromForm] IFormFile image)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var user = await _context.Users.FindAsync(userId);
 
@@ -153,8 +166,8 @@ namespace PrintLogApi.Controllers
                 Size = image.Length,
                 Path = $"{profileImageContainerName}/{fileName}",
                 Id = fileId,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
             };
             _context.Files.Add(file);
 
@@ -169,7 +182,11 @@ namespace PrintLogApi.Controllers
         [HttpPost("me/cover-image")]
         public async Task<ActionResult<UserUrlDto>> PostCoverImage([FromForm] IFormFile image)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue) 
+            {
+                return Unauthorized();
+            }
 
             var user = await _context.Users.FindAsync(userId);
 
@@ -194,8 +211,8 @@ namespace PrintLogApi.Controllers
                 Size = image.Length,
                 Path = $"{profileImageContainerName}/{fileName}",
                 Id = fileId,
-                CreatedById = userId,
-                UpdatedById = userId,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
             };
             _context.Files.Add(file);
 
@@ -214,7 +231,11 @@ namespace PrintLogApi.Controllers
         [HttpDelete("me/cover-image")]
         public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var user = await _context.Users.FindAsync(userId);
 

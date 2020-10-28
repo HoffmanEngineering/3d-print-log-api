@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
+using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -34,7 +35,11 @@ namespace PrintLogApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserSettingDto>>> GetCurrentUsersSettings()
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var settings = await _context.UserSettings
                 .Where(u => u.UserId == userId)
@@ -48,7 +53,11 @@ namespace PrintLogApi.Controllers
         [HttpPut]
         public async Task<ActionResult<UserSettingDto>> UpdateUserSetting([FromBody] UpdateUserSettingDto updateSettingDto)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var existingSetting = await _context.UserSettings
                 .Where(setting => setting.Id == updateSettingDto.Id && setting.UserId == userId)
@@ -85,7 +94,11 @@ namespace PrintLogApi.Controllers
         [HttpPost]
         public async Task<ActionResult<UserSettingDto>> CreateUserSetting([FromBody] AddUserSettingDto newSettingDto)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var existingSetting = await _context.UserSettings
                 .Where(setting => setting.UserSettingTypeId == newSettingDto.UserSettingTypeId && setting.UserId == userId)
@@ -98,9 +111,9 @@ namespace PrintLogApi.Controllers
 
             var newSetting = _mapper.Map<UserSetting>(newSettingDto);
 
-            newSetting.UserId = userId;
-            newSetting.CreatedById = userId;
-            newSetting.UpdatedById = userId;
+            newSetting.UserId = userId.Value;
+            newSetting.CreatedById = userId.Value;
+            newSetting.UpdatedById = userId.Value;
 
 
             _context.UserSettings.Add(newSetting);

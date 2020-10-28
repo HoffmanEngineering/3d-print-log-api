@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -37,7 +38,11 @@ namespace PrintLogApi.Controllers
         [HttpGet("summary")]
         public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             var printers = _context.Printers
                 .Where(p => p.UserId == userId);
@@ -70,7 +75,13 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             if (printer.UserId != userId)
             {
                 return Forbid();
@@ -83,11 +94,16 @@ namespace PrintLogApi.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> PutPrinter(long id, AddPrinterDTO printer)
         {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             if (id != printer.Id)
             {
                 return BadRequest();
             }
-
 
             var existingPrinter = await _context.Printers.FindAsync(id);
 
@@ -97,7 +113,7 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            
 
             if (existingPrinter.UserId != userId)
             {
@@ -133,11 +149,15 @@ namespace PrintLogApi.Controllers
         [HttpPost]
         public async Task<ActionResult<Printer>> PostPrinter(AddPrinterDTO printer)
         {
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             var newPrinter = _mapper.Map<Printer>(printer);
 
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
-
-            newPrinter.UserId = userId;
+            newPrinter.UserId = userId.Value;
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
