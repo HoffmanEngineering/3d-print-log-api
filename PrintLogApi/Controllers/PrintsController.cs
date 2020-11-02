@@ -25,6 +25,8 @@ using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
 using PrintLogApi.Extensions;
+using PrintLogApi.Services;
+using PrintLogApi.Exceptions;
 
 namespace PrintLogApi.Controllers
 {
@@ -37,16 +39,26 @@ namespace PrintLogApi.Controllers
         private readonly IMapper _mapper;
         private readonly IAuthorizationService _authorizationService;
         private readonly TelemetryClient _telemetry;
-
+        private readonly IPrintService _printService;
+        private readonly ICommentService _commentService;
         private readonly string printImageContainerName = "printimages";
         private readonly BlobContainerClient printImageContainer;
 
-        public PrintsController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService, TelemetryClient telemetry)
+        public PrintsController(
+            PrintLogContext context,
+            IMapper mapper,
+            IConfiguration config,
+            IAuthorizationService authorizationService,
+            TelemetryClient telemetry,
+            IPrintService printService,
+            ICommentService commentService)
         {
             _context = context;
             _mapper = mapper;
             _authorizationService = authorizationService;
             _telemetry = telemetry;
+            _printService = printService;
+            _commentService = commentService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -67,135 +79,16 @@ namespace PrintLogApi.Controllers
         {
 
             long? currentUserId = User.GetUserId();
-           
-            IQueryable<Print> printQuery;
-            // if a userId is provided, filter by 
-            if (userId.HasValue && userId != currentUserId)
-            {
-                // Get the user's public prints
-                printQuery = _context.Prints
-                .Where(p => p.CreatedById == userId)
-                .Where(p => p.ViewStatus == Print.PrintViewStatus.Public);
 
-            }
-            else
+            if (!userId.HasValue && userId != currentUserId && !currentUserId.HasValue)
             {
-                // Throw a bad request if we aren't filtering by a user, and the current user isn't logged in.
-                if (!currentUserId.HasValue)
-                {
-                    return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
-                }
-
-                printQuery = _context.Prints
-                .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId);
+                return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
 
-
-            if (!string.IsNullOrWhiteSpace(searchText))
-            {
-                printQuery = printQuery.Where(p => p.Title.Contains(searchText) || p.Notes.Contains(searchText));
-            }
-
-            if (filterByStatus != null)
-            {
-                printQuery = printQuery.Where(p => p.Status == filterByStatus);
-            }
-
-
-            if (sortRequest != null)
-            {
-                if (sortRequest.SortColumn == PrintSummarySortColumn.Title)
-                {
-                    if (sortRequest.SortDirection == SortDirection.Asc)
-                    {
-                        printQuery = printQuery.OrderBy(p => p.Title).ThenByDescending(p => p.CreatedDate);
-                    }
-                    else
-                    {
-                        printQuery = printQuery.OrderByDescending(p => p.Title).ThenByDescending(p => p.CreatedDate);
-                    }
-                }
-                else
-                {
-                    if (sortRequest.SortDirection == SortDirection.Asc)
-                    {
-                        printQuery = printQuery.OrderBy(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
-                    }
-                    else
-                    {
-                        printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
-                    }
-                }
-            }
-            else
-            {
-                printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
-            }
-
-
-            var prints = printQuery
-                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider)
-                .AsNoTracking();
-
-            var response = await PagedList<PrintSummaryDTO>.CreateAsync(prints, pagingRequest.PageNumber, pagingRequest.PageSize);
-            return response;
+            return await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByStatus, userId, currentUserId);
         }
 
-        /// <summary>
-        /// Get Print Statistics
-        /// </summary>
-        /// <returns></returns>
-        [HttpGet("statistics")]
-        public async Task<ActionResult<object>> GetPrintStatistics([FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
-        {
-            var userId = User.GetUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized();
-            }
-
-            var baseQuery = _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
-                .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
-
-            var numberOfPrints = await baseQuery.CountAsync();
-            var groupByStatus = await baseQuery
-                .GroupBy(p => p.Status)
-                .Select(group => new { status = group.Key, count = group.Count() })
-                .ToListAsync();
-
-            var estimatedPrintTime = await baseQuery
-                .Where(p => p.EstimatedPrintTimeInSeconds.HasValue)
-                .Select(p => p.EstimatedPrintTimeInSeconds)
-                .SumAsync();
-            var totalPrintTime = await baseQuery
-                .Where(p => p.PrintTimeInSeconds.HasValue)
-                .Select(p => p.PrintTimeInSeconds)
-                .SumAsync();
-
-            var estimatedFilamentUsage = await baseQuery
-                .Where(p => p.EstimatedFilamentUsageMg.HasValue)
-                .Select(p => p.EstimatedFilamentUsageMg)
-                .SumAsync();
-            var totalFilamentUsage = await baseQuery
-                .Where(p => p.FilamentUsageMg.HasValue)
-                .Select(p => p.FilamentUsageMg)
-                .SumAsync();
-
-            var printTimeForPrinters = await baseQuery
-                .Where(p => p.PrintTimeInSeconds.HasValue || p.EstimatedPrintTimeInSeconds.HasValue)
-                .Select(p => new { printerId = p.PrinterId, printTime = p.PrintTimeInSeconds.HasValue ? p.PrintTimeInSeconds : p.EstimatedPrintTimeInSeconds })
-                .GroupBy(p => p.printerId)
-                .Select(group => new
-                {
-                    printerId = group.Key,
-                    printTime = group.Sum(p => p.printTime)
-                })
-                .ToListAsync();
-
-            return Ok(new { numberOfPrints, groupByStatus, estimatedPrintTime, totalPrintTime, estimatedFilamentUsage, totalFilamentUsage, printTimeForPrinters });
-        }
-
+        
         /// <summary>
         /// Get Print Statistics
         /// </summary>
@@ -212,17 +105,12 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-
-            var printStats = await _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
-                .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
-                .OrderByDescending(p => p.StartDate)
-                .ProjectTo<PrintStatistic>(_mapper.ConfigurationProvider)
-                .AsNoTracking()
-                .ToListAsync();
+            var printStats = await _printService.GetPrintStatisticsForUser(userId.Value, fromDate, toDate);
 
             return printStats;
         }
+
+        
 
         // GET: api/Prints/5
         [HttpGet("{id}")]
@@ -258,36 +146,10 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var prints = _context.Prints
-                .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId)
-                .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
-                .ProjectTo<PrintDetailReport>(_mapper.ConfigurationProvider)
-                .AsNoTracking();
+            var stream = await _printService.GeneratePrintReportAsCsvForUser(currentUserId.Value);
 
-
-            List<PrintDetailReport> reportCSVModels = await prints.ToListAsync();
-            var printCount = reportCSVModels.Count;
-
-            var stream = new MemoryStream();
-
-            using (var operation = _telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
-            using (var writeFile = new StreamWriter(stream, leaveOpen: true))
-            using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
-            {
-                csv.Configuration.RegisterClassMap<PrintDetailReportMap>();
-                csv.WriteRecords(reportCSVModels);
-
-            }
-            stream.Position = 0; //reset stream
-
-            var lengthInBytes = stream.Length;
-            var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", lengthInBytes } };
-            _telemetry.TrackEvent("PrintReportExport", metrics: metrics);
-        
-                //_telemetry.
             return File(stream, "application/octet-stream", "PrintReports.csv");
         }
-
 
 
         // PUT: api/Prints/5
@@ -306,7 +168,6 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
-
             var userId = User.GetUserId();
             if (!userId.HasValue)
             {
@@ -318,43 +179,21 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            existingPrint = _mapper.Map<PrintDetailDTO, Print>(printDTO, existingPrint);
-
-            var printer = await _context.Printers.FindAsync(printDTO.PrinterId);
-            existingPrint.Printer = printer;
-
-            // Check if the user had access to that printer!
-            if (userId != printer.UserId)
-            {
-                return BadRequest();
-            }
-
-            // Set UpdatedByIds
-
-            existingPrint.UpdatedById = userId.Value;
-
-
-            _context.Entry(existingPrint).State = EntityState.Modified;
-
             try
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
+                var updatedPrint = _printService.UpdatePrint(id, printDTO, userId.Value);
+
+                return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
+            } catch (UserCannotAccessPrinterException)
             {
-                if (!PrintExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
-            }
+                return BadRequest();
+            } catch (DoesNotExistException)
+            {
+                return NotFound();
+            }          
 
-            _telemetry.TrackEvent("PrintEdit");
 
-            return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+            
         }
 
         // PUT: api/Prints/5/status/1
@@ -379,31 +218,15 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            // Set the new status
-            existingPrint.Status = newStatus;
-            existingPrint.UpdatedById = userId.Value;
-
-            _context.Entry(existingPrint).State = EntityState.Modified;
-
             try
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
+                var updatedPrint = await _printService.UpdatePrintStatus(id, newStatus, userId.Value);
+                return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+            } catch (DoesNotExistException)
             {
-                if (!PrintExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
+                return NotFound();
             }
-
-            _telemetry.TrackEvent("PrintStatusEdit");
-
-            return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+            
         }
 
         // POST: api/Prints
@@ -417,24 +240,25 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var newPrint = _mapper.Map<Print>(print);
-
-            newPrint.CreatedById = userId.Value;
-            newPrint.UpdatedById = userId.Value;
-
-
-            _context.Prints.Add(newPrint);
-            await _context.SaveChangesAsync();
+            var newPrint = await _printService.AddPrint(print, userId.Value);
 
             _telemetry.TrackEvent("PrintAdded");
 
             return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
-        // PUT: api/Prints/5
+        
+
+        // DELETE: api/Prints/5
         [HttpDelete("{id}")]
         public async Task<ActionResult<PrintDetailDTO>> DeletePrint(long id)
         {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             var existingPrint = await _context.Prints.FindAsync(id);
 
             if (existingPrint == null)
@@ -443,37 +267,19 @@ namespace PrintLogApi.Controllers
             }
 
 
-            var userId = User.GetUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized();
-            }
-
             if (userId != existingPrint.CreatedById)
             {
                 return Forbid();
             }
 
-            foreach(var comment in existingPrint.Comments.ToArray())
-            {
-                _context.Comments.Remove(comment.Comment);
-            }
-            _context.PrintComments.RemoveRange(existingPrint.Comments.ToArray());
-
-            foreach (var image in existingPrint.Images.ToArray())
-            {
-                _context.Files.Remove(image.File);
-            }
-            _context.PrintImages.RemoveRange(existingPrint.Images.ToArray());
-
-            _context.Prints.Remove(existingPrint);
-
-            await _context.SaveChangesAsync();
+            await _printService.DeletePrint(existingPrint);
 
             _telemetry.TrackEvent("PrintDeleted");
 
             return Ok();
         }
+
+        
 
         [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
@@ -655,7 +461,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -679,35 +485,9 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
+            var comment = await _printService.AddPrintComment(print, newComment.Body, userId.Value);
 
-
-            var comment = new Comment()
-            {
-                Body = newComment.Body,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            _context.Comments.Add(comment);
-
-            var printComment = new PrintComment()
-            {
-                Print = print,
-                Comment = comment,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            _context.PrintComments.Add(printComment);
-
-            await _context.SaveChangesAsync();
-
-            _telemetry.TrackEvent("CommentAdded");
-
-            var mappedComment = await _context.Comments
-                .Where(c => c.Id == comment.Id)
-                .AsNoTracking()
-                .ProjectTo<CommentDetailDto>(_mapper.ConfigurationProvider)
-                .SingleOrDefaultAsync();
-
+            var mappedComment = await _commentService.GetCommentDetailById(comment.Id);
 
             return CreatedAtRoute("GetComment", new { id = comment.Id }, mappedComment);
         }

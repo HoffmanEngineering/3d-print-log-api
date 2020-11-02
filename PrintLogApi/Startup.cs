@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -58,6 +59,8 @@ namespace PrintLogApi
                 (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
             );
             services.AddTransient<UserService>();
+            services.AddTransient<IPrintService, PrintService>();
+            services.AddTransient<ICommentService, CommentService>();
             services.AddApplicationInsightsTelemetry();
 
         }
