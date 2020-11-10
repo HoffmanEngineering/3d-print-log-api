@@ -41,6 +41,7 @@ namespace PrintLogApi.Controllers
         private readonly TelemetryClient _telemetry;
         private readonly IPrintService _printService;
         private readonly ICommentService _commentService;
+        private readonly IPrintImageService _printImageService;
         private readonly string printImageContainerName = "printimages";
         private readonly BlobContainerClient printImageContainer;
 
@@ -51,6 +52,7 @@ namespace PrintLogApi.Controllers
             IAuthorizationService authorizationService,
             TelemetryClient telemetry,
             IPrintService printService,
+            IPrintImageService printImageService,
             ICommentService commentService)
         {
             _context = context;
@@ -59,6 +61,7 @@ namespace PrintLogApi.Controllers
             _telemetry = telemetry;
             _printService = printService;
             _commentService = commentService;
+            _printImageService = printImageService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -300,20 +303,15 @@ namespace PrintLogApi.Controllers
 
             var imageFile = existingPrint.Images.Where(i => i.Id == imageId).Select(i => i.File).Single();
 
-            var fileName = Path.GetFileName(imageFile.Path);
-            var blobClient = printImageContainer.GetBlobClient(fileName);
-
-            if (await blobClient.ExistsAsync())
+            try
             {
-                var ms = new MemoryStream();
-                var stream = await blobClient.DownloadToAsync(ms);
-                ms.Position = 0;
 
-                new FileExtensionContentTypeProvider().TryGetContentType(fileName, out var contentType);
-                return File(ms, contentType);
+                var printImageDto = await _printImageService.DownloadPrintFile(imageFile);
 
-            }
-            else
+                new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName, out var contentType);
+                return File(printImageDto.File, contentType);
+
+            } catch (DoesNotExistException)
             {
                 return NotFound();
             }
@@ -341,16 +339,8 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var selectedImage = await _context.PrintImages.FindAsync(imageId);
-            selectedImage.IsDefault = true;
-
-
-            // Set other defaults to false;
-            var otherEntities = await _context.PrintImages.Where(p => p.PrintId == printid && p.IsDefault == true && p.PrintId != imageId).ToListAsync();
-            otherEntities.ForEach(p => p.IsDefault = false);
-
-            await _context.SaveChangesAsync();
-
+            await _printService.SetDefaultImage(printid, imageId);
+            
             return Ok();
 
             //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));

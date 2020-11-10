@@ -263,6 +263,20 @@ namespace PrintLogApi.Services
             return existingPrint;
         }
 
+        public async Task SetDefaultImage(long printId, long newDefaultImageId)
+        {
+            var print = await _context.Prints.FindAsync(printId);
+
+            var selectedImage = await _context.PrintImages.FindAsync(newDefaultImageId);
+            selectedImage.IsDefault = true;
+
+            // Set other defaults to false;
+            var otherEntities = await _context.PrintImages.Where(p => p.PrintId == printId && p.IsDefault == true && p.PrintId != newDefaultImageId).ToListAsync();
+            otherEntities.ForEach(p => p.IsDefault = false);
+
+            await _context.SaveChangesAsync();
+        }
+
         public async Task DeletePrint(Print print)
         {
             if (print == null)
