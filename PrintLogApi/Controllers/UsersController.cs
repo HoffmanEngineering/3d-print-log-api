@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
@@ -227,6 +228,19 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             return Ok();
+        }
+
+        /// <summary>
+        /// Returns an array of all the IDs for public users, for use with creating and updating sitemaps.
+        /// </summary>
+        /// <returns></returns>
+        [AllowAnonymous]
+        [HttpGet("public")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+        public async Task<ActionResult<IEnumerable<long>>> GetPublicUserIds()
+        {
+            this._telemetry.TrackEvent("PublicUsersQueried");
+            return await this._context.Users.Where(u => u.ViewStatus == Models.User.ProfileViewStatus.Public).Select(u => u.Id).ToListAsync();
         }
 
         /// <summary>
