@@ -678,6 +678,19 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
+        /// Returns an array of all the IDs for public prints, for use with creating and updating sitemaps.
+        /// </summary>
+        /// <returns></returns>
+        [AllowAnonymous]
+        [HttpGet("public")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+        public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds()
+        {
+            this._telemetry.TrackEvent("PublicPrintsQueried");
+            return await this._context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
+        }
+
+        /// <summary>
         /// Helper method to  check if the current user can view print
         /// </summary>
         /// <param name="print"></param>
