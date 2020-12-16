@@ -492,7 +492,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds()
         {
             this._telemetry.TrackEvent("PublicPrintsQueried");
-            return await this._context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
+            return await this._printService.GetPublicPrintIds();
         }
 
         /// <summary>

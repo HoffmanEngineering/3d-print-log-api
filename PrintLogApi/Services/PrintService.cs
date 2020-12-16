@@ -128,6 +128,11 @@ namespace PrintLogApi.Services
             return response;
         }
 
+        public async Task<List<long>> GetPublicPrintIds()
+        {
+            return await this._context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
+        }
+
         public async Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate)
         {
             return await _context.Prints

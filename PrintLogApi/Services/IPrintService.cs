@@ -15,6 +15,7 @@ namespace PrintLogApi.Services
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);
         Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
+        Task<List<long>> GetPublicPrintIds();
         Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);
         Task SetDefaultImage(long printId, long newDefaultImageId);
         Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId);
