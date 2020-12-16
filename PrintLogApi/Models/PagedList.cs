@@ -12,6 +12,15 @@ namespace PrintLogApi.Models
 
         public List<T> Items { get; set; }
 
+        /// <summary>
+        /// For Integration Testing Deserialization Only
+        /// </summary>
+        public PagedList()
+        {
+            Paging = new PageInfo(1,1,1);
+            Items = new List<T>();
+        }
+
         public PagedList(List<T> items, int totalCount, int pageNumber, int pageSize)
         {
             Paging = new PageInfo(totalCount, pageNumber, pageSize);

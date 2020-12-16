@@ -7,54 +7,61 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models.DTOs.Comments;
+using PrintLogApi.Extensions;
+using PrintLogApi.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class CommentsController : ControllerBase
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly ICommentService _commentService;
 
-        public CommentsController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public CommentsController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ICommentService commentService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _commentService = commentService;
         }
 
-        // GET: api/Comments/5
-        [HttpGet("{id}", Name = "GetComment")]
-        public async Task<ActionResult<CommentDetailDto>> GetComment(long id)
-        {
-            var comment = await _context.Comments
-                .Where(c => c.Id == id)
-                .AsNoTracking()
-                .ProjectTo<CommentDetailDto>(_mapper.ConfigurationProvider)
-                .SingleOrDefaultAsync();
+        // TODO: Figure out authorization, as you'd want to make sure someone has the right permission to view this comment when requesting standalone.
+        //// GET: api/Comments/5
+        //[HttpGet("{id}", Name = "GetComment")]
+        //public async Task<ActionResult<CommentDetailDto>> GetComment(long id)
+        //{
+        //    var comment = await _commentService.GetCommentDetailById(id);
 
-            if (comment == null)
-            {
-                return NotFound();
-            }
+        //    if (comment == null)
+        //    {
+        //        return NotFound();
+        //    }
 
-            return comment;
-        }
+        //    return comment;
+        //}
 
 
         [HttpPut("{id}")]
         public async Task<ActionResult<CommentDetailDto>> PutComment([FromRoute] long id, [FromBody] EditCommentDto edittedComment)
         {
+            var userId = User.GetUserId();
+            if(!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
             var existingComment = await _context.Comments.FindAsync(id);
 
             if (existingComment == null)
             {
                 return NotFound();
             }
-
-            var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
             if (userId != existingComment.CreatedById)
             {
