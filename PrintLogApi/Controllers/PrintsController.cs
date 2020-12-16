@@ -184,7 +184,7 @@ namespace PrintLogApi.Controllers
 
             try
             {
-                var updatedPrint = _printService.UpdatePrint(id, printDTO, userId.Value);
+                var updatedPrint = await _printService.UpdatePrint(id, printDTO, userId.Value);
 
                 return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
             } catch (UserCannotAccessPrinterException)
@@ -448,7 +448,7 @@ namespace PrintLogApi.Controllers
         // POST: api/Prints
         [HttpPost("{printId}/comment")]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
-        public async Task<ActionResult> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
+        public async Task<ActionResult<CommentDetailDto>> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -479,7 +479,7 @@ namespace PrintLogApi.Controllers
 
             var mappedComment = await _commentService.GetCommentDetailById(comment.Id);
 
-            return CreatedAtRoute("GetComment", new { id = comment.Id }, mappedComment);
+            return mappedComment;
         }
 
         /// <summary>
