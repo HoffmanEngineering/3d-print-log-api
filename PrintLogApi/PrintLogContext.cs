@@ -20,9 +20,12 @@ namespace PrintLogApi
         public DbSet<Printer> Printers { get; set; }
 
         public DbSet<Print> Prints { get; set; }
+
         public DbSet<PrintComment> PrintComments { get; set; }
 
         public DbSet<File> Files { get; set; }
+
+        public DbSet<Filament> Filaments { get; set; }
 
         public DbSet<PrintImage> PrintImages { get; set; }
 
