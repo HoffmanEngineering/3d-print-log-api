@@ -41,12 +41,12 @@ namespace PrintLogApi.Controllers
 
             var actualFilamentUsage = await baseQuery
                 .Where(p => p.FilamentUsageMg.HasValue && p.FilamentUsageMg.Value > 0)
-                .Select(p => p.FilamentUsageMg)
+                .Select(p => (long?)p.FilamentUsageMg)
                 .SumAsync();
 
             var estimatedFilamentUsageWhenNoActualWasRecorded = await baseQuery
                 .Where(p => (!p.FilamentUsageMg.HasValue || p.FilamentUsageMg.Value == 0) && p.EstimatedFilamentUsageMg.HasValue)
-                .Select(p => p.EstimatedFilamentUsageMg)
+                .Select(p => (long?)p.EstimatedFilamentUsageMg)
                 .SumAsync();
 
             var totalFilamentUsage = (actualFilamentUsage ?? 0) + (estimatedFilamentUsageWhenNoActualWasRecorded ?? 0);

@@ -27,6 +27,7 @@ using static PrintLogApi.Models.Print;
 using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Controllers
 {
@@ -120,7 +121,7 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<PrintDetailDTO>> GetPrint(long id)
         {
-            var print = await _context.Prints.FindAsync(id);
+            var print = await _printService.GetPrintById(id);
 
             if (print == null)
             {
@@ -132,7 +133,11 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var printDetailDto = _mapper.Map<PrintDetailDTO>(print);
+            var printDetailDto = _context.Prints
+                .Where(p => p.Id == id)
+                .ProjectTo<PrintDetailDTO>(_mapper.ConfigurationProvider)
+                .AsNoTracking()
+                .First();
 
             printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
 
@@ -164,7 +169,7 @@ namespace PrintLogApi.Controllers
                 return BadRequest();
             }
 
-            var existingPrint = await _context.Prints.FindAsync(id);
+            var existingPrint = await _printService.GetPrintById(id);
 
             if (existingPrint == null)
             {
@@ -204,7 +209,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PrintStatus newStatus)
         {
 
-            var existingPrint = await _context.Prints.FindAsync(id);
+            var existingPrint = await _printService.GetPrintById(id);
 
             if (existingPrint == null)
             {
@@ -262,7 +267,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var existingPrint = await _context.Prints.FindAsync(id);
+            var existingPrint = await _printService.GetPrintById(id);
 
             if (existingPrint == null)
             {
@@ -289,7 +294,7 @@ namespace PrintLogApi.Controllers
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<IActionResult> GetImage(long printId, int imageId)
         {
-            var existingPrint = await _context.Prints.FindAsync(printId);
+            var existingPrint = await _context.Prints.Where(p => p.Id == printId).Include(p => p.Images).ThenInclude(p => p.File).SingleOrDefaultAsync();
 
             if (existingPrint == null)
             {
@@ -301,10 +306,11 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var imageFile = existingPrint.Images.Where(i => i.Id == imageId).Select(i => i.File).Single();
+            
 
             try
             {
+                var imageFile = existingPrint.Images.Where(i => i.Id == imageId).Select(i => i.File).SingleOrDefault();
 
                 var printImageDto = await _printImageService.DownloadPrintFile(imageFile);
 
@@ -326,7 +332,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var print = await _context.Prints.FindAsync(printid);
+            var print = await _printService.GetPrintById(printid);
 
             if (print == null || !print.Images.Any(i => i.Id == imageId))
             {
@@ -355,7 +361,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var print = await _context.Prints.FindAsync(id);
+            var print = await _printService.GetPrintById(id);
 
             if (print == null)
             {
@@ -425,7 +431,7 @@ namespace PrintLogApi.Controllers
         {
             var userId = User.GetUserId();
 
-            var print = await _context.Prints.FindAsync(printid);
+            var print = await _printService.GetPrintById(printid);
 
             if (print == null || !print.Images.Any(i => i.Id == imageId))
             {
@@ -456,7 +462,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var print = await _context.Prints.FindAsync(printId);
+            var print = await _printService.GetPrintById(printId);
 
             if (print == null)
             {

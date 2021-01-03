@@ -175,6 +175,18 @@ namespace PrintLogApi.Services
             return stream;
         }
 
+        public async Task<Print> GetPrintById(long id)
+        {
+            return await this._context.Prints
+                .Include(p => p.Printer)
+                .Include(p => p.Images)
+                    .ThenInclude(p => p.File)
+                .Include(p => p.Comments)
+                .ThenInclude(p => p.Comment)
+                .Where(p => p.Id == id)
+                .FirstOrDefaultAsync();
+        }
+
         /// <summary>
         /// Add Print
         /// </summary>
@@ -196,7 +208,13 @@ namespace PrintLogApi.Services
 
         public async Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId)
         {
-            var existingPrint = await _context.Prints.FindAsync(id);
+            var existingPrint = await GetPrintById(id);
+            
+            if (existingPrint == null)
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
+
             var updatedPrint = _mapper.Map<PrintDetailDTO, Print>(dto, existingPrint);
 
             var printer = await _context.Printers.FindAsync(dto.PrinterId);
@@ -239,7 +257,12 @@ namespace PrintLogApi.Services
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)
         {
-            var existingPrint = await _context.Prints.FindAsync(id);
+            var existingPrint = await GetPrintById(id);
+
+            if (existingPrint == null)
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
 
             // Set the new status
             existingPrint.Status = newStatus;
@@ -270,7 +293,12 @@ namespace PrintLogApi.Services
 
         public async Task SetDefaultImage(long printId, long newDefaultImageId)
         {
-            var print = await _context.Prints.FindAsync(printId);
+            var print = await GetPrintById(printId);
+
+            if (print == null)
+            {
+                throw new ArgumentNullException(nameof(printId));
+            }
 
             var selectedImage = await _context.PrintImages.FindAsync(newDefaultImageId);
             selectedImage.IsDefault = true;
