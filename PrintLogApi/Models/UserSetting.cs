@@ -14,10 +14,10 @@ namespace PrintLogApi.Models
         public long Id { get; set; }
 
         public long? UserId { get; set; }
-        public virtual User User { get; set; }
+        public User User { get; set; }
 
         public int UserSettingTypeId { get; set; }
-        public virtual UserSettingType UserSettingType { get; set; }
+        public UserSettingType UserSettingType { get; set; }
 
         [StringLength(250)]
         public string Value { get; set; }

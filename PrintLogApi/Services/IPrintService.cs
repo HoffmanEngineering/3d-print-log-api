@@ -14,6 +14,7 @@ namespace PrintLogApi.Services
         Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);
+        Task<Print> GetPrintById(long id);
         Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
         Task<List<long>> GetPublicPrintIds();
         Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);

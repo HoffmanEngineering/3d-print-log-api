@@ -36,4 +36,4 @@ steps:
       appType: "webAppLinux"
       WebAppName: "3d-print-log-api-prod"
       packageForLinux: "$(Build.ArtifactStagingDirectory)/**/*.zip"
-      RuntimeStack: "DOTNETCORE|3.1"
+      RuntimeStack: "DOTNETCORE|5.0"
