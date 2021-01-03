@@ -15,10 +15,10 @@ namespace PrintLogApi.Models
 
         public long PrintId { get; set; }
 
-        public virtual Print Print { get; set; }
+        public Print Print { get; set; }
 
         public Guid FileId { get; set; }
-        public virtual File File { get; set; }
+        public File File { get; set; }
 
         public bool IsDefault { get; set; }
     }

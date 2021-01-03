@@ -15,10 +15,10 @@ namespace PrintLogApi.Models
 
         public long PrintId { get; set; }
 
-        public virtual Print Print { get; set; }
+        public Print Print { get; set; }
 
         public long CommentId { get; set; }
-        public virtual Comment Comment { get; set; }
+        public Comment Comment { get; set; }
 
     }
 }

@@ -16,7 +16,7 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public long PrinterId { get; set; }
 
-        public virtual PrinterSummary Printer { get; set; }
+        public PrinterSummary Printer { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg { get; set; }

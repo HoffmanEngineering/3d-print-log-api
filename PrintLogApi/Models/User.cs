@@ -58,6 +58,6 @@ namespace PrintLogApi.Models
 
         public ProfileViewStatus ViewStatus { get; set; }
 
-        public virtual ICollection<Printer> printers { get; set; }
+        public ICollection<Printer> printers { get; set; }
     }
 }

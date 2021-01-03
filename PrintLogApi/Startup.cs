@@ -43,7 +43,6 @@ namespace PrintLogApi
 
             services.AddDbContext<PrintLogContext>(opts =>
             {
-                opts.UseLazyLoadingProxies();
                 opts.UseSqlServer(Configuration["ConnectionString:PrintLogDb"]);
             });
 

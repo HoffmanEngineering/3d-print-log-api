@@ -35,7 +35,7 @@ namespace PrintLogApi.Models
         public DateTimeOffset? StartDate { get; set; }
 
         public long PrinterId { get; set; }
-        public virtual Printer Printer { get; set; }
+        public Printer Printer { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg  { get; set; }
@@ -56,9 +56,9 @@ namespace PrintLogApi.Models
 
         public bool AllowComments { get; set; }
 
-        public virtual ICollection<PrintImage> Images { get; set; }
+        public ICollection<PrintImage> Images { get; set; }
 
-        public virtual ICollection<PrintComment> Comments { get; set; }
+        public ICollection<PrintComment> Comments { get; set; }
 
         public PrintStatus Status { get; set; }
 

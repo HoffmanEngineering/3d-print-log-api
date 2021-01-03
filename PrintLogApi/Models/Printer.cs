@@ -14,7 +14,7 @@ namespace PrintLogApi.Models
         public long Id { get; set; }
 
         public long UserId { get; set; }
-        public virtual User User { get; set; }
+        public User User { get; set; }
 
         [MaxLength(50)]
         public string Make { get; set; }
