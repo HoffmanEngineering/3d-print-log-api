@@ -1,4 +1,7 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+﻿using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using System.Security.Principal;
 using AutoMapper;
@@ -18,6 +21,7 @@ using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
+using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace PrintLogApi
 {
@@ -49,6 +53,28 @@ namespace PrintLogApi
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "Print Log Api", Version = "v1" });
+                c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.OAuth2,
+                    Flows = new OpenApiOAuthFlows
+                    {
+                        Implicit = new OpenApiOAuthFlow
+                        {
+                            AuthorizationUrl = new Uri($"https://{Configuration["Auth0:Domain"]}/authorize"),
+                            
+                            Scopes = new Dictionary<string, string>
+                            {
+                                {"api1", "Demo API - full access"}
+                            }
+                        }
+                    },
+                    In = ParameterLocation.Header,
+                    Scheme = "bearer",
+                    BearerFormat = "JWT"
+                });
+
+                c.OperationFilter<AuthorizeCheckOperationFilter>();
+                
             });
 
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
@@ -61,6 +87,7 @@ namespace PrintLogApi
             services.AddTransient<IPrintService, PrintService>();
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
+            services.AddTransient<IFilamentService, FilamentService>();
             services.AddApplicationInsightsTelemetry();
 
         }
@@ -162,7 +189,8 @@ namespace PrintLogApi
             app.UseSwaggerUI(c =>
             {
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
-
+                c.OAuthClientId(Configuration["Auth0:SwaggerClientId"]);
+                c.OAuthAdditionalQueryStringParams(new Dictionary<string, string>() { { "audience", "https://dev.3dprintlog.com/api" } });
             });
 
             app.UseMetricServer();
@@ -173,6 +201,37 @@ namespace PrintLogApi
                 endpoints.MapControllers();
             });
 
+        }
+    }
+
+    public class AuthorizeCheckOperationFilter : IOperationFilter
+    {
+        public void Apply(OpenApiOperation operation, OperationFilterContext context)
+        {
+            var hasAuthorize =
+              context.MethodInfo.DeclaringType.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
+              || context.MethodInfo.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any();
+
+            if (hasAuthorize)
+            {
+                operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
+                operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
+
+                operation.Security = new List<OpenApiSecurityRequirement>
+            {
+                new OpenApiSecurityRequirement
+                {
+                    [
+                        new OpenApiSecurityScheme {Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "oauth2"}
+                        }
+                    ] = new[] {"api1"}
+                }
+            };
+
+            }
         }
     }
 }
