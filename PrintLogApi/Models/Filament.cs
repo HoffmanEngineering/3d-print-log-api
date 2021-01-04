@@ -74,5 +74,8 @@ namespace PrintLogApi.Models
 
         [StringLength(1000)]
         public string Notes { get; set; }
+
+        // Nagivation Element to PrintFilament
+        public ICollection<PrintFilament> PrintFilaments { get; set; }
     }
 }

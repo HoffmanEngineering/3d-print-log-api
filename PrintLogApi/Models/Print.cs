@@ -40,6 +40,8 @@ namespace PrintLogApi.Models
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg  { get; set; }
         public int? PrintTimeInSeconds { get; set; }
+
+        public ICollection<PrintFilament> FilamentUsage { get; set; }
         /// <summary>
         /// Filament usage in milligrams 
         /// </summary>
@@ -59,6 +61,7 @@ namespace PrintLogApi.Models
         public ICollection<PrintImage> Images { get; set; }
 
         public ICollection<PrintComment> Comments { get; set; }
+
 
         public PrintStatus Status { get; set; }
 

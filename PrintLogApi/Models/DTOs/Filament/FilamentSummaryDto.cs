@@ -47,5 +47,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public string Notes { get; set; }
 
         public DateTime CreatedDate { get; set; }
+
+        public long? FilamentRemaining { get; set; }
     }
 }
