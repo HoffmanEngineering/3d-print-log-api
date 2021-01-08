@@ -15,6 +15,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// Common name for the roll of filament.
         /// </summary>
         [StringLength(255)]
+        [Required(AllowEmptyStrings = false)]
         public string DisplayName { get; set; }
 
         [StringLength(255)]
@@ -25,6 +26,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// The material Type, ie PLA, PETG, ABS.
         /// </summary>
         [StringLength(255)]
+        [Required(AllowEmptyStrings = false)]
         public string MaterialType { get; set; }
 
         /// <summary>

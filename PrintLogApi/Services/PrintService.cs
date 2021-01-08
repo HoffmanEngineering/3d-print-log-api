@@ -182,7 +182,9 @@ namespace PrintLogApi.Services
                 .Include(p => p.Images)
                     .ThenInclude(p => p.File)
                 .Include(p => p.Comments)
-                .ThenInclude(p => p.Comment)
+                    .ThenInclude(p => p.Comment)
+                .Include(p => p.FilamentUsage)
+                    .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .FirstOrDefaultAsync();
         }
@@ -197,13 +199,23 @@ namespace PrintLogApi.Services
         {
             var newPrint = _mapper.Map<Print>(print);
 
+            var printer = await _context.Printers.FindAsync(print.PrinterId);
+            newPrint.Printer = printer;
+
+            // Check if the user had access to that printer!
+            if (userId != printer.UserId)
+            {
+                //return BadRequest();
+                throw new UserCannotAccessPrinterException();
+            }
+
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
 
 
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
-            return newPrint;
+            return await GetPrintById(newPrint.Id); ;
         }
 
         public async Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId)
@@ -226,6 +238,38 @@ namespace PrintLogApi.Services
                 //return BadRequest();
                 throw new UserCannotAccessPrinterException();
             }
+
+            //// Remove any print-filament links that no longer exist.
+            //foreach (var existingPrintFilament in updatedPrint.FilamentUsage)
+            //{
+            //    if (!dto.FilamentUsage.Any(PrintFilament => PrintFilament.Id == existingPrintFilament.Id))
+            //    {
+            //        updatedPrint.FilamentUsage.Remove(existingPrintFilament);
+            //    }
+            //}
+
+            //// Handle new and updated Print Filament Amounts
+            //foreach (var dtoPrintFilament in dto.FilamentUsage)
+            //{
+            //    var existingPf = updatedPrint.FilamentUsage.Where(pf => pf.Id == dtoPrintFilament.Id && pf.Id != default).SingleOrDefault();
+
+            //    if (existingPf != null)
+            //    {
+            //        _context.Entry(existingPf).CurrentValues.SetValues(dtoPrintFilament);
+            //    }
+            //    else
+            //    {
+            //        var newPrintFilament = new PrintFilament()
+            //        {
+            //            FilamentId = dtoPrintFilament.Filament.Id,
+            //            PrintId = updatedPrint.Id,
+            //            EstimatedAmountMg = dtoPrintFilament.EstimatedAmountMg,
+            //            AmountMg = dtoPrintFilament.AmountMg
+            //        };
+
+            //        updatedPrint.FilamentUsage.Add(newPrintFilament);
+            //    }
+            //}
 
             // Set UpdatedByIds
 
@@ -252,7 +296,7 @@ namespace PrintLogApi.Services
 
             _telemetry.TrackEvent("PrintEdit");
 
-            return updatedPrint;
+            return await GetPrintById(updatedPrint.Id);
         }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)

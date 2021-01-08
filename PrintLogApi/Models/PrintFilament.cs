@@ -22,5 +22,8 @@ namespace PrintLogApi.Models
 
         public int? EstimatedAmountMg { get; set; }
         public int? AmountMg { get; set; }
+
+        [StringLength(1000)]
+        public string Notes { get; set; }
     }
 }

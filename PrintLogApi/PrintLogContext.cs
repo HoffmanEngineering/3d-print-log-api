@@ -27,6 +27,8 @@ namespace PrintLogApi
 
         public DbSet<Filament> Filaments { get; set; }
 
+        public DbSet<PrintFilament> PrintFilament { get; set; }
+
         public DbSet<PrintImage> PrintImages { get; set; }
 
         public DbSet<Feedback> Feedback { get; set; }
@@ -44,7 +46,6 @@ namespace PrintLogApi
                 );
 
             modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
-
         }
 
         public override int SaveChanges()

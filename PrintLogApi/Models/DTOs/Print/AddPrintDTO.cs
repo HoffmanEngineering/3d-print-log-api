@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
 
@@ -18,6 +19,8 @@ namespace PrintLogApi.Models.DTOs.Print
 
         [StringLength(100)]
         public string FilamentType { get; set; }
+
+        public ICollection<PrintFilamenSummaryDto> FilamentUsage { get; set; }
 
         [StringLength(1000)]
         public string Notes { get; set; }

@@ -248,11 +248,17 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var newPrint = await _printService.AddPrint(print, userId.Value);
+            try
+            {
+                var newPrint = await _printService.AddPrint(print, userId.Value);
+                _telemetry.TrackEvent("PrintAdded");
 
-            _telemetry.TrackEvent("PrintAdded");
-
-            return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+                return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            } catch (UserCannotAccessPrinterException)
+            {
+                return BadRequest("Selected printer does not belong to currently logged in user.");
+            }
+            
         }
 
         
