@@ -35,21 +35,23 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<SinglePrintStat>> GetUsersTotalFilamentUsage(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
             var baseQuery = _context.Prints
+                .Include(p => p.FilamentUsage)
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
 
+            var printFilamentUsage = await baseQuery.SelectMany(p => p.FilamentUsage.Select(pf => (long)(pf.AmountMg ?? pf.EstimatedAmountMg ?? 0))).SumAsync();
 
-            var actualFilamentUsage = await baseQuery
+            var otherActualFilamentUsage = await baseQuery
                 .Where(p => p.FilamentUsageMg.HasValue && p.FilamentUsageMg.Value > 0)
                 .Select(p => (long?)p.FilamentUsageMg)
                 .SumAsync();
 
-            var estimatedFilamentUsageWhenNoActualWasRecorded = await baseQuery
+            var otherEstimatedFilamentUsageWhenNoActualWasRecorded = await baseQuery
                 .Where(p => (!p.FilamentUsageMg.HasValue || p.FilamentUsageMg.Value == 0) && p.EstimatedFilamentUsageMg.HasValue)
                 .Select(p => (long?)p.EstimatedFilamentUsageMg)
                 .SumAsync();
 
-            var totalFilamentUsage = (actualFilamentUsage ?? 0) + (estimatedFilamentUsageWhenNoActualWasRecorded ?? 0);
+            var totalFilamentUsage = printFilamentUsage + (otherActualFilamentUsage ?? 0) + (otherEstimatedFilamentUsageWhenNoActualWasRecorded ?? 0);
 
             return new SinglePrintStat() { Stat = totalFilamentUsage.ToString() };
         }
