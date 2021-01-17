@@ -24,12 +24,14 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly IFilamentService _filamentService;
 
-        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, IFilamentService filamentService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _filamentService = filamentService;
         }
 
         /// <summary>
@@ -182,7 +184,9 @@ namespace PrintLogApi.Services
                 .Include(p => p.Images)
                     .ThenInclude(p => p.File)
                 .Include(p => p.Comments)
-                .ThenInclude(p => p.Comment)
+                    .ThenInclude(p => p.Comment)
+                .Include(p => p.FilamentUsage)
+                    .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .FirstOrDefaultAsync();
         }
@@ -197,13 +201,32 @@ namespace PrintLogApi.Services
         {
             var newPrint = _mapper.Map<Print>(print);
 
+            var printer = await _context.Printers.FindAsync(print.PrinterId);
+            newPrint.Printer = printer;
+
+            // Check if the user had access to that printer!
+            if (userId != printer.UserId)
+            {
+                //return BadRequest();
+                throw new UserCannotAccessPrinterException();
+            }
+
+            foreach (var filament in newPrint.FilamentUsage)
+            {
+                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
+                if (!canAccessFilament)
+                {
+                    throw new UserCannotAccessFilamentException();
+                }
+            }
+
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
 
 
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
-            return newPrint;
+            return await GetPrintById(newPrint.Id); ;
         }
 
         public async Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId)
@@ -227,7 +250,14 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessPrinterException();
             }
 
-            // Set UpdatedByIds
+            foreach (var filament in updatedPrint.FilamentUsage)
+            {
+                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
+                if (!canAccessFilament)
+                {
+                    throw new UserCannotAccessFilamentException();
+                }
+            }
 
             updatedPrint.UpdatedById = userId;
 
@@ -252,7 +282,7 @@ namespace PrintLogApi.Services
 
             _telemetry.TrackEvent("PrintEdit");
 
-            return updatedPrint;
+            return await GetPrintById(updatedPrint.Id);
         }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)

@@ -28,6 +28,8 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public string FilamentType { get; set; }
 
+        public ICollection<PrintFilamenSummaryDto> FilamentUsage { get; set; }
+
         public string Notes { get; set; }
 
         public string Url { get; set; }

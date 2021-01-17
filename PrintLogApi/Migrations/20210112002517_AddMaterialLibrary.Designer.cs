@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20210112002517_AddMaterialLibrary")]
+    partial class AddMaterialLibrary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -182,45 +184,6 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Filaments");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.FilamentAdjustment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long>("AmountMg")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("CreatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("FilamentId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<long>("UpdatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("UpdatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("FilamentId");
-
-                    b.HasIndex("UpdatedById");
-
-                    b.ToTable("FilamentAdjustments");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.Property<Guid>("Id")
@@ -300,8 +263,8 @@ namespace PrintLogApi.Migrations
                         new
                         {
                             Id = new Guid("3dbc49c5-a493-4e21-a4d5-d94b8c0d53da"),
-                            Acronym = "Nylon",
-                            DensityGramPerCubicCm = 1.1399999999999999
+                            DensityGramPerCubicCm = 1.1399999999999999,
+                            Name = "Nylon"
                         },
                         new
                         {
@@ -747,33 +710,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.FilamentAdjustment", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.Filament", "Filament")
-                        .WithMany("FilamentAdjustments")
-                        .HasForeignKey("FilamentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
-                        .WithMany()
-                        .HasForeignKey("UpdatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("Filament");
-
-                    b.Navigation("UpdatedBy");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
@@ -955,8 +891,6 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>
                 {
-                    b.Navigation("FilamentAdjustments");
-
                     b.Navigation("PrintFilaments");
                 });
 

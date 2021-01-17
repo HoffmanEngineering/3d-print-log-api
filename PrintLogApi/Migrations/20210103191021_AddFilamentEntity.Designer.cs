@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20210103191021_AddFilamentEntity")]
+    partial class AddFilamentEntity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -182,45 +184,6 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Filaments");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.FilamentAdjustment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long>("AmountMg")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("CreatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("FilamentId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<long>("UpdatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("UpdatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("FilamentId");
-
-                    b.HasIndex("UpdatedById");
-
-                    b.ToTable("FilamentAdjustments");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.Property<Guid>("Id")
@@ -252,99 +215,6 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("Files");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.Material", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Acronym")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<double>("DensityGramPerCubicCm")
-                        .HasColumnType("float");
-
-                    b.Property<string>("Name")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Materials");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = new Guid("c78c56d0-b34d-49b1-849e-a54066a2f5e3"),
-                            Acronym = "ABS",
-                            DensityGramPerCubicCm = 1.1000000000000001,
-                            Name = "Acrylonitrile Butadiene Styrene"
-                        },
-                        new
-                        {
-                            Id = new Guid("c8cae1e0-5f13-41d6-9f72-cb83740aa2fe"),
-                            Acronym = "CPE",
-                            DensityGramPerCubicCm = 1.27,
-                            Name = "Co-polyester"
-                        },
-                        new
-                        {
-                            Id = new Guid("b0cda842-5a48-4a30-a060-226680e13c06"),
-                            Acronym = "HIPS",
-                            DensityGramPerCubicCm = 1.24,
-                            Name = "High Impact Polystyrene"
-                        },
-                        new
-                        {
-                            Id = new Guid("3dbc49c5-a493-4e21-a4d5-d94b8c0d53da"),
-                            Acronym = "Nylon",
-                            DensityGramPerCubicCm = 1.1399999999999999
-                        },
-                        new
-                        {
-                            Id = new Guid("7d83cbc1-00d0-4e42-a7ce-8a1b831b175b"),
-                            Acronym = "PC",
-                            DensityGramPerCubicCm = 1.1899999999999999,
-                            Name = "Polycarbonate"
-                        },
-                        new
-                        {
-                            Id = new Guid("35151bfe-6890-41ab-8fc9-443c5a690626"),
-                            Acronym = "PCTG",
-                            DensityGramPerCubicCm = 1.24,
-                            Name = "Cyclohexylenedimethylene Terephthalate Glycol"
-                        },
-                        new
-                        {
-                            Id = new Guid("23e38c0d-43f3-4bcd-b3c6-830d193a3e10"),
-                            Acronym = "PETG",
-                            DensityGramPerCubicCm = 1.3799999999999999,
-                            Name = "Polyethylene Terephthalate Glycol"
-                        },
-                        new
-                        {
-                            Id = new Guid("f8a6b364-94a6-4a32-a253-e67b41df1969"),
-                            Acronym = "PLA",
-                            DensityGramPerCubicCm = 1.24,
-                            Name = "Polylactic Acid"
-                        },
-                        new
-                        {
-                            Id = new Guid("0c236829-8487-4bb4-a092-68a9731a64e4"),
-                            Acronym = "PVA",
-                            DensityGramPerCubicCm = 1.23,
-                            Name = "Polyvinyl Acetate"
-                        },
-                        new
-                        {
-                            Id = new Guid("d777bde9-fba6-4f5a-b7a4-e8a4a9695715"),
-                            Acronym = "TPU 95A",
-                            DensityGramPerCubicCm = 1.22,
-                            Name = "Thermoplastic Polyurethane"
-                        });
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
@@ -456,37 +326,6 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("PrintComments");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.PrintFilament", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("AmountMg")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("EstimatedAmountMg")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("FilamentId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<long>("PrintId")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FilamentId");
-
-                    b.HasIndex("PrintId");
-
-                    b.ToTable("PrintFilament");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrintImage", b =>
@@ -747,33 +586,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.FilamentAdjustment", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.Filament", "Filament")
-                        .WithMany("FilamentAdjustments")
-                        .HasForeignKey("FilamentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
-                        .WithMany()
-                        .HasForeignKey("UpdatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("Filament");
-
-                    b.Navigation("UpdatedBy");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
@@ -855,25 +667,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.PrintFilament", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.Filament", "Filament")
-                        .WithMany("PrintFilaments")
-                        .HasForeignKey("FilamentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.Print", "Print")
-                        .WithMany("FilamentUsage")
-                        .HasForeignKey("PrintId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Filament");
-
-                    b.Navigation("Print");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.PrintImage", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
@@ -953,18 +746,9 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UserSettingType");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.Filament", b =>
-                {
-                    b.Navigation("FilamentAdjustments");
-
-                    b.Navigation("PrintFilaments");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
                 {
                     b.Navigation("Comments");
-
-                    b.Navigation("FilamentUsage");
 
                     b.Navigation("Images");
                 });
