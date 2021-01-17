@@ -35,7 +35,9 @@ namespace PrintLogApi.Controllers
         [HttpGet]
         public async Task<ActionResult<PagedList<FilamentSummaryDto>>> GetFilamentSummariesForUser(
             [FromQuery] PagedRequest pagingRequest,
-            [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest)
+            [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest,
+            [FromQuery] string searchText,
+            [FromQuery] bool? includeInactive)
         {
             long? currentUserId = User.GetUserId();
             if (!currentUserId.HasValue)
@@ -47,7 +49,9 @@ namespace PrintLogApi.Controllers
                 sortRequest.SortDirection, 
                 sortRequest.SortColumn, 
                 pagingRequest.PageNumber, 
-                pagingRequest.PageSize);
+                pagingRequest.PageSize,
+                searchText,
+                includeInactive);
         }
 
         //// GET: api/Filaments

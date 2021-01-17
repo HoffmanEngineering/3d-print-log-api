@@ -31,12 +31,25 @@ namespace PrintLogApi.Services
             SortDirection sortDirection,
             FilamentSummarySortColumn sortColumn,
             int pageNumber,
-            int pageSize)
+            int pageSize,
+            string searchText,
+            bool? includeInactive)
         {
             var filamentsBase = _context.Filaments
                 .Where(f => f.CreatedById == userId)
                 .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(searchText) || f.Brand.Contains(searchText) || f.ColorName.Contains(searchText) || f.Notes.Contains(searchText));
+            }
+
+            // Filter out inactives unless specified
+            if (!includeInactive.HasValue || includeInactive.Value == false)
+            {
+                filamentsBase = filamentsBase.Where(f => f.IsActive == true);
+            } 
 
             if (sortColumn == FilamentSummarySortColumn.DisplayName)
             {
@@ -47,6 +60,51 @@ namespace PrintLogApi.Services
                 {
                     filamentsBase = filamentsBase.OrderByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
                 }
+            } else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
+            {
+                if (sortDirection == SortDirection.Asc)
+                {
+                    filamentsBase = filamentsBase.OrderBy(f => f.FilamentRemaining).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                }
+                else
+                {
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.FilamentRemaining).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                }
+            } else if (sortColumn == FilamentSummarySortColumn.MaterialType)
+            {
+                if (sortDirection == SortDirection.Asc)
+                {
+                    filamentsBase = filamentsBase.OrderBy(f => f.MaterialType).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                }
+                else
+                {
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.MaterialType).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                }
+
+            }
+            else if (sortColumn == FilamentSummarySortColumn.Brand)
+            {
+                if (sortDirection == SortDirection.Asc)
+                {
+                    filamentsBase = filamentsBase.OrderBy(f => f.Brand).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                }
+                else
+                {
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.Brand).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                }
+
+            }
+            else if (sortColumn == FilamentSummarySortColumn.Color)
+            {
+                if (sortDirection == SortDirection.Asc)
+                {
+                    filamentsBase = filamentsBase.OrderBy(f => f.ColorName).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                }
+                else
+                {
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.ColorName).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                }
+
             }
 
             return await PagedList<FilamentSummaryDto>.CreateAsync(filamentsBase, pageNumber, pageSize);
