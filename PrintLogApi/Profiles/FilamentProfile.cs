@@ -14,7 +14,10 @@ namespace PrintLogApi.Profiles
         {
             CreateMap<Filament, FilamentSummaryDto>()
                 .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg 
-                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg ?? p.EstimatedAmountMg ?? 0) 
+                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? 
+                                                                                                                    p.AmountMg : 
+                                                                                                                    p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? 
+                                                                                                                    p.EstimatedAmountMg : 0) 
                                                                                     + src.FilamentAdjustments.Sum(adj => adj.AmountMg)));
 
             CreateMap<FilamentSummaryDto, Filament>();

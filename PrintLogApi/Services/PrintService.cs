@@ -24,12 +24,14 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly IFilamentService _filamentService;
 
-        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, IFilamentService filamentService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _filamentService = filamentService;
         }
 
         /// <summary>
@@ -209,6 +211,15 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessPrinterException();
             }
 
+            foreach (var filament in newPrint.FilamentUsage)
+            {
+                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
+                if (!canAccessFilament)
+                {
+                    throw new UserCannotAccessFilamentException();
+                }
+            }
+
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
 
@@ -239,39 +250,14 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessPrinterException();
             }
 
-            //// Remove any print-filament links that no longer exist.
-            //foreach (var existingPrintFilament in updatedPrint.FilamentUsage)
-            //{
-            //    if (!dto.FilamentUsage.Any(PrintFilament => PrintFilament.Id == existingPrintFilament.Id))
-            //    {
-            //        updatedPrint.FilamentUsage.Remove(existingPrintFilament);
-            //    }
-            //}
-
-            //// Handle new and updated Print Filament Amounts
-            //foreach (var dtoPrintFilament in dto.FilamentUsage)
-            //{
-            //    var existingPf = updatedPrint.FilamentUsage.Where(pf => pf.Id == dtoPrintFilament.Id && pf.Id != default).SingleOrDefault();
-
-            //    if (existingPf != null)
-            //    {
-            //        _context.Entry(existingPf).CurrentValues.SetValues(dtoPrintFilament);
-            //    }
-            //    else
-            //    {
-            //        var newPrintFilament = new PrintFilament()
-            //        {
-            //            FilamentId = dtoPrintFilament.Filament.Id,
-            //            PrintId = updatedPrint.Id,
-            //            EstimatedAmountMg = dtoPrintFilament.EstimatedAmountMg,
-            //            AmountMg = dtoPrintFilament.AmountMg
-            //        };
-
-            //        updatedPrint.FilamentUsage.Add(newPrintFilament);
-            //    }
-            //}
-
-            // Set UpdatedByIds
+            foreach (var filament in updatedPrint.FilamentUsage)
+            {
+                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
+                if (!canAccessFilament)
+                {
+                    throw new UserCannotAccessFilamentException();
+                }
+            }
 
             updatedPrint.UpdatedById = userId;
 

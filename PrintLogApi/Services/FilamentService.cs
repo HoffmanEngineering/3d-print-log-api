@@ -192,6 +192,18 @@ namespace PrintLogApi.Services
             return updatedFilament;
         }
 
+        public async Task<bool> CanUserAccessFilament(long userId, Guid filamentId)
+        {
+            var filament = await GetFilamentById(filamentId);
+            if (filament == null)
+            {
+                return false;
+            }
+
+            // Only the user that created the filament can access it.
+            return filament.CreatedById == userId;
+        }
+
         public bool FilamentExists(Guid id)
         {
             return _context.Filaments.Any(f => f.Id == id);

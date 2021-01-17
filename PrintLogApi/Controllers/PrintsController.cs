@@ -234,7 +234,11 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
-            
+            catch (UserCannotAccessFilamentException)
+            {
+                return BadRequest("Selected filament does not belong to currently logged in user.");
+            }
+
         }
 
         // POST: api/Prints
@@ -257,6 +261,9 @@ namespace PrintLogApi.Controllers
             } catch (UserCannotAccessPrinterException)
             {
                 return BadRequest("Selected printer does not belong to currently logged in user.");
+            } catch (UserCannotAccessFilamentException)
+            {
+                return BadRequest("Selected filament does not belong to currently logged in user.");
             }
             
         }
