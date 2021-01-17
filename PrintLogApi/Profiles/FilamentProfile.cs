@@ -13,7 +13,9 @@ namespace PrintLogApi.Profiles
         public FilamentProfile()
         {
             CreateMap<Filament, FilamentSummaryDto>()
-                .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg - src.PrintFilaments.Sum(p => p.AmountMg ?? p.EstimatedAmountMg ?? 0)));
+                .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg 
+                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg ?? p.EstimatedAmountMg ?? 0) 
+                                                                                    + src.FilamentAdjustments.Sum(adj => adj.AmountMg)));
 
             CreateMap<FilamentSummaryDto, Filament>();
 
@@ -23,6 +25,8 @@ namespace PrintLogApi.Profiles
 
             CreateMap<FilamentDetailDto, Filament>();
             CreateMap<Filament, FilamentDetailDto>();
+
+            CreateMap<FilamentAdjustment, FilamentAdjustmentDto>().ReverseMap();
         }
     }
 }

@@ -74,5 +74,7 @@ namespace PrintLogApi.Models.DTOs.Filament
 
         [StringLength(1000)]
         public string Notes { get; set; }
+
+        public ICollection<FilamentAdjustmentDto> FilamentAdjustments { get; set; }
     }
 }

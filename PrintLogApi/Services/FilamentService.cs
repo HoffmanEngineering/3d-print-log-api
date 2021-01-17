@@ -55,7 +55,10 @@ namespace PrintLogApi.Services
 
         public async Task<Filament> GetFilamentById(Guid id)
         {
-            return await _context.Filaments.Where(f => f.Id == id).SingleOrDefaultAsync();
+            return await _context.Filaments
+                    .Where(f => f.Id == id)
+                    .Include(f => f.FilamentAdjustments)
+                    .SingleOrDefaultAsync();
         }
 
         /// <summary>
@@ -68,9 +71,14 @@ namespace PrintLogApi.Services
         {
             var newFilament = _mapper.Map<Filament>(filament);
 
+            foreach (var adjustment in newFilament.FilamentAdjustments)
+            {
+                adjustment.CreatedById = userId;
+                adjustment.UpdatedById = userId;
+            }
+
             newFilament.CreatedById = userId;
             newFilament.UpdatedById = userId;
-
 
             _context.Filaments.Add(newFilament);
             await _context.SaveChangesAsync();
@@ -92,6 +100,12 @@ namespace PrintLogApi.Services
             }
 
             var updatedFilament = _mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
+
+            foreach (var adjustment in updatedFilament.FilamentAdjustments)
+            {
+                adjustment.CreatedById = userId;
+                adjustment.UpdatedById = userId;
+            }
 
 
             // Set UpdatedByIds

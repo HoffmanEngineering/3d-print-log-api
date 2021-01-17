@@ -27,6 +27,8 @@ namespace PrintLogApi
 
         public DbSet<Filament> Filaments { get; set; }
 
+        public DbSet<FilamentAdjustment> FilamentAdjustments { get; set; }
+
         public DbSet<Material> Materials { get; set; }
 
         public DbSet<PrintFilament> PrintFilament { get; set; }
