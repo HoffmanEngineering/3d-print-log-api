@@ -116,6 +116,7 @@ namespace PrintLogApi.Services
             return await _context.Filaments
                     .Where(f => f.Id == id)
                     .Include(f => f.FilamentAdjustments)
+                    .Include(f=> f.PrintFilaments)
                     .SingleOrDefaultAsync();
         }
 
@@ -202,6 +203,39 @@ namespace PrintLogApi.Services
 
             // Only the user that created the filament can access it.
             return filament.CreatedById == userId;
+        }
+
+        /// <summary>
+        /// Delete a Filament if that filament isn't in use by a print.
+        /// </summary>
+        /// <param name="filamentId"></param>
+        /// <returns></returns>
+        public async Task DeleteFilament(Guid filamentId)
+        {
+            var filament = await GetFilamentById(filamentId);
+            if (filament == null)
+            {
+                return;
+            }
+
+            // Check if any filament is being used.
+            if (filament.PrintFilaments.Any())
+            {
+                throw new FilamentIsInUseException();
+            }
+
+            // Remove any adjustments
+            if (filament.FilamentAdjustments.Any())
+            {
+                _context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments);
+            }
+
+            _context.Filaments.Remove(filament);
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("FilamentDelete");
+
+            return;
         }
 
         public bool FilamentExists(Guid id)
