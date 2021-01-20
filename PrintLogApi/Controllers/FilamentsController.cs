@@ -106,7 +106,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            if (userId != existingFilament.CreatedById )
+            if (!await _filamentService.CanUserAccessFilament(userId.Value, id))
             {
                 return Forbid();
             }
@@ -142,24 +142,31 @@ namespace PrintLogApi.Controllers
         }
 
         //// DELETE: api/Filaments/5
-        //[HttpDelete("{id}")]
-        //public async Task<IActionResult> DeleteFilament(Guid id)
-        //{
-        //    var filament = await _context.Filaments.FindAsync(id);
-        //    if (filament == null)
-        //    {
-        //        return NotFound();
-        //    }
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteFilament(Guid id)
+        {
+            var userId = User.GetUserId();
 
-        //    _context.Filaments.Remove(filament);
-        //    await _context.SaveChangesAsync();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
-        //    return NoContent();
-        //}
 
-        //private bool FilamentExists(Guid id)
-        //{
-        //    return _context.Filaments.Any(e => e.Id == id);
-        //}
+            if(!await _filamentService.CanUserAccessFilament(userId.Value, id))
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                await _filamentService.DeleteFilament(id);
+            } catch (FilamentIsInUseException)
+            {
+                return BadRequest("This Filament is used in a Print and cannot be delete. Try editing the Filament and marking it as Inactive instead.");
+            }
+
+            return NoContent();
+        }
     }
 }
