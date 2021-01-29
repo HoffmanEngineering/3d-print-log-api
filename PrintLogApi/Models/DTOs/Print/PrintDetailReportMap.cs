@@ -16,9 +16,9 @@ namespace PrintLogApi.Models.DTOs.Print
             Map(p => p.PrinterMake).Index(3).Name("Printer Make");
             Map(p => p.PrinterModel).Index(4).Name("Printer Model");
             Map(p => p.EstimatedPrintTimeInSeconds).Index(5).Name("Estimated Print Time (s)");
-            Map(p => p.EstimatedFilamentUsageMg).Index(6).Name("Estimated Filament Usage (mg)");
+            Map(p => p.EstimatedFilamentUsageG).Index(6).Name("Estimated Filament Usage (g)");
             Map(p => p.PrintTimeInSeconds).Index(7).Name("Print Time (s)");
-            Map(p => p.FilamentUsageMg).Index(8).Name("Printer MakeFilament Usage (mg)");
+            Map(p => p.FilamentUsageG).Index(8).Name("Filament Usage (g)");
             Map(p => p.FilamentType).Index(9).Name("Filament Type");
             Map(p => p.Notes).Index(10).Name("Notes");
             Map(p => p.Url).Index(11).Name("Url");

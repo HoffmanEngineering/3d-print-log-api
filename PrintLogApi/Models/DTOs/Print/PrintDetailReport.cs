@@ -19,12 +19,12 @@ namespace PrintLogApi.Models.DTOs.Print
         public string PrinterModel { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
-        public int? EstimatedFilamentUsageMg { get; set; }
+        public double? EstimatedFilamentUsageG { get; set; }
         public int? PrintTimeInSeconds { get; set; }
         /// <summary>
         /// Filament usage in milligrams 
         /// </summary>
-        public int? FilamentUsageMg { get; set; }
+        public double? FilamentUsageG { get; set; }
 
         public string FilamentType { get; set; }
 
