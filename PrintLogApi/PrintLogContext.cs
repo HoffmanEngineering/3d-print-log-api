@@ -37,6 +37,8 @@ namespace PrintLogApi
 
         public DbSet<Feedback> Feedback { get; set; }
 
+        public DbSet<UserApiKey> UserApiKeys { get; set; }
+
         public DbSet<UserSetting> UserSettings { get; set; }
 
         public DbSet<UserSettingType> UserSettingTypes { get; set; }

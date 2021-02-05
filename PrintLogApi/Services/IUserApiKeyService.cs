@@ -1,0 +1,13 @@
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.UserApiKeys;
+
+namespace PrintLogApi.Services
+{
+    public interface IUserApiKeyService
+    {
+        Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string description);
+        Task<List<UserApiKeyDto>> GetApiKeySummaryForUser(long userId);
+        Task<long> GetUserIdByApiKey(string publicKey);
+    }
+}
