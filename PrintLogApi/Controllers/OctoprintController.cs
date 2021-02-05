@@ -66,6 +66,10 @@ namespace PrintLogApi.Controllers
                 await HandlePrintStarted(data, testUserId);
             }
 
+            if (data.Topic == "Print Failed")
+            {
+                await HandlePrintFailed(data, testUserId);
+            }
 
             return Ok(data);
             
@@ -134,6 +138,9 @@ namespace PrintLogApi.Controllers
                 newPrint.ViewStatus = PrintViewStatus.Private;
             }
 
+            // Work with File Hash
+            newPrint.FileHash = StringToByteArray(data.Meta.Hash);
+
             newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data.CurrentTime);
 
 
@@ -141,6 +148,37 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
             
+        }
+
+        private async Task HandlePrintFailed(OctoprintWebhookDto data, int userId)
+        {
+            // Find a print thats Printing with that same hash.
+            var hash = StringToByteArray(data.Meta.Hash);
+
+            var print = await _context.Prints.Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash).FirstOrDefaultAsync();
+
+            if (print == null)
+            {
+                return;
+            }
+
+            print.Status = PrintStatus.Failed;
+
+            print.PrintTimeInSeconds = (int)Math.Round(data.Extra.Time ?? 0.0);
+            print.UpdatedById = userId;
+            _context.Entry(print).State = EntityState.Modified;
+
+
+            await _context.SaveChangesAsync();
+
+        }
+
+        public static byte[] StringToByteArray(string hex)
+        {
+            return Enumerable.Range(0, hex.Length)
+                             .Where(x => x % 2 == 0)
+                             .Select(x => Convert.ToByte(hex.Substring(x, 2), 16))
+                             .ToArray();
         }
     }
 }
