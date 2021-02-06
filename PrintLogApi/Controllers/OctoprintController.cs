@@ -10,8 +10,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Octoprint;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
@@ -24,13 +26,15 @@ namespace PrintLogApi.Controllers
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
         private readonly ILogger _logger;
+        private readonly IUserApiKeyService _userApiKeyService;
 
-        public OctoprintController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ILogger<OctoprintController> logger)
+        public OctoprintController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ILogger<OctoprintController> logger, IUserApiKeyService userApiKeyService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _logger = logger;
+            _userApiKeyService = userApiKeyService;
         }
 
         // POST: api/Prints
@@ -39,36 +43,35 @@ namespace PrintLogApi.Controllers
         {
             this._logger.LogInformation("Webhook Recieved:");
 
+            var apiKey = data.ApiSecret;
 
-            //HttpContext.Request.EnableBuffering();
-
-            //HttpContext.Request.Body.Seek(0, SeekOrigin.Begin);
-            //Request.Body.Position = 0;
-
-            //using (StreamReader stream = new StreamReader(HttpContext.Request.Body))
-            //{
-            //    string body = await stream.ReadToEndAsync();
-            //    // body = "param=somevalue&param2=someothervalue"
-            //    this._logger.LogInformation(body);
-            //}
-            //this._logger.LogInformation(Request.Content.ReadAsStringAsync());
-
-
-            //foreach (var key in data.Keys)
-            //{
-            //    this._logger.LogInformation(key.ToString() + ": " + data[key]);
-            //}
-
-            int testUserId = 1;
-
-            if (data.Topic == "Print Started")
+            if (apiKey is null)
             {
-                await HandlePrintStarted(data, testUserId);
+                return Unauthorized("No API Secret Sent");
             }
 
-            if (data.Topic == "Print Failed")
+            long userId;
+            try
             {
-                await HandlePrintFailed(data, testUserId);
+                userId = await _userApiKeyService.GetUserIdByApiKey(apiKey);
+            } catch (ApiKeyIsNotValidException)
+            {
+                return Unauthorized("Invalid API Key");
+            }
+
+
+            switch (data.Topic)
+            {
+                case "Print Started":
+                    await HandlePrintStarted(data, userId);
+                    break;
+                case "Print Failed":
+                case "Error":
+                    await HandlePrintFailed(data, userId);
+                    break;
+                case "Print Done":
+                    await HandlePrintCompleted(data, userId);
+                    break;
             }
 
             return Ok(data);
@@ -98,7 +101,7 @@ namespace PrintLogApi.Controllers
 
         }
 
-        private async Task HandlePrintStarted(OctoprintWebhookDto data, int userId)
+        private async Task HandlePrintStarted(OctoprintWebhookDto data, long userId)
         {
             var newPrint = new Print
             {
@@ -109,21 +112,39 @@ namespace PrintLogApi.Controllers
                 EstimatedPrintTimeInSeconds = (int)Math.Round(data.Job.AveragePrintTime ?? data.Job.EstimatedPrintTime ?? 0.0)
             };
 
-            // TODO: Figure out last printer. Eventually use DeviceIdentifier, but...
-            var lastSelectedPrinterUserSettingTypeId = 2;
-            var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedPrinterUserSettingTypeId).FirstOrDefaultAsync();
-            var lastPrinterIdValue = setting.Value;
-
-            if (int.TryParse(lastPrinterIdValue, out int printerId))
+            if (int.TryParse(data.DeviceIdentifier, out int printerId))
             {
-                newPrint.PrinterId = printerId;
+                // Check the Printer to make sure the user has access to it.
+                var printer = await _context.Printers.FindAsync(data.DeviceIdentifier);
+                newPrint.Printer = printer;
+
+                // Check if the user had access to that printer!
+                if (userId != printer.UserId)
+                {
+                    throw new UserCannotAccessPrinterException();
+                }
             } else
             {
-                // Printer isn't found, so... shrug
                 throw new Exception();
             }
 
-            // TODO: Figure out last printer. Eventually use DeviceIdentifier, but...
+            
+
+            // Determine the Allow Comments settings
+            var lastSelectedAllowCommentsUserSettingTypeId = 3;
+            var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
+            var lastSelectedAllowCommentsValue = setting.Value;
+
+            if (bool.TryParse(lastSelectedAllowCommentsValue, out bool allowComments))
+            {
+                newPrint.AllowComments = allowComments;
+            } else
+            {
+                // Printer isn't found, so... shrug
+                newPrint.AllowComments = false;
+            }
+
+            // Determine the last view status
             var defaultViewStatus = 1;
             var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
             var viewStatusValue = defaultPrintViewStatusSetting.Value;
@@ -150,7 +171,7 @@ namespace PrintLogApi.Controllers
             
         }
 
-        private async Task HandlePrintFailed(OctoprintWebhookDto data, int userId)
+        private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
         {
             // Find a print thats Printing with that same hash.
             var hash = StringToByteArray(data.Meta.Hash);
@@ -163,6 +184,29 @@ namespace PrintLogApi.Controllers
             }
 
             print.Status = PrintStatus.Failed;
+
+            print.PrintTimeInSeconds = (int)Math.Round(data.Extra.Time ?? 0.0);
+            print.UpdatedById = userId;
+            _context.Entry(print).State = EntityState.Modified;
+
+
+            await _context.SaveChangesAsync();
+
+        }
+
+        private async Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
+        {
+            // Find a print thats Printing with that same hash.
+            var hash = StringToByteArray(data.Meta.Hash);
+
+            var print = await _context.Prints.Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash).FirstOrDefaultAsync();
+
+            if (print == null)
+            {
+                return;
+            }
+
+            print.Status = PrintStatus.Success;
 
             print.PrintTimeInSeconds = (int)Math.Round(data.Extra.Time ?? 0.0);
             print.UpdatedById = userId;
