@@ -220,6 +220,8 @@ namespace PrintLogApi.Services
                 }
             }
 
+            await UpdateFilamentUsageWeights(newPrint);
+
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
 
@@ -259,6 +261,8 @@ namespace PrintLogApi.Services
                 }
             }
 
+            await UpdateFilamentUsageWeights(updatedPrint);
+
             updatedPrint.UpdatedById = userId;
 
 
@@ -283,6 +287,65 @@ namespace PrintLogApi.Services
             _telemetry.TrackEvent("PrintEdit");
 
             return await GetPrintById(updatedPrint.Id);
+        }
+
+        /// <summary>
+        /// When we save the filament usage, we need to ensure that the filament weights and lengths are correctly filled out.
+        /// </summary>
+
+
+        private async Task UpdateFilamentUsageWeights(Print print)
+        {
+            foreach(var pf in print.FilamentUsage)
+            {
+                var filament = await _filamentService.GetFilamentById(pf.FilamentId);
+
+                if (filament is null || !filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0) || !(filament.MaterialDensityGramPerCubicCm >= 0) )
+                {
+                    // Skip any filament that doesn't have the required properties to compute.
+                    continue;
+                }
+
+                if (pf.LengthIsSource)
+                {
+                    // Update the weight
+                    if (pf.EstimatedLengthInM.HasValue)
+                    {
+                        pf.EstimatedAmountMg = GetAmountMg(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+
+                    if (pf.LengthInM.HasValue)
+                    {
+                        pf.AmountMg = GetAmountMg(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                } else
+                {
+                    // Update the length
+                    if (pf.EstimatedAmountMg.HasValue)
+                    {
+                        pf.EstimatedLengthInM = GetLengthInMeters(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+
+                    if (pf.AmountMg.HasValue)
+                    {
+                        pf.LengthInM = GetLengthInMeters(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+            }
+        }
+
+        private static int GetAmountMg(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
+        {
+            return (int)Math.Round(250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters);
+        }
+
+        /// <summary>
+        /// Converts between an amount in milligrams to the expected length of that filament in meters.
+        /// </summary>
+        /// <returns></returns>
+        private static double GetLengthInMeters(int AmountMg, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
+        {
+            return ((double)AmountMg) / ((250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM));
         }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)
