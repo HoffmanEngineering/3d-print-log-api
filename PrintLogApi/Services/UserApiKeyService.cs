@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +9,7 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 
@@ -31,14 +33,36 @@ namespace PrintLogApi.Services
         {
             return await _context.UserApiKeys
                 .Where(u => u.UserId == userId && u.IsDeleted == false)
+                .OrderByDescending(u => u.CreatedDate)
                 .ProjectTo<UserApiKeyDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking()
                 .ToListAsync();
         }
 
+        public async Task DeactivateApiKey(Guid keyId, long userId)
+        {
+            var existingKey = await _context.UserApiKeys.FindAsync(keyId);
+
+            if (existingKey == null || existingKey.IsDeleted)
+            {
+                throw new DoesNotExistException();
+            }
+
+            // Cannot delete a key that isn't for your user.
+            if (existingKey.UserId != userId)
+            {
+                throw new UserCannotAccessApiKeyException();
+            }
+
+            existingKey.IsDeleted = true;
+
+            await _context.SaveChangesAsync();
+            
+        }
+
         public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string description)
         {
-            var publicKey = CreateCryptographicallySecureGuid().ToString().ToUpper().Replace("-", "");
+            var publicKey = CreateCryptographicallySecureGuid().ToString().ToUpper(CultureInfo.InvariantCulture).Replace("-", "");
 
             var hashedKey = GetSHA256Hash(publicKey);
 

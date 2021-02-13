@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.Common;
 
 namespace PrintLogApi.Models.DTOs.UserApiKeys
 {
-    public class NewUserApiKeyDto
+    public class NewUserApiKeyDto : TimestampDto
     {
         /// <summary>
         /// Not the API Key, just the primary key
@@ -21,6 +22,5 @@ namespace PrintLogApi.Models.DTOs.UserApiKeys
         /// </summary>
         public string PublicKey { get; set; }
 
-        public DateTime CreatedDate { get; set; }
     }
 }

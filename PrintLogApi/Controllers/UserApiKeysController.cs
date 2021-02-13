@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using PrintLogApi.Services;
 using PrintLogApi.Extensions;
+using PrintLogApi.Exceptions;
 
 namespace PrintLogApi.Controllers
 {
@@ -58,6 +59,30 @@ namespace PrintLogApi.Controllers
     
 
             return newKey;
+        }
+
+        [HttpDelete("{apiKey}")]
+        public async Task<ActionResult<NewUserApiKeyDto>> GenerateNewApiKey([FromRoute] Guid apiKey)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            try
+            {
+                await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
+                return NoContent();
+            } catch (DoesNotExistException)
+            {
+                return NotFound("Active API Key Not Found");
+            } catch (UserCannotAccessApiKeyException)
+            {
+                return Forbid("User does not have access to specified API Key");
+            }
+            
+            
         }
     }
 }
