@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using BrunoZell.ModelBinding;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace PrintLogApi.Models.DTOs.Octoprint
@@ -24,6 +25,8 @@ namespace PrintLogApi.Models.DTOs.Octoprint
 
         [ModelBinder(BinderType = typeof(JsonModelBinder))]
         public OctoprintWebhookMetaDto Meta { get; set; }
+
+        public IFormFile snapshot { get; set; }
 
         /// <summary>
         /// The Unix Epoch timestamp that it started.
