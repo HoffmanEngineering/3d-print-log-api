@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20210206221632_MakeFilamentOptionalForPrintFilament")]
+    partial class MakeFilamentOptionalForPrintFilament
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -480,14 +482,11 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid?>("FilamentId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("IsActualLengthSource")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsEstimatedLengthSource")
-                        .HasColumnType("bit");
-
                     b.Property<double?>("LengthInM")
                         .HasColumnType("float");
+
+                    b.Property<bool>("LengthIsSource")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)

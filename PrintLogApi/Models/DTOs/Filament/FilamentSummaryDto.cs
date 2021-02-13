@@ -8,8 +8,7 @@ namespace PrintLogApi.Models.DTOs.Filament
 {
     public class FilamentSummaryDto
     {
-        [Required]
-        public Guid Id { get; set; }
+        public Guid? Id { get; set; }
 
         /// <summary>
         /// Common name for the roll of filament.

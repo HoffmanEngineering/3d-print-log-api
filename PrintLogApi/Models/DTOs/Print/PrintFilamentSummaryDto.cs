@@ -29,7 +29,13 @@ namespace PrintLogApi.Models.DTOs.Print
         /// Determines if the user entered the length as the "source of truth", or weight. 
         /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
         /// </summary>
-        public bool LengthIsSource { get; set; }
+        public bool IsEstimatedLengthSource { get; set; }
+
+        /// <summary>
+        /// Determines if the user entered the length as the "source of truth", or weight. 
+        /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
+        /// </summary>
+        public bool IsActualLengthSource { get; set; }
 
         public string Notes { get; set; }
     }

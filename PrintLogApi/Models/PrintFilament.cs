@@ -17,7 +17,9 @@ namespace PrintLogApi.Models
 
         public Print Print { get; set; }
 
-        public Guid FilamentId { get; set; }
+        public Guid? FilamentId { get; set; }
+
+        // Can be null
         public Filament Filament { get; set; }
 
         public int? EstimatedAmountMg { get; set; }
@@ -37,7 +39,13 @@ namespace PrintLogApi.Models
         /// Determines if the user entered the length as the "source of truth", or weight. 
         /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
         /// </summary>
-        public bool LengthIsSource { get; set; }
+        public bool IsEstimatedLengthSource { get; set; }
+
+        /// <summary>
+        /// Determines if the user entered the length as the "source of truth", or weight. 
+        /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
+        /// </summary>
+        public bool IsActualLengthSource { get; set; }
 
         [StringLength(1000)]
         public string Notes { get; set; }

@@ -179,7 +179,7 @@ namespace PrintLogApi.Services
 
         public async Task<Print> GetPrintById(long id)
         {
-            return await this._context.Prints
+            var print = await this._context.Prints
                 .Include(p => p.Printer)
                 .Include(p => p.Images)
                     .ThenInclude(p => p.File)
@@ -189,6 +189,10 @@ namespace PrintLogApi.Services
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .FirstOrDefaultAsync();
+
+            print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ToList();
+
+            return print;
         }
 
         /// <summary>
@@ -213,11 +217,21 @@ namespace PrintLogApi.Services
 
             foreach (var filament in newPrint.FilamentUsage)
             {
-                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
-                if (!canAccessFilament)
+                // Set the empty guid to null
+                if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                 {
-                    throw new UserCannotAccessFilamentException();
+                    filament.FilamentId = null;
                 }
+
+                if (filament.FilamentId.HasValue)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
+                    if (!canAccessFilament)
+                    {
+                        throw new UserCannotAccessFilamentException();
+                    }
+                }
+                
             }
 
             await UpdateFilamentUsageWeights(newPrint);
@@ -254,10 +268,19 @@ namespace PrintLogApi.Services
 
             foreach (var filament in updatedPrint.FilamentUsage)
             {
-                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
-                if (!canAccessFilament)
+                // Set the empty guid to null
+                if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                 {
-                    throw new UserCannotAccessFilamentException();
+                    filament.FilamentId = null;
+                }
+
+                if (filament.FilamentId.HasValue)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
+                    if (!canAccessFilament)
+                    {
+                        throw new UserCannotAccessFilamentException();
+                    }
                 }
             }
 
@@ -298,7 +321,13 @@ namespace PrintLogApi.Services
         {
             foreach(var pf in print.FilamentUsage)
             {
-                var filament = await _filamentService.GetFilamentById(pf.FilamentId);
+                if (!pf.FilamentId.HasValue || pf.FilamentId == default(Guid))
+                {
+                    // We can't do anything for filament lengths not tied to a filament
+                    continue;
+                }
+
+                var filament = await _filamentService.GetFilamentById(pf.FilamentId.Value);
 
                 if (filament is null || !filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0) || !(filament.MaterialDensityGramPerCubicCm >= 0) )
                 {
@@ -306,13 +335,8 @@ namespace PrintLogApi.Services
                     continue;
                 }
 
-                if (pf.LengthIsSource)
+                if (pf.IsActualLengthSource)
                 {
-                    // Update the weight
-                    if (pf.EstimatedLengthInM.HasValue)
-                    {
-                        pf.EstimatedAmountMg = GetAmountMg(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                    }
 
                     if (pf.LengthInM.HasValue)
                     {
@@ -320,15 +344,28 @@ namespace PrintLogApi.Services
                     }
                 } else
                 {
-                    // Update the length
-                    if (pf.EstimatedAmountMg.HasValue)
-                    {
-                        pf.EstimatedLengthInM = GetLengthInMeters(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                    }
 
                     if (pf.AmountMg.HasValue)
                     {
                         pf.LengthInM = GetLengthInMeters(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+
+                if (pf.IsEstimatedLengthSource)
+                {
+                    // Update the weight
+                    if (pf.EstimatedLengthInM.HasValue)
+                    {
+                        pf.EstimatedAmountMg = GetAmountMg(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+
+                }
+                else
+                {
+                    // Update the length
+                    if (pf.EstimatedAmountMg.HasValue)
+                    {
+                        pf.EstimatedLengthInM = GetLengthInMeters(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                     }
                 }
             }

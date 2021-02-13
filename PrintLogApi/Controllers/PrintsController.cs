@@ -133,13 +133,7 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var printDetailDto = _context.Prints
-                .Where(p => p.Id == id)
-                .ProjectTo<PrintDetailDTO>(_mapper.ConfigurationProvider)
-                .AsNoTracking()
-                .First();
-
-            printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
+            var printDetailDto = _mapper.Map<PrintDetailDTO>(print);
 
             return printDetailDto;
         }
