@@ -31,6 +31,8 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.Images, opt => opt.Ignore())
                 .ForMember(dest => dest.Comments, opt => opt.Ignore());
 
+            CreateMap<PutPrintDetailDto, Print>();
+
             CreateMap<Print, PrintStatistic>()
                 .ForMember(dest => dest.EstimatedFilamentUsageMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.EstimatedAmountMg.HasValue &&
                                                                                                                     p.EstimatedAmountMg > 0 ?
@@ -61,6 +63,8 @@ namespace PrintLogApi.Profiles
 
             CreateMap<PrintFilamentSummaryDto, PrintFilament>()
                 .ForMember(dest => dest.Filament, opt => opt.Ignore());
+
+            CreateMap<PutPrintFilamentSummaryDto, PrintFilament>();
 
         }
     }

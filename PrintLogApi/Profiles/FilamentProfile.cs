@@ -14,11 +14,17 @@ namespace PrintLogApi.Profiles
         {
             CreateMap<Filament, FilamentSummaryDto>()
                 .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => (src.InitialNominalWeightMg ?? 0)
-                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? 
-                                                                                                                    p.AmountMg : 
-                                                                                                                    p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? 
-                                                                                                                    p.EstimatedAmountMg : 0) 
-                                                                                    + src.FilamentAdjustments.Sum(adj => adj.AmountMg)));
+                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg :
+                                                                                                                    p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)
+                                                                                    + src.FilamentAdjustments.Sum(adj => adj.AmountMg)))
+                .ForMember(dest => dest.FilamentLengthRemainingInM, src => src.MapFrom(src => src.DiameterMm > 0 ? (((src.InitialNominalWeightMg ?? 0)
+                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg :
+                                                                                                                    p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)
+                                                                                    + src.FilamentAdjustments.Sum(adj => adj.AmountMg)) ?? 0) / (250 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm * src.DiameterMm) : 0));
 
             CreateMap<FilamentSummaryDto, Filament>();
 

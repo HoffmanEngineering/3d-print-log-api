@@ -19,7 +19,7 @@ namespace PrintLogApi.Services
         Task<List<long>> GetPublicPrintIds();
         Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);
         Task SetDefaultImage(long printId, long newDefaultImageId);
-        Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId);
+        Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
         Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     }
 }

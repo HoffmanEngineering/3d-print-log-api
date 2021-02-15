@@ -133,8 +133,21 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var printDetailDto = _mapper.Map<PrintDetailDTO>(print);
+            var printDetailDto = await this._context.Prints
+                .Include(p => p.Printer)
+                .Include(p => p.Images)
+                    .ThenInclude(p => p.File)
+                .Include(p => p.Comments)
+                    .ThenInclude(p => p.Comment)
+                .Include(p => p.FilamentUsage)
+                    .ThenInclude(pf => pf.Filament)
+                .Where(p => p.Id == id)
+                .AsNoTracking()
+                .ProjectTo< PrintDetailDTO>(_mapper.ConfigurationProvider)
+                .FirstOrDefaultAsync();
 
+            printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
+            
             return printDetailDto;
         }
 
@@ -156,7 +169,7 @@ namespace PrintLogApi.Controllers
 
         // PUT: api/Prints/5
         [HttpPut("{id}")]
-        public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PrintDetailDTO printDTO)
+        public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PutPrintDetailDto printDTO)
         {
             if (id != printDTO.Id)
             {

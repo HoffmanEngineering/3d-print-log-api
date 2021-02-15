@@ -245,7 +245,7 @@ namespace PrintLogApi.Services
             return await GetPrintById(newPrint.Id); ;
         }
 
-        public async Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId)
+        public async Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId)
         {
             var existingPrint = await GetPrintById(id);
             
@@ -254,7 +254,7 @@ namespace PrintLogApi.Services
                 throw new ArgumentNullException(nameof(id));
             }
 
-            var updatedPrint = _mapper.Map<PrintDetailDTO, Print>(dto, existingPrint);
+            var updatedPrint = _mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
             var printer = await _context.Printers.FindAsync(dto.PrinterId);
             updatedPrint.Printer = printer;
