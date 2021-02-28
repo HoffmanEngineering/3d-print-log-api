@@ -32,6 +32,9 @@ namespace PrintLogApi.Models.DTOs.Print
         [StringLength(100)]
         public string Title { get; set; }
 
+        [MaxLength(1000)]
+        public string FileName { get; set; }
+
         public DateTimeOffset? StartDate { get; set; }
 
         public PrintStatus Status { get; set; }

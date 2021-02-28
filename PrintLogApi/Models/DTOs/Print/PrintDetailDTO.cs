@@ -2,6 +2,7 @@
 using PrintLogApi.Models.DTOs.Printer;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print
@@ -33,6 +34,9 @@ namespace PrintLogApi.Models.DTOs.Print
         public string Notes { get; set; }
 
         public string Url { get; set; }
+
+        [MaxLength(1000)]
+        public string FileName { get; set; }
 
         public long CreatedByUserId { get; set; }
 

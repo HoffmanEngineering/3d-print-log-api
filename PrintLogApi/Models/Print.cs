@@ -65,6 +65,9 @@ namespace PrintLogApi.Models
         [MinLength(20)]
         public byte[] FileHash { get; set; }
 
+        [MaxLength(1000)]
+        public string FileName { get; set; }
+
         public ICollection<PrintImage> Images { get; set; }
 
         public ICollection<PrintComment> Comments { get; set; }

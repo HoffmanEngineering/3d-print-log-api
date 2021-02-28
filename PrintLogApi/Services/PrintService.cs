@@ -164,7 +164,7 @@ namespace PrintLogApi.Services
             using (var writeFile = new StreamWriter(stream, leaveOpen: true))
             using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
             {
-                csv.Configuration.RegisterClassMap<PrintDetailReportMap>();
+                csv.Context.RegisterClassMap<PrintDetailReportMap>();
                 csv.WriteRecords(reportCSVModels);
 
             }

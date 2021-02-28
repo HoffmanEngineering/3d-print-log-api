@@ -7,12 +7,14 @@ using AutoMapper;
 using Azure.Storage.Blobs;
 using BrunoZell.ModelBinding;
 using Microsoft.ApplicationInsights;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Octoprint;
 using PrintLogApi.Services;
@@ -22,6 +24,7 @@ namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class OctoprintController : ControllerBase
     {
         private readonly PrintLogContext _context;
@@ -51,68 +54,70 @@ namespace PrintLogApi.Controllers
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
         }
 
-        // POST: api/Prints
+        
         [HttpPost]
         public async Task<ActionResult> Webhook([FromForm] OctoprintWebhookDto data)
         {
             this._logger.LogInformation("Webhook Recieved:");
 
-            var apiKey = data.ApiSecret;
+            var userId = User.GetUserId();
 
-            if (apiKey is null)
+            if (!userId.HasValue)
             {
-                return Unauthorized("No API Secret Sent");
+                return Unauthorized();
             }
 
-            long userId;
-            try
+            if (isTestWebhook(data))
             {
-                userId = await _userApiKeyService.GetUserIdByApiKey(apiKey);
-            } catch (ApiKeyIsNotValidException)
-            {
-                return Unauthorized("Invalid API Key");
+                string printerName;
+                if (long.TryParse(data.DeviceIdentifier, out long printerId))
+                {
+                    // Check the Printer to make sure the user has access to it.
+                    var printer = await _context.Printers.FindAsync(printerId);
+                    
+                    // Check if the user had access to that printer!
+                    if (userId != printer.UserId)
+                    {
+                        return BadRequest("Printer does not belong to current user. Please check DeviceIdentifier.");
+                    }
+
+                    printerName = printer.Name;
+                }
+                else
+                {
+                    return BadRequest("No Printer Id found in webhook's DeviceIdentifier.");
+                }
+
+                return Ok($"Webhook Connection to 3D Print Log is Good!\nPrinter is {printerName}.\nReady to start logging prints.");
             }
 
 
             switch (data.Topic)
             {
                 case "Print Started":
-                    await HandlePrintStarted(data, userId);
+                    await HandlePrintStarted(data, userId.Value);
                     break;
                 case "Print Failed":
                 case "Error":
-                    await HandlePrintFailed(data, userId);
+                    await HandlePrintFailed(data, userId.Value);
                     break;
                 case "Print Done":
-                    await HandlePrintCompleted(data, userId);
+                    await HandlePrintCompleted(data, userId.Value);
                     break;
             }
 
             return Ok(data);
-            
-            //var userId = User.GetUserId();
+           
+        }
 
-            //if (!userId.HasValue)
-            //{
-            //    return Unauthorized();
-            //}
+        private bool isTestWebhook(OctoprintWebhookDto data)
+        {
+            if (data?.Extra?.Name == "example.gcode")
+            {
+                return true;
+            }
 
-            //try
-            //{
-            //    var newPrint = await _printService.AddPrint(print, userId.Value);
-            //    _telemetry.TrackEvent("PrintAdded");
-
-            //    return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
-            //}
-            //catch (UserCannotAccessPrinterException)
-            //{
-            //    return BadRequest("Selected printer does not belong to currently logged in user.");
-            //}
-            //catch (UserCannotAccessFilamentException)
-            //{
-            //    return BadRequest("Selected filament does not belong to currently logged in user.");
-            //}
-
+            return false;
         }
 
         private async Task HandlePrintStarted(OctoprintWebhookDto data, long userId)
@@ -139,7 +144,7 @@ namespace PrintLogApi.Controllers
                 }
             } else
             {
-                throw new Exception();
+                throw new Exception("Invalid Device Identifier");
             }
 
             
@@ -226,7 +231,14 @@ namespace PrintLogApi.Controllers
             // Find a print thats Printing with that same hash.
             var hash = StringToByteArray(data.Meta.Hash);
 
-            var print = await _context.Prints.Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash).FirstOrDefaultAsync();
+            var print = await _context.Prints
+                .Where(p => p.CreatedById == userId 
+                                && p.Status == PrintStatus.Printing 
+        
+                                && p.FileHash == hash 
+                                )
+                .OrderByDescending(p => p.CreatedDate)
+                .FirstOrDefaultAsync();
 
             if (print == null)
             {
