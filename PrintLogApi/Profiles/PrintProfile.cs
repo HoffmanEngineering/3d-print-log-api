@@ -31,6 +31,8 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.Images, opt => opt.Ignore())
                 .ForMember(dest => dest.Comments, opt => opt.Ignore());
 
+            CreateMap<PutPrintDetailDto, Print>();
+
             CreateMap<Print, PrintStatistic>()
                 .ForMember(dest => dest.EstimatedFilamentUsageMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.EstimatedAmountMg.HasValue &&
                                                                                                                     p.EstimatedAmountMg > 0 ?
@@ -56,11 +58,13 @@ namespace PrintLogApi.Profiles
                 // Combine the FilamentTypes with the display names of the filaments, deliminated by ;.
                 .ForMember(dest => dest.FilamentType, opt => opt.MapFrom(src => (src.FilamentType + "; " + string.Join("; ", src.FilamentUsage.Select(f => f.Filament.DisplayName).ToList())).Trim().Trim(';').Trim()));
 
-            CreateMap<PrintFilament, PrintFilamenSummaryDto>()
+            CreateMap<PrintFilament, PrintFilamentSummaryDto>()
                 .ForMember(dest => dest.Filament, opt => opt.MapFrom(src => src.Filament));
 
-            CreateMap<PrintFilamenSummaryDto, PrintFilament>()
+            CreateMap<PrintFilamentSummaryDto, PrintFilament>()
                 .ForMember(dest => dest.Filament, opt => opt.Ignore());
+
+            CreateMap<PutPrintFilamentSummaryDto, PrintFilament>();
 
         }
     }

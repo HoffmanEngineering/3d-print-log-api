@@ -1,26 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.Filament;
 
-namespace PrintLogApi.Models
+namespace PrintLogApi.Models.DTOs.Print
 {
-    public class PrintFilament
+    public class PrintFilamentSummaryDto
     {
-        [Key]
-        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public Guid Id { get; set; }
 
-        public long PrintId { get; set; }
-
-        public Print Print { get; set; }
-
-        public Guid? FilamentId { get; set; }
-
-        // Can be null
-        public Filament Filament { get; set; }
+        public FilamentSummaryDto Filament { get; set; }
 
         public int? EstimatedAmountMg { get; set; }
         public int? AmountMg { get; set; }
@@ -47,7 +37,6 @@ namespace PrintLogApi.Models
         /// </summary>
         public bool IsActualLengthSource { get; set; }
 
-        [StringLength(1000)]
         public string Notes { get; set; }
     }
 }

@@ -37,6 +37,8 @@ namespace PrintLogApi
 
         public DbSet<Feedback> Feedback { get; set; }
 
+        public DbSet<UserApiKey> UserApiKeys { get; set; }
+
         public DbSet<UserSetting> UserSettings { get; set; }
 
         public DbSet<UserSettingType> UserSettingTypes { get; set; }
@@ -46,7 +48,8 @@ namespace PrintLogApi
             modelBuilder.Entity<UserSettingType>().HasData(
                 new UserSettingType() { Id = 1, Name = "Prints_DefaultPrintViewStatus", Description = "The Default View Status for a print." },
                 new UserSettingType() { Id = 2, Name = "Prints_LastSelectedPrinterId", Description = "The Id of the printer that was last selected." },
-                new UserSettingType() { Id = 3, Name = "Prints_LastSelectedAllowComments", Description = "The value of the last changed Allow Comments on prints." }
+                new UserSettingType() { Id = 3, Name = "Prints_LastSelectedAllowComments", Description = "The value of the last changed Allow Comments on prints." },
+                new UserSettingType() { Id = 4, Name = "Prints_LastSelectedFilamentMeasureType", Description = "The last selected filament measure type on the print." }
                 );
 
             // Pulled from Cura

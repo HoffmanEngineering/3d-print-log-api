@@ -3,15 +3,17 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20210222003550_AddPrintFileNameToPrintEntity")]
+    partial class AddPrintFileNameToPrintEntity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -756,12 +758,6 @@ namespace PrintLogApi.Migrations
                             Id = 3,
                             Description = "The value of the last changed Allow Comments on prints.",
                             Name = "Prints_LastSelectedAllowComments"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            Description = "The last selected filament measure type on the print.",
-                            Name = "Prints_LastSelectedFilamentMeasureType"
                         });
                 });
 

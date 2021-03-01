@@ -8,7 +8,6 @@ namespace PrintLogApi.Models.DTOs.Filament
 {
     public class FilamentSummaryDto
     {
-        [Required]
         public Guid Id { get; set; }
 
         /// <summary>
@@ -49,5 +48,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public DateTime CreatedDate { get; set; }
 
         public long? FilamentRemaining { get; set; }
+
+        public double? FilamentLengthRemainingInM { get; set; }
     }
 }

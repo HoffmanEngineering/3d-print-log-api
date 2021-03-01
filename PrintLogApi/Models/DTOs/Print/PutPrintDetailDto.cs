@@ -1,14 +1,14 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print
 {
-    public class PutPrintDetail
+    public class PutPrintDetailDto
     {
         public long Id { get; set; }
 
-        [StringLength(100)]
         public string Title { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
@@ -23,14 +23,16 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public int? FilamentUsageMg { get; set; }
 
-        [StringLength(100)]
         public string FilamentType { get; set; }
 
-        [StringLength(1000)]
+        public ICollection<PutPrintFilamentSummaryDto> FilamentUsage { get; set; }
+
         public string Notes { get; set; }
 
-        [StringLength(1000)]
         public string Url { get; set; }
+
+        [MaxLength(1000)]
+        public string FileName { get; set; }
 
         public bool AllowComments { get; set; }
 

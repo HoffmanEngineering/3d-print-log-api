@@ -164,7 +164,7 @@ namespace PrintLogApi.Services
             using (var writeFile = new StreamWriter(stream, leaveOpen: true))
             using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
             {
-                csv.Configuration.RegisterClassMap<PrintDetailReportMap>();
+                csv.Context.RegisterClassMap<PrintDetailReportMap>();
                 csv.WriteRecords(reportCSVModels);
 
             }
@@ -179,7 +179,7 @@ namespace PrintLogApi.Services
 
         public async Task<Print> GetPrintById(long id)
         {
-            return await this._context.Prints
+            var print = await this._context.Prints
                 .Include(p => p.Printer)
                 .Include(p => p.Images)
                     .ThenInclude(p => p.File)
@@ -189,6 +189,10 @@ namespace PrintLogApi.Services
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .FirstOrDefaultAsync();
+
+            print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ToList();
+
+            return print;
         }
 
         /// <summary>
@@ -213,12 +217,24 @@ namespace PrintLogApi.Services
 
             foreach (var filament in newPrint.FilamentUsage)
             {
-                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
-                if (!canAccessFilament)
+                // Set the empty guid to null
+                if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                 {
-                    throw new UserCannotAccessFilamentException();
+                    filament.FilamentId = null;
                 }
+
+                if (filament.FilamentId.HasValue)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
+                    if (!canAccessFilament)
+                    {
+                        throw new UserCannotAccessFilamentException();
+                    }
+                }
+                
             }
+
+            await UpdateFilamentUsageWeights(newPrint);
 
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
@@ -229,7 +245,7 @@ namespace PrintLogApi.Services
             return await GetPrintById(newPrint.Id); ;
         }
 
-        public async Task<Print> UpdatePrint(long id, PrintDetailDTO dto, long userId)
+        public async Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId)
         {
             var existingPrint = await GetPrintById(id);
             
@@ -238,7 +254,7 @@ namespace PrintLogApi.Services
                 throw new ArgumentNullException(nameof(id));
             }
 
-            var updatedPrint = _mapper.Map<PrintDetailDTO, Print>(dto, existingPrint);
+            var updatedPrint = _mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
             var printer = await _context.Printers.FindAsync(dto.PrinterId);
             updatedPrint.Printer = printer;
@@ -252,12 +268,23 @@ namespace PrintLogApi.Services
 
             foreach (var filament in updatedPrint.FilamentUsage)
             {
-                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId);
-                if (!canAccessFilament)
+                // Set the empty guid to null
+                if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                 {
-                    throw new UserCannotAccessFilamentException();
+                    filament.FilamentId = null;
+                }
+
+                if (filament.FilamentId.HasValue)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
+                    if (!canAccessFilament)
+                    {
+                        throw new UserCannotAccessFilamentException();
+                    }
                 }
             }
+
+            await UpdateFilamentUsageWeights(updatedPrint);
 
             updatedPrint.UpdatedById = userId;
 
@@ -283,6 +310,79 @@ namespace PrintLogApi.Services
             _telemetry.TrackEvent("PrintEdit");
 
             return await GetPrintById(updatedPrint.Id);
+        }
+
+        /// <summary>
+        /// When we save the filament usage, we need to ensure that the filament weights and lengths are correctly filled out.
+        /// </summary>
+
+
+        private async Task UpdateFilamentUsageWeights(Print print)
+        {
+            foreach(var pf in print.FilamentUsage)
+            {
+                if (!pf.FilamentId.HasValue || pf.FilamentId == default(Guid))
+                {
+                    // We can't do anything for filament lengths not tied to a filament
+                    continue;
+                }
+
+                var filament = await _filamentService.GetFilamentById(pf.FilamentId.Value);
+
+                if (filament is null || !filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0) || !(filament.MaterialDensityGramPerCubicCm >= 0) )
+                {
+                    // Skip any filament that doesn't have the required properties to compute.
+                    continue;
+                }
+
+                if (pf.IsActualLengthSource)
+                {
+
+                    if (pf.LengthInM.HasValue)
+                    {
+                        pf.AmountMg = GetAmountMg(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                } else
+                {
+
+                    if (pf.AmountMg.HasValue)
+                    {
+                        pf.LengthInM = GetLengthInMeters(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+
+                if (pf.IsEstimatedLengthSource)
+                {
+                    // Update the weight
+                    if (pf.EstimatedLengthInM.HasValue)
+                    {
+                        pf.EstimatedAmountMg = GetAmountMg(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+
+                }
+                else
+                {
+                    // Update the length
+                    if (pf.EstimatedAmountMg.HasValue)
+                    {
+                        pf.EstimatedLengthInM = GetLengthInMeters(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+            }
+        }
+
+        private static int GetAmountMg(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
+        {
+            return (int)Math.Round(250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters);
+        }
+
+        /// <summary>
+        /// Converts between an amount in milligrams to the expected length of that filament in meters.
+        /// </summary>
+        /// <returns></returns>
+        private static double GetLengthInMeters(int AmountMg, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
+        {
+            return ((double)AmountMg) / ((250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM));
         }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)

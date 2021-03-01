@@ -58,6 +58,16 @@ namespace PrintLogApi.Models
 
         public bool AllowComments { get; set; }
 
+        /// <summary>
+        /// The SHA1 file hash of the gcode file this print was created from.
+        /// </summary>
+        [MaxLength(20)]
+        [MinLength(20)]
+        public byte[] FileHash { get; set; }
+
+        [MaxLength(1000)]
+        public string FileName { get; set; }
+
         public ICollection<PrintImage> Images { get; set; }
 
         public ICollection<PrintComment> Comments { get; set; }

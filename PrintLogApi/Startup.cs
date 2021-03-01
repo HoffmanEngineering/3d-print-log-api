@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -73,6 +74,14 @@ namespace PrintLogApi
                     BearerFormat = "JWT"
                 });
 
+                c.AddSecurityDefinition("apikey", new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    
+                    In = ParameterLocation.Header,
+                    Name = "X-Api-Key"
+                });
+
                 c.OperationFilter<AuthorizeCheckOperationFilter>();
                 
             });
@@ -88,6 +97,7 @@ namespace PrintLogApi
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
             services.AddTransient<IFilamentService, FilamentService>();
+            services.AddTransient<IUserApiKeyService, UserApiKeyService>();
             services.AddApplicationInsightsTelemetry();
 
         }
@@ -165,6 +175,7 @@ namespace PrintLogApi
             {
                 // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
+                app.UseHttpsRedirection();
             }
 
             app.UseCors(builder =>
@@ -172,11 +183,12 @@ namespace PrintLogApi
                 builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
             });
 
-            app.UseHttpsRedirection();
+            
 
             app.UseRouting();
 
             app.UseAuthentication();
+            app.UseApiKeyAuthentication();
             app.UseAuthorization();
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
             JwtSecurityTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
@@ -226,6 +238,17 @@ namespace PrintLogApi
                         {
                             Type = ReferenceType.SecurityScheme,
                             Id = "oauth2"}
+                        }
+                    ] = new[] {"api1"}
+                },
+                new OpenApiSecurityRequirement
+                {
+                    [
+                        new OpenApiSecurityScheme {
+                            Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "apikey"}
                         }
                     ] = new[] {"api1"}
                 }
