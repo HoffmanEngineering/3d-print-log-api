@@ -7,6 +7,8 @@
         public double? AveragePrintTime { get; set; }
         public double? LastPrintTime { get; set; }
 
+        public OctoprintWebhookMetaAnalysisFilamentDto Filament { get; set; }
+
     }
 
     public class OctoprintWebhookJobFileDto

@@ -5,10 +5,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
 using Azure.Storage.Blobs;
-using BrunoZell.ModelBinding;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -76,7 +74,7 @@ namespace PrintLogApi.Controllers
                     var printer = await _context.Printers.FindAsync(printerId);
                     
                     // Check if the user had access to that printer!
-                    if (userId != printer.UserId)
+                    if (printer is null || userId != printer.UserId)
                     {
                         return BadRequest("Printer does not belong to current user. Please check DeviceIdentifier.");
                     }
@@ -128,7 +126,8 @@ namespace PrintLogApi.Controllers
                 CreatedById = userId,
                 UpdatedById = userId,
                 Title = data.Job.File.Name,
-                EstimatedPrintTimeInSeconds = (int)Math.Round(data.Job.AveragePrintTime ?? data.Job.EstimatedPrintTime ?? 0.0)
+                EstimatedPrintTimeInSeconds = (int)Math.Round(data.Job.AveragePrintTime ?? data.Job.EstimatedPrintTime ?? 0.0),
+                FilamentUsage = new List<PrintFilament>()
             };
 
             if (long.TryParse(data.DeviceIdentifier, out long printerId))
@@ -176,6 +175,71 @@ namespace PrintLogApi.Controllers
             {
                 // Printer isn't found, so... shrug
                 newPrint.ViewStatus = PrintViewStatus.Private;
+            }
+
+            // Handle Filament Usage
+
+            if (data?.Meta?.Analysis?.filament is not null)
+            {
+                if (data?.Meta?.Analysis?.filament?.tool0 is not null)
+                {
+                    newPrint.FilamentUsage.Add(new PrintFilament
+                    {
+                        IsEstimatedLengthSource = true,
+                        Id = Guid.Empty,
+                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool0?.length/1000 ?? 0.0,
+                        IsActualLengthSource = false,
+                        Notes= ""
+                    });
+                }
+
+                if (data?.Meta?.Analysis?.filament?.tool1 is not null)
+                {
+                    newPrint.FilamentUsage.Add(new PrintFilament
+                    {
+                        IsEstimatedLengthSource = true,
+                        Id = Guid.Empty,
+                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool1?.length / 1000 ?? 0.0,
+                        IsActualLengthSource = false,
+                        Notes = ""
+                    });
+                }
+
+                if (data?.Meta?.Analysis?.filament?.tool2 is not null)
+                {
+                    newPrint.FilamentUsage.Add(new PrintFilament
+                    {
+                        IsEstimatedLengthSource = true,
+                        Id = Guid.Empty,
+                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool2?.length / 1000 ?? 0.0,
+                        IsActualLengthSource = false,
+                        Notes = ""
+                    });
+                }
+
+                if (data?.Meta?.Analysis?.filament?.tool3 is not null)
+                {
+                    newPrint.FilamentUsage.Add(new PrintFilament
+                    {
+                        IsEstimatedLengthSource = true,
+                        Id = Guid.Empty,
+                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool3?.length / 1000 ?? 0.0,
+                        IsActualLengthSource = false,
+                        Notes = ""
+                    });
+                }
+
+                if (data?.Meta?.Analysis?.filament?.tool4 is not null)
+                {
+                    newPrint.FilamentUsage.Add(new PrintFilament
+                    {
+                        IsEstimatedLengthSource = true,
+                        Id = Guid.Empty,
+                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool4?.length / 1000 ?? 0.0,
+                        IsActualLengthSource = false,
+                        Notes = ""
+                    });
+                }
             }
 
             // Work with File Hash
@@ -238,6 +302,8 @@ namespace PrintLogApi.Controllers
                                 && p.FileHash == hash 
                                 )
                 .OrderByDescending(p => p.CreatedDate)
+                .Include(p => p.FilamentUsage)
+                .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
 
             if (print == null)
@@ -293,7 +359,6 @@ namespace PrintLogApi.Controllers
                 otherEntities.ForEach(p => p.IsDefault = false);
             }
 
-
             await _context.SaveChangesAsync();
 
         }
@@ -303,7 +368,11 @@ namespace PrintLogApi.Controllers
             // Find a print thats Printing with that same hash.
             var hash = StringToByteArray(data.Meta.Hash);
 
-            var print = await _context.Prints.Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash).FirstOrDefaultAsync();
+            var print = await _context.Prints
+                .Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash)
+                .Include(p => p.FilamentUsage)
+                .ThenInclude(pf => pf.Filament)
+                .FirstOrDefaultAsync();
 
             if (print == null)
             {
@@ -357,7 +426,6 @@ namespace PrintLogApi.Controllers
                 var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
                 otherEntities.ForEach(p => p.IsDefault = false);
             }
-
 
             await _context.SaveChangesAsync();
 
