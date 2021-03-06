@@ -6,11 +6,13 @@ using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Feedback;
 using PrintLogApi.Extensions;
+using Microsoft.AspNetCore.Authorization;
 
 namespace PrintLogApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class FeedbacksController : ControllerBase
     {
         private readonly PrintLogContext _context;
