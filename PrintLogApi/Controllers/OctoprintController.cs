@@ -67,6 +67,7 @@ namespace PrintLogApi.Controllers
 
             if (isTestWebhook(data))
             {
+                _telemetry.TrackEvent("OctoPrint_Webhook_Test");
                 string printerName;
                 if (long.TryParse(data.DeviceIdentifier, out long printerId))
                 {
@@ -93,14 +94,24 @@ namespace PrintLogApi.Controllers
             switch (data.Topic)
             {
                 case "Print Started":
+                    _telemetry.TrackEvent("OctoPrint_Webhook_Started");
                     await HandlePrintStarted(data, userId.Value);
                     break;
                 case "Print Failed":
+                    _telemetry.TrackEvent("OctoPrint_Webhook_Failed");
+                    await HandlePrintFailed(data, userId.Value);
+                    break;
                 case "Error":
+                    _telemetry.TrackEvent("OctoPrint_Webhook_Error");
                     await HandlePrintFailed(data, userId.Value);
                     break;
                 case "Print Done":
+                    _telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
                     await HandlePrintCompleted(data, userId.Value);
+                    break;
+                default:
+                    var properties = new Dictionary<string, string> { { "Topic", data.Topic } };
+                    _telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
                     break;
             }
 
