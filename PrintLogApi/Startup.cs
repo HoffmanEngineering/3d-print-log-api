@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
 using AutoMapper;
@@ -53,7 +55,17 @@ namespace PrintLogApi
 
             services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Print Log Api", Version = "v1" });
+                c.SwaggerDoc("v1", new OpenApiInfo { 
+                    Title = "3D Print Log Api", 
+                    Version = "v1",
+                    Description = "API powering https://3dprintlog.com, allowing users to manage their prints, printers, and filaments.",
+                    Contact = new OpenApiContact
+                    {
+                        Email = "hello@3dprintlog.com",
+                        Name = "Christopher Hoffman",
+                        Url = new Uri("https://www.hoffman.engineering")
+                    }
+                });
                 c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
                 {
                     Type = SecuritySchemeType.OAuth2,
@@ -83,7 +95,11 @@ namespace PrintLogApi
                 });
 
                 c.OperationFilter<AuthorizeCheckOperationFilter>();
-                
+
+                var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+                var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+                c.IncludeXmlComments(xmlPath);
+
             });
 
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();

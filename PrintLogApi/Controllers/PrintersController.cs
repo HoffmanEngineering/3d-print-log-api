@@ -147,7 +147,7 @@ namespace PrintLogApi.Controllers
 
         // POST: api/Printers
         [HttpPost]
-        public async Task<ActionResult<Printer>> PostPrinter(AddPrinterDTO printer)
+        public async Task<ActionResult<PrinterDetailDto>> PostPrinter(AddPrinterDTO printer)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)

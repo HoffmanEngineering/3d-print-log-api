@@ -6,5 +6,7 @@
         /// SHA1 Hash of the file.
         /// </summary>
         public string Hash { get; set; }
+
+        public OctoprintWebhookMetaAnalysisDto Analysis { get; set; }
     }
 }
