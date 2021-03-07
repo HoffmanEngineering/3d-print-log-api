@@ -138,7 +138,8 @@ namespace PrintLogApi.Controllers
                 UpdatedById = userId,
                 Title = data.Job.File.Name,
                 EstimatedPrintTimeInSeconds = (int)Math.Round(data.Job.AveragePrintTime ?? data.Job.EstimatedPrintTime ?? 0.0),
-                FilamentUsage = new List<PrintFilament>()
+                FilamentUsage = new List<PrintFilament>(),
+                FileName = data.Job.File.Name
             };
 
             if (long.TryParse(data.DeviceIdentifier, out long printerId))
@@ -211,7 +212,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool0?.length/1000 ?? 0.0,
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool0?.length/1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes= ""
                     });
@@ -223,7 +224,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool1?.length / 1000 ?? 0.0,
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool1?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
                     });
@@ -235,7 +236,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool2?.length / 1000 ?? 0.0,
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool2?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
                     });
@@ -247,7 +248,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool3?.length / 1000 ?? 0.0,
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool3?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
                     });
@@ -259,7 +260,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        EstimatedLengthInM = data?.Meta?.Analysis?.filament?.tool4?.length / 1000 ?? 0.0,
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool4?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
                     });
