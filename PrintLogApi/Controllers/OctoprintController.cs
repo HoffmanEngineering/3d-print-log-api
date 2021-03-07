@@ -157,34 +157,47 @@ namespace PrintLogApi.Controllers
                 throw new Exception("Invalid Device Identifier");
             }
 
-            
 
-            // Determine the Allow Comments settings
-            var lastSelectedAllowCommentsUserSettingTypeId = 3;
-            var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
-            var lastSelectedAllowCommentsValue = setting.Value;
+            try
+            {
+                // Determine the Allow Comments settings
+                var lastSelectedAllowCommentsUserSettingTypeId = 3;
+                var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
+                var lastSelectedAllowCommentsValue = setting.Value;
 
-            if (bool.TryParse(lastSelectedAllowCommentsValue, out bool allowComments))
+                if (bool.TryParse(lastSelectedAllowCommentsValue, out bool allowComments))
+                {
+                    newPrint.AllowComments = allowComments;
+                }
+                else
+                {
+                    // Printer isn't found, so... shrug
+                    newPrint.AllowComments = false;
+                }
+            } catch (Exception)
             {
-                newPrint.AllowComments = allowComments;
-            } else
-            {
-                // Printer isn't found, so... shrug
                 newPrint.AllowComments = false;
             }
 
-            // Determine the last view status
-            var defaultViewStatus = 1;
-            var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
-            var viewStatusValue = defaultPrintViewStatusSetting.Value;
+            try
+            {
+                // Determine the last view status
+                var defaultViewStatus = 1;
+                var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
+                var viewStatusValue = defaultPrintViewStatusSetting.Value;
 
-            if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
-            {
-                newPrint.ViewStatus = viewStatus;
+                if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
+                {
+                    newPrint.ViewStatus = viewStatus;
+                }
+                else
+                {
+                    // Printer isn't found, so... shrug
+                    newPrint.ViewStatus = PrintViewStatus.Private;
+                }
             }
-            else
+            catch (Exception)
             {
-                // Printer isn't found, so... shrug
                 newPrint.ViewStatus = PrintViewStatus.Private;
             }
 
@@ -262,39 +275,42 @@ namespace PrintLogApi.Controllers
             _context.Prints.Add(newPrint);
 
 
-            // Images
-            var image = data.snapshot;
-            var fileId = Guid.NewGuid();
-            var fileName = fileId + Path.GetExtension(image.FileName);
-
-
-
-            var blobClient = printImageContainer.GetBlobClient(fileName);
-
-            using (var uploadFileStream = image.OpenReadStream())
+            if (data.snapshot is not null)
             {
-                await blobClient.UploadAsync(uploadFileStream);
-            };
+                // Images
+                var image = data.snapshot;
+                var fileId = Guid.NewGuid();
+                var fileName = fileId + Path.GetExtension(image.FileName);
 
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = $"{printImageContainerName}/{fileName}",
-                Id = fileId,
-                CreatedById = userId,
-                UpdatedById = userId,
-            };
-            _context.Files.Add(file);
 
-            var printImage = new PrintImage()
-            {
-                File = file,
-                CreatedById = userId,
-                UpdatedById = userId,
-                Print = newPrint,
-                IsDefault = true,
-            };
-            _context.PrintImages.Add(printImage);
+
+                var blobClient = printImageContainer.GetBlobClient(fileName);
+
+                using (var uploadFileStream = image.OpenReadStream())
+                {
+                    await blobClient.UploadAsync(uploadFileStream);
+                };
+
+                var file = new Models.File()
+                {
+                    Size = image.Length,
+                    Path = $"{printImageContainerName}/{fileName}",
+                    Id = fileId,
+                    CreatedById = userId,
+                    UpdatedById = userId,
+                };
+                _context.Files.Add(file);
+
+                var printImage = new PrintImage()
+                {
+                    File = file,
+                    CreatedById = userId,
+                    UpdatedById = userId,
+                    Print = newPrint,
+                    IsDefault = true,
+                };
+                _context.PrintImages.Add(printImage);
+            }
 
 
             await _context.SaveChangesAsync();
