@@ -19,7 +19,7 @@ namespace PrintLogApi.Profiles
                                                                                                                     p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
                                                                                                                     p.EstimatedAmountMg : 0)
                                                                                     + src.FilamentAdjustments.Sum(adj => adj.AmountMg)))
-                .ForMember(dest => dest.FilamentLengthRemainingInM, src => src.MapFrom(src => src.DiameterMm > 0 ? (((src.InitialNominalWeightMg ?? 0)
+                .ForMember(dest => dest.FilamentLengthRemainingInM, src => src.MapFrom(src => src.DiameterMm > 0 && src.MaterialDensityGramPerCubicCm > 0 ? (((src.InitialNominalWeightMg ?? 0)
                                                                                     - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
                                                                                                                     p.AmountMg :
                                                                                                                     p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
