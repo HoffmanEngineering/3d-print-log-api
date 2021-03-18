@@ -20,8 +20,17 @@ namespace PrintLogApi.Models
 
         public enum PrintViewStatus
         {
+            /// <summary>
+            /// Publicly viewable by anyone.
+            /// </summary>
             Public = 1,
+            /// <summary>
+            /// Anyone with the link can view, but print is not visible by searching.
+            /// </summary>
             Unlisted = 2,
+            /// <summary>
+            /// Print can only be viewed by the creator.
+            /// </summary>
             Private = 3,
         }
 

@@ -66,6 +66,12 @@ namespace PrintLogApi
                         Url = new Uri("https://www.hoffman.engineering")
                     }
                 });
+
+                c.CustomOperationIds(apiDesc =>
+                {
+                    return apiDesc.TryGetMethodInfo(out MethodInfo methodInfo) ? methodInfo.Name : null;
+                });
+
                 c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
                 {
                     Type = SecuritySchemeType.OAuth2,
@@ -242,8 +248,16 @@ namespace PrintLogApi
 
             if (hasAuthorize)
             {
-                operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
-                operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
+                if (!operation.Responses.Any(kvp => kvp.Key == "401"))
+                {
+                    operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
+                }
+
+                if (!operation.Responses.Any(kvp => kvp.Key == "403"))
+                {
+                    operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
+                }
+                
 
                 operation.Security = new List<OpenApiSecurityRequirement>
             {
