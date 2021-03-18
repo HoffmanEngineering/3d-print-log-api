@@ -8,8 +8,8 @@ namespace PrintLogApi.Authentication
 {
     public class ClaimsTransformer : IClaimsTransformation
     {
-        private readonly UserService userService;
-        public ClaimsTransformer(UserService userService)
+        private readonly IUserService userService;
+        public ClaimsTransformer(IUserService userService)
         {
             this.userService = userService;
         }

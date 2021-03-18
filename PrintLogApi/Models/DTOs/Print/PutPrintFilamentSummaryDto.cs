@@ -4,11 +4,25 @@ namespace PrintLogApi.Models.DTOs.Print
 {
     public class PutPrintFilamentSummaryDto
     {
+        /// <summary>
+        /// The GUID of the PrintFilament collection. Use EMPTY_GUID for new entries.
+        /// </summary>
         public Guid Id { get; set; }
 
+        /// <summary>
+        /// The optional GUID of the filament used. Set as null (or EMPTY_GUID) to not 
+        /// link this usage to a filament, and instead treat this as a non-tracked filament.
+        /// </summary>
         public Guid? FilamentId { get; set; }
 
+        /// <summary>
+        /// The estimated weight of filament used in milligrams.
+        /// </summary>
         public int? EstimatedAmountMg { get; set; }
+
+        /// <summary>
+        /// The actual weight of filament used in milligrams.
+        /// </summary>
         public int? AmountMg { get; set; }
 
         /// <summary>
@@ -33,6 +47,9 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public bool IsActualLengthSource { get; set; }
 
+        /// <summary>
+        /// Any notes for this filament usage.
+        /// </summary>
         public string Notes { get; set; }
     }
 }

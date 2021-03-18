@@ -69,11 +69,22 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        /// Get Print Summaries for current user
+        ///     Get a paged list of Print Summary information for a user. 
+        ///     If no userId is provided, then all prints for the currently authenticated user will be queried.
+        ///     Otherwise, if a userId is provided, then only the user's public prints will be returned.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="pagingRequest">The paging request.</param>
+        /// <param name="searchText">Optionally search for text in a print's title or notes.</param>
+        /// <param name="sortRequest">The sorting request.</param>
+        /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
+        /// <param name="userId">Optionally search for public</param>
+        /// <returns>A Paged List of Print Summaries matching the search criteria.</returns>
+        /// <response code="200">A Paged List of Print Summaries matching the search criteria.</response>
+        /// <response code="400">Returned if no user is logged in, and no userId is provided.</response>
         [HttpGet("summary")]
         [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary(
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery, MaxLength(50)] string searchText,
@@ -94,7 +105,7 @@ namespace PrintLogApi.Controllers
 
         
         /// <summary>
-        /// Get Print Statistics
+        /// Get Print Statistics for the current user.
         /// </summary>
         /// <returns></returns>
         [HttpGet("stats")]
@@ -116,10 +127,22 @@ namespace PrintLogApi.Controllers
 
         
 
-        // GET: api/Prints/5
+        /// <summary>
+        ///     Get a print's detailed information by print id.
+        /// </summary>
+        /// <param name="id">The id of a print to query</param>
+        /// <returns></returns>
+        /// <response code="200">Returns the Print's Detailed information.</response>
+        /// <response code="403">
+        ///     Returned when the current user (authenticated or not) cannot access the requested print id. 
+        ///     Normally when the print is marked as private, and the current user cannot access it.
+        /// </response>
+        /// <response code="404">Returned when a print with that ID does not exist.</response>
         [HttpGet("{id}")]
         [AllowAnonymous]
-        public async Task<ActionResult<PrintDetailDTO>> GetPrint(long id)
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<PrintDetailDTO>> GetPrintById(long id)
         {
             var print = await _printService.GetPrintById(id);
 
@@ -151,7 +174,14 @@ namespace PrintLogApi.Controllers
             return printDetailDto;
         }
 
+        /// <summary>
+        ///     Generate a print report for the current user.
+        /// </summary>
+        /// <returns>Returns a octet-stream containing a comma-separated value (.csv) file with a report of the current user's print information.</returns>
+        /// <response code="200">Returns a octet-stream containing a comma-separated value (.csv) file with a report of the current user's print information.</response>
+        /// <response code="401">Returned when no user is currently authenticated.</response>
         [HttpGet("csv")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAllPrintDetailsAsCsv()
         {
             long? currentUserId = User.GetUserId();
@@ -167,8 +197,19 @@ namespace PrintLogApi.Controllers
         }
 
 
-        // PUT: api/Prints/5
+        /// <summary>
+        ///     Update a print with new detailed information. All data is overridden with the details provided, no partial-patching is done. Last-request wins.
+        ///     Normally GetPrintById is used to retrieve the current version, then fields are modified before PUT to this endpoint.
+        /// </summary>
+        /// <param name="id">The ID of the print to update.</param>
+        /// <param name="printDTO">The new print detail information.</param>
+        /// <response code="200">The newly-updated Print Detail information.</response>
+        /// <response code="401">Returned when no user is authenticated.</response>
+        /// <response code="403">Returned when the current authenticated user does not have access to update the requested print.</response>
+        /// <response code="404">Returned when the printDTO is not valid, or if the printDTO's ID does not match the ID in the route.</response>
         [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PutPrintDetailDto printDTO)
         {
             if (id != printDTO.Id)
@@ -198,7 +239,7 @@ namespace PrintLogApi.Controllers
             {
                 var updatedPrint = await _printService.UpdatePrint(id, printDTO, userId.Value);
 
-                return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
+                return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
             } catch (UserCannotAccessPrinterException)
             {
                 return BadRequest();
@@ -211,9 +252,19 @@ namespace PrintLogApi.Controllers
             
         }
 
-        // PUT: api/Prints/5/status/1
+        /// <summary>
+        ///   Update a print with a new PrintStatus.
+        /// </summary>
+        /// <param name="id">The ID of the print to update.</param>
+        /// <param name="newStatus">The new Print Status.</param>
+        /// <response code="200">The updated Print Detail information.</response>
+        /// <response code="403">Returned if the currently authenticated user does not have access to update the requested print.</response>
+        /// <response code="404">Returned if no print is found with the requested id.</response>
         [HttpPut("{id}/status/{newStatus}")]
-        public async Task<ActionResult<PrintDetailDTO>> PutPrint(long id, PrintStatus newStatus)
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<PrintDetailDTO>> UpdatePrintStatus(long id, PrintStatus newStatus)
         {
 
             var existingPrint = await _printService.GetPrintById(id);
@@ -236,7 +287,7 @@ namespace PrintLogApi.Controllers
             try
             {
                 var updatedPrint = await _printService.UpdatePrintStatus(id, newStatus, userId.Value);
-                return CreatedAtAction("GetPrint", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+                return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
             } catch (DoesNotExistException)
             {
                 return NotFound();
@@ -248,8 +299,15 @@ namespace PrintLogApi.Controllers
 
         }
 
-        // POST: api/Prints
+        /// <summary>
+        ///    Create a new Print.
+        /// </summary>
+        /// <param name="print">The print details to create.</param>
+        /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
+        /// <response code="400">Returned if the new Print is not valid. Inspect Problem Details object for message as to what failed validation.</response>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
         {
             var userId = User.GetUserId();
@@ -264,7 +322,7 @@ namespace PrintLogApi.Controllers
                 var newPrint = await _printService.AddPrint(print, userId.Value);
                 _telemetry.TrackEvent("PrintAdded");
 
-                return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+                return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
             } catch (UserCannotAccessPrinterException)
             {
                 return BadRequest("Selected printer does not belong to currently logged in user.");
@@ -275,10 +333,20 @@ namespace PrintLogApi.Controllers
             
         }
 
-        
 
-        // DELETE: api/Prints/5
+
+        /// <summary>
+        ///     Delete a print permanently. Deleted prints will delete any associated print data, such as comments, filament usage, images, etc.
+        /// </summary>
+        /// <param name="id">The id of the print to delete.</param>
+        /// <response code="200">When the print was deleted successfully.</response>
+        /// <response code="401">Returned when the user is unauthorized.</response>
+        /// <response code="403">Returned when the current user does not have access to delete/modify the requested print.</response>
+        /// <response code="404">Returned if there is no print with the requested id.</response>
         [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<PrintDetailDTO>> DeletePrint(long id)
         {
             var userId = User.GetUserId();
@@ -307,7 +375,6 @@ namespace PrintLogApi.Controllers
             return Ok();
         }
 
-        
 
         [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
@@ -369,7 +436,7 @@ namespace PrintLogApi.Controllers
             
             return Ok();
 
-            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         [HttpPost("{id}/image")]
@@ -443,7 +510,7 @@ namespace PrintLogApi.Controllers
 
             return Ok();
 
-            //return CreatedAtAction("GetPrint", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         [HttpDelete("{printid}/image/{imageId}")]

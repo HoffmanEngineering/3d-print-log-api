@@ -7,6 +7,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Feedback;
 using PrintLogApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 
 namespace PrintLogApi.Controllers
 {
@@ -26,8 +27,14 @@ namespace PrintLogApi.Controllers
             _telemetry = telemetry;
         }
 
-        // POST: api/Feedbacks
+        /// <summary>
+        ///     Send a feedback.
+        /// </summary>
+        /// <param name="requestDto">The feedback request.</param>
+        /// <response code="201">Returned when feedback as been successfully sent.</response>
+        /// <response code="401">Returned when the user is not authorized. Only logged-in users can send feedback.</response>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
         public async Task<ActionResult> Post([FromBody] AddFeedbackDto requestDto)
         {
             var userId = User.GetUserId();

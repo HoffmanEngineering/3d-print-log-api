@@ -66,6 +66,12 @@ namespace PrintLogApi
                         Url = new Uri("https://www.hoffman.engineering")
                     }
                 });
+
+                c.CustomOperationIds(apiDesc =>
+                {
+                    return apiDesc.TryGetMethodInfo(out MethodInfo methodInfo) ? methodInfo.Name : null;
+                });
+
                 c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
                 {
                     Type = SecuritySchemeType.OAuth2,
@@ -108,12 +114,13 @@ namespace PrintLogApi
             services.AddScoped<IPrincipal>(
                 (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
             );
-            services.AddTransient<UserService>();
+            services.AddTransient<IUserService, UserService>();
             services.AddTransient<IPrintService, PrintService>();
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
             services.AddTransient<IFilamentService, FilamentService>();
             services.AddTransient<IUserApiKeyService, UserApiKeyService>();
+            services.AddTransient<IUserDeletionService, UserDeletionService>();
             services.AddApplicationInsightsTelemetry();
 
         }
@@ -242,8 +249,16 @@ namespace PrintLogApi
 
             if (hasAuthorize)
             {
-                operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
-                operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
+                if (!operation.Responses.Any(kvp => kvp.Key == "401"))
+                {
+                    operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
+                }
+
+                if (!operation.Responses.Any(kvp => kvp.Key == "403"))
+                {
+                    operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
+                }
+                
 
                 operation.Security = new List<OpenApiSecurityRequirement>
             {

@@ -62,7 +62,7 @@ namespace PrintLogApi.Controllers
         }
 
         [HttpDelete("{apiKey}")]
-        public async Task<ActionResult<NewUserApiKeyDto>> GenerateNewApiKey([FromRoute] Guid apiKey)
+        public async Task<ActionResult<NewUserApiKeyDto>> DeleteApiKey([FromRoute] Guid apiKey)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)

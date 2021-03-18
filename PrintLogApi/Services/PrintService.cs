@@ -447,17 +447,22 @@ namespace PrintLogApi.Services
                 throw new ArgumentNullException(nameof(print));
             }
 
+            // Remove Print Comments.
             foreach (var comment in print.Comments.ToArray())
             {
                 _context.Comments.Remove(comment.Comment);
             }
             _context.PrintComments.RemoveRange(print.Comments.ToArray());
 
+            // Remove Print Images.
             foreach (var image in print.Images.ToArray())
             {
                 _context.Files.Remove(image.File);
             }
             _context.PrintImages.RemoveRange(print.Images.ToArray());
+
+            // Remove PrintFilament for this print.
+            _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
 
             _context.Prints.Remove(print);
 

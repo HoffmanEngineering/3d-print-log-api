@@ -56,6 +56,11 @@ namespace PrintLogApi.Models
         [StringLength(1000)]
         public string Bio { get; set; }
 
+        /// <summary>
+        ///   If present, the datetime that the user started the deactivation process.
+        /// </summary>
+        public DateTimeOffset? DeactivationDateTime { get; set; }
+
         public ProfileViewStatus ViewStatus { get; set; }
 
         public ICollection<Printer> printers { get; set; }
