@@ -114,12 +114,13 @@ namespace PrintLogApi
             services.AddScoped<IPrincipal>(
                 (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
             );
-            services.AddTransient<UserService>();
+            services.AddTransient<IUserService, UserService>();
             services.AddTransient<IPrintService, PrintService>();
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
             services.AddTransient<IFilamentService, FilamentService>();
             services.AddTransient<IUserApiKeyService, UserApiKeyService>();
+            services.AddTransient<IUserDeletionService, UserDeletionService>();
             services.AddApplicationInsightsTelemetry();
 
         }

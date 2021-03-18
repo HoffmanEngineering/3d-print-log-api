@@ -17,6 +17,8 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
 using PrintLogApi.Extensions;
+using PrintLogApi.Services;
+using PrintLogApi.Users;
 
 namespace PrintLogApi.Controllers
 {
@@ -28,17 +30,27 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly IAuthorizationService _authorizationService;
+        private readonly IUserDeletionService _userDeletionService;
         private readonly TelemetryClient _telemetry;
+        private readonly IUserService _userService;
 
         private readonly string profileImageContainerName = "userprofile";
         private readonly BlobContainerClient userProfileImageContainer;
 
-        public UsersController(PrintLogContext context, IMapper mapper, IConfiguration config, IAuthorizationService authorizationService, TelemetryClient telemetry)
+        public UsersController(PrintLogContext context,
+                               IUserDeletionService userDeletionService,
+                               IUserService userService,
+                               IMapper mapper,
+                               IConfiguration config,
+                               IAuthorizationService authorizationService,
+                               TelemetryClient telemetry)
         {
             _context = context;
             _mapper = mapper;
             _authorizationService = authorizationService;
+            _userDeletionService = userDeletionService;
             _telemetry = telemetry;
+            _userService = userService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
@@ -75,8 +87,56 @@ namespace PrintLogApi.Controllers
             return user;
         }
 
-        [HttpGet("{id}")]
+        /// <summary>
+        ///  Marks the current user as deactivated
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost("me/deactivate")]
+        public async Task<ActionResult> DeactivateCurrentUser()
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            await _userService.MarkUserAsDeactivated(userId.Value);
+
+            return Ok();
+        }
+
+        /// <summary>
+        ///  Reactivate the current user if the user has not yet been deleted.
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost("me/reactivate")]
+        public async Task<ActionResult> ReactivateCurrentUser()
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            await _userService.ReactivateUser(userId.Value);
+
+            return Ok();
+        }
+
+        /// <summary>
+        ///   Delete the data from users pending deactivation after the deactivation period.
+        /// </summary>
+        /// <returns></returns>
+        [HttpDelete("pending-deactivation")]
         [AllowAnonymous]
+        public async Task<ActionResult> ProcessPendingDeactivations()
+        {
+            await _userDeletionService.DeletePendingDeactivatedUsers();
+
+            return Ok();
+        }
+
+        [HttpGet("{id}")]
         public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
         {
             var user = await _context.Users
