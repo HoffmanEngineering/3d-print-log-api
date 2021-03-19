@@ -46,6 +46,8 @@ namespace PrintLogApi
 
             services.AddCors();
 
+            services.AddHttpClient();
+
             ConfigureAuthentication(services);
 
             services.AddDbContext<PrintLogContext>(opts =>
@@ -121,6 +123,7 @@ namespace PrintLogApi
             services.AddTransient<IFilamentService, FilamentService>();
             services.AddTransient<IUserApiKeyService, UserApiKeyService>();
             services.AddTransient<IUserDeletionService, UserDeletionService>();
+            services.AddTransient<IAuth0Service, Auth0Service>();
             services.AddApplicationInsightsTelemetry();
 
         }

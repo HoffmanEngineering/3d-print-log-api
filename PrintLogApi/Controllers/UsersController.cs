@@ -19,6 +19,7 @@ using PrintLogApi.Models.DTOs.User;
 using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using PrintLogApi.Users;
+using System.Globalization;
 
 namespace PrintLogApi.Controllers
 {
@@ -92,7 +93,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpPost("me/deactivate")]
-        public async Task<ActionResult> DeactivateCurrentUser()
+        public async Task<ActionResult<UserDetailDto>> DeactivateCurrentUser()
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -102,7 +103,15 @@ namespace PrintLogApi.Controllers
 
             await _userService.MarkUserAsDeactivated(userId.Value);
 
-            return Ok();
+            _telemetry.TrackEvent("UserDeactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
+
+            var user = await _context.Users
+                .Where(u => u.Id == userId)
+                .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
+                .AsNoTracking()
+                .SingleAsync();
+
+            return user;
         }
 
         /// <summary>
@@ -110,7 +119,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpPost("me/reactivate")]
-        public async Task<ActionResult> ReactivateCurrentUser()
+        public async Task<ActionResult<UserDetailDto>> ReactivateCurrentUser()
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -120,7 +129,16 @@ namespace PrintLogApi.Controllers
 
             await _userService.ReactivateUser(userId.Value);
 
-            return Ok();
+            _telemetry.TrackEvent("UserReactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
+
+
+            var user = await _context.Users
+                .Where(u => u.Id == userId)
+                .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
+                .AsNoTracking()
+                .SingleAsync();
+
+            return user;
         }
 
         /// <summary>
@@ -130,7 +148,7 @@ namespace PrintLogApi.Controllers
         [HttpDelete("pending-deactivation")]
         [AllowAnonymous]
         public async Task<ActionResult> ProcessPendingDeactivations()
-        {
+        { 
             await _userDeletionService.DeletePendingDeactivatedUsers();
 
             return Ok();
@@ -325,9 +343,9 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        /// Helper method to  check if the current user can view print
+        /// Helper method to check if the current user can view the user profile
         /// </summary>
-        /// <param name="print"></param>
+        /// <param name="profileToView"></param>
         /// <returns></returns>
         private async Task<bool> CanViewUserProfile(User profileToView)
         {
