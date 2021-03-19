@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 using static PrintLogApi.Models.User;
 
@@ -23,6 +24,11 @@ namespace PrintLogApi.Models.DTOs
 
         [StringLength(1000)]
         public string Bio { get; set; }
+
+        /// <summary>
+        ///   If present, the datetime that the user started the deactivation process.
+        /// </summary>
+        public DateTimeOffset? DeactivationDateTime { get; set; }
 
         public ProfileViewStatus ViewStatus { get; set; }
     }

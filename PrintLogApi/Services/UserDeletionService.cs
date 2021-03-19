@@ -16,13 +16,19 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly ILogger<UserDeletionService> _logger;
         private readonly TelemetryClient _telemetry;
+        private readonly IAuth0Service _auth0Service;
         private readonly int _deactivationTimeInMinutes;
 
-        public UserDeletionService(PrintLogContext context, ILogger<UserDeletionService> logger, TelemetryClient telemetry, IConfiguration config )
+        public UserDeletionService(PrintLogContext context,
+                                   ILogger<UserDeletionService> logger,
+                                   TelemetryClient telemetry,
+                                   IConfiguration config,
+                                   IAuth0Service auth0Service)
         {
             _context = context;
             _logger = logger;
             _telemetry = telemetry;
+            _auth0Service = auth0Service;
 
             _deactivationTimeInMinutes = int.Parse(config["PendingUserDeactivationTimeInMinutes"], CultureInfo.InvariantCulture);
         }
@@ -39,13 +45,23 @@ namespace PrintLogApi.Services
 
             _logger.LogInformation("Deleting {count} deactivated users before {deactivationDate}", usersToDelete.Count, pendingDeactivationTime.ToString(CultureInfo.InvariantCulture));
 
+            if (usersToDelete.Count > 0)
+            {
+                _telemetry.TrackEvent("DeletePendingDeactivatedUsers", new Dictionary<string, string>() { { "Count", usersToDelete.Count.ToString(CultureInfo.InvariantCulture) } });
+            }
+            
+
             foreach (var user in usersToDelete)
             {
-                _logger.LogInformation("Deleting User {id} with oauth id {oauthId}", user.Id, user.OAuthUserId);
+                var internalId = user.Id;
+                var oauthUserId = user.OAuthUserId;
+                _logger.LogInformation("Deleting User {id} with oauth id {oauthId}", internalId, oauthUserId);
 
+                // Delete all data from the database.
                 await DeleteAllDataForUser(user);
 
-                // TODO: Send AUTH0 API request to delete that user.
+                // Delete the user from the Auth Server.
+                await _auth0Service.DeleteUser(oauthUserId);
             }
 
         }
