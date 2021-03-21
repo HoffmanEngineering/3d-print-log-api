@@ -90,29 +90,36 @@ namespace PrintLogApi.Controllers
                 return Ok($"Webhook Connection to 3D Print Log is Good!\nPrinter is {printerName}.\nReady to start logging prints.");
             }
 
-
-            switch (data.Topic)
+            try
             {
-                case "Print Started":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Started");
-                    await HandlePrintStarted(data, userId.Value);
-                    break;
-                case "Print Failed":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Failed");
-                    await HandlePrintFailed(data, userId.Value);
-                    break;
-                case "Error":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Error");
-                    await HandlePrintFailed(data, userId.Value);
-                    break;
-                case "Print Done":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
-                    await HandlePrintCompleted(data, userId.Value);
-                    break;
-                default:
-                    var properties = new Dictionary<string, string> { { "Topic", data.Topic } };
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
-                    break;
+                switch (data.Topic)
+                {
+                    case "Print Started":
+                        _telemetry.TrackEvent("OctoPrint_Webhook_Started");
+                        await HandlePrintStarted(data, userId.Value);
+                        break;
+                    case "Print Failed":
+                        _telemetry.TrackEvent("OctoPrint_Webhook_Failed");
+                        await HandlePrintFailed(data, userId.Value);
+                        break;
+                    case "Error":
+                        _telemetry.TrackEvent("OctoPrint_Webhook_Error");
+                        await HandlePrintFailed(data, userId.Value);
+                        break;
+                    case "Print Done":
+                        _telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
+                        await HandlePrintCompleted(data, userId.Value);
+                        break;
+                    default:
+                        var properties = new Dictionary<string, string> { { "Topic", data.Topic } };
+                        _telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
+                        break;
+                }
+            }
+            catch (Exception)
+            {
+                _logger.LogError("An error occurred in the Octoprint Webhook", data);
+                throw;
             }
 
             return Ok(data);
@@ -136,10 +143,10 @@ namespace PrintLogApi.Controllers
                 Status = PrintStatus.Printing,
                 CreatedById = userId,
                 UpdatedById = userId,
-                Title = data.Job.File.Name,
-                EstimatedPrintTimeInSeconds = (int)Math.Round(data.Job.AveragePrintTime ?? data.Job.EstimatedPrintTime ?? 0.0),
+                Title = data?.Job?.File?.Name ?? "",
+                EstimatedPrintTimeInSeconds = (int)Math.Round(data?.Job?.AveragePrintTime ?? data?.Job?.EstimatedPrintTime ?? 0.0),
                 FilamentUsage = new List<PrintFilament>(),
-                FileName = data.Job.File.Name
+                FileName = data?.Job?.File?.Name ?? ""
             };
 
             if (long.TryParse(data.DeviceIdentifier, out long printerId))
@@ -268,7 +275,11 @@ namespace PrintLogApi.Controllers
             }
 
             // Work with File Hash
-            newPrint.FileHash = StringToByteArray(data.Meta.Hash);
+            if (data?.Meta?.Hash is not null)
+            {
+                newPrint.FileHash = StringToByteArray(data.Meta.Hash);
+            }
+            
 
             newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data.CurrentTime);
 
@@ -320,22 +331,46 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
         {
-            // Find a print thats Printing with that same hash.
-            var hash = StringToByteArray(data.Meta.Hash);
+            Print print = null;
 
-            var print = await _context.Prints
-                .Where(p => p.CreatedById == userId 
-                                && p.Status == PrintStatus.Printing 
-        
-                                && p.FileHash == hash 
+            // Find a print thats Printing with that same hash.
+            if (data?.Meta?.Hash is not null)
+            {
+                var hash = StringToByteArray(data.Meta.Hash);
+                print = await _context.Prints
+                .Where(p => p.CreatedById == userId
+                                && p.Status == PrintStatus.Printing
+
+                                && p.FileHash == hash
                                 )
                 .OrderByDescending(p => p.CreatedDate)
                 .Include(p => p.FilamentUsage)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
+            } else if (data?.Job?.File?.Name is not null)
+            {
+                // if the hash doesn't exist, then look for the same file name?
+                var fileName = data?.Job?.File?.Name;
+                print = await _context.Prints
+                .Where(p => p.CreatedById == userId
+                                && p.Status == PrintStatus.Printing
 
+                                && p.FileName == fileName
+                                )
+                .OrderByDescending(p => p.CreatedDate)
+                .Include(p => p.FilamentUsage)
+                .ThenInclude(pf => pf.Filament)
+                .FirstOrDefaultAsync();
+            } else
+            {
+                // We have no other way of coorlating files other than filehash or name, so...
+                _logger.LogWarning("Not enough information from octoprint to find matching print.", data);
+                return;
+            }
+                
             if (print == null)
             {
+                _logger.LogWarning("Matching print was not found.", data);
                 return;
             }
 
@@ -393,17 +428,48 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
         {
-            // Find a print thats Printing with that same hash.
-            var hash = StringToByteArray(data.Meta.Hash);
+            Print print = null;
 
-            var print = await _context.Prints
-                .Where(p => p.CreatedById == userId && p.Status == PrintStatus.Printing && p.FileHash == hash)
+            // Find a print thats Printing with that same hash.
+            if (data?.Meta?.Hash is not null)
+            {
+                var hash = StringToByteArray(data.Meta.Hash);
+                print = await _context.Prints
+                .Where(p => p.CreatedById == userId
+                                && p.Status == PrintStatus.Printing
+
+                                && p.FileHash == hash
+                                )
+                .OrderByDescending(p => p.CreatedDate)
                 .Include(p => p.FilamentUsage)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
+            }
+            else if (data?.Job?.File?.Name is not null)
+            {
+                // if the hash doesn't exist, then look for the same file name?
+                var fileName = data?.Job?.File?.Name;
+                print = await _context.Prints
+                .Where(p => p.CreatedById == userId
+                                && p.Status == PrintStatus.Printing
+
+                                && p.FileName == fileName
+                                )
+                .OrderByDescending(p => p.CreatedDate)
+                .Include(p => p.FilamentUsage)
+                .ThenInclude(pf => pf.Filament)
+                .FirstOrDefaultAsync();
+            }
+            else
+            {
+                // We have no other way of coorlating files other than filehash or name, so...
+                _logger.LogWarning("Not enough information from octoprint to find matching print.", data);
+                return;
+            }
 
             if (print == null)
             {
+                _logger.LogWarning("Matching print was not found.", data);
                 return;
             }
 
