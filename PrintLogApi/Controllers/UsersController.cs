@@ -155,6 +155,7 @@ namespace PrintLogApi.Controllers
         }
 
         [HttpGet("{id}")]
+        [AllowAnonymous]
         public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
         {
             var user = await _context.Users
