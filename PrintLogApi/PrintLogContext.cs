@@ -17,6 +17,8 @@ namespace PrintLogApi
 
         public DbSet<Comment> Comments { get; set; }
 
+        public DbSet<CuraSetting> CuraSettings { get; set; }
+
         public DbSet<Printer> Printers { get; set; }
 
         public DbSet<Print> Prints { get; set; }
@@ -127,6 +129,10 @@ namespace PrintLogApi
             );
 
             modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
+
+            modelBuilder.Entity<CuraSetting>()
+                .Property(c => c._Settings)
+                .HasColumnName("Settings");
         }
 
         public override int SaveChanges()

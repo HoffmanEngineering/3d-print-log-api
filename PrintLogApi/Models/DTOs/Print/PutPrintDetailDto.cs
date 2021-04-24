@@ -61,7 +61,7 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public ICollection<PutPrintFilamentSummaryDto> FilamentUsage { get; set; }
 
-        [StringLength(1000)]
+        [StringLength(50000)]
         public string Notes { get; set; }
 
         [StringLength(1000)]
