@@ -1,17 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Azure.Storage.Blobs;
-using CsvHelper;
 using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,15 +15,14 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
-using static PrintLogApi.Models.Print;
-using PrintLogApi.Extensions;
 using PrintLogApi.Services;
-using PrintLogApi.Exceptions;
-using PrintLogApi.Models.DTOs.Printer;
+using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {

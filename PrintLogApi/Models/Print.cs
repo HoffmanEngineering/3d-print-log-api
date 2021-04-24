@@ -59,7 +59,6 @@ namespace PrintLogApi.Models
         [MaxLength(100)]
         public string FilamentType { get; set; }
 
-        [MaxLength(1000)]
         public string Notes { get; set; }
 
         [MaxLength(1000)]
