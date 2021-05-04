@@ -10,6 +10,7 @@ using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 
 namespace PrintLogApi.Controllers
 {
@@ -46,8 +47,17 @@ namespace PrintLogApi.Controllers
         //    return comment;
         //}
 
-
+        /// <summary>
+        /// Edit a comment.
+        /// </summary>
+        /// <param name="id">The Comment Id to edit</param>
+        /// <param name="edittedComment">The DTO containing the edited information.</param>
+        /// <response code="201">An 201 Created if the edit was successful.</response>
+        /// <response code="403">Returned if the user is not the owner of the comment.</response>
         [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<CommentDetailDto>> PutComment([FromRoute] long id, [FromBody] EditCommentDto edittedComment)
         {
             var userId = User.GetUserId();
@@ -65,7 +75,7 @@ namespace PrintLogApi.Controllers
 
             if (userId != existingComment.CreatedById)
             {
-                return Forbid();
+                return StatusCode(403, "Cannot edit another user's comment");
             }
 
             existingComment.Body = edittedComment.Body;
@@ -88,9 +98,46 @@ namespace PrintLogApi.Controllers
                 }
             }
 
-            _telemetry.TrackEvent("PrintEdit");
+            _telemetry.TrackEvent("CommentEdit");
 
             return CreatedAtAction("GetComment", new { id = existingComment.Id }, _mapper.Map<CommentDetailDto>(existingComment));
+        }
+
+        /// <summary>
+        /// Delete a comment by comment id.
+        /// </summary>
+        /// <param name="id">The comment ID to delete</param>
+        /// <response code="200">An OK if the delete was successful.</response>
+        /// <response code="403">Returned if the user is not the owner of the comment.</response>
+        [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult> DeleteComment([FromRoute] long id)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingComment = await _context.Comments.FindAsync(id);
+
+            if (existingComment == null)
+            {
+                return NotFound();
+            }
+
+            if (userId != existingComment.CreatedById)
+            {
+                return Forbid();
+            }
+
+            await _commentService.DeleteCommentById(id);
+
+            _telemetry.TrackEvent("CommentDelete");
+
+            return Ok();
         }
 
 

@@ -31,5 +31,35 @@ namespace PrintLogApi.Services
                             .ProjectTo<CommentDetailDto>(_mapper.ConfigurationProvider)
                             .SingleOrDefaultAsync();
         }
+
+        /// <summary>
+        /// Delete a comment by id.
+        /// </summary>
+        /// <param name="id">The ID of the comment to delete.</param>
+        /// <returns></returns>
+        public async Task DeleteCommentById(long id)
+        {
+            var comment = await _context.Comments
+                            .Where(c => c.Id == id)
+                            .SingleOrDefaultAsync();
+            if (comment is null)
+            {
+                return;
+            }
+
+            // Find related links:
+            var printComments = await _context.PrintComments
+                                    .Where(pc => pc.CommentId == id)
+                                    .ToListAsync();
+
+            if (printComments.Any())
+            {
+                _context.PrintComments.RemoveRange(printComments);
+            }
+
+            _context.Comments.Remove(comment);
+            await _context.SaveChangesAsync();
+
+        }
     }
 }

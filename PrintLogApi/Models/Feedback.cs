@@ -28,5 +28,10 @@ namespace PrintLogApi.Models
 
         [MaxLength(5000)]
         public string Note { get; set; }
+
+        public DateTimeOffset? ResolvedDate { get; set; }
+
+        [MaxLength(1000)]
+        public string ResolvedNote { get; set; }
     }
 }

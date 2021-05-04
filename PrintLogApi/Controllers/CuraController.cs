@@ -27,9 +27,17 @@ namespace PrintLogApi.Controllers
             _context = context;
         }
 
+        /// <summary>
+        /// Returns the settings saved by cura by GUID. Since Cura does not know the user who first saved the settings,
+        /// the first time the settings are retrieved by a 3D Print Log user, the settings are linked to that user.
+        /// Other users cannot retrieve the settings afterwards, even if they learned the GUID.
+        /// </summary>
+        /// <param name="id">The GUID for the settings</param>
+        /// <response code="200">An OK containing the settings send by Cura.</response>
+        /// <response code="403">Returned if the user is not the owner of the settings.</response>
         [HttpGet("settings")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<ActionResult<CuraSetting>> GetSettings(Guid id)
         {
             var userId = User.GetUserId();
@@ -46,7 +54,7 @@ namespace PrintLogApi.Controllers
                 if (settings.UserId.Value != userId.Value)
                 {
                     // Return a 403 if the current user is trying to view a setting created by another user.
-                    return Forbid();
+                    return StatusCode(StatusCodes.Status403Forbidden, "Cannot view settings linked to another user.");
                 }
             }
             else 
@@ -62,6 +70,10 @@ namespace PrintLogApi.Controllers
             return settings;
         }
 
+        /// <summary>
+        /// Save a JSON object containing the settings from Cura.
+        /// </summary>
+        /// <returns>The GUID for these saved settings that can be used to retrieve the settings.</returns>
         [HttpPost("settings")]
         [AllowAnonymous]
         public async Task<ActionResult<NewCuraSettingsDto>> SaveSettings()
