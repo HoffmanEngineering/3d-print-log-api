@@ -88,9 +88,37 @@ namespace PrintLogApi.Controllers
                 }
             }
 
-            _telemetry.TrackEvent("PrintEdit");
+            _telemetry.TrackEvent("CommentEdit");
 
             return CreatedAtAction("GetComment", new { id = existingComment.Id }, _mapper.Map<CommentDetailDto>(existingComment));
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> DeleteComment([FromRoute] long id)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingComment = await _context.Comments.FindAsync(id);
+
+            if (existingComment == null)
+            {
+                return NotFound();
+            }
+
+            if (userId != existingComment.CreatedById)
+            {
+                return Forbid();
+            }
+
+            await _commentService.DeleteCommentById(id);
+
+            _telemetry.TrackEvent("CommentDelete");
+
+            return Ok();
         }
 
 

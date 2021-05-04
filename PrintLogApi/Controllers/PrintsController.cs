@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -568,6 +569,55 @@ namespace PrintLogApi.Controllers
             var mappedComment = await _commentService.GetCommentDetailById(comment.Id);
 
             return mappedComment;
+        }
+
+        /// <summary>
+        /// Delete a Comment from a print. The owner of the Print can remove any comment on that print, while other users can only delete comments they created.
+        /// </summary>
+        /// <param name="printId">The print ID</param>
+        /// <param name="commentId">The comment Id to delete.</param>
+        /// <response code="200">An OK response if the deletion was successful.</response>
+        /// <response code="403">Returned if the user is not the print owner or the owner of the comment.</response>
+        [HttpDelete("{printId}/comment/{commentId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<CommentDetailDto>> DeletePrintComment(long printId, long commentId)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var print = await _printService.GetPrintById(printId);
+
+            if (print == null)
+            {
+                return NotFound("Print not found.");
+            }
+
+            // Check if print contains the print comment selected.
+            var printComment = print.Comments.Where(pc => pc.CommentId == commentId).SingleOrDefault();
+
+            if (printComment is null)
+            {
+                return NotFound("Comment not found.");
+            }
+
+            // User can delete the print if they own the print, or if they made the comment:
+            var userOwnsPrint = print.CreatedById == userId.Value;
+            var userOwnsComment = printComment.Comment.CreatedById == userId.Value;
+
+            if (!(userOwnsPrint || userOwnsComment))
+            {
+                return BadRequest("Cannot remove other's comments on other's prints.");
+            }
+
+            // Delete the print and comment:
+            await _commentService.DeleteCommentById(commentId);
+
+            return Ok();
         }
 
         /// <summary>
