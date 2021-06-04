@@ -35,6 +35,8 @@ namespace PrintLogApi
 
         public DbSet<PrintFilament> PrintFilament { get; set; }
 
+        public DbSet<PrinterFilament> PrinterFilament { get; set; }
+
         public DbSet<PrintImage> PrintImages { get; set; }
 
         public DbSet<Feedback> Feedback { get; set; }

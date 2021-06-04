@@ -167,6 +167,43 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<PrinterDetailDto>(newPrinter));
         }
 
+        /// <summary>
+        /// Retrieve the list of currently loaded filament for this printer
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        [HttpGet("{id}/filament")]
+        public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
+        {
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.FilamentAdjustments)
+                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.PrintFilaments)
+                .Where(p => p.Id == id)
+                .SingleOrDefaultAsync();
+
+            if (printer == null)
+            {
+                return NotFound();
+            }
+
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            if (printer.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            return _mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        }
+
         // TODO: Make the delete be a soft-inactive delete.
         //// DELETE: api/Printers/5
         //[HttpDelete("{id}")]

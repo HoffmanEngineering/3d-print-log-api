@@ -205,7 +205,14 @@ namespace PrintLogApi.Services
         {
             var newPrint = _mapper.Map<Print>(print);
 
-            var printer = await _context.Printers.FindAsync(print.PrinterId);
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                .Where(p => p.Id == print.PrinterId)
+                .FirstOrDefaultAsync();
+            if (printer == null)
+            {
+                throw new UserCannotAccessPrinterException();
+            }
             newPrint.Printer = printer;
 
             // Check if the user had access to that printer!
@@ -231,8 +238,39 @@ namespace PrintLogApi.Services
                         throw new UserCannotAccessFilamentException();
                     }
                 }
-                
             }
+
+            // Handle managing loaded filaments for this printer.
+            // Unload any filament that isn't in the new print.
+            var currentlyLoadedFilament = printer.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue);
+            var filamentsToUnload = currentlyLoadedFilament.Where(f => !newPrint.FilamentUsage.Any(pf => pf.FilamentId == f.FilamentId));
+            
+            var addPrintTime = DateTimeOffset.Now;
+            foreach (var filament in filamentsToUnload)
+            {
+                filament.UnloadedDateTime = addPrintTime;
+                _context.Entry(filament).State = EntityState.Modified;
+            }
+
+            // Add any new filament to the list;
+            //
+            var newFilament = newPrint.FilamentUsage.Where(newFilament => !currentlyLoadedFilament.Any(f => f.FilamentId == newFilament.FilamentId));
+
+            foreach (var filament in newFilament)
+            {
+                if (filament.FilamentId.HasValue)
+                {
+                    var newLoadedFilament = new PrinterFilament
+                    {
+                        FilamentId = filament.FilamentId.Value,
+                        PrinterId = printer.Id,
+                        LoadedDateTime = addPrintTime,
+                    };
+                    printer.LoadedFilaments.Add(newLoadedFilament);
+                    _context.Entry(printer).State = EntityState.Modified;
+                }
+            }
+
 
             await UpdateFilamentUsageWeights(newPrint);
 
