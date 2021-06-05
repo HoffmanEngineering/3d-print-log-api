@@ -31,6 +31,11 @@ namespace PrintLogApi.Models.DTOs.Printer
         [Range(0, double.MaxValue, ErrorMessage = "Only positive number allowed")]
         public double FilamentDiameter { get; set; }
 
+        /// <summary>
+        /// The collection of currently loaded filament for this printer.
+        /// </summary>
+        public ICollection<AddPrinterFilamentDto> LoadedFilaments { get; set; }
+
         public bool IsActive { get; set; }
     }
 }

@@ -135,6 +135,10 @@ namespace PrintLogApi
             modelBuilder.Entity<CuraSetting>()
                 .Property(c => c._Settings)
                 .HasColumnName("Settings");
+
+            // Only every query for currently-loaded filament.
+            modelBuilder.Entity<PrinterFilament>()
+                .HasQueryFilter(pf => !pf.UnloadedDateTime.HasValue);
         }
 
         public override int SaveChanges()

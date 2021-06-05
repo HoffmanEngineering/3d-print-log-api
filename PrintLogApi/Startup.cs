@@ -118,6 +118,7 @@ namespace PrintLogApi
             );
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IPrintService, PrintService>();
+            services.AddTransient<IPrinterService, PrinterService>();
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
             services.AddTransient<IFilamentService, FilamentService>();

@@ -25,13 +25,19 @@ namespace PrintLogApi.Services
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
         private readonly IFilamentService _filamentService;
+        private readonly IPrinterService _printerService;
 
-        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, IFilamentService filamentService)
+        public PrintService(PrintLogContext context,
+                            IMapper mapper,
+                            TelemetryClient telemetry,
+                            IFilamentService filamentService,
+                            IPrinterService printerService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _filamentService = filamentService;
+            _printerService = printerService;
         }
 
         /// <summary>
@@ -206,7 +212,7 @@ namespace PrintLogApi.Services
             var newPrint = _mapper.Map<Print>(print);
 
             var printer = await _context.Printers
-                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                .Include(p => p.LoadedFilaments)
                 .Where(p => p.Id == print.PrinterId)
                 .FirstOrDefaultAsync();
             if (printer == null)
@@ -240,36 +246,12 @@ namespace PrintLogApi.Services
                 }
             }
 
-            // Handle managing loaded filaments for this printer.
-            // Unload any filament that isn't in the new print.
-            var currentlyLoadedFilament = printer.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue);
-            var filamentsToUnload = currentlyLoadedFilament.Where(f => !newPrint.FilamentUsage.Any(pf => pf.FilamentId == f.FilamentId));
-            
-            var addPrintTime = DateTimeOffset.Now;
-            foreach (var filament in filamentsToUnload)
-            {
-                filament.UnloadedDateTime = addPrintTime;
-                _context.Entry(filament).State = EntityState.Modified;
-            }
+            var newLoadedFilamentIds = newPrint.FilamentUsage
+                .Where(filament => filament.FilamentId.HasValue && filament.FilamentId != default)
+                .Select(filament => filament.FilamentId.Value);
 
-            // Add any new filament to the list;
-            //
-            var newFilament = newPrint.FilamentUsage.Where(newFilament => !currentlyLoadedFilament.Any(f => f.FilamentId == newFilament.FilamentId));
-
-            foreach (var filament in newFilament)
-            {
-                if (filament.FilamentId.HasValue)
-                {
-                    var newLoadedFilament = new PrinterFilament
-                    {
-                        FilamentId = filament.FilamentId.Value,
-                        PrinterId = printer.Id,
-                        LoadedDateTime = addPrintTime,
-                    };
-                    printer.LoadedFilaments.Add(newLoadedFilament);
-                    _context.Entry(printer).State = EntityState.Modified;
-                }
-            }
+            // PrinterService setLoadedFilament
+            await _printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
 
 
             await UpdateFilamentUsageWeights(newPrint);

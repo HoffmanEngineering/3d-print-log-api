@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Extensions;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers
 {
@@ -22,12 +23,20 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly IFilamentService _filamentService;
+        private readonly IPrinterService _printerService;
 
-        public PrintersController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public PrintersController(PrintLogContext context,
+                                  IMapper mapper,
+                                  TelemetryClient telemetry,
+                                  IFilamentService filamentService,
+                                  IPrinterService printerService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _filamentService = filamentService;
+            _printerService = printerService;
         }
 
 
@@ -69,7 +78,16 @@ namespace PrintLogApi.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
         {
-            var printer = await _context.Printers.FindAsync(id);
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.FilamentAdjustments)
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.PrintFilaments)
+                .Where(p => p.Id == id)
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
 
             if (printer == null)
             {
@@ -105,7 +123,7 @@ namespace PrintLogApi.Controllers
                 return BadRequest();
             }
 
-            var existingPrinter = await _context.Printers.FindAsync(id);
+            var existingPrinter = await _printerService.getPrinterById(id);
 
             if (existingPrinter == null)
             {
@@ -121,6 +139,21 @@ namespace PrintLogApi.Controllers
             }
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
+
+            foreach (var filament in existingPrinter.LoadedFilaments)
+            {
+                if (filament.FilamentId != default)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
+                    if (!canAccessFilament)
+                    {
+                        //throw new UserCannotAccessFilamentException();
+                        return StatusCode(403, "User does not have access to filament.");
+                    }
+                }
+            }
+
+            await this._printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
 
             _context.Entry(existingPrinter).State = EntityState.Modified;
 
@@ -158,6 +191,7 @@ namespace PrintLogApi.Controllers
             var newPrinter = _mapper.Map<Printer>(printer);
 
             newPrinter.UserId = userId.Value;
+            
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
@@ -176,10 +210,10 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
         {
             var printer = await _context.Printers
-                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                .Include(p => p.LoadedFilaments)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.FilamentAdjustments)
-                .Include(p => p.LoadedFilaments.Where(f => !f.UnloadedDateTime.HasValue))
+                .Include(p => p.LoadedFilaments)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.PrintFilaments)
                 .Where(p => p.Id == id)

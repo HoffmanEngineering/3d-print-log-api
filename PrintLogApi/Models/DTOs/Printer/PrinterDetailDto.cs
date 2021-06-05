@@ -27,5 +27,10 @@ namespace PrintLogApi.Models.DTOs.Printer
         public double FilamentDiameter { get; set; }
 
         public bool IsActive { get; set; }
+
+        /// <summary>
+        /// The collection of currently loaded filament for this printer.
+        /// </summary>
+        public ICollection<PrinterFilamentSummaryDto> LoadedFilaments { get; set; }
     }
 }
