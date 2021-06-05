@@ -78,6 +78,8 @@ namespace PrintLogApi.Models
         // Nagivation Element to PrintFilament
         public ICollection<PrintFilament> PrintFilaments { get; set; }
         // Nagivation Element to PrintFilament
+        public ICollection<PrinterFilament> PrinterFilaments { get; set; }
+        // Nagivation Element to PrintFilament
         public ICollection<FilamentAdjustment> FilamentAdjustments { get; set; }
     }
 }
