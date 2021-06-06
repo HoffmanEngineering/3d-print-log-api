@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -88,8 +89,12 @@ namespace PrintLogApi.Services
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                // Split on any spaces and search separately.
-                var criterias = searchText.Trim().Split(" ");
+                // Split on any spaces and search separately, preserving quotes.
+                var criterias = searchText.Split('"')
+                     .Select((element, index) => index % 2 == 0  // If even index
+                                           ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)  // Split the item
+                                           : new string[] { element })  // Keep the entire item
+                     .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
                 {
                     printQuery = printQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
