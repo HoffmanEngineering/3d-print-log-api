@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;

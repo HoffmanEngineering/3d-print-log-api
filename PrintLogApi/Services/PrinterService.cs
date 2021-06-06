@@ -74,6 +74,12 @@ namespace PrintLogApi.Services
                 }
             }
 
+            // Fixup for any loaded filaments with no set LoadedDateTime:
+            foreach (var pf in printer.LoadedFilaments.Where(lf => lf.LoadedDateTime == default(DateTimeOffset)))
+            {
+                pf.LoadedDateTime = modifiedTime;
+            }
+
             // Finally, unload these filament from any other printer's loaded list.
             var loadedFilamentFromOtherPrinters = await _context
                 .PrinterFilament
