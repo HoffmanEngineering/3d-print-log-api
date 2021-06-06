@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PrintLogApi.Models
@@ -29,5 +30,7 @@ namespace PrintLogApi.Models
         public double FilamentDiameter { get; set; }
 
         public bool IsActive { get; set; }
+
+        public ICollection<PrinterFilament> LoadedFilaments { get; set; }
     }
 }

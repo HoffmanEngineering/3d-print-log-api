@@ -35,6 +35,8 @@ namespace PrintLogApi
 
         public DbSet<PrintFilament> PrintFilament { get; set; }
 
+        public DbSet<PrinterFilament> PrinterFilament { get; set; }
+
         public DbSet<PrintImage> PrintImages { get; set; }
 
         public DbSet<Feedback> Feedback { get; set; }
@@ -133,6 +135,10 @@ namespace PrintLogApi
             modelBuilder.Entity<CuraSetting>()
                 .Property(c => c._Settings)
                 .HasColumnName("Settings");
+
+            // Only every query for currently-loaded filament.
+            modelBuilder.Entity<PrinterFilament>()
+                .HasQueryFilter(pf => !pf.UnloadedDateTime.HasValue);
         }
 
         public override int SaveChanges()

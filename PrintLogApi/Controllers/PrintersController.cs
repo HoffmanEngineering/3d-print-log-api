@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Extensions;
+using PrintLogApi.Services;
+using System;
 
 namespace PrintLogApi.Controllers
 {
@@ -22,12 +24,20 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly IFilamentService _filamentService;
+        private readonly IPrinterService _printerService;
 
-        public PrintersController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public PrintersController(PrintLogContext context,
+                                  IMapper mapper,
+                                  TelemetryClient telemetry,
+                                  IFilamentService filamentService,
+                                  IPrinterService printerService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _filamentService = filamentService;
+            _printerService = printerService;
         }
 
 
@@ -36,7 +46,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
-        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
+        public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)
@@ -58,9 +68,9 @@ namespace PrintLogApi.Controllers
             }
 
             var result = printers.OrderByDescending(p => p.Name).OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
-                .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider);
+                .ProjectTo<PrinterSummaryWithFilamentDto>(_mapper.ConfigurationProvider);
 
-            var response = await PagedList<PrinterSummary>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+            var response = await PagedList<PrinterSummaryWithFilamentDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
 
             return Ok(response);
         }
@@ -69,7 +79,16 @@ namespace PrintLogApi.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
         {
-            var printer = await _context.Printers.FindAsync(id);
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.FilamentAdjustments)
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.PrintFilaments)
+                .Where(p => p.Id == id)
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
 
             if (printer == null)
             {
@@ -105,7 +124,7 @@ namespace PrintLogApi.Controllers
                 return BadRequest();
             }
 
-            var existingPrinter = await _context.Printers.FindAsync(id);
+            var existingPrinter = await _printerService.getPrinterById(id);
 
             if (existingPrinter == null)
             {
@@ -121,6 +140,21 @@ namespace PrintLogApi.Controllers
             }
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
+
+            foreach (var filament in existingPrinter.LoadedFilaments)
+            {
+                if (filament.FilamentId != default)
+                {
+                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
+                    if (!canAccessFilament)
+                    {
+                        //throw new UserCannotAccessFilamentException();
+                        return StatusCode(403, "User does not have access to filament.");
+                    }
+                }
+            }
+
+            await this._printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
 
             _context.Entry(existingPrinter).State = EntityState.Modified;
 
@@ -158,6 +192,7 @@ namespace PrintLogApi.Controllers
             var newPrinter = _mapper.Map<Printer>(printer);
 
             newPrinter.UserId = userId.Value;
+            
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
@@ -165,6 +200,93 @@ namespace PrintLogApi.Controllers
             _telemetry.TrackEvent("PrinterAdded");
 
             return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<PrinterDetailDto>(newPrinter));
+        }
+
+        /// <summary>
+        /// Retrieve the list of currently loaded filament for this printer
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        [HttpGet("{id}/filament")]
+        public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
+        {
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.FilamentAdjustments)
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.PrintFilaments)
+                .Where(p => p.Id == id)
+                .SingleOrDefaultAsync();
+
+            if (printer == null)
+            {
+                return NotFound();
+            }
+
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            if (printer.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            return _mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        }
+
+        /// <summary>
+        /// Unload all filament for a printer by ID
+        /// </summary>
+        /// <param name="id"></param>
+        [HttpPut("{id}/filament/unload")]
+        public async Task<IActionResult> UnloadPrinterFilament(long id)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingPrinter = await _printerService.getPrinterById(id);
+
+            if (existingPrinter == null)
+            {
+
+                return NotFound();
+            }
+
+            if (existingPrinter.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            // Set loaded filament to an empty list.
+            await this._printerService.setLoadedFilament(existingPrinter.Id, new List<Guid>());
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!PrinterExists(id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            _telemetry.TrackEvent("PrinterFilamentUnloaded");
+
+            return Ok();
         }
 
         // TODO: Make the delete be a soft-inactive delete.

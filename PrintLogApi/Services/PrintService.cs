@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -25,13 +26,19 @@ namespace PrintLogApi.Services
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
         private readonly IFilamentService _filamentService;
+        private readonly IPrinterService _printerService;
 
-        public PrintService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, IFilamentService filamentService)
+        public PrintService(PrintLogContext context,
+                            IMapper mapper,
+                            TelemetryClient telemetry,
+                            IFilamentService filamentService,
+                            IPrinterService printerService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _filamentService = filamentService;
+            _printerService = printerService;
         }
 
         /// <summary>
@@ -82,7 +89,16 @@ namespace PrintLogApi.Services
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                printQuery = printQuery.Where(p => p.Title.Contains(searchText) || p.Notes.Contains(searchText));
+                // Split on any spaces and search separately, preserving quotes.
+                var criterias = searchText.Split('"')
+                     .Select((element, index) => index % 2 == 0  // If even index
+                                           ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)  // Split the item
+                                           : new string[] { element })  // Keep the entire item
+                     .SelectMany(element => element).ToList();
+                foreach (var text in criterias)
+                {
+                    printQuery = printQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
+                }
             }
 
             if (filterByStatus != null)
@@ -205,7 +221,14 @@ namespace PrintLogApi.Services
         {
             var newPrint = _mapper.Map<Print>(print);
 
-            var printer = await _context.Printers.FindAsync(print.PrinterId);
+            var printer = await _context.Printers
+                .Include(p => p.LoadedFilaments)
+                .Where(p => p.Id == print.PrinterId)
+                .FirstOrDefaultAsync();
+            if (printer == null)
+            {
+                throw new UserCannotAccessPrinterException();
+            }
             newPrint.Printer = printer;
 
             // Check if the user had access to that printer!
@@ -231,8 +254,15 @@ namespace PrintLogApi.Services
                         throw new UserCannotAccessFilamentException();
                     }
                 }
-                
             }
+
+            var newLoadedFilamentIds = newPrint.FilamentUsage
+                .Where(filament => filament.FilamentId.HasValue && filament.FilamentId != default)
+                .Select(filament => filament.FilamentId.Value);
+
+            // PrinterService setLoadedFilament
+            await _printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+
 
             await UpdateFilamentUsageWeights(newPrint);
 

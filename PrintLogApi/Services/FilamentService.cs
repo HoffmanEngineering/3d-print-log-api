@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -42,7 +43,17 @@ namespace PrintLogApi.Services
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(searchText) || f.Brand.Contains(searchText) || f.ColorName.Contains(searchText) || f.Notes.Contains(searchText));
+                // Split on any spaces and search separately.
+                var criterias = searchText.Split('"')
+                     .Select((element, index) => index % 2 == 0  // If even index
+                                           ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)  // Split the item
+                                           : new string[] { element })  // Keep the entire item
+                     .SelectMany(element => element).ToList();
+                foreach (var text in criterias)
+                {
+                    filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(text) || f.Brand.Contains(text) || f.ColorName.Contains(text) || f.MaterialType.Contains(text) || f.Notes.Contains(text));
+                }
+                
             }
 
             // Filter out inactives unless specified

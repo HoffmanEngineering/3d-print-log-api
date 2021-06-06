@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Models.DTOs.Filament
 {
@@ -50,5 +51,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public long? FilamentRemaining { get; set; }
 
         public double? FilamentLengthRemainingInM { get; set; }
+
+        public PrinterSummary LoadedInPrinter { get; set; }
     }
 }
