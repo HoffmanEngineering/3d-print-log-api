@@ -88,7 +88,12 @@ namespace PrintLogApi.Services
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                printQuery = printQuery.Where(p => p.Title.Contains(searchText) || p.Notes.Contains(searchText));
+                // Split on any spaces and search separately.
+                var criterias = searchText.Trim().Split(" ");
+                foreach (var text in criterias)
+                {
+                    printQuery = printQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
+                }
             }
 
             if (filterByStatus != null)
