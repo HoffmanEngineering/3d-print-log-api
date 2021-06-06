@@ -42,7 +42,13 @@ namespace PrintLogApi.Services
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(searchText) || f.Brand.Contains(searchText) || f.ColorName.Contains(searchText) || f.Notes.Contains(searchText));
+                // Split on any spaces and search separately.
+                var criterias = searchText.Trim().Split(" ");
+                foreach (var text in criterias)
+                {
+                    filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(text) || f.Brand.Contains(text) || f.ColorName.Contains(text) || f.MaterialType.Contains(text) || f.Notes.Contains(text));
+                }
+                
             }
 
             // Filter out inactives unless specified
