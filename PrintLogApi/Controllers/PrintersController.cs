@@ -12,6 +12,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Extensions;
 using PrintLogApi.Services;
+using System;
 
 namespace PrintLogApi.Controllers
 {
@@ -236,6 +237,56 @@ namespace PrintLogApi.Controllers
             }
 
             return _mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        }
+
+        /// <summary>
+        /// Unload all filament for a printer by ID
+        /// </summary>
+        /// <param name="id"></param>
+        [HttpPut("{id}/filament/unload")]
+        public async Task<IActionResult> UnloadPrinterFilament(long id)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingPrinter = await _printerService.getPrinterById(id);
+
+            if (existingPrinter == null)
+            {
+
+                return NotFound();
+            }
+
+            if (existingPrinter.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            // Set loaded filament to an empty list.
+            await this._printerService.setLoadedFilament(existingPrinter.Id, new List<Guid>());
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!PrinterExists(id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            _telemetry.TrackEvent("PrinterFilamentUnloaded");
+
+            return Ok();
         }
 
         // TODO: Make the delete be a soft-inactive delete.
