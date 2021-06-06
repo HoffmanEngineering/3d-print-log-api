@@ -45,7 +45,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet("summary")]
-        public async Task<ActionResult<IEnumerable<PrinterSummary>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
+        public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)
@@ -67,9 +67,9 @@ namespace PrintLogApi.Controllers
             }
 
             var result = printers.OrderByDescending(p => p.Name).OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
-                .ProjectTo<PrinterSummary>(_mapper.ConfigurationProvider);
+                .ProjectTo<PrinterSummaryWithFilamentDto>(_mapper.ConfigurationProvider);
 
-            var response = await PagedList<PrinterSummary>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+            var response = await PagedList<PrinterSummaryWithFilamentDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
 
             return Ok(response);
         }
