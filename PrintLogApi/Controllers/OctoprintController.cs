@@ -224,7 +224,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? default(Guid),
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
                         EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool0?.length/1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes= ""
@@ -237,7 +237,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        FilamentId = printersLoadedFilament.ElementAtOrDefault(1)?.FilamentId ?? default(Guid),
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(1)?.FilamentId ?? null,
                         EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool1?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
@@ -250,7 +250,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        FilamentId = printersLoadedFilament.ElementAtOrDefault(2)?.FilamentId ?? default(Guid),
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(2)?.FilamentId ?? null,
                         EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool2?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
@@ -263,7 +263,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        FilamentId = printersLoadedFilament.ElementAtOrDefault(3)?.FilamentId ?? default(Guid),
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(3)?.FilamentId ?? null,
                         EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool3?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
@@ -276,7 +276,7 @@ namespace PrintLogApi.Controllers
                     {
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
-                        FilamentId = printersLoadedFilament.ElementAtOrDefault(4)?.FilamentId ?? default(Guid),
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(4)?.FilamentId ?? null,
                         EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool4?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
                         Notes = ""
