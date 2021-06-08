@@ -39,13 +39,18 @@ namespace PrintLogApi.Controllers
                 .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
 
-            var printFilamentUsage = await baseQuery.SelectMany(p => p.FilamentUsage.Select(pf => (long)(pf.AmountMg ?? pf.EstimatedAmountMg ?? 0))).SumAsync();
+            // Calculate Filament Usage from the PrintFilaments
+            var printFilamentUsage = await baseQuery
+                .SelectMany(p => p.FilamentUsage.Select(pf => (long)((pf.AmountMg > 0 ? pf.AmountMg : null) ?? pf.EstimatedAmountMg ?? 0)))
+                .SumAsync();
 
+            // Calculate usage of the old "other" filament.
             var otherActualFilamentUsage = await baseQuery
                 .Where(p => p.FilamentUsageMg.HasValue && p.FilamentUsageMg.Value > 0)
                 .Select(p => (long?)p.FilamentUsageMg)
                 .SumAsync();
 
+            // Calculate the estimated usage from the old "other" filament.
             var otherEstimatedFilamentUsageWhenNoActualWasRecorded = await baseQuery
                 .Where(p => (!p.FilamentUsageMg.HasValue || p.FilamentUsageMg.Value == 0) && p.EstimatedFilamentUsageMg.HasValue)
                 .Select(p => (long?)p.EstimatedFilamentUsageMg)
