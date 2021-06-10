@@ -143,7 +143,7 @@ namespace PrintLogApi.Controllers
                 Status = PrintStatus.Printing,
                 CreatedById = userId,
                 UpdatedById = userId,
-                Title = data?.Job?.File?.Name ?? "",
+                Title = data?.Job?.File?.Name.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",
                 EstimatedPrintTimeInSeconds = (int)Math.Round(data?.Job?.AveragePrintTime ?? data?.Job?.EstimatedPrintTime ?? 0.0),
                 FilamentUsage = new List<PrintFilament>(),
                 FileName = data?.Job?.File?.Name ?? ""
