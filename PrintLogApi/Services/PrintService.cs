@@ -206,7 +206,10 @@ namespace PrintLogApi.Services
                 .Where(p => p.Id == id)
                 .FirstOrDefaultAsync();
 
-            print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ToList();
+            if (print is not null)
+            {
+                print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ToList();
+            }
 
             return print;
         }
