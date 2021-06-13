@@ -55,6 +55,7 @@ namespace PrintLogApi.Services
             PagedRequest pagingRequest,
             string searchText,
             SortRequest<PrintSummarySortColumn> sortRequest,
+            IEnumerable<long> filterByPrinterIds,
             PrintStatus? filterByStatus,
             long? userId,
             long? currentUserId)
@@ -104,6 +105,12 @@ namespace PrintLogApi.Services
             if (filterByStatus != null)
             {
                 printQuery = printQuery.Where(p => p.Status == filterByStatus);
+            }
+
+            // Filter by an of the selected printer ids.
+            if (filterByPrinterIds != null && filterByPrinterIds.Any())
+            {
+                printQuery = printQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
             }
 
 

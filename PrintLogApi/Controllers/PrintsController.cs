@@ -71,6 +71,7 @@ namespace PrintLogApi.Controllers
         /// </summary>
         /// <param name="pagingRequest">The paging request.</param>
         /// <param name="searchText">Optionally search for text in a print's title or notes.</param>
+        /// <param name="filterByPrinterIds">Optionally filter by specific printer ids.</param>
         /// <param name="sortRequest">The sorting request.</param>
         /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
         /// <param name="userId">Optionally search for public</param>
@@ -84,6 +85,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary(
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery, MaxLength(50)] string searchText,
+            [FromQuery] IEnumerable<long> filterByPrinterIds,
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
             [FromQuery] Print.PrintStatus? filterByStatus,
             [FromQuery] long? userId)
@@ -96,7 +98,7 @@ namespace PrintLogApi.Controllers
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
 
-            return await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByStatus, userId, currentUserId);
+            return await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByStatus, userId, currentUserId);
         }
 
         
