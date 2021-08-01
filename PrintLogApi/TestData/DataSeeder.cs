@@ -78,7 +78,7 @@ namespace PrintLogApi.TestData
                 {
                     Id = i,
                     StartDate = DateTimeOffset.Now.AddDays(-1),
-                    Notes = "A Test Note!",
+                    Notes = "This is a Test Note for Print " + i + ".",
                     EstimatedFilamentUsageMg = i * 100,
                     EstimatedPrintTimeInSeconds = i,
                     CreatedById = 1,
