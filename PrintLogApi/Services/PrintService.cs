@@ -546,5 +546,21 @@ namespace PrintLogApi.Services
         {
             return _context.Prints.Any(e => e.Id == id);
         }
+
+        public async Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime)
+        {
+            // TODO: User the currentUserId to filter the feed based on friends, likes, etcetc
+
+            var prints = await _context.Prints
+                .Where(p => p.CreatedDate < fromDateTime)
+                .Where(p => p.ViewStatus == PrintViewStatus.Public) // Only show public prints
+                .OrderByDescending(p => p.CreatedDate)
+                .Take(numberOfRecords)
+                .ProjectTo<PrintFeedSummaryDto>(_mapper.ConfigurationProvider)
+                .AsNoTracking()
+                .ToListAsync();
+
+            return prints;
+        }
     }
 }

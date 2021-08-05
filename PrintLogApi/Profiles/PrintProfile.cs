@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
 using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
@@ -18,6 +19,15 @@ namespace PrintLogApi.Profiles
                                                                         .Select(i => i.Id)
                                                                         .FirstOrDefault()))
                 .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
+                .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()));
+
+            CreateMap<Print, PrintFeedSummaryDto>()
+                .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images
+                                                                        .Where(i => i.IsDefault == true)
+                                                                        .Select(i => i.Id)
+                                                                        .FirstOrDefault()))
+                .ForMember(dest => dest.CreatedBy, opt => opt.MapFrom(src => src.CreatedBy))
+                .ForMember(dest => dest.CreatedDate, opt => opt.MapFrom(src => (DateTimeOffset) DateTime.SpecifyKind(src.CreatedDate, DateTimeKind.Utc)))
                 .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()));
 
             CreateMap<Print, PrintDetailDTO>()
