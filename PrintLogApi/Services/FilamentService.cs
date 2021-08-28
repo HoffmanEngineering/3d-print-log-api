@@ -34,10 +34,20 @@ namespace PrintLogApi.Services
             int pageNumber,
             int pageSize,
             string searchText,
-            bool? includeInactive)
+            bool? includeInactive,
+            bool? showFavoritesOnly,
+            bool? showLoadedFilamentOnly)
         {
-            var filamentsBase = _context.Filaments
-                .Where(f => f.CreatedById == userId)
+            var filament = _context.Filaments
+                .Where(f => f.CreatedById == userId);
+
+                        // Filter out unloaded-filaments if requested.
+            if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
+            {
+                filament = filament.Where(f => f.PrinterFilaments.Any(pf => !pf.UnloadedDateTime.HasValue));
+            }
+
+            var filamentsBase = filament
                 .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking();
 
@@ -60,7 +70,13 @@ namespace PrintLogApi.Services
             if (!includeInactive.HasValue || includeInactive.Value == false)
             {
                 filamentsBase = filamentsBase.Where(f => f.IsActive == true);
-            } 
+            }
+
+            // Filter out non-favorites if requested.
+            if (showFavoritesOnly.HasValue && showFavoritesOnly.Value == true)
+            {
+                filamentsBase = filamentsBase.Where(f => f.IsFavorite == true);
+            }
 
             if (sortColumn == FilamentSummarySortColumn.DisplayName)
             {
