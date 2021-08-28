@@ -20,6 +20,7 @@ using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
+using PrintLogApi.Models.SendGrid;
 using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -126,6 +127,15 @@ namespace PrintLogApi
             services.AddTransient<IUserDeletionService, UserDeletionService>();
             services.AddTransient<IAuth0Service, Auth0Service>();
             services.AddApplicationInsightsTelemetry();
+
+
+            services.AddTransient<IEmailSender, SendGridEmailSender>();
+            services.Configure<SendGridEmailSenderOptions>(options =>
+            {
+                options.ApiKey = Configuration["ExternalProviders:SendGrid:ApiKey"];
+                options.SenderEmail = Configuration["ExternalProviders:SendGrid:SenderEmail"];
+                options.SenderName = Configuration["ExternalProviders:SendGrid:SenderName"];
+            });
 
         }
 
