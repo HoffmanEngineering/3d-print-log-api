@@ -8,6 +8,11 @@ using PrintLogApi.Models.DTOs.Feedback;
 using PrintLogApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using PrintLogApi.Services;
+using System;
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace PrintLogApi.Controllers
 {
@@ -19,12 +24,16 @@ namespace PrintLogApi.Controllers
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly IEmailSender _emailSender;
+        private readonly string _feedbackEmail;
 
-        public FeedbacksController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public FeedbacksController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, IEmailSender emailSender, IConfiguration config )
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _emailSender = emailSender;
+            _feedbackEmail = config["FeedbackEmailAddress"];
         }
 
         /// <summary>
@@ -52,6 +61,26 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             _telemetry.TrackEvent("FeedbackAdded");
+
+
+
+            // Send Email
+            if (!string.IsNullOrWhiteSpace(_feedbackEmail))
+            {
+                var user = await _context.Users.Where(u => u.Id == newFeedback.CreatedById).FirstOrDefaultAsync();
+
+                var subject = "New 3D Print Log Feedback";
+                var body = $@"
+By: {System.Security.SecurityElement.Escape(user.DisplayName)} (User ID: {System.Security.SecurityElement.Escape(user.Id.ToString())}) <br>
+Email: {System.Security.SecurityElement.Escape(newFeedback.Email)} <br>
+Type: {Enum.GetName(typeof(Feedback.FeedbackType), newFeedback.Type)} <br>
+Feedback ID: {newFeedback.Id} <br>
+<br>
+Feedback: <br>
+{System.Security.SecurityElement.Escape(newFeedback.Note)}
+";
+                await _emailSender.SendEmailAsync(_feedbackEmail, subject, body);
+            }
 
             return StatusCode(201);
         }

@@ -33,7 +33,8 @@ namespace PrintLogApi.Controllers
             _allowedUserIds = config.GetSection("Feed").GetSection("AllowedUserIds").Get<long[]>();
         }
 
-    [HttpGet]
+        [HttpGet]
+        [Authorize]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<List<PrintFeedSummaryDto>>> GetFeed(DateTimeOffset? fromDateTime)
