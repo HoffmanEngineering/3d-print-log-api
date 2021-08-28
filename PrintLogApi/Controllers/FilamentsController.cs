@@ -45,7 +45,9 @@ namespace PrintLogApi.Controllers
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest,
             [FromQuery] string searchText,
-            [FromQuery] bool? includeInactive)
+            [FromQuery] bool? includeInactive,
+            [FromQuery] bool? showFavoritesOnly,
+            [FromQuery] bool? showLoadedFilamentOnly)
         {
             long? currentUserId = User.GetUserId();
             if (!currentUserId.HasValue)
@@ -59,7 +61,9 @@ namespace PrintLogApi.Controllers
                 pagingRequest.PageNumber, 
                 pagingRequest.PageSize,
                 searchText,
-                includeInactive);
+                includeInactive,
+                showFavoritesOnly,
+                showLoadedFilamentOnly);
         }
 
 
