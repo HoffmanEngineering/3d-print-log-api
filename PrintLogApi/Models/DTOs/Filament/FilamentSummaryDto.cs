@@ -53,5 +53,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double? FilamentLengthRemainingInM { get; set; }
 
         public PrinterSummary LoadedInPrinter { get; set; }
+
+        public bool IsFavorite { get; set; }
     }
 }
