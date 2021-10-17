@@ -76,15 +76,14 @@ namespace PrintLogApi.Services
             {
                 // Get the user's public prints
                 printQuery = _context.Prints
-                .Where(p => p.CreatedById == userId)
-                .Where(p => p.ViewStatus == Print.PrintViewStatus.Public);
+                    .Where(p => p.CreatedById == userId)
+                    .Where(p => p.ViewStatus == Print.PrintViewStatus.Public);
 
             }
             else
             {
-
                 printQuery = _context.Prints
-                .Where(p => p.CreatedById == currentUserId || p.Printer.UserId == currentUserId);
+                    .Where(p => p.CreatedById == currentUserId);
             }
 
 
