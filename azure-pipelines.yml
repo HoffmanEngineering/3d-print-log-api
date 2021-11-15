@@ -13,6 +13,11 @@ variables:
   buildConfiguration: "Release"
 
 steps:
+  - task: UseDotNet@2
+    inputs:
+      version: 6.x
+    displayName: Change to Dotnet 6
+
   - script: dotnet --version
     displayName: Check dotnet version
 
