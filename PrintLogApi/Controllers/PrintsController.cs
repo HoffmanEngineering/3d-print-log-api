@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -368,7 +369,12 @@ namespace PrintLogApi.Controllers
 
             await _printService.DeletePrint(existingPrint);
 
-            _telemetry.TrackEvent("PrintDeleted");
+            var properties = new Dictionary<string, string> { 
+                { "PrintId", existingPrint.Id.ToString() }, 
+                { "UserId", userId.ToString() }, 
+                { "PrintCreated", existingPrint.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }  
+            };
+            _telemetry.TrackEvent("PrintDeleted", properties);
 
             return Ok();
         }
