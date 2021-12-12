@@ -11,6 +11,8 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using System.Globalization;
+using System.Collections.Generic;
 
 namespace PrintLogApi.Controllers
 {
@@ -135,7 +137,12 @@ namespace PrintLogApi.Controllers
 
             await _commentService.DeleteCommentById(id);
 
-            _telemetry.TrackEvent("CommentDelete");
+            var properties = new Dictionary<string, string> {
+                { "CommentId", existingComment.Id.ToString() },
+                { "UserId", userId.ToString() },
+                { "CommentCreated", existingComment.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
+            };
+            _telemetry.TrackEvent("CommentDelete", properties);
 
             return Ok();
         }
