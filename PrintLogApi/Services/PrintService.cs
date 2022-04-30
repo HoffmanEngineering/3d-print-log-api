@@ -47,6 +47,7 @@ namespace PrintLogApi.Services
         /// <param name="pagingRequest"></param>
         /// <param name="searchText"></param>
         /// <param name="sortRequest"></param>
+        /// <param name="filterByPrinterIds"></param>
         /// <param name="filterByStatus"></param>
         /// <param name="userId"></param>
         /// <param name="currentUserId"></param>
@@ -515,7 +516,6 @@ namespace PrintLogApi.Services
         /// <param name="print"></param>
         /// <param name="commentBody"></param>
         /// <param name="userId"></param>
-        /// <param name=""></param>
         /// <returns></returns>
         public async Task<Comment> AddPrintComment(Print print, string commentBody, long userId)
         {
