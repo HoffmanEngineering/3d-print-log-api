@@ -37,6 +37,8 @@ namespace PrintLogApi.Controllers
         /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
         /// <param name="searchText">Search filament's name/description/brand for text.</param>
         /// <param name="includeInactive">Include filament rolls that have been marked as inactive.</param>
+        /// <param name="showFavoritesOnly">Show only the favoriate filaments</param>
+        /// <param name="showLoadedFilamentOnly">Show only currently loaded filament</param>
         /// <returns>A Paged List of filament rolls.</returns>
         /// <response code="200">Returns the paged list of filament rolls.</response>
         [HttpGet]
