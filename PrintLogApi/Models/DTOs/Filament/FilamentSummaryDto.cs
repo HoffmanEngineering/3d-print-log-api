@@ -51,6 +51,15 @@ namespace PrintLogApi.Models.DTOs.Filament
         public long? FilamentRemaining { get; set; }
 
         public double? FilamentLengthRemainingInM { get; set; }
+        /// <summary>
+        /// Any notes about the purchase price
+        /// </summary>
+        [StringLength(1000)]
+        public string PurchasePriceValue { get; set; }
+
+        public long? InitialNominalWeightMg { get; set; }
+
+        public double? DiameterMm { get; set; }
 
         public PrinterSummary LoadedInPrinter { get; set; }
 

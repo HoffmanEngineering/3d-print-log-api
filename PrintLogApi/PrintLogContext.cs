@@ -53,7 +53,9 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 1, Name = "Prints_DefaultPrintViewStatus", Description = "The Default View Status for a print." },
                 new UserSettingType() { Id = 2, Name = "Prints_LastSelectedPrinterId", Description = "The Id of the printer that was last selected." },
                 new UserSettingType() { Id = 3, Name = "Prints_LastSelectedAllowComments", Description = "The value of the last changed Allow Comments on prints." },
-                new UserSettingType() { Id = 4, Name = "Prints_LastSelectedFilamentMeasureType", Description = "The last selected filament measure type on the print." }
+                new UserSettingType() { Id = 4, Name = "Prints_LastSelectedFilamentMeasureType", Description = "The last selected filament measure type on the print." },
+                new UserSettingType() { Id = 5, Name = "Currency_Name", Description = "The three-character country code of the preferred currency" },
+                new UserSettingType() { Id = 6, Name = "Currency_Symbol", Description = "The symbol of the preferred currency" }
                 );
 
             // Pulled from Cura
