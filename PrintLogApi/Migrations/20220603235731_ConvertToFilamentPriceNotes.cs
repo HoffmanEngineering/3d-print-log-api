@@ -45,7 +45,7 @@ WHERE Filaments.PurchasePriceValue IS NOT NULL
             migrationBuilder.Sql(@"
 /* Set non-numeric prices to null */
 UPDATE FILAMENTS
-SET PurchasePriceValue = NULL
+SET PurchasePriceValue = PurchaseNotes
 WHERE Filaments.PurchaseNotes IS NOT NULL
 ");
 
