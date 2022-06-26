@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,10 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20220603235731_ConvertToFilamentPriceNotes")]
+    partial class ConvertToFilamentPriceNotes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -845,18 +847,6 @@ namespace PrintLogApi.Migrations
                             Id = 4,
                             Description = "The last selected filament measure type on the print.",
                             Name = "Prints_LastSelectedFilamentMeasureType"
-                        },
-                        new
-                        {
-                            Id = 5,
-                            Description = "The three-character country code of the preferred currency",
-                            Name = "Currency_Name"
-                        },
-                        new
-                        {
-                            Id = 6,
-                            Description = "The symbol of the preferred currency",
-                            Name = "Currency_Symbol"
                         });
                 });
 

@@ -66,6 +66,11 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// </summary>
         [StringLength(256)]
         public string PurchasePriceCurrency { get; set; }
+        /// <summary>
+        /// Any notes about the purchase price
+        /// </summary>
+        [StringLength(1000)]
+        public string PurchaseNotes { get; set; }
 
         [StringLength(1000)]
         public string Notes { get; set; }
