@@ -108,6 +108,28 @@ namespace PrintLogApi.Services
             return userId;
         }
 
+        /// <summary>
+        /// Updates the LastUsed value for an api key by setting the date to now (UTC).
+        /// </summary>
+        /// <param name="publicKey"></param>
+        /// <returns></returns>
+        /// <exception cref="ApiKeyIsNotValidException"></exception>
+        public async Task UpdateApiKeyLastUsed(string publicKey)
+        {
+            var hashedKey = GetSHA256Hash(publicKey);
+
+            var apiKey = await _context.UserApiKeys.Where(u => u.HashedKey == hashedKey && u.IsDeleted == false).SingleOrDefaultAsync();
+
+            if (apiKey == default)
+            {
+                throw new ApiKeyIsNotValidException();
+            }
+
+            apiKey.LastUsed = DateTimeOffset.UtcNow;
+
+            await _context.SaveChangesAsync();
+        }
+
         private string GetSHA256Hash(string publicKey)
         {
             using (SHA256 ShaHashFunction = SHA256.Create())
