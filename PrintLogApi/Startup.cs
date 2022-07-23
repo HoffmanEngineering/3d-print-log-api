@@ -61,7 +61,20 @@ namespace PrintLogApi
                 c.SwaggerDoc("v1", new OpenApiInfo { 
                     Title = "3D Print Log Api", 
                     Version = "v1",
-                    Description = "API powering https://3dprintlog.com, allowing users to manage their prints, printers, and filaments.",
+                    Description = @"HTTP API powering <https://3dprintlog.com>, allowing users to manage their prints, printers, and filaments.
+
+For additional documentation, please visit <https://www.3dprintlog.com/docs/getting-started>. Please contact us at <hello@3dprintlog.com> with any questions or comments.
+
+Authentication can be done using a personal API Key. After creating an account on the 3D Print Log website, create an API key using the following:
+- Navigate to the [Personal Api Keys](https://www.3dprintlog.com/api-keys) page by clicking on your User Profile Picture at the top-left, and selecting ""Personal Api Keys"".
+- Click Create new API Key.
+- Enter a new description(such a ""API Access Key"").
+- Click Submit to generate a new key.
+- Copy the new 32 - character key.
+   - Note: The API Key cannot be retrieved after you leave the page, so copy it to a secure location, otherwise you will have to generate a new key
+
+The API key can be used either by adding a **X-Api-Key header** with the key, or by including a **api_key query param** to each request.
+",
                     Contact = new OpenApiContact
                     {
                         Email = "hello@3dprintlog.com",
@@ -107,7 +120,7 @@ namespace PrintLogApi
 
                 var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
                 var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-                c.IncludeXmlComments(xmlPath);
+                c.IncludeXmlComments(xmlPath, true);
 
             });
 

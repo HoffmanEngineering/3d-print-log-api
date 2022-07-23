@@ -31,7 +31,7 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        /// Gets a Paged Result of filaments for the user.
+        /// Gets a Paged Result of filament summaries for the current user.
         /// </summary>
         /// <param name="pagingRequest">The paging request information.</param>
         /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
@@ -152,9 +152,16 @@ namespace PrintLogApi.Controllers
             }
         }
 
-        // POST: api/Filaments
-        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+        /// <summary>
+        ///     Create a new Filament for the current user.
+        /// </summary>
+        /// <param name="filamentDto">The dto containing all of the details for the filament to create.</param>
+        /// <returns>The filament detail DTO that was created.</returns>
+        /// <response code="201">The filament detail DTO that was created.</response>
+        /// <response code="401">Returned if the request is not authenticated.</response>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<ActionResult<FilamentDetailDto>> PostFilament(AddFilamentDto filamentDto)
         {
             var userId = User.GetUserId();
@@ -170,8 +177,17 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetFilament", new { id = newFilament.Id }, _mapper.Map<Filament, FilamentDetailDto>(newFilament));
         }
 
-        //// DELETE: api/Filaments/5
+        /// <summary>
+        /// Permantently delete a filament, if the filament has not been used in any existing prints.
+        /// </summary>
+        /// <param name="id">The ID of the filament to delete.</param>
+        /// <response code="204">Returned if the filament was deleted successfully.</response>
+        /// <response code="400">Returned if the filament is unable to be deleted since it has been used in a print.</response>
+        /// <response code="403">Returned if the current user cannot access the filament.</response>
         [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> DeleteFilament(Guid id)
         {
             var userId = User.GetUserId();

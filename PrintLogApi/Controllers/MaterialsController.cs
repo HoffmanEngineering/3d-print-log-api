@@ -10,6 +10,9 @@ using System.Linq;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Manage the list of default filament material types.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -24,7 +27,10 @@ namespace PrintLogApi.Controllers
             _mapper = mapper;
         }
 
-        // GET: api/Materials
+        /// <summary>
+        /// Returns the current list of material types for the filament selection dropdown.
+        /// </summary>
+        /// <returns></returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<MaterialDto>>> GetMaterials()
         {

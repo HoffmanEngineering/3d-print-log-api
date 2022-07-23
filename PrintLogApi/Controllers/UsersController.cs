@@ -23,6 +23,9 @@ using System.Globalization;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Manage 3D Print Log Users.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -57,6 +60,11 @@ namespace PrintLogApi.Controllers
             userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
         }
 
+        /// <summary>
+        /// Get the user summary for the specified user id. 
+        /// </summary>
+        /// <param name="id">The ID of the user to retrieve.</param>
+        /// <returns></returns>
         [HttpGet("{id}/summary")]
         [AllowAnonymous]
         public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
@@ -70,6 +78,10 @@ namespace PrintLogApi.Controllers
             return user;
         }
 
+        /// <summary>
+        /// Gets the user details for the currently authenticated user.
+        /// </summary>
+        /// <returns></returns>
         [HttpGet("me")]
         public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
         {
@@ -89,7 +101,7 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        ///  Marks the current user as deactivated
+        /// Marks the current user as deactivated
         /// </summary>
         /// <returns></returns>
         [HttpPost("me/deactivate")]
@@ -154,6 +166,11 @@ namespace PrintLogApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Gets the user details of the specified user. Respects the user's Profile View Status, so private profiles cannot be accessed by other users.
+        /// </summary>
+        /// <param name="id">The Id of the user to retrieve.</param>
+        /// <returns></returns>
         [HttpGet("{id}")]
         [AllowAnonymous]
         public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
@@ -171,6 +188,11 @@ namespace PrintLogApi.Controllers
             return _mapper.Map<UserDetailDto>(user);
         }
 
+        /// <summary>
+        /// Updates the current user's details.
+        /// </summary>
+        /// <param name="updatedUser"></param>
+        /// <returns></returns>
         [HttpPut("me")]
         public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
         {
@@ -213,6 +235,11 @@ namespace PrintLogApi.Controllers
             return _mapper.Map<UserDetailDto>(existingUser);
         }
 
+        /// <summary>
+        /// Replace the user profile image of the currently authenticated user.
+        /// </summary>
+        /// <param name="image">The image file to save.</param>
+        /// <returns></returns>
         [HttpPost("me/profile-image")]
         public async Task<ActionResult<UserUrlDto>> PostProfileImage([FromForm] IFormFile image)
         {
@@ -258,6 +285,11 @@ namespace PrintLogApi.Controllers
             return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
         }
 
+        /// <summary>
+        /// Replace the user cover image of the currently authenticated user.
+        /// </summary>
+        /// <param name="image">The image file to save.</param>
+        /// <returns></returns>
         [HttpPost("me/cover-image")]
         public async Task<ActionResult<UserUrlDto>> PostCoverImage([FromForm] IFormFile image)
         {

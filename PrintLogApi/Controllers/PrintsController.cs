@@ -28,6 +28,9 @@ using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Operations involving Prints, print filament, print images, and print comments.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -379,7 +382,12 @@ namespace PrintLogApi.Controllers
             return Ok();
         }
 
-
+        /// <summary>
+        /// Gets an image attached to a print.
+        /// </summary>
+        /// <param name="printId">The Id of the print.</param>
+        /// <param name="imageId">The id of the image to retrieve.</param>
+        /// <returns></returns>
         [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
@@ -414,6 +422,12 @@ namespace PrintLogApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Prints have a single "default" image, which is the image used in thumbnails. This is used to mark a specific image as the default image.
+        /// </summary>
+        /// <param name="printid">The id of the print.</param>
+        /// <param name="imageId">The id of the image to make default.</param>
+        /// <returns>Ok if the operation was successful.</returns>
         [HttpPost("{printid}/image/{imageId}/set-as-default")]
         public async Task<ActionResult> SetImageAsDefault(long printid, int imageId)
         {
@@ -443,6 +457,14 @@ namespace PrintLogApi.Controllers
             //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
+        /// <summary>
+        /// Create a new image and attach it to an existing print. If the "isDefault" param is set to true, then
+        /// it will mark the image as the print's default image.
+        /// </summary>
+        /// <param name="id">The ID of the print to save the image to.</param>
+        /// <param name="image">The image file to save.</param>
+        /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
+        /// <returns></returns>
         [HttpPost("{id}/image")]
         public async Task<ActionResult> PostImage(long id, [FromForm] IFormFile image, [FromForm] bool isDefault = false)
         {
@@ -517,6 +539,12 @@ namespace PrintLogApi.Controllers
             //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
+        /// <summary>
+        /// Delete an image from a print.
+        /// </summary>
+        /// <param name="printid">The id of the print.</param>
+        /// <param name="imageId">The id of the image to remove.</param>
+        /// <returns></returns>
         [HttpDelete("{printid}/image/{imageId}")]
         public async Task<ActionResult> RemoveImage(long printid, int imageId)
         {
@@ -542,8 +570,18 @@ namespace PrintLogApi.Controllers
             return Ok();
         }
 
-        // POST: api/Prints
+        /// <summary>
+        /// Create a new comment and attach it to the print.
+        /// </summary>
+        /// <param name="printId">The ID of the print to comment on.</param>
+        /// <param name="newComment">The details of the new comment.</param>
+        /// <response code="200">An OK response with the new comment details if the comment was added successfully.</response>
+        /// <response code="400">Returned if the request contains bad details, or if the print specified does not allow comments.</response>
+        /// <response code="403">Returned if the user cannot access the print specified.</response>
         [HttpPost("{printId}/comment")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
         public async Task<ActionResult<CommentDetailDto>> PostPrintComment(long printId, [FromBody, BindRequired] AddCommentDto newComment)
         {

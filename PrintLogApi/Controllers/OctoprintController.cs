@@ -7,6 +7,7 @@ using AutoMapper;
 using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -20,6 +21,9 @@ using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Handles incoming Octoprint Webhooks.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -52,8 +56,21 @@ namespace PrintLogApi.Controllers
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
         }
 
-        
+
+        /// <summary>
+        /// Webhook endpoint for the Octoprint Webhooks plugin. Takes in webhook data and uses that to create or 
+        /// update prints based on the statuses sent by Octoprint. See https://www.3dprintlog.com/docs/octoprint-webhookOctoprint 
+        /// Webhook Docs for more information.
+        /// </summary>
+        /// <param name="data">The wehbook data sent by Octoprint.</param>
+        /// <response code="200">Returned if the webhook was handled successfully.</response>
+        /// <response code="400">Returned if required data is missing in the webhook (like the DeviceIdentifier, etc).</response>
+        /// <response code="401">Returned if the user is not authenticated.</response>
+        /// <response code="403">Returned if the current user cannot access the printer specified.</response>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<ActionResult> Webhook([FromForm] OctoprintWebhookDto data)
         {
             this._logger.LogInformation("Webhook Recieved:");
@@ -73,7 +90,7 @@ namespace PrintLogApi.Controllers
                 {
                     // Check the Printer to make sure the user has access to it.
                     var printer = await _context.Printers.FindAsync(printerId);
-                    
+
                     // Check if the user had access to that printer!
                     if (printer is null || userId != printer.UserId)
                     {
@@ -123,7 +140,7 @@ namespace PrintLogApi.Controllers
             }
 
             return Ok(data);
-           
+
         }
 
         private bool isTestWebhook(OctoprintWebhookDto data)
@@ -163,7 +180,8 @@ namespace PrintLogApi.Controllers
                 {
                     throw new UserCannotAccessPrinterException();
                 }
-            } else
+            }
+            else
             {
                 throw new Exception("Invalid Device Identifier");
             }
@@ -185,7 +203,8 @@ namespace PrintLogApi.Controllers
                     // Printer isn't found, so... shrug
                     newPrint.AllowComments = false;
                 }
-            } catch (Exception)
+            }
+            catch (Exception)
             {
                 newPrint.AllowComments = false;
             }
@@ -225,9 +244,9 @@ namespace PrintLogApi.Controllers
                         IsEstimatedLengthSource = true,
                         Id = Guid.Empty,
                         FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool0?.length/1000 ?? 0.0, 3),
+                        EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool0?.length / 1000 ?? 0.0, 3),
                         IsActualLengthSource = false,
-                        Notes= ""
+                        Notes = ""
                     });
                 }
 
@@ -289,7 +308,7 @@ namespace PrintLogApi.Controllers
             {
                 newPrint.FileHash = StringToByteArray(data.Meta.Hash);
             }
-            
+
 
             newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data.CurrentTime);
 
@@ -336,7 +355,7 @@ namespace PrintLogApi.Controllers
 
 
             await _context.SaveChangesAsync();
-            
+
         }
 
         private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
@@ -357,7 +376,8 @@ namespace PrintLogApi.Controllers
                 .Include(p => p.FilamentUsage)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
-            } else if (data?.Job?.File?.Name is not null)
+            }
+            else if (data?.Job?.File?.Name is not null)
             {
                 // if the hash doesn't exist, then look for the same file name?
                 var fileName = data?.Job?.File?.Name;
@@ -371,13 +391,14 @@ namespace PrintLogApi.Controllers
                 .Include(p => p.FilamentUsage)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
-            } else
+            }
+            else
             {
                 // We have no other way of coorlating files other than filehash or name, so...
                 _logger.LogWarning("Not enough information from octoprint to find matching print.", data);
                 return;
             }
-                
+
             if (print == null)
             {
                 _logger.LogWarning("Matching print was not found.", data);

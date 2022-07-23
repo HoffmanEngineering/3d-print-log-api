@@ -14,6 +14,9 @@ using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Used to retrieve list of prints for a feed-like view. Not currently in use.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     public class FeedController : ControllerBase
