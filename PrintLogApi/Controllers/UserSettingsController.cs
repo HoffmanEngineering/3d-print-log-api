@@ -13,6 +13,10 @@ using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Manage the currently authenticated user's list of settings. User Settings are used throughout the application to
+    /// store preferences, last selected printers, etc.
+    /// </summary>
     [Route("api/Users/me/user-settings")]
     [ApiController]
     [Authorize]
@@ -50,6 +54,11 @@ namespace PrintLogApi.Controllers
             return settings;
         }
 
+        /// <summary>
+        /// Update an existing user setting.
+        /// </summary>
+        /// <param name="updateSettingDto">The details of the user setting to update.</param>
+        /// <returns></returns>
         [HttpPut]
         public async Task<ActionResult<UserSettingDto>> UpdateUserSetting([FromBody] UpdateUserSettingDto updateSettingDto)
         {
@@ -91,6 +100,11 @@ namespace PrintLogApi.Controllers
             return _mapper.Map<UserSettingDto>(existingSetting);
         }
 
+        /// <summary>
+        /// Save a new user setting.
+        /// </summary>
+        /// <param name="newSettingDto"></param>
+        /// <returns></returns>
         [HttpPost]
         public async Task<ActionResult<UserSettingDto>> CreateUserSetting([FromBody] AddUserSettingDto newSettingDto)
         {

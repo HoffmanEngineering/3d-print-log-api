@@ -16,6 +16,10 @@ using System.Collections.Generic;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Editing and removing existing comments. Comments cannot be created by themselves, they need to be created 
+    /// attached to another resource (ie, to add a comment on a Print, use the POST api/Prints/{printid}/comment).
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]

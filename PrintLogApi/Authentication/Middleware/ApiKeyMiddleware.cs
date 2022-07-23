@@ -77,6 +77,9 @@ namespace PrintLogApi.Authentication.Middleware
                 var principal = new GenericPrincipal(identity, new[] { "ApiUser" });
 
                 context.User = principal;
+
+                await userApiKeyService.UpdateApiKeyLastUsed(key);
+
                 await next(context);
             }
         }

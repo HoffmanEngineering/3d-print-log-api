@@ -13,6 +13,9 @@ using PrintLogApi.Exceptions;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Managing API keys for a user.
+    /// </summary>
     [Route("api/UserApiKeys")]
     [ApiController]
     [Authorize]
@@ -32,6 +35,10 @@ namespace PrintLogApi.Controllers
 
         }
 
+        /// <summary>
+        /// Get the list of API Key summary info for the current user.
+        /// </summary>
+        /// <returns></returns>
         [HttpGet]
         public async Task<ActionResult<List<UserApiKeyDto>>> GetApiKeySummaryForUser()
         {
@@ -46,6 +53,11 @@ namespace PrintLogApi.Controllers
             return apiKeys;
         }
 
+        /// <summary>
+        /// Generate a new API key for the current user.
+        /// </summary>
+        /// <param name="request"></param>
+        /// <returns></returns>
         [HttpPost]
         public async Task<ActionResult<NewUserApiKeyDto>> GenerateNewApiKey([FromBody] AddNewApiKeyDto request)
         {
@@ -61,6 +73,11 @@ namespace PrintLogApi.Controllers
             return newKey;
         }
 
+        /// <summary>
+        /// Delete the specific API Key.
+        /// </summary>
+        /// <param name="apiKey"></param>
+        /// <returns></returns>
         [HttpDelete("{apiKey}")]
         public async Task<ActionResult<NewUserApiKeyDto>> DeleteApiKey([FromRoute] Guid apiKey)
         {

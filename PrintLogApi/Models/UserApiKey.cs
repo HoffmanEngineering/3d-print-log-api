@@ -27,5 +27,10 @@ namespace PrintLogApi.Models
         public string Description { get; set; }
 
         public bool IsDeleted { get; set; }
+
+        /// <summary>
+        /// The date that the api key was last used.
+        /// </summary>
+        public DateTimeOffset? LastUsed { get; set; }
     }
 }

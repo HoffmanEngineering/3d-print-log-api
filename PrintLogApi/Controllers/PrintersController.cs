@@ -13,9 +13,13 @@ using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using System;
+using Microsoft.AspNetCore.Http;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Manage a user's list of printers.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -42,10 +46,16 @@ namespace PrintLogApi.Controllers
 
 
         /// <summary>
-        /// Get Print Summaries for current user
+        /// Get an array of paged Printer Summaries for current user.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="pagingRequest">Paging information</param>
+        /// <param name="searchText">Filter printers by name, make, and model.</param>
+        /// <param name="includeInactive">By default, only returns active printers. Set this to true to return both active and inactive printers.</param>
+        /// <response code="200">Returned with a paged list of printer summaries.</response>
+        /// <response code="401">Returned if the user is not authenticated.</response>
         [HttpGet("summary")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
@@ -75,8 +85,19 @@ namespace PrintLogApi.Controllers
             return Ok(response);
         }
 
-        // GET: api/Printers/5
+        /// <summary>
+        /// Return a specific printer by id.
+        /// </summary>
+        /// <param name="id">The ID of the printer.</param>
+        /// <response code="200">Returned with the printer details.</response>
+        /// <response code="401">Returned if the user is not authenticated.</response>
+        /// <response code="403">Returned if the current user cannot access the requested printer.</response>
+        /// <response code="404">Returned if the printer does not exist.</response>
         [HttpGet("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
         {
             var printer = await _context.Printers
@@ -109,8 +130,22 @@ namespace PrintLogApi.Controllers
             return _mapper.Map<PrinterDetailDto>(printer);
         }
 
-        // PUT: api/Printers/5
+        /// <summary>
+        /// Update a printer. Overwrites all properties of the printer.
+        /// </summary>
+        /// <param name="id">The ID of the printer to update.</param>
+        /// <param name="printer">The updated printer details.</param>
+        /// <returns></returns>
+        /// <response code="201">Returned with the updated printer details.</response>
+        /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+        /// <response code="401">Returned if the user is not authenticated.</response>
+        /// <response code="403">Returned if the current user cannot access the requested printer.</response>
+        /// <response code="404">Returned if the printer does not exist.</response>
         [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> PutPrinter(long id, AddPrinterDTO printer)
         {
             var userId = User.GetUserId();
@@ -131,8 +166,6 @@ namespace PrintLogApi.Controllers
 
                 return NotFound();
             }
-
-            
 
             if (existingPrinter.UserId != userId)
             {
@@ -179,8 +212,20 @@ namespace PrintLogApi.Controllers
             return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, _mapper.Map<PrinterDetailDto>(existingPrinter));
         }
 
-        // POST: api/Printers
+        /// <summary>
+        /// Create a new printer for the current user.
+        /// </summary>
+        /// <param name="printer">The printer details to create</param>
+        /// <response code="201">Returned with the newly creeated printer details.</response>
+        /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+        /// <response code="401">Returned if the user is not authenticated.</response>
+        /// <response code="403">Returned if the current user cannot access the requested printer.</response>
+        /// <response code="404">Returned if the printer does not exist.</response>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<PrinterDetailDto>> PostPrinter(AddPrinterDTO printer)
         {
             var userId = User.GetUserId();
@@ -288,23 +333,6 @@ namespace PrintLogApi.Controllers
 
             return Ok();
         }
-
-        // TODO: Make the delete be a soft-inactive delete.
-        //// DELETE: api/Printers/5
-        //[HttpDelete("{id}")]
-        //public async Task<ActionResult<Printer>> DeletePrinter(long id)
-        //{
-        //    var printer = await _context.Printers.FindAsync(id);
-        //    if (printer == null)
-        //    {
-        //        return NotFound();
-        //    }
-
-        //    _context.Printers.Remove(printer);
-        //    await _context.SaveChangesAsync();
-
-        //    return printer;
-        //}
 
         private bool PrinterExists(long id)
         {

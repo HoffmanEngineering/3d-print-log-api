@@ -15,6 +15,9 @@ using PrintLogApi.Models.DTOs.CuraSettings;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Operations around saving settings coming from the Cura 3D Print Log Uploader plugin.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]

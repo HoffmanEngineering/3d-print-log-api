@@ -16,6 +16,9 @@ using Microsoft.Extensions.Configuration;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Manage feedback.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]

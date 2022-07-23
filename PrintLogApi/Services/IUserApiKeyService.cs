@@ -11,5 +11,6 @@ namespace PrintLogApi.Services
         Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string description);
         Task<List<UserApiKeyDto>> GetApiKeySummaryForUser(long userId);
         Task<long> GetUserIdByApiKey(string publicKey);
+        Task UpdateApiKeyLastUsed(string publicKey);
     }
 }

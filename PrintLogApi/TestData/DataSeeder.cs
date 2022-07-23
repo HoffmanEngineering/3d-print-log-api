@@ -24,11 +24,60 @@ namespace PrintLogApi.TestData
             context.Printers.AddRange(printers);
             Save<Printer>(context);
 
+            // Create Test Filament
+
+            var filament = GetTestFilament();
+
+            context.Filaments.AddRange(filament);
+            context.SaveChanges();
+
             // Add Prints
-            var prints = GetTestPrints();
+            var prints = GetTestPrints(filament);
 
             context.Prints.AddRange(prints);
             Save<Print>(context);
+
+
+        }
+
+        private static List<Filament> GetTestFilament()
+        {
+             List<Filament> testFilament = new List<Filament>()
+             {
+
+             };
+
+            for (int i = 1; i <= 10000; i++)
+            {
+                var createdDate = new DateTime();
+                var filament = new Filament()
+                {
+                    Brand = $"Test Brand {i % 10}",
+                    ColorHex = "FFFFFF",
+                    ColorName = "White",
+                    CreatedById = 1,
+                    CreatedDate = createdDate,
+                    UpdatedById = 1,
+                    UpdatedDate = createdDate,
+                    DiameterMm = 1.75,
+                    DisplayName = $"Filament {i}",
+                    FilamentAdjustments = new List<FilamentAdjustment>(),
+                    Id = new Guid(),
+                    InitialNominalWeightMg = 1000000,
+                    InitialTotalWeightMg = 1250000,
+                    SpoolWeightMg = 250000,
+                    IsActive = true,
+                    IsFavorite = false,
+                    MaterialDensityGramPerCubicCm = 2.54,
+                    MaterialType = "PLA",
+                    Notes = $"Test Notes for Filament {i}",
+                    PurchasePriceValue = i % 2 == 0 ? "20.01" : "24.99",
+                };
+
+                testFilament.Add(filament);
+                    }
+
+                    return testFilament;
         }
 
         private static List<User> GetTestUsers()
@@ -64,7 +113,7 @@ namespace PrintLogApi.TestData
             return testPrinters;
         }
 
-        private static List<Print> GetTestPrints()
+        private static List<Print> GetTestPrints(List<Filament> filaments)
         {
             List<Print> testPrinters = new List<Print>()
             {
@@ -79,7 +128,17 @@ namespace PrintLogApi.TestData
                     Id = i,
                     StartDate = DateTimeOffset.Now.AddDays(-1),
                     Notes = "This is a Test Note for Print " + i + ".",
-                    EstimatedFilamentUsageMg = i * 100,
+                    FilamentUsage = new List<PrintFilament>() {
+                        new PrintFilament()
+                        {
+                            Filament = filaments[i-1],
+                            EstimatedAmountMg = i,
+                            IsEstimatedLengthSource = false,
+                            IsActualLengthSource = false,
+                            Notes = $"This is filament {i}"
+
+                        }
+                    },
                     EstimatedPrintTimeInSeconds = i,
                     CreatedById = 1,
                     CreatedDate = createdDate,
