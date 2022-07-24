@@ -53,9 +53,13 @@ namespace PrintLogApi.Models
         public double? TempRangeStart { get; set; }
         public double? TempRangeEnd { get; set; }
         /// <summary>
-        /// The user's recommended temperature
+        /// The user's recommended hotend temperature
         /// </summary>
         public double? RecommendedTemp { get; set; }
+        /// <summary>
+        /// The user's recommended bed temperature
+        /// </summary>
+        public double? RecommendedBedTemp { get; set; }
         public bool IsActive { get; set; }
         public DateTimeOffset? PurchaseDate { get; set; }
 
@@ -79,6 +83,11 @@ namespace PrintLogApi.Models
         /// </summary>
         [StringLength(1000)]
         public string PurchaseNotes { get; set; }
+        /// <summary>
+        /// Where is this filament stored?
+        /// </summary>
+        [StringLength(256)]
+        public string StorageLocation { get; set; }
 
         [StringLength(1000)]
         public string Notes { get; set; }

@@ -133,6 +133,18 @@ namespace PrintLogApi.Services
                 }
 
             }
+            else if (sortColumn == FilamentSummarySortColumn.StorageLocation)
+            {
+                if (sortDirection == SortDirection.Asc)
+                {
+                    filamentsBase = filamentsBase.OrderBy(f => f.StorageLocation).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                }
+                else
+                {
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.StorageLocation).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                }
+
+            }
 
             return await PagedList<FilamentSummaryDto>.CreateAsync(filamentsBase, pageNumber, pageSize);
 
