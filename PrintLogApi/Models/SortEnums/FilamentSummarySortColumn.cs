@@ -12,5 +12,6 @@ namespace PrintLogApi.Models.SortEnums
         FilamentRemaining = 3,
         Brand = 4,
         Color = 5,
+        StorageLocation = 6,
     }
 }

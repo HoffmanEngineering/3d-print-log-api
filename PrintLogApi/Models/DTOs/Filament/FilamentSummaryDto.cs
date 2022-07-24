@@ -62,6 +62,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double? DiameterMm { get; set; }
 
         public PrinterSummary LoadedInPrinter { get; set; }
+        public string StorageLocation { get; set; }
 
         public bool IsFavorite { get; set; }
     }
