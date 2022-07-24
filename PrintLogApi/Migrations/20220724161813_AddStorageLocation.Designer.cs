@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,10 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20220724161813_AddStorageLocation")]
+    partial class AddStorageLocation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -201,9 +203,6 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("PurchasePriceValue")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
-
-                    b.Property<double?>("RecommendedBedTemp")
-                        .HasColumnType("float");
 
                     b.Property<double?>("RecommendedTemp")
                         .HasColumnType("float");
