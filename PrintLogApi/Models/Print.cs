@@ -15,7 +15,8 @@ namespace PrintLogApi.Models
             Printing = 2,
             Success = 3,
             Cancelled = 4,
-            Failed = 5
+            Failed = 5,
+            PartialSuccess = 6,
         }
 
         public enum PrintViewStatus
