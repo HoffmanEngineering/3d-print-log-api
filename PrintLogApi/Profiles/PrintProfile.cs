@@ -19,7 +19,19 @@ namespace PrintLogApi.Profiles
                                                                         .Select(i => i.Id)
                                                                         .FirstOrDefault()))
                 .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
-                .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()));
+                .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment).Count()))
+                .ForMember(dest => dest.SumActualFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                                                                                                                    p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg : 0)))
+                .ForMember(dest => dest.SumEstimatedFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.EstimatedAmountMg.HasValue &&
+                                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)))
+                .ForMember(dest => dest.TotalFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                                                                                                                    p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg : 
+                                                                                                                    p.EstimatedAmountMg.HasValue &&
+                                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)));
 
             CreateMap<Print, PrintFeedSummaryDto>()
                 .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images
