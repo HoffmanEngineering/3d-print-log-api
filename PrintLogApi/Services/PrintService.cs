@@ -127,7 +127,7 @@ namespace PrintLogApi.Services
                         printQuery = printQuery.OrderByDescending(p => p.Title).ThenByDescending(p => p.CreatedDate);
                     }
                 }
-                else
+                else if (sortRequest.SortColumn == PrintSummarySortColumn.StartDate)
                 {
                     if (sortRequest.SortDirection == SortDirection.Asc)
                     {
@@ -136,6 +136,27 @@ namespace PrintLogApi.Services
                     else
                     {
                         printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
+                    }
+                }
+                else if (sortRequest.SortColumn == PrintSummarySortColumn.FilamentUsage)
+                {
+                    if (sortRequest.SortDirection == SortDirection.Asc)
+                    {
+                        printQuery = printQuery.OrderBy(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                                                                                                                    p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg :
+                                                                                                                    p.EstimatedAmountMg.HasValue &&
+                                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                    }
+                    else
+                    {
+                        printQuery = printQuery.OrderByDescending(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                                                                                                                    p.AmountMg > 0 ?
+                                                                                                                    p.AmountMg :
+                                                                                                                    p.EstimatedAmountMg.HasValue &&
+                                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
                     }
                 }
             }

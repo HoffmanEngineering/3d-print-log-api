@@ -141,6 +141,16 @@ namespace PrintLogApi
             // Only every query for currently-loaded filament.
             modelBuilder.Entity<PrinterFilament>()
                 .HasQueryFilter(pf => !pf.UnloadedDateTime.HasValue);
+
+            modelBuilder.Entity<PrinterFilament>()
+                .HasIndex(pf => pf.PrinterId).IncludeProperties(pf => new { pf.FilamentId, pf.LoadedDateTime, pf.UnloadedDateTime })
+                .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<PrinterFilament>()
+                .HasIndex(pf => pf.FilamentId).IncludeProperties(pf => new { pf.PrinterId, pf.LoadedDateTime, pf.UnloadedDateTime })
+                .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
         }
 
         public override int SaveChanges()

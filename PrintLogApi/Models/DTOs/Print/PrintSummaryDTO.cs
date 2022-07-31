@@ -22,6 +22,15 @@ namespace PrintLogApi.Models.DTOs.Print
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? PrintTimeInSeconds { get; set; }
 
+        public ICollection<PrintFilamentSummaryDto> FilamentUsage { get; set; }
+
+        public int SumActualFilamentWeightMg { get; set; }
+
+        public int SumEstimatedFilamentWeightMg { get; set; }
+
+        public int TotalFilamentWeightMg { get; set; }
+
+
         public long CreatedByUserId { get; set; }
 
         public int DefaultPrintImageId { get; set; }
