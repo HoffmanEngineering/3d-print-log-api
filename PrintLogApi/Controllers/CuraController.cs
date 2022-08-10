@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -24,10 +25,12 @@ namespace PrintLogApi.Controllers
     public class CuraController : ControllerBase
     {
         private readonly PrintLogContext _context;
+        private readonly TelemetryClient _telemetry;
 
-        public CuraController(PrintLogContext context)
+        public CuraController(PrintLogContext context, TelemetryClient telemetry)
         {
             _context = context;
+            _telemetry = telemetry;
         }
 
         /// <summary>
@@ -62,6 +65,8 @@ namespace PrintLogApi.Controllers
             }
             else 
             {
+                _telemetry.TrackEvent("CuraSettingsFirstLoad");
+
                 // Update the setting to be locked to the first user that looks at it.
                 settings.UserId = userId.Value;
 
@@ -81,6 +86,8 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<NewCuraSettingsDto>> SaveSettings()
         {
+
+            _telemetry.TrackEvent("CuraSettingsSaved");
 
             using var ms = new MemoryStream();
             await Request.Body.CopyToAsync(ms);
