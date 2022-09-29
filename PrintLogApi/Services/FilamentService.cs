@@ -82,10 +82,10 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenBy(f => f.CreatedDate);
                 } else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenByDescending(f => f.CreatedDate);
                 }
             } else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
             {

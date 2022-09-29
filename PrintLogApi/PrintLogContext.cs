@@ -47,6 +47,9 @@ namespace PrintLogApi
 
         public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
+        public static int fnNaturalSort(string sortKey)
+            => throw new NotSupportedException();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<UserSettingType>().HasData(
@@ -151,6 +154,9 @@ namespace PrintLogApi
                 .HasFilter("[UnloadedDateTime] IS NULL");
 
             modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
+
+            modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
+                .HasName("fnNaturalSort");
         }
 
         public override int SaveChanges()
