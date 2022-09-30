@@ -16,7 +16,6 @@ steps:
   - task: UseDotNet@2
     inputs:
       version: 7.x
-      includePreviewVersions: true
     displayName: Change to Dotnet 7
 
   - script: dotnet --version
