@@ -15,9 +15,8 @@ variables:
 steps:
   - task: UseDotNet@2
     inputs:
-      version: 7.x
-      includePreviewVersions: true
-    displayName: Change to Dotnet 7
+      version: 6.x
+    displayName: Change to Dotnet 6
 
   - script: dotnet --version
     displayName: Check dotnet version
@@ -42,4 +41,4 @@ steps:
       appType: "webAppLinux"
       WebAppName: "3d-print-log-api-prod"
       packageForLinux: "$(Build.ArtifactStagingDirectory)/**/*.zip"
-      RuntimeStack: "DOTNETCORE|7.0"
+      RuntimeStack: "DOTNETCORE|6.0"
