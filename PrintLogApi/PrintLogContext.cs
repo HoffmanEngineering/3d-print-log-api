@@ -58,7 +58,9 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 3, Name = "Prints_LastSelectedAllowComments", Description = "The value of the last changed Allow Comments on prints." },
                 new UserSettingType() { Id = 4, Name = "Prints_LastSelectedFilamentMeasureType", Description = "The last selected filament measure type on the print." },
                 new UserSettingType() { Id = 5, Name = "Currency_Name", Description = "The three-character country code of the preferred currency" },
-                new UserSettingType() { Id = 6, Name = "Currency_Symbol", Description = "The symbol of the preferred currency" }
+                new UserSettingType() { Id = 6, Name = "Currency_Symbol", Description = "The symbol of the preferred currency" },
+                new UserSettingType() { Id = 7, Name = "Filaments_DefaultDiameterMm", Description = "The default diameter of new filament (in millimeters)." },
+                new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." }
                 );
 
             // Pulled from Cura

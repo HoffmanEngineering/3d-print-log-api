@@ -376,9 +376,7 @@ namespace PrintLogApi.Services
         /// <summary>
         /// When we save the filament usage, we need to ensure that the filament weights and lengths are correctly filled out.
         /// </summary>
-
-
-        private async Task UpdateFilamentUsageWeights(Print print)
+        public async Task UpdateFilamentUsageWeights(Print print)
         {
             foreach(var pf in print.FilamentUsage)
             {
