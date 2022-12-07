@@ -34,6 +34,7 @@ namespace PrintLogApi.Controllers
         private readonly TelemetryClient _telemetry;
         private readonly ILogger _logger;
         private readonly IUserApiKeyService _userApiKeyService;
+        private readonly IPrintService _printService;
 
         // TODO: Move this out of here....
         private readonly string printImageContainerName = "printimages";
@@ -44,6 +45,7 @@ namespace PrintLogApi.Controllers
                                    TelemetryClient telemetry,
                                    ILogger<OctoprintController> logger,
                                    IUserApiKeyService userApiKeyService,
+                                   IPrintService printService,
                                    IConfiguration config)
         {
             _context = context;
@@ -51,6 +53,7 @@ namespace PrintLogApi.Controllers
             _telemetry = telemetry;
             _logger = logger;
             _userApiKeyService = userApiKeyService;
+            _printService = printService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -301,6 +304,8 @@ namespace PrintLogApi.Controllers
                         Notes = ""
                     });
                 }
+
+                await _printService.UpdateFilamentUsageWeights(newPrint);
             }
 
             // Work with File Hash

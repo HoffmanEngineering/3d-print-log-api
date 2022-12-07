@@ -23,6 +23,6 @@ namespace PrintLogApi.Services
         Task SetDefaultImage(long printId, long newDefaultImageId);
         Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
         Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
-
+        Task UpdateFilamentUsageWeights(Print print);
     }
 }
