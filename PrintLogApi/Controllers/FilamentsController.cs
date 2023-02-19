@@ -213,5 +213,72 @@ namespace PrintLogApi.Controllers
 
             return NoContent();
         }
+
+        /// <summary>
+        /// Returns a DTO which includes a list of all filament storage locations for the current user.
+        /// </summary>
+        /// <returns></returns>
+        /// <response code="200">The Filament Storage Locations on success.</response>
+        [HttpGet("storage-locations")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<FilamentStorageLocationDto>> GetFilamentStorageLocations()
+        {
+
+            var currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Forbid();
+            }
+
+            var locations = await this._filamentService.GetFilamentStorageLocations(currentUserId.Value);
+
+            return new FilamentStorageLocationDto { StorageLocations = locations };
+        }
+
+        /// <summary>
+        /// Returns a DTO which includes a list of all filament purchase locations for the current user.
+        /// </summary>
+        /// <returns></returns>
+        /// <response code="200">The Filament Purchase Locations on success.</response>
+        [HttpGet("purchase-locations")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<FilamentPurchaseLocationsDto>> GetFilamentPurchaseLocations()
+        {
+
+            var currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Forbid();
+            }
+
+            var locations = await this._filamentService.GetFilamentPurchaseLocations(currentUserId.Value);
+
+            return new FilamentPurchaseLocationsDto { PurchaseLocations = locations };
+        }
+
+
+        /// <summary>
+        /// Returns a DTO which includes a list of all filament brands for the current user.
+        /// </summary>
+        /// <returns></returns>
+        /// <response code="200">The Filament Brands on success.</response>
+        [HttpGet("brands")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<FilamentBrandsDto>> GetFilamentBrands()
+        {
+
+            var currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Forbid();
+            }
+
+            var brands = await this._filamentService.GetFilamentBrands(currentUserId.Value);
+
+            return new FilamentBrandsDto { Brands = brands };
+        }
     }
 }
