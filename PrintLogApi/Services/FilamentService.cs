@@ -254,6 +254,17 @@ namespace PrintLogApi.Services
                 .ToArrayAsync();
         }
 
+        public async Task<string[]> GetFilamentBrands(long userId)
+        {
+            return await _context.Filaments
+                .Where(f => f.CreatedById == userId)
+                .Where(f => f.Brand != null && f.Brand != "")
+                .OrderBy(f => f.Brand)
+                .Select(f => f.Brand)
+                .Distinct()
+                .ToArrayAsync();
+        }
+
         public async Task<bool> CanUserAccessFilament(long userId, Guid filamentId)
         {
             var filament = await GetFilamentById(filamentId);

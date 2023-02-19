@@ -13,6 +13,7 @@ namespace PrintLogApi.Services
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task DeleteFilament(Guid filamentId);
         bool FilamentExists(Guid id);
+        Task<string[]> GetFilamentBrands(long userId);
         Task<Filament> GetFilamentById(Guid id);
         Task<string[]> GetFilamentPurchaseLocations(long userId);
         Task<string[]> GetFilamentStorageLocations(long userId);

@@ -257,5 +257,28 @@ namespace PrintLogApi.Controllers
 
             return new FilamentPurchaseLocationsDto { PurchaseLocations = locations };
         }
+
+
+        /// <summary>
+        /// Returns a DTO which includes a list of all filament brands for the current user.
+        /// </summary>
+        /// <returns></returns>
+        /// <response code="200">The Filament Brands on success.</response>
+        [HttpGet("brands")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<FilamentBrandsDto>> GetFilamentBrands()
+        {
+
+            var currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Forbid();
+            }
+
+            var brands = await this._filamentService.GetFilamentBrands(currentUserId.Value);
+
+            return new FilamentBrandsDto { Brands = brands };
+        }
     }
 }
