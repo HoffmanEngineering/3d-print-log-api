@@ -232,6 +232,28 @@ namespace PrintLogApi.Services
             return updatedFilament;
         }
 
+        public async Task<string[]> GetFilamentStorageLocations(long userId)
+        {
+            return await _context.Filaments
+                .Where(f => f.CreatedById == userId)
+                .Where(f => f.StorageLocation != null && f.StorageLocation != "" )
+                .OrderBy(f => f.StorageLocation)
+                .Select(f => f.StorageLocation)
+                .Distinct()
+                .ToArrayAsync();
+        }
+
+        public async Task<string[]> GetFilamentPurchaseLocations(long userId)
+        {
+            return await _context.Filaments
+                .Where(f => f.CreatedById == userId)
+                .Where(f => f.PurchaseLocation != null && f.PurchaseLocation != "")
+                .OrderBy(f => f.PurchaseLocation)
+                .Select(f => f.PurchaseLocation)
+                .Distinct()
+                .ToArrayAsync();
+        }
+
         public async Task<bool> CanUserAccessFilament(long userId, Guid filamentId)
         {
             var filament = await GetFilamentById(filamentId);
