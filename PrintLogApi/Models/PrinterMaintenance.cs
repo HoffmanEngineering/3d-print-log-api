@@ -35,10 +35,5 @@ namespace PrintLogApi.Models
         /// </summary>
         [MaxLength(256)]
         public string PriceValue { get; set; }
-        /// <summary>
-        /// The Currency Marker (ie, USD)
-        /// </summary>
-        [MaxLength(256)]
-        public string PriceCurrency { get; set; }
     }
 }
