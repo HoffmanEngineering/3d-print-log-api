@@ -1,0 +1,249 @@
+﻿using System;
+using System.Threading.Tasks;
+using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
+using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.PrinterMaintenance;
+using PrintLogApi.Models.SortEnums;
+using PrintLogApi.Services;
+
+namespace PrintLogApi.Controllers
+{
+    /// <summary>
+    /// Manage a user's printer maintenance entries
+    /// </summary>
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize]
+    public class PrinterMaintenanceController : ControllerBase
+    {
+        private readonly IPrinterMaintenanceService _printerMaintenanceService;
+        private readonly IMapper _mapper;
+        private readonly IPrinterService _printerService;
+
+        public PrinterMaintenanceController(IPrinterMaintenanceService printerMaintenanceService, IMapper mapper, IPrinterService printerService)
+        {
+            _printerMaintenanceService = printerMaintenanceService;
+            _mapper = mapper;
+            _printerService = printerService;
+        }
+
+        /// <summary>
+        /// Gets a Paged Result of printer maintenance entries
+        /// </summary>
+        /// <param name="pagingRequest">The paging request information.</param>
+        /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
+        /// <param name="searchText">Search maintenance entries's category/description/notes for text.</param>
+        /// <param name="filterByPrinterIds">Filter by specific printer ids.</param>
+        /// <param name="includeDone">Whether to include entries marked as Done.</param>
+        /// <param name="includeNotDone">Whether to include entries marked as Done.</param>
+        /// <returns>A Paged List of printer maintenance entries.</returns>
+        /// <response code="200">Returns the paged list of printer maintenance entries.</response>
+        [HttpGet]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<PagedList<PrinterMaintenanceDto>>> GetPrinterMaintenanceEntriesForCurrentUser(
+            [FromQuery] PagedRequest pagingRequest,
+            [FromQuery] SortRequest<PrinterMaintenanceSortColumn> sortRequest,
+            [FromQuery] string searchText,
+            [FromQuery] long[] filterByPrinterIds,
+            [FromQuery] bool? includeDone,
+            [FromQuery] bool? includeNotDone)
+        {
+            long? currentUserId = User.GetUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized("Please login before requesting filaments.");
+            }
+
+            return await _printerMaintenanceService.GetPrinterMaintenanceByUser(currentUserId.Value, 
+                sortRequest.SortDirection, 
+                sortRequest.SortColumn, 
+                pagingRequest.PageNumber, 
+                pagingRequest.PageSize,
+                searchText,
+                filterByPrinterIds,
+                includeDone,
+                includeNotDone
+                );
+        }
+
+
+        /// <summary>
+        /// Returns detailed information for a maintence entry
+        /// </summary>
+        /// <param name="id">The GUID of the entry.</param>
+        /// <returns></returns>
+        /// <response code="200">The Maintenance Entry details on success.</response>
+        /// <response code="403">Returned when the requested entry does not belong to the current user.</response>
+        /// <response code="404">Returned when an entry with that GUID does not exist.</response>
+        [HttpGet("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<PrinterMaintenanceDto>> GetMaintenanceEntry(Guid id)
+        {
+            var entry = await _printerMaintenanceService.GetEntryById(id);
+
+            if (entry == null)
+            {
+                return NotFound();
+            }
+
+            var currentUserId = User.GetUserId();
+
+            if (currentUserId != entry.CreatedById)
+            {
+                return Forbid();
+            }
+
+            return _mapper.Map<PrinterMaintenanceDto>(entry);
+        }
+
+        /// <summary>
+        /// Update an existing maintenance entry with new information
+        /// </summary>
+        /// <param name="id">The GUID of the entry to update.</param>
+        /// <param name="maintenanceDto">The updated entry details.</param>
+        /// <returns>The updated entry.</returns>
+        /// <response code="201">The updated entry information.</response>
+        /// <response code="400">Returned if the id does not match the id of the entry details provided.</response>
+        /// <response code="401">Returned if the request is not authenticated.</response>
+        /// <response code="403">Returned if the current user tries to update an entry which is not theirs.</response>
+        /// <response code="404">Returned if a entry with the specified ID is not found.</response>
+        [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> PutPrinterMaintenanceEntry(Guid id, PutPrinterMaintenanceDto maintenanceDto)
+        {
+            if (id != maintenanceDto.Id)
+            {
+                return BadRequest();
+            }
+
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingEntry = await _printerMaintenanceService.GetEntryById(id);
+
+            if (existingEntry == null)
+            {
+                return NotFound();
+            }
+
+            if (existingEntry.CreatedById != userId)
+            {
+                return Forbid();
+            }
+
+            var printer = await _printerService.getPrinterById(maintenanceDto.PrinterId);
+
+            // Return if the printer does not belong to the user making the request.
+            if (printer.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                var updatedEntry = await _printerMaintenanceService.UpdateEntry(id, maintenanceDto, userId.Value);
+
+                return CreatedAtAction("GetMaintenanceEntry", new { id = existingEntry.Id }, _mapper.Map<PrinterMaintenanceDto>(updatedEntry));
+            }
+            catch (DoesNotExistException)
+            {
+                return NotFound();
+            }
+        }
+
+        /// <summary>
+        ///     Create a new Maintenance Entry for the current user.
+        /// </summary>
+        /// <param name="dto">The dto containing all of the details for the printer maintenance entry to create.</param>
+        /// <returns>The filament detail DTO that was created.</returns>
+        /// <response code="201">The filament detail DTO that was created.</response>
+        /// <response code="401">Returned if the request is not authenticated.</response>
+        [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<PrinterMaintenanceDto>> PostPrinterMaintenanceEntry(AddPrinterMaintenanceDto dto)
+        {
+            var userId = User.GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var newEntry = await _printerMaintenanceService.AddEntry(dto, userId.Value);
+
+
+            return CreatedAtAction("GetMaintenanceEntry", new { id = newEntry.Id }, _mapper.Map<PrinterMaintenance, PrinterMaintenanceDto>(newEntry));
+        }
+
+        /// <summary>
+        /// Permantently delete a maintenance entry
+        /// </summary>
+        /// <param name="id">The ID of the entry to delete.</param>
+        /// <response code="204">Returned if the entry was deleted successfully.</response>
+        /// <response code="403">Returned if the current user cannot access the filament.</response>
+        [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<IActionResult> DeletePrinterMaintenceEntry(Guid id)
+        {
+            var userId = User.GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingEntry = await _printerMaintenanceService.GetEntryById(id);
+
+            if (existingEntry.CreatedById != userId)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                await _printerMaintenanceService.DeleteMaintenanceEntry(existingEntry);
+            } catch (Exception)
+            {
+                return BadRequest("Entry cannot be deleted");
+            }
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Returns a DTO which includes a list of all maintenance categories for the current user.
+        /// </summary>
+        /// <returns></returns>
+        /// <response code="200">The Maintence Categories on success.</response>
+        [HttpGet("categories")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<PrinterMaintenanceCategoriesDto>> GetPrinterMaintenanceCategories()
+        {
+
+            var currentUserId = User.GetUserId();
+
+            if (!currentUserId.HasValue)
+            {
+                return Forbid();
+            }
+
+            var categories = await this._printerMaintenanceService.GetMaintenanceCategories(currentUserId.Value);
+
+            return new PrinterMaintenanceCategoriesDto { Categories = categories };
+        }
+    }
+}

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20230325012121_AddPrinterMaintenance")]
+    partial class AddPrinterMaintenance
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -713,6 +716,10 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("PriceCurrency")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("PriceValue")
                         .HasMaxLength(256)
