@@ -37,6 +37,8 @@ namespace PrintLogApi
 
         public DbSet<PrinterFilament> PrinterFilament { get; set; }
 
+        public DbSet<PrinterMaintenance> PrinterMaintenance { get; set; }
+
         public DbSet<PrintImage> PrintImages { get; set; }
 
         public DbSet<Feedback> Feedback { get; set; }
@@ -156,6 +158,8 @@ namespace PrintLogApi
                 .HasFilter("[UnloadedDateTime] IS NULL");
 
             modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
+
+            modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate});
 
             modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
                 .HasName("fnNaturalSort");
