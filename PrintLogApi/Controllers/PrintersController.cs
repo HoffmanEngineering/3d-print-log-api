@@ -334,6 +334,51 @@ namespace PrintLogApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Permantently delete a Printer, if the Printer has not been used in any existing prints.
+        /// </summary>
+        /// <param name="id">The ID of the printer to delete.</param>
+        /// <response code="204">Returned if the printer was deleted successfully.</response>
+        /// <response code="400">Returned if the printer is unable to be deleted since it has been used in a print.</response>
+        /// <response code="403">Returned if the current user cannot access the printer.</response>
+        [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<IActionResult> DeletePrinter(long id)
+        {
+            var userId = User.GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var existingPrinter = await _printerService.getPrinterById(id);
+
+            if (existingPrinter == null)
+            {
+
+                return NotFound();
+            }
+
+            if (existingPrinter.UserId != userId)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                await _printerService.DeletePrinter(id);
+            }
+            catch (PrinterIsInUseException)
+            {
+                return BadRequest("This Printer is used in a Print and cannot be deleted. Try editing the Printer and marking it as Inactive instead.");
+            }
+
+            return NoContent();
+        }
+
         private bool PrinterExists(long id)
         {
             return _context.Printers.Any(e => e.Id == id);
