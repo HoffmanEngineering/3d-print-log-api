@@ -117,8 +117,12 @@ namespace PrintLogApi.Services
             _context.Comments.RemoveRange(comments);
             _context.PrintComments.RemoveRange(associatedPrintComments);
 
+            // Printer Maintenance
+            var maintenanceEntries = await _context.PrinterMaintenance.Where(p => p.CreatedById == userId).ToListAsync();
+            _context.PrinterMaintenance.RemoveRange(maintenanceEntries);
+
             // Printers
-            var printers = await _context.Printers.Where(p => p.UserId == userId).ToListAsync();
+            var printers = await _context.Printers.Where(p => p.UserId == userId).Include(p => p.LoadedFilaments).ToListAsync();
             _context.Printers.RemoveRange(printers);
 
 

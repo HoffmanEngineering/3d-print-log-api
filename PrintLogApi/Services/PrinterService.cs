@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
@@ -11,10 +12,12 @@ namespace PrintLogApi.Services
     public class PrinterService : IPrinterService
     {
         private readonly PrintLogContext _context;
+        private readonly TelemetryClient _telemetry;
 
-        public PrinterService(PrintLogContext context)
+        public PrinterService(PrintLogContext context, TelemetryClient telemetry)
         {
             _context = context;
+            _telemetry = telemetry;
         }
 
         public async Task<Printer> getPrinterById(long printerId)
@@ -91,6 +94,56 @@ namespace PrintLogApi.Services
                 filament.UnloadedDateTime = modifiedTime;
             }
 
+        }
+
+        /// <summary>
+        /// Delete a Printer if that printer isn't in use by a print.
+        /// </summary>
+        /// <param name="printerId"></param>
+        /// <returns></returns>
+        public async Task DeletePrinter(long printerId)
+        {
+            var printer = await getPrinterById(printerId);
+            if (printer == null)
+            {
+                return;
+            }
+
+            var hasExistingPrints = await DoPrintsExistForPrinter(printerId);
+
+
+            // Check if any filament is being used.
+            if (hasExistingPrints)
+            {
+                throw new PrinterIsInUseException();
+            }
+
+            // Remove any adjustments
+            if (printer.LoadedFilaments.Any())
+            {
+                _context.PrinterFilament.RemoveRange(printer.LoadedFilaments);
+            }
+
+            var maintenanceEntries = _context.PrinterMaintenance.Where(pm => pm.PrinterId == printerId);
+            if (maintenanceEntries.Any())
+            {
+                _context.PrinterMaintenance.RemoveRange(maintenanceEntries);
+            }
+
+            _context.Printers.Remove(printer);
+
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("PrinterDelete");
+
+            return;
+        }
+
+        private async Task<bool> DoPrintsExistForPrinter(long printerId)
+        {
+            var exists = await _context.Prints.AnyAsync(p => p.PrinterId == printerId);
+
+            return exists;
         }
     }
 }
