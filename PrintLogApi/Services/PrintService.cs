@@ -182,7 +182,7 @@ namespace PrintLogApi.Services
         public async Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate)
         {
             return await _context.Prints
-                            .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                            .Where(p => p.CreatedById == userId)
                             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                             .OrderByDescending(p => p.StartDate)
                             .ProjectTo<PrintStatistic>(_mapper.ConfigurationProvider)
@@ -193,7 +193,7 @@ namespace PrintLogApi.Services
         public async Task<Stream> GeneratePrintReportAsCsvForUser(long userId)
         {
             var prints = _context.Prints
-                            .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                            .Where(p => p.CreatedById == userId)
                             .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
                             .ProjectTo<PrintDetailReport>(_mapper.ConfigurationProvider)
                             .AsNoTracking();

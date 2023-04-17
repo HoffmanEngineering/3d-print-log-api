@@ -43,7 +43,7 @@ namespace PrintLogApi.Controllers
         {
             var baseQuery = _context.Prints
                 .Include(p => p.FilamentUsage)
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                .Where(p => p.CreatedById == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
 
             // Calculate Filament Usage from the PrintFilaments
@@ -81,7 +81,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<SinglePrintStat>> GetUsersTotalPrintCount(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
             var printCount = await _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                .Where(p => p.CreatedById == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                 .CountAsync();
 
@@ -102,7 +102,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<SinglePrintStat>> GetUsersTotalPrintTimeInSeconds(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
         {
             var printTime = await _context.Prints
-                .Where(p => p.CreatedById == userId || p.Printer.UserId == userId)
+                .Where(p => p.CreatedById == userId)
                 .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                 .Where(p => p.PrintTimeInSeconds.HasValue || p.EstimatedPrintTimeInSeconds.HasValue)
                 .Select(p => p.PrintTimeInSeconds.HasValue ? p.PrintTimeInSeconds : p.EstimatedPrintTimeInSeconds)
