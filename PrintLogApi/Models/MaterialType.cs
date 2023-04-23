@@ -8,9 +8,9 @@ using System.Threading.Tasks;
 namespace PrintLogApi.Models
 {
     /// <summary>
-    /// Used as a material library of standard materials.
+    /// Used as a material library of standard materials types.
     /// </summary>
-    public class Material
+    public class MaterialType
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

@@ -4,11 +4,11 @@ using PrintLogApi.Models.DTOs.Materials;
 
 namespace PrintLogApi.Profiles
 {
-    public class MaterialProfile: Profile
+    public class MaterialTypeProfile: Profile
     {
-        public MaterialProfile()
+        public MaterialTypeProfile()
         {
-            CreateMap<Material, MaterialDto>();
+            CreateMap<MaterialType, MaterialTypeDto>();
         }
 
     }

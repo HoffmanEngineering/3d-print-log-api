@@ -11,30 +11,31 @@ using System.Linq;
 namespace PrintLogApi.Controllers
 {
     /// <summary>
-    /// Manage the list of default filament material types.
+    /// Manage the list of default material types.
     /// </summary>
+    [Route("api/Materials")]
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
-    public class MaterialsController : ControllerBase
+    public class MaterialTypesController : ControllerBase
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
 
-        public MaterialsController(PrintLogContext context, IMapper mapper)
+        public MaterialTypesController(PrintLogContext context, IMapper mapper)
         {
             _context = context;
             _mapper = mapper;
         }
 
         /// <summary>
-        /// Returns the current list of material types for the filament selection dropdown.
+        /// Returns the current list of material types for the material selection dropdown.
         /// </summary>
         /// <returns></returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<MaterialDto>>> GetMaterials()
+        public async Task<ActionResult<IEnumerable<MaterialTypeDto>>> GetMaterials()
         {
-            return await _context.Materials.ProjectTo<MaterialDto>(_mapper.ConfigurationProvider).OrderBy(m => m.Acronym).ToListAsync();
+            return await _context.MaterialTypes.ProjectTo<MaterialTypeDto>(_mapper.ConfigurationProvider).OrderBy(m => m.Acronym).ToListAsync();
         }
 
     }

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20230422174510_RenameMaterialTypes")]
+    partial class RenameMaterialTypes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -52,7 +55,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("Comments", (string)null);
+                    b.ToTable("Comments");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.CuraSetting", b =>
@@ -81,7 +84,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("CuraSettings", (string)null);
+                    b.ToTable("CuraSettings");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Feedback", b =>
@@ -126,7 +129,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("Feedback", (string)null);
+                    b.ToTable("Feedback");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>
@@ -233,7 +236,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("Filaments", (string)null);
+                    b.ToTable("Filaments");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.FilamentAdjustment", b =>
@@ -272,7 +275,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("FilamentAdjustments", (string)null);
+                    b.ToTable("FilamentAdjustments");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
@@ -305,7 +308,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("Files", (string)null);
+                    b.ToTable("Files");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.MaterialType", b =>
@@ -327,7 +330,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("MaterialTypes", (string)null);
+                    b.ToTable("MaterialTypes");
 
                     b.HasData(
                         new
@@ -479,7 +482,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("Prints", (string)null);
+                    b.ToTable("Prints");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrintComment", b =>
@@ -518,7 +521,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("PrintComments", (string)null);
+                    b.ToTable("PrintComments");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrintFilament", b =>
@@ -563,7 +566,7 @@ namespace PrintLogApi.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrintId"), new[] { "FilamentId", "AmountMg", "EstimatedAmountMg" });
 
-                    b.ToTable("PrintFilament", (string)null);
+                    b.ToTable("PrintFilament");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrintImage", b =>
@@ -605,7 +608,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("PrintImages", (string)null);
+                    b.ToTable("PrintImages");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
@@ -648,7 +651,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Printers", (string)null);
+                    b.ToTable("Printers");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterFilament", b =>
@@ -681,7 +684,7 @@ namespace PrintLogApi.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "LoadedDateTime", "UnloadedDateTime" });
 
-                    b.ToTable("PrinterFilament", (string)null);
+                    b.ToTable("PrinterFilament");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterMaintenance", b =>
@@ -737,7 +740,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
-                    b.ToTable("PrinterMaintenance", (string)null);
+                    b.ToTable("PrinterMaintenance");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.User", b =>
@@ -777,7 +780,7 @@ namespace PrintLogApi.Migrations
                         .IsUnique()
                         .HasFilter("[OAuthUserId] IS NOT NULL");
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.UserApiKey", b =>
@@ -829,7 +832,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserApiKeys", (string)null);
+                    b.ToTable("UserApiKeys");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.UserSetting", b =>
@@ -872,7 +875,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UserSettingTypeId");
 
-                    b.ToTable("UserSettings", (string)null);
+                    b.ToTable("UserSettings");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.UserSettingType", b =>
@@ -893,7 +896,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("UserSettingTypes", (string)null);
+                    b.ToTable("UserSettingTypes");
 
                     b.HasData(
                         new

@@ -31,7 +31,7 @@ namespace PrintLogApi
 
         public DbSet<FilamentAdjustment> FilamentAdjustments { get; set; }
 
-        public DbSet<Material> Materials { get; set; }
+        public DbSet<MaterialType> MaterialTypes { get; set; }
 
         public DbSet<PrintFilament> PrintFilament { get; set; }
 
@@ -66,71 +66,71 @@ namespace PrintLogApi
                 );
 
             // Pulled from Cura
-            modelBuilder.Entity<Material>().HasData(
-                new Material()
+            modelBuilder.Entity<MaterialType>().HasData(
+                new MaterialType()
                 {
                     Id = Guid.Parse("c78c56d0-b34d-49b1-849e-a54066a2f5e3"),
                     Acronym = "ABS",
                     Name = "Acrylonitrile Butadiene Styrene",
                     DensityGramPerCubicCm = 1.10
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("c8cae1e0-5f13-41d6-9f72-cb83740aa2fe"),
                     Acronym = "CPE",
                     Name = "Co-polyester",
                     DensityGramPerCubicCm = 1.27
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("b0cda842-5a48-4a30-a060-226680e13c06"),
                     Acronym = "HIPS",
                     Name = "High Impact Polystyrene",
                     DensityGramPerCubicCm = 1.24
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("3dbc49c5-a493-4e21-a4d5-d94b8c0d53da"),
                     Acronym = "Nylon",
                     Name = null,
                     DensityGramPerCubicCm = 1.14
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("7d83cbc1-00d0-4e42-a7ce-8a1b831b175b"),
                     Acronym = "PC",
                     Name = "Polycarbonate",
                     DensityGramPerCubicCm = 1.19
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("35151bfe-6890-41ab-8fc9-443c5a690626"),
                     Acronym = "PCTG",
                     Name = "Cyclohexylenedimethylene Terephthalate Glycol",
                     DensityGramPerCubicCm = 1.24
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("23e38c0d-43f3-4bcd-b3c6-830d193a3e10"),
                     Acronym = "PETG",
                     Name = "Polyethylene Terephthalate Glycol",
                     DensityGramPerCubicCm = 1.38
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("f8a6b364-94a6-4a32-a253-e67b41df1969"),
                     Acronym = "PLA",
                     Name = "Polylactic Acid",
                     DensityGramPerCubicCm = 1.24
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("0c236829-8487-4bb4-a092-68a9731a64e4"),
                     Acronym = "PVA",
                     Name = "Polyvinyl Acetate",
                     DensityGramPerCubicCm = 1.23
                 },
-                new Material()
+                new MaterialType()
                 {
                     Id = Guid.Parse("d777bde9-fba6-4f5a-b7a4-e8a4a9695715"),
                     Acronym = "TPU 95A",

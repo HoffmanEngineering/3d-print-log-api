@@ -1,11 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Models.DTOs.Materials
 {
-    public class MaterialDto
+    public class MaterialTypeDto
     {
         public Guid Id { get; set; }
 
