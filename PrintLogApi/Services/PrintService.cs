@@ -394,7 +394,7 @@ namespace PrintLogApi.Services
                     continue;
                 }
 
-                if (pf.IsActualLengthSource)
+                if (pf.Source == PrintFilament.SourceMeasurement.Length)
                 {
 
                     if (pf.LengthInM.HasValue)
@@ -410,7 +410,7 @@ namespace PrintLogApi.Services
                     }
                 }
 
-                if (pf.IsEstimatedLengthSource)
+                if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Length)
                 {
                     // Update the weight
                     if (pf.EstimatedLengthInM.HasValue)

@@ -133,8 +133,8 @@ namespace PrintLogApi.TestData
                         {
                             Filament = filaments[i-1],
                             EstimatedAmountMg = i,
-                            IsEstimatedLengthSource = false,
-                            IsActualLengthSource = false,
+                            EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                            Source = PrintFilament.SourceMeasurement.Weight,
                             Notes = $"This is filament {i}"
 
                         }
