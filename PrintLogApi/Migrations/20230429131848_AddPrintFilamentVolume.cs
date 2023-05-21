@@ -132,15 +132,7 @@ WHERE
                 table: "Printers");
 
             migrationBuilder.DropColumn(
-                name: "EstimatedSource",
-                table: "PrintFilament");
-
-            migrationBuilder.DropColumn(
                 name: "EstimatedVolumeMl",
-                table: "PrintFilament");
-
-            migrationBuilder.DropColumn(
-                name: "Source",
                 table: "PrintFilament");
 
             migrationBuilder.DropColumn(
@@ -164,6 +156,26 @@ WHERE
                 type: "bit",
                 nullable: false,
                 defaultValue: false);
+
+            // Convert the existing Source columns
+            migrationBuilder.Sql($@"
+UPDATE PrintFilament
+SET IsEstimatedLengthSource = {true}
+WHERE EstimatedSource = {PrintFilament.SourceMeasurement.Length}
+");
+
+            migrationBuilder.Sql($@"
+UPDATE PrintFilament
+SET IsActualLengthSource = {true}
+WHERE Source = {PrintFilament.SourceMeasurement.Length}
+");
+
+            migrationBuilder.DropColumn(
+                name: "Source",
+                table: "PrintFilament");
+            migrationBuilder.DropColumn(
+                name: "EstimatedSource",
+                table: "PrintFilament");
         }
     }
 }
