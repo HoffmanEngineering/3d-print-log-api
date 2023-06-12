@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20230429175357_AddFilamentMaterialCategory")]
+    partial class AddFilamentMaterialCategory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -160,19 +163,6 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
-                    b.Property<string>("InertGas")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<double?>("InitialLayerTimeS")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("InitialNominalLengthM")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("InitialNominalVolumeMl")
-                        .HasColumnType("float");
-
                     b.Property<long?>("InitialNominalWeightMg")
                         .HasColumnType("bigint");
 
@@ -185,27 +175,15 @@ namespace PrintLogApi.Migrations
                     b.Property<bool>("IsFavorite")
                         .HasColumnType("bit");
 
-                    b.Property<double?>("LayerTimeS")
-                        .HasColumnType("float");
-
                     b.Property<string>("MaterialCategoryNickname")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(50)")
-                        .HasDefaultValue("filament");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<double>("MaterialDensityGramPerCubicCm")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("MaterialRefreshRatio")
                         .HasColumnType("float");
 
                     b.Property<string>("MaterialType")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
-
-                    b.Property<double?>("MeltingTemperature")
-                        .HasColumnType("float");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
@@ -235,9 +213,6 @@ namespace PrintLogApi.Migrations
 
                     b.Property<double?>("RecommendedTemp")
                         .HasColumnType("float");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
 
                     b.Property<long?>("SpoolWeightMg")
                         .HasColumnType("bigint");
@@ -275,7 +250,7 @@ namespace PrintLogApi.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<long?>("AmountMg")
+                    b.Property<long>("AmountMg")
                         .HasColumnType("bigint");
 
                     b.Property<long>("CreatedById")
@@ -287,24 +262,15 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("FilamentId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<double?>("LengthInM")
-                        .HasColumnType("float");
-
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
 
                     b.Property<long>("UpdatedById")
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedDate")
                         .HasColumnType("datetime2");
-
-                    b.Property<double?>("VolumeMl")
-                        .HasColumnType("float");
 
                     b.HasKey("Id");
 
@@ -932,12 +898,12 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("FilamentId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.HasIndex("PrinterId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.ToTable("PrinterFilament");
                 });
@@ -1252,9 +1218,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasOne("PrintLogApi.Models.MaterialCategory", "MaterialCategory")
                         .WithMany()
-                        .HasForeignKey("MaterialCategoryNickname")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("MaterialCategoryNickname");
 
                     b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
                         .WithMany()

@@ -42,26 +42,26 @@ namespace PrintLogApi.Migrations
             // Convert the existing Source columns
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET EstimatedSource = {PrintFilament.SourceMeasurement.Weight}
-WHERE IsEstimatedLengthSource = {false}
+SET EstimatedSource = {((int)PrintFilament.SourceMeasurement.Weight)}
+WHERE IsEstimatedLengthSource = 0
 ");
 
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET EstimatedSource = {PrintFilament.SourceMeasurement.Length}
-WHERE IsEstimatedLengthSource = {true}
+SET EstimatedSource = {((int)PrintFilament.SourceMeasurement.Length)}
+WHERE IsEstimatedLengthSource = 1
 ");
 
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET Source = {PrintFilament.SourceMeasurement.Weight}
-WHERE IsActualLengthSource = {false}
+SET Source = {((int)PrintFilament.SourceMeasurement.Weight)}
+WHERE IsActualLengthSource = 0
 ");
 
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET Source = {PrintFilament.SourceMeasurement.Length}
-WHERE IsActualLengthSource = {true}
+SET Source = {((int)PrintFilament.SourceMeasurement.Length)}
+WHERE IsActualLengthSource = 1
 ");
 
 
@@ -160,14 +160,14 @@ WHERE
             // Convert the existing Source columns
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET IsEstimatedLengthSource = {true}
-WHERE EstimatedSource = {PrintFilament.SourceMeasurement.Length}
+SET IsEstimatedLengthSource = 1
+WHERE EstimatedSource = {((int)PrintFilament.SourceMeasurement.Length)}
 ");
 
             migrationBuilder.Sql($@"
 UPDATE PrintFilament
-SET IsActualLengthSource = {true}
-WHERE Source = {PrintFilament.SourceMeasurement.Length}
+SET IsActualLengthSource = 1
+WHERE Source = {((int)PrintFilament.SourceMeasurement.Length)}
 ");
 
             migrationBuilder.DropColumn(

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20230528001259_ChangeDefaultMaterialCategory")]
+    partial class ChangeDefaultMaterialCategory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -932,12 +935,12 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("FilamentId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.HasIndex("PrinterId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.ToTable("PrinterFilament");
                 });

@@ -73,27 +73,60 @@ namespace PrintLogApi
             {
                 Nickname = "filament",
                 Name = "Filament",
-                Description = "A single continuous filament of material"
+                Description = "A single continuous filament of material",
+                HasDiameter = true,
+                ShowNozzleTemperature = true,
+                ShowBedTemperature = true,
+                ShowMeltingTemperature = false,
+                ShowInertGas = false,
+                ShowMaterialRefreshRatio = false,
+                ShowRecommendedInitialLayerTimeInSeconds = false,
+                ShowRecommendedLayerTimeInSeconds = false,
+                
             };
             var resinCategory = new MaterialCategory()
             {
                 Nickname = "resin",
                 Name = "Resin",
-                Description = "A photo-sensitive resin"
+                Description = "A photo-sensitive resin",
+                HasDiameter = false,
+                ShowNozzleTemperature = false,
+                ShowBedTemperature = false,
+                ShowMeltingTemperature = false,
+                ShowInertGas = false,
+                ShowMaterialRefreshRatio = false,
+                ShowRecommendedInitialLayerTimeInSeconds = true,
+                ShowRecommendedLayerTimeInSeconds = true,
             };
 
             var powderCategory = new MaterialCategory()
             {
                 Nickname = "powder",
                 Name = "Powder",
-                Description = "A powder which is fused by heat or a binder"
+                Description = "A powder which is fused by heat or a binder",
+                HasDiameter = false,
+                ShowNozzleTemperature = false,
+                ShowBedTemperature = false,
+                ShowMeltingTemperature = true,
+                ShowInertGas = true,
+                ShowMaterialRefreshRatio = true,
+                ShowRecommendedInitialLayerTimeInSeconds = false,
+                ShowRecommendedLayerTimeInSeconds = false,
             };
 
             var wireCategory = new MaterialCategory()
             {
                 Nickname = "wire",
                 Name = "Wire",
-                Description = "A continous wire"
+                Description = "A continous wire",
+                HasDiameter = true,
+                ShowNozzleTemperature = true,
+                ShowBedTemperature = true,
+                ShowMeltingTemperature = false,
+                ShowInertGas = false,
+                ShowMaterialRefreshRatio = false,
+                ShowRecommendedInitialLayerTimeInSeconds = false,
+                ShowRecommendedLayerTimeInSeconds = false,
             };
 
             modelBuilder.Entity<MaterialCategory>().HasData(filamentCategory, resinCategory, powderCategory, wireCategory);
@@ -254,6 +287,10 @@ namespace PrintLogApi
                 .Property(c => c._Settings)
                 .HasColumnName("Settings");
 
+            modelBuilder.Entity<Filament>()
+                .Property(f => f.MaterialCategoryNickname)
+                .HasDefaultValue("filament");
+
             // Only every query for currently-loaded filament.
             modelBuilder.Entity<PrinterFilament>()
                 .HasQueryFilter(pf => !pf.UnloadedDateTime.HasValue);
@@ -264,6 +301,14 @@ namespace PrintLogApi
 
             modelBuilder.Entity<PrinterFilament>()
                 .HasIndex(pf => pf.FilamentId).IncludeProperties(pf => new { pf.PrinterId, pf.LoadedDateTime, pf.UnloadedDateTime })
+                .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<PrinterFilament>()
+                .HasIndex(pf => pf.FilamentId).IncludeProperties(pf => new { pf.PrinterId, pf.UnloadedDateTime })
+                .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<PrinterFilament>()
+                .HasIndex(pf => pf.PrinterId).IncludeProperties(pf => new { pf.FilamentId, pf.UnloadedDateTime })
                 .HasFilter("[UnloadedDateTime] IS NULL");
 
             modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });

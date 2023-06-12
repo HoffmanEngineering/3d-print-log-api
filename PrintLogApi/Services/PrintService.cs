@@ -16,6 +16,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
+using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services
 {
@@ -399,14 +400,14 @@ namespace PrintLogApi.Services
 
                     if (pf.LengthInM.HasValue)
                     {
-                        pf.AmountMg = GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                         pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, filament.DiameterMm.Value);
                     }
                 } else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
                 {
                     if (pf.VolumeMl.HasValue)
                     {
-                        pf.AmountMg = GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
                         if (filament.MaterialCategory.HasDiameter)
                         {
@@ -433,7 +434,7 @@ namespace PrintLogApi.Services
 
                     if (pf.EstimatedLengthInM.HasValue)
                     {
-                        pf.EstimatedAmountMg = GetAmountMgFromLength(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                         pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value);
                     }
                 }
@@ -441,7 +442,7 @@ namespace PrintLogApi.Services
                 {
                     if (pf.EstimatedVolumeMl.HasValue)
                     {
-                        pf.EstimatedAmountMg = GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
                         if (filament.MaterialCategory.HasDiameter)
                         {
@@ -465,45 +466,7 @@ namespace PrintLogApi.Services
             }
         }
 
-        private static int GetAmountMgFromLength(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
-        {
-            return (int)Math.Round(250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters);
-        }
 
-        private static int GetAmountMgFromVolume(double VolumeInMl, double materialDensityGramPerCubicCm)
-        {
-            return (int)Math.Round(VolumeInMl * materialDensityGramPerCubicCm * 1000);
-        }
-
-        /// <summary>
-        /// Converts between an amount in milligrams to the expected length of that filament in meters.
-        /// </summary>
-        /// <returns></returns>
-        private static double GetLengthInMetersFromAmount(int amountMg, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
-        {
-            return ((double)amountMg) / ((250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM));
-        }
-
-        private static double GetLengthInMetersFromVolume(double volumeMl, double filamentDiameterInMM)
-        {
-            return volumeMl / ((1 / 4.00) * Math.PI * filamentDiameterInMM * filamentDiameterInMM); ;
-        }
-
-        /// <summary>
-        /// Returns the Volume from a weight
-        /// </summary>
-        private static double GetVolumeInMlFromAmount(int amountMg, double materialDensityGramPerCubicCm)
-        {
-            return (amountMg) / (1000.0 * materialDensityGramPerCubicCm);
-        }
-
-        /// <summary>
-        /// Converts between a filament length in meters into a volume in milliliters
-        /// </summary>
-        private static double GetVolumeInMlFromLengthM(double lengthInMeters, double filamentDiameterInMM)
-        {
-            return ((1/4.00) * Math.PI * lengthInMeters * filamentDiameterInMM * filamentDiameterInMM);
-        }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)
         {

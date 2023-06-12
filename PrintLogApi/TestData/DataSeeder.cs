@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,6 +65,9 @@ namespace PrintLogApi.TestData
                     FilamentAdjustments = new List<FilamentAdjustment>(),
                     Id = new Guid(),
                     InitialNominalWeightMg = 1000000,
+                    Source = Filament.SourceMeasurement.Weight,
+                    InitialNominalLengthM = MeasurementUtilities.GetLengthInMetersFromAmount(1000000, 1.75, 2.54),
+                    InitialNominalVolumeMl = MeasurementUtilities.GetVolumeInMlFromAmount(1000000, 2.54),
                     InitialTotalWeightMg = 1250000,
                     SpoolWeightMg = 250000,
                     IsActive = true,

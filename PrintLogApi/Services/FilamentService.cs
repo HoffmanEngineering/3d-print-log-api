@@ -11,6 +11,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.SortEnums;
+using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services
 {
@@ -156,6 +157,7 @@ namespace PrintLogApi.Services
                     .Where(f => f.Id == id)
                     .Include(f => f.FilamentAdjustments)
                     .Include(f=> f.PrintFilaments)
+                    .Include(f => f.MaterialCategory)
                     .SingleOrDefaultAsync();
         }
 
@@ -169,10 +171,24 @@ namespace PrintLogApi.Services
         {
             var newFilament = _mapper.Map<Filament>(filament);
 
+            var materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == newFilament.MaterialCategoryNickname);
+
+            if (materialCategory == null)
+            {
+                // Todo, throw error?
+                materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
+            }
+
+            newFilament.MaterialCategory = materialCategory;
+
+            UpdateFilamentMeasurements(newFilament);
+
             foreach (var adjustment in newFilament.FilamentAdjustments)
             {
                 adjustment.CreatedById = userId;
                 adjustment.UpdatedById = userId;
+
+                UpdateFilamentAdjustmentMeasurements(adjustment, newFilament);
             }
 
             newFilament.CreatedById = userId;
@@ -188,6 +204,91 @@ namespace PrintLogApi.Services
             return await GetFilamentById(filamentId);
         }
 
+        private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
+        {
+            if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+            {
+                // Skip any filament that doesn't have the required properties to compute.
+                return;
+            }
+
+            if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Length)
+            {
+                if (adjustment.LengthInM.HasValue)
+                {
+                    adjustment.AmountMg = GetAmountMgFromLength(adjustment.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    adjustment.LengthInM = GetVolumeInMlFromLengthM(adjustment.LengthInM.Value, filament.DiameterMm.Value);
+                }
+            }
+            else if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Volume)
+            {
+                if (adjustment.VolumeMl.HasValue)
+                {
+                    adjustment.AmountMg = GetAmountMgFromVolume(adjustment.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+
+                    if (filament.MaterialCategory.HasDiameter)
+                    {
+                        adjustment.LengthInM = GetLengthInMetersFromVolume(adjustment.VolumeMl.Value, filament.DiameterMm.Value);
+                    }
+                }
+            }
+            else
+            {
+
+                if (adjustment.AmountMg.HasValue)
+                {
+                    adjustment.VolumeMl = GetVolumeInMlFromAmount(adjustment.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
+
+                    if (filament.MaterialCategory.HasDiameter)
+                    {
+                        adjustment.LengthInM = GetLengthInMetersFromAmount(adjustment.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+            }
+        }
+
+        private void UpdateFilamentMeasurements(Filament filament)
+        {
+
+            if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+            {
+                // Skip any filament that doesn't have the required properties to compute.
+                return;
+            }
+
+            if (filament.Source == Filament.SourceMeasurement.Length)
+            {
+                if (filament.InitialNominalLengthM.HasValue)
+                {
+                    filament.InitialNominalWeightMg = GetAmountMgFromLength(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    filament.InitialNominalVolumeMl = GetVolumeInMlFromLengthM(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value);
+                }
+            } else if (filament.Source == Filament.SourceMeasurement.Weight)
+            {
+                if (filament.InitialNominalVolumeMl.HasValue)
+                {
+                    filament.InitialNominalWeightMg = GetAmountMgFromVolume(filament.InitialNominalVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+
+                    if (filament.MaterialCategory.HasDiameter)
+                    {
+                        filament.InitialNominalLengthM = GetLengthInMetersFromVolume(filament.InitialNominalVolumeMl.Value, filament.DiameterMm.Value);
+                    }
+                }
+            } else
+            {
+
+                if (filament.InitialNominalWeightMg.HasValue)
+                {
+                    filament.InitialNominalVolumeMl = GetVolumeInMlFromAmount(filament.InitialNominalWeightMg.Value, filament.MaterialDensityGramPerCubicCm);
+
+                    if (filament.MaterialCategory.HasDiameter)
+                    {
+                        filament.InitialNominalLengthM = GetLengthInMetersFromAmount(filament.InitialNominalWeightMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                }
+            }
+        }
+
         public async Task<Filament> UpdateFilament(Guid id, FilamentDetailDto dto, long userId)
         {
             var existingFilament = await GetFilamentById(id);
@@ -199,10 +300,25 @@ namespace PrintLogApi.Services
 
             var updatedFilament = _mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
 
+            var materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);
+
+            if (materialCategory == null)
+            {
+                // Todo, throw error?
+                materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
+            }
+
+            updatedFilament.MaterialCategoryNickname = materialCategory.Nickname;
+            updatedFilament.MaterialCategory = materialCategory;
+
+            UpdateFilamentMeasurements(updatedFilament);
+
             foreach (var adjustment in updatedFilament.FilamentAdjustments)
             {
                 adjustment.CreatedById = userId;
                 adjustment.UpdatedById = userId;
+
+                UpdateFilamentAdjustmentMeasurements(adjustment, updatedFilament);
             }
 
 
