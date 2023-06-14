@@ -9,9 +9,24 @@ namespace PrintLogApi.Models
 {
     public class Filament : TimestampEntity
     {
+        /// <summary>
+        /// Which field is the user-entered "source"
+        /// </summary>
+        public enum SourceMeasurement
+        {
+            Weight = 1,
+            Length = 2,
+            Volume = 3,
+        }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public Guid Id { get; set; }
+
+        [Required]
+        public string MaterialCategoryNickname { get; set; }
+
+        public MaterialCategory MaterialCategory { get; set; }
 
         /// <summary>
         /// Common name for the roll of filament.
@@ -38,6 +53,22 @@ namespace PrintLogApi.Models
         public string ColorName { get; set; }
         [StringLength(6)]
         public string ColorHex { get; set; }
+
+        /// <summary>
+        /// Which measurement is the source. Ie, should measurements be based on weight, volume, etc?
+        /// </summary>
+        public SourceMeasurement Source {  get; set; }
+
+        /// <summary>
+        /// The initial volume of the material in millileters 
+        /// </summary>
+        public double? InitialNominalVolumeMl { get; set; }
+
+        /// <summary>
+        /// The initial length of the material in meters 
+        /// </summary>
+        public double? InitialNominalLengthM { get; set; }
+
         public double? DiameterMm { get; set; }
         public long? InitialTotalWeightMg { get; set; }
 
@@ -60,6 +91,35 @@ namespace PrintLogApi.Models
         /// The user's recommended bed temperature
         /// </summary>
         public double? RecommendedBedTemp { get; set; }
+
+        /// <summary>
+        /// The initial layer cure time in seconds
+        /// </summary>
+        public double? InitialLayerTimeS { get; set; }
+
+        /// <summary>
+        /// The layer cure time in seconds (after the initial layers)
+        /// </summary>
+        public double? LayerTimeS { get; set; }
+
+        /// <summary>
+        /// Melting temperature of the material
+        /// </summary>
+        public double? MeltingTemperature { get; set; }
+
+        /// <summary>
+        /// What inert gas should be used?
+        /// </summary>
+        [StringLength(255)]
+        public string InertGas { get; set; }
+
+        /// <summary>
+        /// The percentage of new powder when mixing with old powder.
+        /// 1.0 means always use new powder.
+        /// </summary>
+        [Range(0.0, 1.0)]
+        public double? MaterialRefreshRatio { get; set; }
+
         public bool IsActive { get; set; }
         public DateTimeOffset? PurchaseDate { get; set; }
 

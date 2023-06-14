@@ -16,6 +16,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
+using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services
 {
@@ -374,7 +375,7 @@ namespace PrintLogApi.Services
         }
 
         /// <summary>
-        /// When we save the filament usage, we need to ensure that the filament weights and lengths are correctly filled out.
+        /// When we save the filament usage, we need to ensure that the filament weights, lengths and volume are correctly filled out.
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
@@ -388,61 +389,84 @@ namespace PrintLogApi.Services
 
                 var filament = await _filamentService.GetFilamentById(pf.FilamentId.Value);
 
-                if (filament is null || !filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0) || !(filament.MaterialDensityGramPerCubicCm >= 0) )
+                if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || ( filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
                 {
                     // Skip any filament that doesn't have the required properties to compute.
                     continue;
                 }
 
-                if (pf.IsActualLengthSource)
+                if (pf.Source == PrintFilament.SourceMeasurement.Length)
                 {
 
                     if (pf.LengthInM.HasValue)
                     {
-                        pf.AmountMg = GetAmountMg(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, filament.DiameterMm.Value);
                     }
+                } else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
+                {
+                    if (pf.VolumeMl.HasValue)
+                    {
+                        pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+
+                        if (filament.MaterialCategory.HasDiameter)
+                        {
+                            pf.LengthInM = GetLengthInMetersFromVolume(pf.VolumeMl.Value, filament.DiameterMm.Value);
+                        }
+                    }
+
                 } else
                 {
 
                     if (pf.AmountMg.HasValue)
                     {
-                        pf.LengthInM = GetLengthInMeters(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.VolumeMl = GetVolumeInMlFromAmount(pf.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
+
+                        if (filament.MaterialCategory.HasDiameter)
+                        {
+                            pf.LengthInM = GetLengthInMetersFromAmount(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        }
                     }
                 }
 
-                if (pf.IsEstimatedLengthSource)
+                if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Length)
                 {
-                    // Update the weight
+
                     if (pf.EstimatedLengthInM.HasValue)
                     {
-                        pf.EstimatedAmountMg = GetAmountMg(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value);
                     }
+                }
+                else if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Volume)
+                {
+                    if (pf.EstimatedVolumeMl.HasValue)
+                    {
+                        pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
+                        if (filament.MaterialCategory.HasDiameter)
+                        {
+                            pf.EstimatedLengthInM = GetLengthInMetersFromVolume(pf.EstimatedVolumeMl.Value, filament.DiameterMm.Value);
+                        }
+                    }
                 }
                 else
                 {
-                    // Update the length
+
                     if (pf.EstimatedAmountMg.HasValue)
                     {
-                        pf.EstimatedLengthInM = GetLengthInMeters(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedVolumeMl = GetVolumeInMlFromAmount(pf.EstimatedAmountMg.Value, filament.MaterialDensityGramPerCubicCm);
+
+                        if (filament.MaterialCategory.HasDiameter)
+                        {
+                            pf.EstimatedLengthInM = GetLengthInMetersFromAmount(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        }
                     }
                 }
             }
         }
 
-        private static int GetAmountMg(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
-        {
-            return (int)Math.Round(250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters);
-        }
 
-        /// <summary>
-        /// Converts between an amount in milligrams to the expected length of that filament in meters.
-        /// </summary>
-        /// <returns></returns>
-        private static double GetLengthInMeters(int AmountMg, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
-        {
-            return ((double)AmountMg) / ((250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM));
-        }
 
         public async Task<Print> UpdatePrintStatus(long id, PrintStatus newStatus, long userId)
         {

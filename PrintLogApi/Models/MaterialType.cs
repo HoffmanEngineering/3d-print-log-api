@@ -8,9 +8,9 @@ using System.Threading.Tasks;
 namespace PrintLogApi.Models
 {
     /// <summary>
-    /// Used as a material library of standard materials.
+    /// Used as a material library of standard materials types.
     /// </summary>
-    public class Material
+    public class MaterialType
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
@@ -26,5 +26,8 @@ namespace PrintLogApi.Models
         /// The Density of the Material
         /// </summary>
         public double DensityGramPerCubicCm { get; set; }
+
+        public string MaterialCategoryNickname {  get; set; }
+        public MaterialCategory MaterialCategory { get; set; }
     }
 }

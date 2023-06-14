@@ -32,5 +32,8 @@ namespace PrintLogApi.Models
         public bool IsActive { get; set; }
 
         public ICollection<PrinterFilament> LoadedFilaments { get; set; }
+
+        public PrinterCategory type { get; set; }
+
     }
 }

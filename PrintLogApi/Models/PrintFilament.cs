@@ -1,14 +1,21 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace PrintLogApi.Models
 {
     public class PrintFilament
     {
+        /// <summary>
+        /// Which field is the user-entered "source"
+        /// </summary>
+        public enum SourceMeasurement
+        {
+            Weight = 1,
+            Length = 2,
+            Volume = 3,
+        }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public Guid Id { get; set; }
@@ -36,16 +43,24 @@ namespace PrintLogApi.Models
         public double? LengthInM { get; set; }
 
         /// <summary>
-        /// Determines if the user entered the length as the "source of truth", or weight. 
-        /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
+        /// The estimated length of filament used in meters.
         /// </summary>
-        public bool IsEstimatedLengthSource { get; set; }
+        public double? EstimatedVolumeMl{ get; set; }
 
         /// <summary>
-        /// Determines if the user entered the length as the "source of truth", or weight. 
-        /// True means the user entered the filament usage as a length, while false means the user entered usage as Mg.
+        /// The actual volume of filament used in milliliters
         /// </summary>
-        public bool IsActualLengthSource { get; set; }
+        public double? VolumeMl { get; set; }
+
+        /// <summary>
+        /// The source of truth for the estimated sections
+        /// </summary>
+        public SourceMeasurement EstimatedSource { get; set; }
+
+        /// <summary>
+        /// The source of truth for the actual sections
+        /// </summary>
+        public SourceMeasurement Source {  get; set; }
 
         [StringLength(1000)]
         public string Notes { get; set; }

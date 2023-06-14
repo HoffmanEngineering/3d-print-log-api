@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20230422175423_RenameMaterialTypesConfirmation")]
+    partial class RenameMaterialTypesConfirmation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -160,19 +163,6 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
-                    b.Property<string>("InertGas")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<double?>("InitialLayerTimeS")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("InitialNominalLengthM")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("InitialNominalVolumeMl")
-                        .HasColumnType("float");
-
                     b.Property<long?>("InitialNominalWeightMg")
                         .HasColumnType("bigint");
 
@@ -185,27 +175,12 @@ namespace PrintLogApi.Migrations
                     b.Property<bool>("IsFavorite")
                         .HasColumnType("bit");
 
-                    b.Property<double?>("LayerTimeS")
-                        .HasColumnType("float");
-
-                    b.Property<string>("MaterialCategoryNickname")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(50)")
-                        .HasDefaultValue("filament");
-
                     b.Property<double>("MaterialDensityGramPerCubicCm")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("MaterialRefreshRatio")
                         .HasColumnType("float");
 
                     b.Property<string>("MaterialType")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
-
-                    b.Property<double?>("MeltingTemperature")
-                        .HasColumnType("float");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
@@ -236,9 +211,6 @@ namespace PrintLogApi.Migrations
                     b.Property<double?>("RecommendedTemp")
                         .HasColumnType("float");
 
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
                     b.Property<long?>("SpoolWeightMg")
                         .HasColumnType("bigint");
 
@@ -262,8 +234,6 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("CreatedById");
 
-                    b.HasIndex("MaterialCategoryNickname");
-
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("Filaments");
@@ -275,7 +245,7 @@ namespace PrintLogApi.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<long?>("AmountMg")
+                    b.Property<long>("AmountMg")
                         .HasColumnType("bigint");
 
                     b.Property<long>("CreatedById")
@@ -287,24 +257,15 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("FilamentId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<double?>("LengthInM")
-                        .HasColumnType("float");
-
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
 
                     b.Property<long>("UpdatedById")
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedDate")
                         .HasColumnType("datetime2");
-
-                    b.Property<double?>("VolumeMl")
-                        .HasColumnType("float");
 
                     b.HasKey("Id");
 
@@ -350,107 +311,6 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Files");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.MaterialCategory", b =>
-                {
-                    b.Property<string>("Nickname")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<bool>("HasDiameter")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Name")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<bool>("ShowBedTemperature")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowInertGas")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowMaterialRefreshRatio")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowMeltingTemperature")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowNozzleTemperature")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowRecommendedInitialLayerTimeInSeconds")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ShowRecommendedLayerTimeInSeconds")
-                        .HasColumnType("bit");
-
-                    b.HasKey("Nickname");
-
-                    b.ToTable("MaterialCategories");
-
-                    b.HasData(
-                        new
-                        {
-                            Nickname = "filament",
-                            Description = "A single continuous filament of material",
-                            HasDiameter = true,
-                            Name = "Filament",
-                            ShowBedTemperature = true,
-                            ShowInertGas = false,
-                            ShowMaterialRefreshRatio = false,
-                            ShowMeltingTemperature = false,
-                            ShowNozzleTemperature = true,
-                            ShowRecommendedInitialLayerTimeInSeconds = false,
-                            ShowRecommendedLayerTimeInSeconds = false
-                        },
-                        new
-                        {
-                            Nickname = "resin",
-                            Description = "A photo-sensitive resin",
-                            HasDiameter = false,
-                            Name = "Resin",
-                            ShowBedTemperature = false,
-                            ShowInertGas = false,
-                            ShowMaterialRefreshRatio = false,
-                            ShowMeltingTemperature = false,
-                            ShowNozzleTemperature = false,
-                            ShowRecommendedInitialLayerTimeInSeconds = true,
-                            ShowRecommendedLayerTimeInSeconds = true
-                        },
-                        new
-                        {
-                            Nickname = "powder",
-                            Description = "A powder which is fused by heat or a binder",
-                            HasDiameter = false,
-                            Name = "Powder",
-                            ShowBedTemperature = false,
-                            ShowInertGas = true,
-                            ShowMaterialRefreshRatio = true,
-                            ShowMeltingTemperature = true,
-                            ShowNozzleTemperature = false,
-                            ShowRecommendedInitialLayerTimeInSeconds = false,
-                            ShowRecommendedLayerTimeInSeconds = false
-                        },
-                        new
-                        {
-                            Nickname = "wire",
-                            Description = "A continous wire",
-                            HasDiameter = true,
-                            Name = "Wire",
-                            ShowBedTemperature = true,
-                            ShowInertGas = false,
-                            ShowMaterialRefreshRatio = false,
-                            ShowMeltingTemperature = false,
-                            ShowNozzleTemperature = true,
-                            ShowRecommendedInitialLayerTimeInSeconds = false,
-                            ShowRecommendedLayerTimeInSeconds = false
-                        });
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.MaterialType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -464,16 +324,11 @@ namespace PrintLogApi.Migrations
                     b.Property<double>("DensityGramPerCubicCm")
                         .HasColumnType("float");
 
-                    b.Property<string>("MaterialCategoryNickname")
-                        .HasColumnType("nvarchar(50)");
-
                     b.Property<string>("Name")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("MaterialCategoryNickname");
 
                     b.ToTable("MaterialTypes");
 
@@ -483,7 +338,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("c78c56d0-b34d-49b1-849e-a54066a2f5e3"),
                             Acronym = "ABS",
                             DensityGramPerCubicCm = 1.1000000000000001,
-                            MaterialCategoryNickname = "filament",
                             Name = "Acrylonitrile Butadiene Styrene"
                         },
                         new
@@ -491,7 +345,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("c8cae1e0-5f13-41d6-9f72-cb83740aa2fe"),
                             Acronym = "CPE",
                             DensityGramPerCubicCm = 1.27,
-                            MaterialCategoryNickname = "filament",
                             Name = "Co-polyester"
                         },
                         new
@@ -499,22 +352,19 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("b0cda842-5a48-4a30-a060-226680e13c06"),
                             Acronym = "HIPS",
                             DensityGramPerCubicCm = 1.24,
-                            MaterialCategoryNickname = "filament",
                             Name = "High Impact Polystyrene"
                         },
                         new
                         {
                             Id = new Guid("3dbc49c5-a493-4e21-a4d5-d94b8c0d53da"),
                             Acronym = "Nylon",
-                            DensityGramPerCubicCm = 1.1399999999999999,
-                            MaterialCategoryNickname = "filament"
+                            DensityGramPerCubicCm = 1.1399999999999999
                         },
                         new
                         {
                             Id = new Guid("7d83cbc1-00d0-4e42-a7ce-8a1b831b175b"),
                             Acronym = "PC",
                             DensityGramPerCubicCm = 1.1899999999999999,
-                            MaterialCategoryNickname = "filament",
                             Name = "Polycarbonate"
                         },
                         new
@@ -522,7 +372,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("35151bfe-6890-41ab-8fc9-443c5a690626"),
                             Acronym = "PCTG",
                             DensityGramPerCubicCm = 1.24,
-                            MaterialCategoryNickname = "filament",
                             Name = "Cyclohexylenedimethylene Terephthalate Glycol"
                         },
                         new
@@ -530,7 +379,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("23e38c0d-43f3-4bcd-b3c6-830d193a3e10"),
                             Acronym = "PETG",
                             DensityGramPerCubicCm = 1.3799999999999999,
-                            MaterialCategoryNickname = "filament",
                             Name = "Polyethylene Terephthalate Glycol"
                         },
                         new
@@ -538,7 +386,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("f8a6b364-94a6-4a32-a253-e67b41df1969"),
                             Acronym = "PLA",
                             DensityGramPerCubicCm = 1.24,
-                            MaterialCategoryNickname = "filament",
                             Name = "Polylactic Acid"
                         },
                         new
@@ -546,7 +393,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("0c236829-8487-4bb4-a092-68a9731a64e4"),
                             Acronym = "PVA",
                             DensityGramPerCubicCm = 1.23,
-                            MaterialCategoryNickname = "filament",
                             Name = "Polyvinyl Acetate"
                         },
                         new
@@ -554,7 +400,6 @@ namespace PrintLogApi.Migrations
                             Id = new Guid("d777bde9-fba6-4f5a-b7a4-e8a4a9695715"),
                             Acronym = "TPU 95A",
                             DensityGramPerCubicCm = 1.22,
-                            MaterialCategoryNickname = "filament",
                             Name = "Thermoplastic Polyurethane"
                         });
                 });
@@ -694,14 +539,14 @@ namespace PrintLogApi.Migrations
                     b.Property<double?>("EstimatedLengthInM")
                         .HasColumnType("float");
 
-                    b.Property<int>("EstimatedSource")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("EstimatedVolumeMl")
-                        .HasColumnType("float");
-
                     b.Property<Guid?>("FilamentId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActualLengthSource")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEstimatedLengthSource")
+                        .HasColumnType("bit");
 
                     b.Property<double?>("LengthInM")
                         .HasColumnType("float");
@@ -712,12 +557,6 @@ namespace PrintLogApi.Migrations
 
                     b.Property<long>("PrintId")
                         .HasColumnType("bigint");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("VolumeMl")
-                        .HasColumnType("float");
 
                     b.HasKey("Id");
 
@@ -808,105 +647,11 @@ namespace PrintLogApi.Migrations
                     b.Property<long>("UserId")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("typeNickname")
-                        .HasColumnType("nvarchar(50)");
-
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
 
-                    b.HasIndex("typeNickname");
-
                     b.ToTable("Printers");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.PrinterCategory", b =>
-                {
-                    b.Property<string>("Nickname")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("MaterialCategoryNickname")
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Name")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("Nickname");
-
-                    b.HasIndex("MaterialCategoryNickname");
-
-                    b.ToTable("PrinterCategories");
-
-                    b.HasData(
-                        new
-                        {
-                            Nickname = "FDM",
-                            Description = "Material extruded through a nozzle.",
-                            MaterialCategoryNickname = "filament",
-                            Name = "Fused Deposition Modeling"
-                        },
-                        new
-                        {
-                            Nickname = "FFF",
-                            Description = "Material extruded through a nozzle.",
-                            MaterialCategoryNickname = "filament",
-                            Name = "Fused Filament Fabrication"
-                        },
-                        new
-                        {
-                            Nickname = "SLA",
-                            Description = "",
-                            MaterialCategoryNickname = "resin",
-                            Name = "Stereolithography"
-                        },
-                        new
-                        {
-                            Nickname = "LCD",
-                            Description = "",
-                            MaterialCategoryNickname = "resin",
-                            Name = "Liquid Crystal Display"
-                        },
-                        new
-                        {
-                            Nickname = "DLP",
-                            Description = "",
-                            MaterialCategoryNickname = "resin",
-                            Name = "Digital Light Processing"
-                        },
-                        new
-                        {
-                            Nickname = "MSLA",
-                            Description = "",
-                            MaterialCategoryNickname = "resin",
-                            Name = "Micro-stereolithography"
-                        },
-                        new
-                        {
-                            Nickname = "SLS",
-                            Description = "",
-                            MaterialCategoryNickname = "powder",
-                            Name = "Selective Laser Sintering"
-                        },
-                        new
-                        {
-                            Nickname = "LPDF",
-                            Description = "",
-                            MaterialCategoryNickname = "powder",
-                            Name = "Laser Powder Bed Fusion"
-                        },
-                        new
-                        {
-                            Nickname = "EBM",
-                            Description = "",
-                            MaterialCategoryNickname = "powder",
-                            Name = "Electron Beam Melting"
-                        });
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterFilament", b =>
@@ -932,12 +677,12 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("FilamentId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FilamentId"), new[] { "PrinterId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.HasIndex("PrinterId")
                         .HasFilter("[UnloadedDateTime] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "UnloadedDateTime" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId"), new[] { "FilamentId", "LoadedDateTime", "UnloadedDateTime" });
 
                     b.ToTable("PrinterFilament");
                 });
@@ -1250,12 +995,6 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("PrintLogApi.Models.MaterialCategory", "MaterialCategory")
-                        .WithMany()
-                        .HasForeignKey("MaterialCategoryNickname")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
@@ -1263,8 +1002,6 @@ namespace PrintLogApi.Migrations
                         .IsRequired();
 
                     b.Navigation("CreatedBy");
-
-                    b.Navigation("MaterialCategory");
 
                     b.Navigation("UpdatedBy");
                 });
@@ -1313,15 +1050,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("UpdatedBy");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.MaterialType", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.MaterialCategory", "MaterialCategory")
-                        .WithMany()
-                        .HasForeignKey("MaterialCategoryNickname");
-
-                    b.Navigation("MaterialCategory");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
@@ -1446,22 +1174,7 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("PrintLogApi.Models.PrinterCategory", "type")
-                        .WithMany()
-                        .HasForeignKey("typeNickname");
-
                     b.Navigation("User");
-
-                    b.Navigation("type");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.PrinterCategory", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.MaterialCategory", "MaterialCategory")
-                        .WithMany()
-                        .HasForeignKey("MaterialCategoryNickname");
-
-                    b.Navigation("MaterialCategory");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterFilament", b =>

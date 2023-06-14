@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
@@ -121,6 +122,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
                 var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
                 c.IncludeXmlComments(xmlPath, true);
+
+                c.CustomSchemaIds(type => type.ToString());
 
             });
 

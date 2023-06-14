@@ -51,6 +51,8 @@ namespace PrintLogApi.Models.DTOs.Filament
         public long? FilamentRemaining { get; set; }
 
         public double? FilamentLengthRemainingInM { get; set; }
+
+        public double? FilamentVolumeRemainingInMl { get; set; }
         /// <summary>
         /// Any notes about the purchase price
         /// </summary>

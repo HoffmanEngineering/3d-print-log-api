@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament
 {
@@ -20,6 +21,8 @@ namespace PrintLogApi.Models.DTOs.Filament
 
         [StringLength(255)]
         public string Brand { get; set; }
+
+        public string MaterialCategoryNickname { get; set; }
 
 
         /// <summary>
@@ -39,6 +42,23 @@ namespace PrintLogApi.Models.DTOs.Filament
         [StringLength(6)]
         public string ColorHex { get; set; }
         public double? DiameterMm { get; set; }
+
+        /// <summary>
+        /// Which measurement is the source. Ie, should measurements be based on weight, volume, etc?
+        /// </summary>
+        public SourceMeasurement? Source { get; set; }
+
+        /// <summary>
+        /// The initial volume of the material in millileters 
+        /// </summary>
+        public double? InitialNominalVolumeMl { get; set; }
+
+        /// <summary>
+        /// The initial length of the material in meters 
+        /// </summary>
+        public double? InitialNominalLengthM { get; set; }
+
+
         public long? InitialTotalWeightMg { get; set; }
 
         /// <summary>
@@ -90,6 +110,35 @@ namespace PrintLogApi.Models.DTOs.Filament
         public string Notes { get; set; }
 
         public bool IsFavorite { get; set; }
+
+        /// <summary>
+        /// The initial layer cure time in seconds
+        /// </summary>
+        public double? InitialLayerTimeS { get; set; }
+
+        /// <summary>
+        /// The layer cure time in seconds (after the initial layers)
+        /// </summary>
+        public double? LayerTimeS { get; set; }
+
+        /// <summary>
+        /// Melting temperature of the material
+        /// </summary>
+        public double? MeltingTemperature { get; set; }
+
+
+        /// <summary>
+        /// What inert gas should be used?
+        /// </summary>
+        [StringLength(255)]
+        public string InertGas { get; set; }
+
+        /// <summary>
+        /// The percentage of new powder when mixing with old powder.
+        /// 1.0 means always use new powder.
+        /// </summary>
+        [Range(0.0, 1.0)]
+        public double? MaterialRefreshRatio { get; set; }
 
         public ICollection<FilamentAdjustmentDto> FilamentAdjustments { get; set; }
     }
