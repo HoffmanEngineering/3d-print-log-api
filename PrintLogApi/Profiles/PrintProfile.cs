@@ -83,7 +83,7 @@ namespace PrintLogApi.Profiles
             CreateMap<PrintFilament, PrintFilamentSummaryDto>()
                 .ForMember(dest => dest.Filament, opt => opt.MapFrom(src => src.Filament))
                 .ForMember(dest => dest.IsEstimatedLengthSource, opt => opt.MapFrom(src => src.EstimatedSource == PrintFilament.SourceMeasurement.Length))
-                .ForMember(dest => dest.IsActualLengthSource, opt => opt.MapFrom(src => src.EstimatedSource == PrintFilament.SourceMeasurement.Length));
+                .ForMember(dest => dest.IsActualLengthSource, opt => opt.MapFrom(src => src.Source == PrintFilament.SourceMeasurement.Length));
 
             CreateMap<PrintFilamentSummaryDto, PrintFilament>()
                 .ForMember(dest => dest.Filament, opt => opt.Ignore())
