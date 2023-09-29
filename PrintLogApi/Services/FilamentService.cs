@@ -35,17 +35,24 @@ namespace PrintLogApi.Services
             int pageNumber,
             int pageSize,
             string searchText,
+            string filterByMaterialCategoryNickname,
             bool? includeInactive,
             bool? showFavoritesOnly,
             bool? showLoadedFilamentOnly)
         {
             var filament = _context.Filaments
+                .Include(f => f.MaterialCategory)
                 .Where(f => f.CreatedById == userId);
 
                         // Filter out unloaded-filaments if requested.
             if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
             {
                 filament = filament.Where(f => f.PrinterFilaments.Any(pf => !pf.UnloadedDateTime.HasValue));
+            }
+
+            if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
+            {
+                filament = filament.Where(f => f.MaterialCategory.Nickname == filterByMaterialCategoryNickname);
             }
 
             var filamentsBase = filament
@@ -66,6 +73,8 @@ namespace PrintLogApi.Services
                 }
                 
             }
+
+            
 
             // Filter out inactives unless specified
             if (!includeInactive.HasValue || includeInactive.Value == false)
