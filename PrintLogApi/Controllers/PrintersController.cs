@@ -166,13 +166,6 @@ namespace PrintLogApi.Controllers
                 return BadRequest();
             }
 
-            var printerType = await _printerCategoryService.get(printer.Type ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
-
-            if (printerType is null)
-            {
-                return BadRequest("Printer Type not found");
-            }
-
             var existingPrinter = await _printerService.getPrinterById(id);
 
             if (existingPrinter == null)
@@ -187,6 +180,13 @@ namespace PrintLogApi.Controllers
             }
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
+
+            var printerType = await _printerCategoryService.get(printer.Type ?? existingPrinter.Type.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+
+            if (printerType is null)
+            {
+                return BadRequest("Printer Type not found");
+            }
 
             existingPrinter.Type = printerType;
 
@@ -251,6 +251,13 @@ namespace PrintLogApi.Controllers
             }
 
             var newPrinter = _mapper.Map<Printer>(printer);
+
+            var printerType = await _printerCategoryService.get(printer.Type ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+
+            if (printerType is null)
+            {
+                return BadRequest("Printer Type not found");
+            }
 
             newPrinter.UserId = userId.Value;
             
