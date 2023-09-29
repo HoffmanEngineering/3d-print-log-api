@@ -136,6 +136,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IPrintService, PrintService>();
             services.AddTransient<IPrinterService, PrinterService>();
+            services.AddTransient<IPrinterCategoryService, PrinterCategoryService>();
             services.AddTransient<ICommentService, CommentService>();
             services.AddTransient<IPrintImageService, PrintImageService>();
             services.AddTransient<IFilamentService, FilamentService>();

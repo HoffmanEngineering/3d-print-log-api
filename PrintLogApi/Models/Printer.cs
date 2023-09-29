@@ -33,7 +33,7 @@ namespace PrintLogApi.Models
 
         public ICollection<PrinterFilament> LoadedFilaments { get; set; }
 
-        public PrinterCategory type { get; set; }
+        public PrinterCategory Type { get; set; }
 
     }
 }

@@ -37,5 +37,7 @@ namespace PrintLogApi.Models.DTOs.Printer
         public ICollection<AddPrinterFilamentDto> LoadedFilaments { get; set; }
 
         public bool IsActive { get; set; }
+
+        public string Type { get; set; }
     }
 }

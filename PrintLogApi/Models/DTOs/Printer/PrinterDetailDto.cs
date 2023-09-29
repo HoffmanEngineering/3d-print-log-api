@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.PrinterCategory;
 
 namespace PrintLogApi.Models.DTOs.Printer
 {
@@ -32,5 +33,7 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// The collection of currently loaded filament for this printer.
         /// </summary>
         public ICollection<PrinterFilamentSummaryDto> LoadedFilaments { get; set; }
+
+        public PrinterCategoryDto Type { get; set; }
     }
 }
