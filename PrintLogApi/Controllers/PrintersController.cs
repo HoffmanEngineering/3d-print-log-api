@@ -259,8 +259,9 @@ namespace PrintLogApi.Controllers
                 return BadRequest("Printer Type not found");
             }
 
+            newPrinter.Type = printerType;
+
             newPrinter.UserId = userId.Value;
-            
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();
