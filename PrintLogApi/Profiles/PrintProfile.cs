@@ -87,12 +87,12 @@ namespace PrintLogApi.Profiles
 
             CreateMap<PrintFilamentSummaryDto, PrintFilament>()
                 .ForMember(dest => dest.Filament, opt => opt.Ignore())
-                .ForMember(dest => dest.EstimatedSource, opt => opt.MapFrom(src => src.IsEstimatedLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight))
-                .ForMember(dest => dest.Source, opt => opt.MapFrom(src => src.IsActualLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight));
+                .ForMember(dest => dest.EstimatedSource, opt => opt.MapFrom(src => src.EstimatedSource.HasValue ? src.EstimatedSource : src.IsEstimatedLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight))
+                .ForMember(dest => dest.Source, opt => opt.MapFrom(src => src.Source.HasValue ? src.Source : src.IsActualLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight));
 
             CreateMap<PutPrintFilamentSummaryDto, PrintFilament>()
-                .ForMember(dest => dest.EstimatedSource, opt => opt.MapFrom(src => src.IsEstimatedLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight))
-                .ForMember(dest => dest.Source, opt => opt.MapFrom(src => src.IsActualLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight));
+                .ForMember(dest => dest.EstimatedSource, opt => opt.MapFrom(src => src.EstimatedSource.HasValue ? src.EstimatedSource : src.IsEstimatedLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight))
+                .ForMember(dest => dest.Source, opt => opt.MapFrom(src => src.Source.HasValue ? src.Source : src.IsActualLengthSource ? PrintFilament.SourceMeasurement.Length : PrintFilament.SourceMeasurement.Weight));
 
         }
     }

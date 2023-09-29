@@ -805,17 +805,17 @@ namespace PrintLogApi.Migrations
                     b.Property<double>("NozzleDiameter")
                         .HasColumnType("float");
 
+                    b.Property<string>("TypeNickname")
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<long>("UserId")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("typeNickname")
-                        .HasColumnType("nvarchar(50)");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("TypeNickname");
 
-                    b.HasIndex("typeNickname");
+                    b.HasIndex("UserId");
 
                     b.ToTable("Printers");
                 });
@@ -1201,6 +1201,24 @@ namespace PrintLogApi.Migrations
                             Id = 8,
                             Description = "The default price of filament, for when pricing wasn't added.",
                             Name = "Filaments_DefaultPrice"
+                        },
+                        new
+                        {
+                            Id = 9,
+                            Description = "The last selected resin measure type on the print.",
+                            Name = "Prints_LastSelectedResinMeasureType"
+                        },
+                        new
+                        {
+                            Id = 10,
+                            Description = "The last selected powder measure type on the print.",
+                            Name = "Prints_LastSelectedPowderMeasureType"
+                        },
+                        new
+                        {
+                            Id = 11,
+                            Description = "The last selected wire measure type on the print.",
+                            Name = "Prints_LastSelectedWireMeasureType"
                         });
                 });
 
@@ -1440,19 +1458,19 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
                 {
+                    b.HasOne("PrintLogApi.Models.PrinterCategory", "Type")
+                        .WithMany()
+                        .HasForeignKey("TypeNickname");
+
                     b.HasOne("PrintLogApi.Models.User", "User")
                         .WithMany("printers")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("PrintLogApi.Models.PrinterCategory", "type")
-                        .WithMany()
-                        .HasForeignKey("typeNickname");
+                    b.Navigation("Type");
 
                     b.Navigation("User");
-
-                    b.Navigation("type");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterCategory", b =>

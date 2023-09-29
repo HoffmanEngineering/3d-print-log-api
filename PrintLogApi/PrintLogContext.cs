@@ -66,7 +66,10 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 5, Name = "Currency_Name", Description = "The three-character country code of the preferred currency" },
                 new UserSettingType() { Id = 6, Name = "Currency_Symbol", Description = "The symbol of the preferred currency" },
                 new UserSettingType() { Id = 7, Name = "Filaments_DefaultDiameterMm", Description = "The default diameter of new filament (in millimeters)." },
-                new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." }
+                new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." },
+                new UserSettingType() { Id = 9, Name = "Prints_LastSelectedResinMeasureType", Description = "The last selected resin measure type on the print." },
+                new UserSettingType() { Id = 10, Name = "Prints_LastSelectedPowderMeasureType", Description = "The last selected powder measure type on the print." },
+                new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." }
                 );
 
             var filamentCategory = new MaterialCategory()
