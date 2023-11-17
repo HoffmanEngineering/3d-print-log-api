@@ -18,6 +18,6 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         public bool IsActive { get; set; }
 
-        public PrinterCategoryDto Type { get; set; }
+        public PrinterCategoryDto Category { get; set; }
     }
 }

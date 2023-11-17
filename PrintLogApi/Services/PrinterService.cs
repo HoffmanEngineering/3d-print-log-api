@@ -27,7 +27,7 @@ namespace PrintLogApi.Services
             var existingPrinter = await _context.Printers
                 .Include(p => p.LoadedFilaments)
                     .ThenInclude(f => f.Filament)
-                .Include(p => p.Type)
+                .Include(p => p.Category)
                     .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == printerId)
                 .SingleOrDefaultAsync();

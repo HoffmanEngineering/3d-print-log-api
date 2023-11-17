@@ -134,6 +134,14 @@ namespace PrintLogApi
 
             modelBuilder.Entity<MaterialCategory>().HasData(filamentCategory, resinCategory, powderCategory, wireCategory);
 
+            var FFFPrinterCategory = new PrinterCategory()
+            {
+                Nickname = "FFF",
+                Name = "Fused Filament Fabrication",
+                Description = "Material extruded through a nozzle.",
+                MaterialCategoryNickname = filamentCategory.Nickname
+            };
+
             modelBuilder.Entity<PrinterCategory>().HasData(
                 new PrinterCategory()
                 {
@@ -142,13 +150,7 @@ namespace PrintLogApi
                     Description = "Material extruded through a nozzle.",
                     MaterialCategoryNickname = filamentCategory.Nickname
                 },
-                new PrinterCategory()
-                {
-                    Nickname = "FFF",
-                    Name = "Fused Filament Fabrication",
-                    Description = "Material extruded through a nozzle.",
-                    MaterialCategoryNickname = filamentCategory.Nickname
-                },
+                FFFPrinterCategory,
                 new PrinterCategory()
                 {
                     Nickname = "SLA",
@@ -313,6 +315,10 @@ namespace PrintLogApi
             modelBuilder.Entity<PrinterFilament>()
                 .HasIndex(pf => pf.PrinterId).IncludeProperties(pf => new { pf.FilamentId, pf.UnloadedDateTime })
                 .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<Printer>()
+                .Property(p => p.CategoryNickname)
+                    .HasDefaultValue(FFFPrinterCategory.Nickname);
 
             modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
 

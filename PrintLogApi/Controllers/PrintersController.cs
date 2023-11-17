@@ -25,7 +25,7 @@ namespace PrintLogApi.Controllers
     [Authorize]
     public class PrintersController : ControllerBase
     {
-        private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = "FDM";
+        private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = "FFF";
 
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
@@ -112,7 +112,7 @@ namespace PrintLogApi.Controllers
                 .Include(p => p.LoadedFilaments)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.PrintFilaments)
-                .Include(p => p.Type)
+                .Include(p => p.Category)
                     .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == id)
                 .AsNoTracking()
@@ -181,14 +181,14 @@ namespace PrintLogApi.Controllers
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
-            var printerType = await _printerCategoryService.get(printer.Type ?? existingPrinter.Type.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+            var printerCategory = await _printerCategoryService.get(printer.Category ?? existingPrinter.Category.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
-            if (printerType is null)
+            if (printerCategory is null)
             {
-                return BadRequest("Printer Type not found");
+                return BadRequest("Printer Category not found");
             }
 
-            existingPrinter.Type = printerType;
+            existingPrinter.Category = printerCategory;
 
             foreach (var filament in existingPrinter.LoadedFilaments)
             {
@@ -252,14 +252,14 @@ namespace PrintLogApi.Controllers
 
             var newPrinter = _mapper.Map<Printer>(printer);
 
-            var printerType = await _printerCategoryService.get(printer.Type ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+            var printerType = await _printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
             if (printerType is null)
             {
                 return BadRequest("Printer Type not found");
             }
 
-            newPrinter.Type = printerType;
+            newPrinter.Category = printerType;
 
             newPrinter.UserId = userId.Value;
 

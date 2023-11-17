@@ -34,6 +34,6 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// </summary>
         public ICollection<PrinterFilamentSummaryDto> LoadedFilaments { get; set; }
 
-        public PrinterCategoryDto Type { get; set; }
+        public PrinterCategoryDto Category { get; set; }
     }
 }

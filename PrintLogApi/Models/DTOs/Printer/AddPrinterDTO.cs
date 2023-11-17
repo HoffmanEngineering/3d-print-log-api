@@ -42,6 +42,6 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// <summary>
         /// Nickname of the Printer Category for this printer (ie, FDM, FFF, etc)
         /// </summary>
-        public string Type { get; set; }
+        public string Category { get; set; }
     }
 }
