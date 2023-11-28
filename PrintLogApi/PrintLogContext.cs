@@ -283,6 +283,14 @@ namespace PrintLogApi
                     Name = "Thermoplastic Polyurethane",
                     DensityGramPerCubicCm = 1.22,
                     MaterialCategoryNickname = filamentCategory.Nickname
+                },
+                new MaterialType()
+                {
+                    Id = Guid.Parse("CC3A5FC9-39DD-42C6-8ACC-9C9019DCD307"),
+                    Acronym = "Standard Resin",
+                    Name = "Standard Resin",
+                    DensityGramPerCubicCm = 1.1,
+                    MaterialCategoryNickname = resinCategory.Nickname
                 }
             );
 
