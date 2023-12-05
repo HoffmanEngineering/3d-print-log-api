@@ -279,7 +279,7 @@ namespace PrintLogApi.Services
                     filament.InitialNominalWeightMg = GetAmountMgFromLength(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                     filament.InitialNominalVolumeMl = GetVolumeInMlFromLengthM(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value);
                 }
-            } else if (filament.Source == Filament.SourceMeasurement.Weight)
+            } else if (filament.Source == Filament.SourceMeasurement.Volume)
             {
                 if (filament.InitialNominalVolumeMl.HasValue)
                 {

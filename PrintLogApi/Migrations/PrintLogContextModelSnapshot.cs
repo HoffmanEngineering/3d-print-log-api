@@ -556,6 +556,14 @@ namespace PrintLogApi.Migrations
                             DensityGramPerCubicCm = 1.22,
                             MaterialCategoryNickname = "filament",
                             Name = "Thermoplastic Polyurethane"
+                        },
+                        new
+                        {
+                            Id = new Guid("cc3a5fc9-39dd-42c6-8acc-9c9019dcd307"),
+                            Acronym = "Standard Resin",
+                            DensityGramPerCubicCm = 1.1000000000000001,
+                            MaterialCategoryNickname = "resin",
+                            Name = "Standard Resin"
                         });
                 });
 
