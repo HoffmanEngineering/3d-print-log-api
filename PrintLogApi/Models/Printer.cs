@@ -25,9 +25,10 @@ namespace PrintLogApi.Models
         [MaxLength(1000)]
         public string Description { get; set; }
 
-        public double NozzleDiameter { get; set; }
+        public double? NozzleDiameter { get; set; }
 
-        public double FilamentDiameter { get; set; }
+        public double? FilamentDiameter { get; set; }
+        public double? BeamDiameter { get; set; }
 
         public bool IsActive { get; set; }
 
@@ -35,6 +36,15 @@ namespace PrintLogApi.Models
 
         public string CategoryNickname { get; set; }
         public PrinterCategory Category { get; set; }
+
+        public double? BedWidthMm { get; set; }
+        public double? BedHeightMm { get; set; }
+        public double? BedDepthMm { get; set; }
+        public double? ScreenResolutionXPixels { get; set; }
+        public double? ScreenResolutionYPixels { get; set; }
+
+        public bool? HasHeatedBed { get; set; }
+        public bool? HasHeatedChamber { get; set; }
 
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Extensions;
 using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament
@@ -53,7 +54,6 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// The initial length of the material in meters 
         /// </summary>
         public double? InitialNominalLengthM { get; set; }
-
 
         public long? InitialTotalWeightMg { get; set; }
 

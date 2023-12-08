@@ -788,6 +788,18 @@ namespace PrintLogApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<double?>("BeamDiameter")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedDepthMm")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedHeightMm")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedWidthMm")
+                        .HasColumnType("float");
+
                     b.Property<string>("CategoryNickname")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("nvarchar(50)")
@@ -797,8 +809,14 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<double>("FilamentDiameter")
+                    b.Property<double?>("FilamentDiameter")
                         .HasColumnType("float");
+
+                    b.Property<bool?>("HasHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("HasHeatedChamber")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -815,7 +833,13 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<double>("NozzleDiameter")
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ScreenResolutionXPixels")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ScreenResolutionYPixels")
                         .HasColumnType("float");
 
                     b.Property<long>("UserId")
@@ -847,6 +871,27 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<bool>("ShowBeamDiameter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowBedSize")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowFilamentDiameter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowHasHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowHasHeatedChamber")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowNozzleDiameter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("ShowScreenResolution")
+                        .HasColumnType("bit");
+
                     b.HasKey("Nickname");
 
                     b.HasIndex("MaterialCategoryNickname");
@@ -859,63 +904,140 @@ namespace PrintLogApi.Migrations
                             Nickname = "FDM",
                             Description = "Material extruded through a nozzle.",
                             MaterialCategoryNickname = "filament",
-                            Name = "Fused Deposition Modeling"
+                            Name = "Fused Deposition Modeling",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = true,
+                            ShowHasHeatedBed = true,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = true,
+                            ShowScreenResolution = false
                         },
                         new
                         {
                             Nickname = "FFF",
                             Description = "Material extruded through a nozzle.",
                             MaterialCategoryNickname = "filament",
-                            Name = "Fused Filament Fabrication"
+                            Name = "Fused Filament Fabrication",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = true,
+                            ShowHasHeatedBed = true,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = true,
+                            ShowScreenResolution = false
                         },
                         new
                         {
                             Nickname = "SLA",
-                            Description = "",
+                            Description = "Laser based SLA which cures photosensitive resin.",
                             MaterialCategoryNickname = "resin",
-                            Name = "Stereolithography"
+                            Name = "Stereolithography",
+                            ShowBeamDiameter = true,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = false
+                        },
+                        new
+                        {
+                            Nickname = "PolyJet",
+                            Description = "Printing with UV curable resin onto a build tray in a process somewhat similar to inkjet printing.",
+                            MaterialCategoryNickname = "resin",
+                            Name = "PolyJet",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = true
                         },
                         new
                         {
                             Nickname = "LCD",
-                            Description = "",
+                            Description = "Uses an LCD Screen to mask photosensitive resin.",
                             MaterialCategoryNickname = "resin",
-                            Name = "Liquid Crystal Display"
+                            Name = "Liquid Crystal Display",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = true
                         },
                         new
                         {
                             Nickname = "DLP",
-                            Description = "",
+                            Description = "Uses a projector or projector-like array to expose a photosensitive resin.",
                             MaterialCategoryNickname = "resin",
-                            Name = "Digital Light Processing"
+                            Name = "Digital Light Processing",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = true
                         },
                         new
                         {
                             Nickname = "MSLA",
-                            Description = "",
+                            Description = "Uses an LED array along with a LCD Photomask to selectively expose a photosensitive resin.",
                             MaterialCategoryNickname = "resin",
-                            Name = "Micro-stereolithography"
+                            Name = "Micro-stereolithography",
+                            ShowBeamDiameter = false,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = true
                         },
                         new
                         {
                             Nickname = "SLS",
-                            Description = "",
+                            Description = "Uses a laser to fuse particles together.",
                             MaterialCategoryNickname = "powder",
-                            Name = "Selective Laser Sintering"
+                            Name = "Selective Laser Sintering",
+                            ShowBeamDiameter = true,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = false
                         },
                         new
                         {
                             Nickname = "LPDF",
-                            Description = "",
+                            Description = "Generic category for powder based additive manufacturing.",
                             MaterialCategoryNickname = "powder",
-                            Name = "Laser Powder Bed Fusion"
+                            Name = "Laser Powder Bed Fusion",
+                            ShowBeamDiameter = true,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = false
                         },
                         new
                         {
                             Nickname = "EBM",
-                            Description = "",
+                            Description = "Uses an electron beam to fuse particles together.",
                             MaterialCategoryNickname = "powder",
-                            Name = "Electron Beam Melting"
+                            Name = "Electron Beam Melting",
+                            ShowBeamDiameter = true,
+                            ShowBedSize = true,
+                            ShowFilamentDiameter = false,
+                            ShowHasHeatedBed = false,
+                            ShowHasHeatedChamber = true,
+                            ShowNozzleDiameter = false,
+                            ShowScreenResolution = false
                         });
                 });
 

@@ -32,5 +32,14 @@ namespace PrintLogApi.Models
         /// The type of material that this 3D printing technology can use
         /// </summary>
         public MaterialCategory MaterialCategory { get; set; }
+
+        public bool ShowNozzleDiameter {  get; set; }
+        public bool ShowFilamentDiameter { get; set; }
+        public bool ShowBeamDiameter { get; set; }
+        public bool ShowBedSize { get; set; }
+        public bool ShowScreenResolution { get; set; }
+        public bool ShowHasHeatedBed { get; set; }
+        public bool ShowHasHeatedChamber { get; set; }
+        
     }
 }
