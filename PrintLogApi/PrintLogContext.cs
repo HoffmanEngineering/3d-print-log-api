@@ -66,7 +66,10 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 5, Name = "Currency_Name", Description = "The three-character country code of the preferred currency" },
                 new UserSettingType() { Id = 6, Name = "Currency_Symbol", Description = "The symbol of the preferred currency" },
                 new UserSettingType() { Id = 7, Name = "Filaments_DefaultDiameterMm", Description = "The default diameter of new filament (in millimeters)." },
-                new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." }
+                new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." },
+                new UserSettingType() { Id = 9, Name = "Prints_LastSelectedResinMeasureType", Description = "The last selected resin measure type on the print." },
+                new UserSettingType() { Id = 10, Name = "Prints_LastSelectedPowderMeasureType", Description = "The last selected powder measure type on the print." },
+                new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." }
                 );
 
             var filamentCategory = new MaterialCategory()
@@ -131,69 +134,148 @@ namespace PrintLogApi
 
             modelBuilder.Entity<MaterialCategory>().HasData(filamentCategory, resinCategory, powderCategory, wireCategory);
 
+            var FFFPrinterCategory = new PrinterCategory()
+            {
+                Nickname = "FFF",
+                Name = "Fused Filament Fabrication",
+                Description = "Material extruded through a nozzle.",
+                MaterialCategoryNickname = filamentCategory.Nickname,
+                ShowFilamentDiameter = true,
+                ShowNozzleDiameter = true,
+                ShowBeamDiameter = false,
+                ShowBedSize = true,
+                ShowHasHeatedBed = true,
+                ShowHasHeatedChamber = true,
+                ShowScreenResolution = false,
+            };
+
             modelBuilder.Entity<PrinterCategory>().HasData(
                 new PrinterCategory()
                 {
                     Nickname = "FDM",
                     Name = "Fused Deposition Modeling",
                     Description = "Material extruded through a nozzle.",
-                    MaterialCategoryNickname = filamentCategory.Nickname
+                    MaterialCategoryNickname = filamentCategory.Nickname,
+                    ShowFilamentDiameter = true,
+                    ShowNozzleDiameter = true,
+                    ShowBeamDiameter = false,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = true,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = false,
                 },
-                new PrinterCategory()
-                {
-                    Nickname = "FFF",
-                    Name = "Fused Filament Fabrication",
-                    Description = "Material extruded through a nozzle.",
-                    MaterialCategoryNickname = filamentCategory.Nickname
-                },
+                FFFPrinterCategory,
                 new PrinterCategory()
                 {
                     Nickname = "SLA",
                     Name = "Stereolithography",
-                    Description = "",
-                    MaterialCategoryNickname = resinCategory.Nickname
+                    Description = "Laser based SLA which cures photosensitive resin.",
+                    MaterialCategoryNickname = resinCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = true,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = false,
+                },
+                new PrinterCategory()
+                {
+                    Nickname = "PolyJet",
+                    Name = "PolyJet",
+                    Description = "Printing with UV curable resin onto a build tray in a process somewhat similar to inkjet printing.",
+                    MaterialCategoryNickname = resinCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = false,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = true,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "LCD",
                     Name = "Liquid Crystal Display",
-                    Description = "",
-                    MaterialCategoryNickname = resinCategory.Nickname
+                    Description = "Uses an LCD Screen to mask photosensitive resin.",
+                    MaterialCategoryNickname = resinCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = false,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = true,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "DLP",
                     Name = "Digital Light Processing",
-                    Description = "",
-                    MaterialCategoryNickname = resinCategory.Nickname
+                    Description = "Uses a projector or projector-like array to expose a photosensitive resin.",
+                    MaterialCategoryNickname = resinCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = false,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = true,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "MSLA",
                     Name = "Micro-stereolithography",
-                    Description = "",
-                    MaterialCategoryNickname = resinCategory.Nickname
+                    Description = "Uses an LED array along with a LCD Photomask to selectively expose a photosensitive resin.",
+                    MaterialCategoryNickname = resinCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = false,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = true,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "SLS",
                     Name = "Selective Laser Sintering",
-                    Description = "",
-                    MaterialCategoryNickname = powderCategory.Nickname
+                    Description = "Uses a laser to fuse particles together.",
+                    MaterialCategoryNickname = powderCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = true,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = false,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "LPDF",
                     Name = "Laser Powder Bed Fusion",
-                    Description = "",
-                    MaterialCategoryNickname = powderCategory.Nickname
+                    Description = "Generic category for powder based additive manufacturing.",
+                    MaterialCategoryNickname = powderCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = true,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = false,
                 },
                 new PrinterCategory()
                 {
                     Nickname = "EBM",
                     Name = "Electron Beam Melting",
-                    Description = "",
-                    MaterialCategoryNickname = powderCategory.Nickname
+                    Description = "Uses an electron beam to fuse particles together.",
+                    MaterialCategoryNickname = powderCategory.Nickname,
+                    ShowFilamentDiameter = false,
+                    ShowNozzleDiameter = false,
+                    ShowBeamDiameter = true,
+                    ShowBedSize = true,
+                    ShowHasHeatedBed = false,
+                    ShowHasHeatedChamber = true,
+                    ShowScreenResolution = false,
                 }
             );
 
@@ -278,6 +360,14 @@ namespace PrintLogApi
                     Name = "Thermoplastic Polyurethane",
                     DensityGramPerCubicCm = 1.22,
                     MaterialCategoryNickname = filamentCategory.Nickname
+                },
+                new MaterialType()
+                {
+                    Id = Guid.Parse("CC3A5FC9-39DD-42C6-8ACC-9C9019DCD307"),
+                    Acronym = "Standard Resin",
+                    Name = "Standard Resin",
+                    DensityGramPerCubicCm = 1.1,
+                    MaterialCategoryNickname = resinCategory.Nickname
                 }
             );
 
@@ -310,6 +400,10 @@ namespace PrintLogApi
             modelBuilder.Entity<PrinterFilament>()
                 .HasIndex(pf => pf.PrinterId).IncludeProperties(pf => new { pf.FilamentId, pf.UnloadedDateTime })
                 .HasFilter("[UnloadedDateTime] IS NULL");
+
+            modelBuilder.Entity<Printer>()
+                .Property(p => p.CategoryNickname)
+                    .HasDefaultValue(FFFPrinterCategory.Nickname);
 
             modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
 

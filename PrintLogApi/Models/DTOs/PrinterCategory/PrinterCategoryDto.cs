@@ -1,11 +1,12 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using PrintLogApi.Models.DTOs.MaterialCategory;
 
-namespace PrintLogApi.Models
+namespace PrintLogApi.Models.DTOs.PrinterCategory
 {
     /// <summary>
     /// The class/category/type of 3D printing technology, such as FDM, SLA, etc
     /// </summary>
-    public class PrinterCategory
+    public class PrinterCategoryDto
     {
         /// <summary>
         /// The nickname of the category
@@ -26,20 +27,17 @@ namespace PrintLogApi.Models
         [StringLength(255)]
         public string Description { get; set; }
 
-
-        public string MaterialCategoryNickname { get; set; }
         /// <summary>
         /// The type of material that this 3D printing technology can use
         /// </summary>
-        public MaterialCategory MaterialCategory { get; set; }
+        public MaterialCategoryDto MaterialCategory { get; set; }
 
-        public bool ShowNozzleDiameter {  get; set; }
+        public bool ShowNozzleDiameter { get; set; }
         public bool ShowFilamentDiameter { get; set; }
         public bool ShowBeamDiameter { get; set; }
         public bool ShowBedSize { get; set; }
         public bool ShowScreenResolution { get; set; }
         public bool ShowHasHeatedBed { get; set; }
         public bool ShowHasHeatedChamber { get; set; }
-        
     }
 }

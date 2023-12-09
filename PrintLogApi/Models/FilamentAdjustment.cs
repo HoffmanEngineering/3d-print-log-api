@@ -56,8 +56,8 @@ namespace PrintLogApi.Models
         ///     </list>
         /// </para>
         /// </summary>
-        /// <example>If a filament has an INITIAL WEIGHT of 1000, and adjusted by +100, then the current weight is 1000+100 = 1100Mg </example>
-        /// <example>If a filament has an INITIAL WEIGHT of 1000, and adjusted by -100, then the current weight is 1000-100) = 900 Mg</example>
+        /// <example>If a filament has an INITIAL LENGTH of 1000, and adjusted by +100, then the current weight is 1000+100 = 1100 m </example>
+        /// <example>If a filament has an INITIAL LENGTH of 1000, and adjusted by -100, then the current weight is 1000-100) = 900 m</example>
         public double? LengthInM { get; set; }
 
 
@@ -71,8 +71,8 @@ namespace PrintLogApi.Models
         ///     </list>
         /// </para>
         /// </summary>
-        /// <example>If a filament has an INITIAL VOLUME of 1000, and adjusted by +100, then the current weight is 1000+100 = 1100Mg </example>
-        /// <example>If a filament has an INITIAL VOLUME of 1000, and adjusted by -100, then the current weight is 1000-100) = 900 Mg</example>
+        /// <example>If a filament has an INITIAL VOLUME of 1000, and adjusted by +100, then the current weight is 1000+100 = 1100 Ml </example>
+        /// <example>If a filament has an INITIAL VOLUME of 1000, and adjusted by -100, then the current weight is 1000-100) = 900 Ml</example>
         public double? VolumeMl { get; set; }
 
         [StringLength(1000)]

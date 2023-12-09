@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.MaterialCategory;
 using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Models.DTOs.Filament
@@ -26,6 +27,11 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// </summary>
         [StringLength(255)]
         public string MaterialType { get; set; }
+
+        /// <summary>
+        /// The material category (ie, filament, resin, etc).
+        /// </summary>
+        public MaterialCategoryDto MaterialCategory { get; set; }
 
         /// <summary>
         /// The Density of the Material

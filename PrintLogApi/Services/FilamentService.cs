@@ -35,17 +35,24 @@ namespace PrintLogApi.Services
             int pageNumber,
             int pageSize,
             string searchText,
+            string filterByMaterialCategoryNickname,
             bool? includeInactive,
             bool? showFavoritesOnly,
             bool? showLoadedFilamentOnly)
         {
             var filament = _context.Filaments
+                .Include(f => f.MaterialCategory)
                 .Where(f => f.CreatedById == userId);
 
                         // Filter out unloaded-filaments if requested.
             if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
             {
                 filament = filament.Where(f => f.PrinterFilaments.Any(pf => !pf.UnloadedDateTime.HasValue));
+            }
+
+            if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
+            {
+                filament = filament.Where(f => f.MaterialCategory.Nickname == filterByMaterialCategoryNickname);
             }
 
             var filamentsBase = filament
@@ -66,6 +73,8 @@ namespace PrintLogApi.Services
                 }
                 
             }
+
+            
 
             // Filter out inactives unless specified
             if (!includeInactive.HasValue || includeInactive.Value == false)
@@ -217,7 +226,7 @@ namespace PrintLogApi.Services
                 if (adjustment.LengthInM.HasValue)
                 {
                     adjustment.AmountMg = GetAmountMgFromLength(adjustment.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                    adjustment.LengthInM = GetVolumeInMlFromLengthM(adjustment.LengthInM.Value, filament.DiameterMm.Value);
+                    adjustment.VolumeMl = GetVolumeInMlFromLengthM(adjustment.LengthInM.Value, filament.DiameterMm.Value);
                 }
             }
             else if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Volume)
@@ -229,6 +238,9 @@ namespace PrintLogApi.Services
                     if (filament.MaterialCategory.HasDiameter)
                     {
                         adjustment.LengthInM = GetLengthInMetersFromVolume(adjustment.VolumeMl.Value, filament.DiameterMm.Value);
+                    } else
+                    {
+                        adjustment.LengthInM = null;
                     }
                 }
             }
@@ -242,6 +254,10 @@ namespace PrintLogApi.Services
                     if (filament.MaterialCategory.HasDiameter)
                     {
                         adjustment.LengthInM = GetLengthInMetersFromAmount(adjustment.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                    else
+                    {
+                        adjustment.LengthInM = null;
                     }
                 }
             }
@@ -263,7 +279,7 @@ namespace PrintLogApi.Services
                     filament.InitialNominalWeightMg = GetAmountMgFromLength(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                     filament.InitialNominalVolumeMl = GetVolumeInMlFromLengthM(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value);
                 }
-            } else if (filament.Source == Filament.SourceMeasurement.Weight)
+            } else if (filament.Source == Filament.SourceMeasurement.Volume)
             {
                 if (filament.InitialNominalVolumeMl.HasValue)
                 {
@@ -272,6 +288,10 @@ namespace PrintLogApi.Services
                     if (filament.MaterialCategory.HasDiameter)
                     {
                         filament.InitialNominalLengthM = GetLengthInMetersFromVolume(filament.InitialNominalVolumeMl.Value, filament.DiameterMm.Value);
+                    }
+                    else
+                    {
+                        filament.InitialNominalLengthM = null;
                     }
                 }
             } else
@@ -284,6 +304,10 @@ namespace PrintLogApi.Services
                     if (filament.MaterialCategory.HasDiameter)
                     {
                         filament.InitialNominalLengthM = GetLengthInMetersFromAmount(filament.InitialNominalWeightMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                    }
+                    else
+                    {
+                        filament.InitialNominalLengthM = null;
                     }
                 }
             }

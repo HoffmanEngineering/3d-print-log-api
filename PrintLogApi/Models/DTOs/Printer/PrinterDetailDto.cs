@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.PrinterCategory;
 
 namespace PrintLogApi.Models.DTOs.Printer
 {
@@ -22,9 +23,9 @@ namespace PrintLogApi.Models.DTOs.Printer
         [MaxLength(1000)]
         public string Description { get; set; }
 
-        public double NozzleDiameter { get; set; }
+        public double? NozzleDiameter { get; set; }
 
-        public double FilamentDiameter { get; set; }
+        public double? FilamentDiameter { get; set; }
 
         public bool IsActive { get; set; }
 
@@ -32,5 +33,16 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// The collection of currently loaded filament for this printer.
         /// </summary>
         public ICollection<PrinterFilamentSummaryDto> LoadedFilaments { get; set; }
+
+        public PrinterCategoryDto Category { get; set; }
+
+        public double? BedWidthMm { get; set; }
+        public double? BedHeightMm { get; set; }
+        public double? BedDepthMm { get; set; }
+        public double? ScreenResolutionXPixels { get; set; }
+        public double? ScreenResolutionYPixels { get; set; }
+
+        public bool? HasHeatedBed { get; set; }
+        public bool? HasHeatedChamber { get; set; }
     }
 }

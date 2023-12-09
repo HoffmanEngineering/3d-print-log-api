@@ -10,6 +10,8 @@ namespace PrintLogApi.Models.DTOs.Materials
 
         public string Name { get; set; }
 
+        public string MaterialCategoryNickname { get; set; }
+
         /// <summary>
         /// The Density of the Material
         /// </summary>

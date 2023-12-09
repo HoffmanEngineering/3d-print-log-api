@@ -13,11 +13,13 @@ namespace PrintLogApi.Services
     {
         private readonly PrintLogContext _context;
         private readonly TelemetryClient _telemetry;
+        private readonly IPrinterCategoryService _printerCategoryService;
 
-        public PrinterService(PrintLogContext context, TelemetryClient telemetry)
+        public PrinterService(PrintLogContext context, TelemetryClient telemetry, IPrinterCategoryService printerCategoryService)
         {
             _context = context;
             _telemetry = telemetry;
+            _printerCategoryService = printerCategoryService;
         }
 
         public async Task<Printer> getPrinterById(long printerId)
@@ -25,6 +27,8 @@ namespace PrintLogApi.Services
             var existingPrinter = await _context.Printers
                 .Include(p => p.LoadedFilaments)
                     .ThenInclude(f => f.Filament)
+                .Include(p => p.Category)
+                    .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == printerId)
                 .SingleOrDefaultAsync();
 

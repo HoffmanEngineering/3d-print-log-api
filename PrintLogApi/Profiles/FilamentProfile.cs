@@ -41,13 +41,14 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))
                 .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight)); ;
 
-            CreateMap<FilamentDetailDto, Filament>();
+            CreateMap<FilamentDetailDto, Filament>()
+                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight));
             CreateMap<Filament, FilamentDetailDto>();
 
             CreateMap<FilamentAdjustment, FilamentAdjustmentDto>();
 
             CreateMap<FilamentAdjustmentDto, FilamentAdjustment>()
-                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : FilamentAdjustment.SourceMeasurement.Weight)); ; ;
+                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : FilamentAdjustment.SourceMeasurement.Weight));
         }
     }
 }

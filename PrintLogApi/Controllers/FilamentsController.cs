@@ -36,6 +36,7 @@ namespace PrintLogApi.Controllers
         /// <param name="pagingRequest">The paging request information.</param>
         /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
         /// <param name="searchText">Search filament's name/description/brand for text.</param>
+        /// <param name="filterByMaterialCategoryNickname">Optional filter by a material category nickname</param>
         /// <param name="includeInactive">Include filament rolls that have been marked as inactive.</param>
         /// <param name="showFavoritesOnly">Show only the favoriate filaments</param>
         /// <param name="showLoadedFilamentOnly">Show only currently loaded filament</param>
@@ -47,6 +48,7 @@ namespace PrintLogApi.Controllers
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest,
             [FromQuery] string searchText,
+            [FromQuery] string filterByMaterialCategoryNickname,
             [FromQuery] bool? includeInactive,
             [FromQuery] bool? showFavoritesOnly,
             [FromQuery] bool? showLoadedFilamentOnly)
@@ -63,6 +65,7 @@ namespace PrintLogApi.Controllers
                 pagingRequest.PageNumber, 
                 pagingRequest.PageSize,
                 searchText,
+                filterByMaterialCategoryNickname,
                 includeInactive,
                 showFavoritesOnly,
                 showLoadedFilamentOnly);

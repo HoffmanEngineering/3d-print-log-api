@@ -25,23 +25,28 @@ namespace PrintLogApi.Controllers
     [Authorize]
     public class PrintersController : ControllerBase
     {
+        private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = "FFF";
+
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
         private readonly IFilamentService _filamentService;
         private readonly IPrinterService _printerService;
+        private readonly IPrinterCategoryService _printerCategoryService;
 
         public PrintersController(PrintLogContext context,
                                   IMapper mapper,
                                   TelemetryClient telemetry,
                                   IFilamentService filamentService,
-                                  IPrinterService printerService)
+                                  IPrinterService printerService,
+                                  IPrinterCategoryService printerCategoryService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _filamentService = filamentService;
             _printerService = printerService;
+            _printerCategoryService = printerCategoryService;
         }
 
 
@@ -107,6 +112,8 @@ namespace PrintLogApi.Controllers
                 .Include(p => p.LoadedFilaments)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.PrintFilaments)
+                .Include(p => p.Category)
+                    .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == id)
                 .AsNoTracking()
                 .SingleOrDefaultAsync();
@@ -174,6 +181,15 @@ namespace PrintLogApi.Controllers
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
+            var printerCategory = await _printerCategoryService.get(printer.Category ?? existingPrinter.Category.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+
+            if (printerCategory is null)
+            {
+                return BadRequest("Printer Category not found");
+            }
+
+            existingPrinter.Category = printerCategory;
+
             foreach (var filament in existingPrinter.LoadedFilaments)
             {
                 if (filament.FilamentId != default)
@@ -236,8 +252,16 @@ namespace PrintLogApi.Controllers
 
             var newPrinter = _mapper.Map<Printer>(printer);
 
+            var printerType = await _printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+
+            if (printerType is null)
+            {
+                return BadRequest("Printer Type not found");
+            }
+
+            newPrinter.Category = printerType;
+
             newPrinter.UserId = userId.Value;
-            
 
             _context.Printers.Add(newPrinter);
             await _context.SaveChangesAsync();

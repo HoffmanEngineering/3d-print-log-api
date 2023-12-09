@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Models.DTOs.PrinterCategory;
 
 namespace PrintLogApi.Models.DTOs.Printer
 {
@@ -16,5 +17,7 @@ namespace PrintLogApi.Models.DTOs.Printer
         public string Model { get; set; }
 
         public bool IsActive { get; set; }
+
+        public PrinterCategoryDto Category { get; set; }
     }
 }
