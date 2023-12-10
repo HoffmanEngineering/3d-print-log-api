@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -17,6 +16,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
@@ -246,7 +246,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseApiKeyAuthentication();
             app.UseAuthorization();
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
-            JwtSecurityTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
+            JsonWebTokenHandler.DefaultMapInboundClaims = true;
+            JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
             // Enable middleware to serve generated Swagger as a JSON endpoint.
             app.UseSwagger();
