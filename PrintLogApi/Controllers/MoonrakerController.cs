@@ -20,6 +20,9 @@ using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
 {
+    /// <summary>
+    /// Handles moonraker integration
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -30,8 +33,6 @@ namespace PrintLogApi.Controllers
 
         private readonly TelemetryClient _telemetry;
         private readonly ILogger _logger;
-
-
 
         public MoonrakerController(PrintLogContext context,
                                    TelemetryClient telemetry,
@@ -45,11 +46,12 @@ namespace PrintLogApi.Controllers
 
         /// <summary>
         /// Webhook endpoint for the Moonraker. Takes in webhook data and uses that to create or 
-        /// update prints based on the statuses sent by Moonraker. See https://www.3dprintlog.com/docs/Moonraker-webhook Moonraker 
+        /// update prints based on the statuses sent by Moonraker. See https://www.3dprintlog.com/docs/klipper Moonraker 
         /// Webhook Docs for more information.
         /// </summary>
         /// <see cref="PrintEventDto"/>
         /// <see cref="PrintEventMessageDto"/>
+        /// <param>The body of the Post Request contains <see cref="PrintEventDto"/></param>
         /// <response code="200">Returned if the webhook was handled successfully.</response>
         /// <response code="400">Returned if required data is missing in the webhook (like the printerId, etc).</response>
         /// <response code="401">Returned if the user is not authenticated.</response>
