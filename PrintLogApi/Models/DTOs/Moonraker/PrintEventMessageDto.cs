@@ -18,7 +18,7 @@ namespace PrintLogApi.Models.DTOs.Moonraker
         [JsonPropertyName("print_duration")]
         public double PrintDuration { get; set; }
         [JsonPropertyName("printerId")]
-        public double PrinterId {  get; set; }
+        public long PrinterId {  get; set; }
         [JsonPropertyName("state")]
         public string State { get; set; }
         [JsonPropertyName("total_duration")]
