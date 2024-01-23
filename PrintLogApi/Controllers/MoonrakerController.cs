@@ -125,9 +125,10 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintStarted(PrintEventMessageDto data, long userId)
         {
-            var filename = Path.GetFileNameWithoutExtension(data.Filename);
+            var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
+            var filenameWithExtension = Path.GetFileName(data.Filename);
 
-            var splitFilename = filename.Replace('_', ' ').Replace('-', ' ');
+            var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
             var textInfo = new CultureInfo("en-US", false).TextInfo;
             var title = textInfo.ToTitleCase(splitFilename);
 
@@ -139,7 +140,7 @@ namespace PrintLogApi.Controllers
                 Title = title[..Math.Min(title.Length, 100)] ?? "",
                 EstimatedPrintTimeInSeconds = 0,
                 FilamentUsage = new List<PrintFilament>(),
-                FileName = filename ?? ""
+                FileName = filenameWithExtension ?? ""
             };
 
             if (data.PrinterId > 0)
@@ -225,7 +226,7 @@ namespace PrintLogApi.Controllers
             Print print = null;
 
 
-            var filename = Path.GetFileNameWithoutExtension(data.Filename);
+            var filename = Path.GetFileName(data.Filename);
 
 
             // Find a print thats Printing with that same filename and printer
@@ -292,7 +293,7 @@ namespace PrintLogApi.Controllers
         {
             Print print = null;
 
-            var filename = Path.GetFileNameWithoutExtension(data.Filename);
+            var filename = Path.GetFileName(data.Filename);
 
             // Find a print thats Printing with that same filename and printer
             if (filename is not null)
