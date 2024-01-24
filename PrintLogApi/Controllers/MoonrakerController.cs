@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Humanizer;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -132,7 +133,8 @@ namespace PrintLogApi.Controllers
             var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
             var filenameWithExtension = Path.GetFileName(data.Filename);
 
-            var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
+            // var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
+            var splitFilename = filenameWithoutExtension.Humanize();
             var textInfo = new CultureInfo("en-US", false).TextInfo;
             var title = textInfo.ToTitleCase(splitFilename);
 
