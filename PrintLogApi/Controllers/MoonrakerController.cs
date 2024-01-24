@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Humanizer;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -16,6 +17,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Moonraker;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers
@@ -33,14 +35,17 @@ namespace PrintLogApi.Controllers
 
         private readonly TelemetryClient _telemetry;
         private readonly ILogger _logger;
+        private readonly IPrintService _printService;
 
         public MoonrakerController(PrintLogContext context,
                                    TelemetryClient telemetry,
-                                   ILogger<MoonrakerController> logger)
+                                   ILogger<MoonrakerController> logger,
+                                   IPrintService printService)
         {
             _context = context;
             _telemetry = telemetry;
             _logger = logger;
+            _printService = printService;
 
         }
 
@@ -128,7 +133,8 @@ namespace PrintLogApi.Controllers
             var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
             var filenameWithExtension = Path.GetFileName(data.Filename);
 
-            var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
+            // var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
+            var splitFilename = filenameWithoutExtension.Humanize();
             var textInfo = new CultureInfo("en-US", false).TextInfo;
             var title = textInfo.ToTitleCase(splitFilename);
 
@@ -208,6 +214,22 @@ namespace PrintLogApi.Controllers
                 newPrint.ViewStatus = PrintViewStatus.Private;
             }
 
+            var printersLoadedFilament = newPrint.Printer.LoadedFilaments ?? new List<PrinterFilament>();
+
+
+            newPrint.FilamentUsage.Add(new PrintFilament
+            {
+                EstimatedSource = PrintFilament.SourceMeasurement.Length,
+                Id = Guid.Empty,
+                FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
+                EstimatedLengthInM = 0,
+                Source = PrintFilament.SourceMeasurement.Length,
+                LengthInM = 0,
+                Notes = "Added by Moonraker"
+            });
+
+            await _printService.UpdateFilamentUsageWeights(newPrint);
+
 
             newPrint.StartDate = DateTimeOffset.UtcNow;
 
@@ -271,18 +293,31 @@ namespace PrintLogApi.Controllers
 
             if (data?.FilamentUsed is not null)
             {
-                var lengthInM = Math.Round(data?.FilamentUsed * 1000 ?? 0.0, 3);
+                var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
 
-                print.FilamentUsage.Add(new PrintFilament
+                if (print.FilamentUsage.Count > 0)
                 {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                    EstimatedLengthInM = lengthInM,
-                    Source = PrintFilament.SourceMeasurement.Length,
-                    LengthInM = lengthInM,
-                    Notes = ""
-                });
+
+
+                    print.FilamentUsage.ElementAt(0).LengthInM = lengthInM;
+                    print.FilamentUsage.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
+
+
+                } else
+                {
+                    print.FilamentUsage.Add(new PrintFilament
+                    {
+                        EstimatedSource = PrintFilament.SourceMeasurement.Length,
+                        Id = Guid.Empty,
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
+                        EstimatedLengthInM = lengthInM,
+                        Source = PrintFilament.SourceMeasurement.Length,
+                        LengthInM = lengthInM,
+                        Notes = ""
+                    });
+                }
+
+                await _printService.UpdateFilamentUsageWeights(print);
             }
 
             _ = await _context.SaveChangesAsync();
@@ -330,18 +365,28 @@ namespace PrintLogApi.Controllers
 
             if (data?.FilamentUsed is not null)
             {
-                var lengthInM = Math.Round(data?.FilamentUsed * 1000 ?? 0.0, 3);
+                var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
 
-                print.FilamentUsage.Add(new PrintFilament
+                if (print.FilamentUsage.Count > 0)
                 {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                    EstimatedLengthInM = lengthInM,
-                    Source = PrintFilament.SourceMeasurement.Length,
-                    LengthInM = lengthInM,
-                    Notes = ""
-                });
+                    print.FilamentUsage.ElementAt(0).LengthInM = lengthInM;
+                    print.FilamentUsage.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
+                }
+                else
+                {
+                    print.FilamentUsage.Add(new PrintFilament
+                    {
+                        EstimatedSource = PrintFilament.SourceMeasurement.Length,
+                        Id = Guid.Empty,
+                        FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
+                        EstimatedLengthInM = lengthInM,
+                        Source = PrintFilament.SourceMeasurement.Length,
+                        LengthInM = lengthInM,
+                        Notes = ""
+                    });
+                }
+
+                await _printService.UpdateFilamentUsageWeights(print);
             }
 
             _ = await _context.SaveChangesAsync();
