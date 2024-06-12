@@ -241,7 +241,7 @@ namespace PrintLogApi.Controllers
         /// <param name="image">The image file to save.</param>
         /// <returns></returns>
         [HttpPost("me/profile-image")]
-        public async Task<ActionResult<UserUrlDto>> PostProfileImage([FromForm] IFormFile image)
+        public async Task<ActionResult<UserUrlDto>> PostProfileImage(IFormFile image)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -291,7 +291,7 @@ namespace PrintLogApi.Controllers
         /// <param name="image">The image file to save.</param>
         /// <returns></returns>
         [HttpPost("me/cover-image")]
-        public async Task<ActionResult<UserUrlDto>> PostCoverImage([FromForm] IFormFile image)
+        public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue) 
