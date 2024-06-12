@@ -466,7 +466,7 @@ namespace PrintLogApi.Controllers
         /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
         /// <returns></returns>
         [HttpPost("{id}/image")]
-        public async Task<ActionResult> PostImage(long id, [FromForm] IFormFile image, [FromForm] bool isDefault = false)
+        public async Task<ActionResult> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
