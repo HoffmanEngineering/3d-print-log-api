@@ -15,6 +15,7 @@ namespace PrintLogApi.Profiles
             CreateMap<Printer, PrinterSummary>();
             CreateMap<Printer, PrinterFeedSummary>();
             CreateMap<Printer, PrinterSummaryWithFilamentDto>();
+            CreateMap<Printer, PrinterSummaryWithoutCategory>();
             CreateMap<Printer, PrinterDetailDto>();
 
             CreateMap<AddPrinterDTO, Printer>()
