@@ -83,6 +83,7 @@ namespace PrintLogApi.Controllers
             }
 
             var result = printers.OrderByDescending(p => p.Name).OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
+                .AsNoTracking()
                 .ProjectTo<PrinterSummaryWithFilamentDto>(_mapper.ConfigurationProvider);
 
             var response = await PagedList<PrinterSummaryWithFilamentDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);

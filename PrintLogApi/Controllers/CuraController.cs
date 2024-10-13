@@ -26,11 +26,13 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly TelemetryClient _telemetry;
+        private readonly JsonSerializerOptions _jsonSerializerOptions;
 
         public CuraController(PrintLogContext context, TelemetryClient telemetry)
         {
             _context = context;
             _telemetry = telemetry;
+            _jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         }
 
         /// <summary>
@@ -95,14 +97,15 @@ namespace PrintLogApi.Controllers
 
             var decodedString = Encoding.UTF8.GetString(encodedJsonString);
 
-            var settings = JsonSerializer.Deserialize<CuraSetting>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var settings = JsonSerializer.Deserialize<CuraSetting>(decodedString, this._jsonSerializerOptions);
 
             var newSettings = new CuraSetting()
             {
                 CuraVersion = settings.CuraVersion,
                 PluginVersion = settings.PluginVersion,
                 Settings = settings.Settings,
-                CreatedDate = DateTimeOffset.Now
+                CreatedDate = DateTimeOffset.Now,
+                Slicer = settings.Slicer ?? "Cura"
             };
 
             _context.CuraSettings.Add(newSettings);

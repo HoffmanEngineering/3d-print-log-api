@@ -377,6 +377,10 @@ namespace PrintLogApi
                 .Property(c => c._Settings)
                 .HasColumnName("Settings");
 
+            modelBuilder.Entity<CuraSetting>()
+                .Property(c => c.Slicer)
+                .HasDefaultValue("Cura");
+
             modelBuilder.Entity<Filament>()
                 .Property(f => f.MaterialCategoryNickname)
                 .HasDefaultValue("filament");

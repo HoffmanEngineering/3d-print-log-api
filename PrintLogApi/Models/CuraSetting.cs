@@ -14,6 +14,12 @@ namespace PrintLogApi.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public Guid Id { get; set; }
 
+        /// <summary>
+        /// What slicer is this coming from? Defaults to Cura
+        /// </summary>
+        [StringLength(100)]
+        public string Slicer { get; set; }
+
         [StringLength(100)]
         public string CuraVersion { get; set; }
 
