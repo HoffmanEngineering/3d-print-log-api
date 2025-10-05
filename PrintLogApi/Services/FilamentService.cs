@@ -44,7 +44,7 @@ namespace PrintLogApi.Services
                 .Include(f => f.MaterialCategory)
                 .Where(f => f.CreatedById == userId);
 
-                        // Filter out unloaded-filaments if requested.
+            // Filter out unloaded-filaments if requested.
             if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
             {
                 filament = filament.Where(f => f.PrinterFilaments.Any(pf => !pf.UnloadedDateTime.HasValue));
@@ -92,30 +92,30 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 } else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
             } else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.FilamentRemaining).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => f.FilamentRemaining).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.FilamentRemaining).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.FilamentRemaining).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
             } else if (sortColumn == FilamentSummarySortColumn.MaterialType)
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.MaterialType).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => f.MaterialType).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.MaterialType).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.MaterialType).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
 
             }
@@ -123,11 +123,11 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.Brand).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => f.Brand).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.Brand).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.Brand).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
 
             }
@@ -135,11 +135,11 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.ColorName).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => f.ColorName).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.ColorName).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.ColorName).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
 
             }
@@ -147,11 +147,11 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => f.StorageLocation).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderBy(f => f.StorageLocation).ThenBy(f => f.DisplayName).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => f.StorageLocation).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate);
+                    filamentsBase = filamentsBase.OrderByDescending(f => f.StorageLocation).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
 
             }
@@ -167,6 +167,7 @@ namespace PrintLogApi.Services
                     .Include(f => f.FilamentAdjustments)
                     .Include(f=> f.PrintFilaments)
                     .Include(f => f.MaterialCategory)
+                    .AsSplitQuery()
                     .SingleOrDefaultAsync();
         }
 

@@ -84,6 +84,7 @@ namespace PrintLogApi.Services
                 .Include(p => p.FilamentUsage)
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.CreatedById == userId)
+                .AsSplitQuery()
                 .ToListAsync();
 
             foreach (var print in prints)
@@ -122,7 +123,10 @@ namespace PrintLogApi.Services
             _context.PrinterMaintenance.RemoveRange(maintenanceEntries);
 
             // Printers
-            var printers = await _context.Printers.Where(p => p.UserId == userId).Include(p => p.LoadedFilaments).ToListAsync();
+            var printers = await _context.Printers
+                .Where(p => p.UserId == userId)
+                .Include(p => p.LoadedFilaments)
+                .ToListAsync();
             _context.Printers.RemoveRange(printers);
 
 
