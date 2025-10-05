@@ -36,6 +36,7 @@ namespace PrintLogApi.Services
                 .Include(pm => pm.Printer)
                 .Where(pm => pm.PrinterId == printerId)
                 .OrderByDescending(pm => pm.Date)
+                .ThenByDescending(pm => pm.Id)
                 .ToListAsync();
 
             return entry;
@@ -137,22 +138,22 @@ namespace PrintLogApi.Services
                 {
                     if (sortDirection == SortDirection.Asc)
                     {
-                        maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => PrintLogContext.fnNaturalSort(f.Category)).ThenBy(f => f.Date);
+                        maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => PrintLogContext.fnNaturalSort(f.Category)).ThenBy(f => f.Date).ThenBy(f => f.Id);
                     }
                     else
                     {
-                        maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.Category)).ThenByDescending(f => f.Date);
+                        maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.Category)).ThenByDescending(f => f.Date).ThenByDescending(f => f.Id);
                     }
                 }
             } else
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => f.Date).ThenBy(f => f.Category);
+                    maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => f.Date).ThenBy(f => f.Category).ThenBy(f => f.Id);
                 }
                 else
                 {
-                    maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => f.Date).ThenBy(f => f.Category);
+                    maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => f.Date).ThenByDescending(f => f.Category).ThenByDescending(f => f.Id);
                     }
             }
 

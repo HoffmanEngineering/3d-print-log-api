@@ -30,6 +30,7 @@ namespace PrintLogApi.Services
                 .Include(p => p.Category)
                     .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == printerId)
+                .AsSplitQuery()
                 .SingleOrDefaultAsync();
 
             return existingPrinter;

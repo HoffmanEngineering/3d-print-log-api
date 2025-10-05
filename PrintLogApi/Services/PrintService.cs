@@ -186,6 +186,8 @@ namespace PrintLogApi.Services
                             .Where(p => p.CreatedById == userId)
                             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                             .OrderByDescending(p => p.StartDate)
+                            .ThenByDescending(p => p.CreatedDate)
+                            .ThenByDescending(p => p.Id)
                             .ProjectTo<PrintStatistic>(_mapper.ConfigurationProvider)
                             .AsNoTracking()
                             .ToListAsync();
@@ -233,11 +235,12 @@ namespace PrintLogApi.Services
                 .Include(p => p.FilamentUsage)
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync();
 
             if (print is not null)
             {
-                print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ToList();
+                print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ThenBy(c => c.Id).ToList();
             }
 
             return print;
@@ -256,6 +259,7 @@ namespace PrintLogApi.Services
             var printer = await _context.Printers
                 .Include(p => p.LoadedFilaments)
                 .Where(p => p.Id == print.PrinterId)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync();
             if (printer == null)
             {
