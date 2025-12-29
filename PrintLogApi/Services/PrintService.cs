@@ -88,7 +88,6 @@ namespace PrintLogApi.Services
                     .Where(p => p.CreatedById == currentUserId);
             }
 
-
             if (!string.IsNullOrWhiteSpace(searchText))
             {
                 // Split on any spaces and search separately, preserving quotes.
@@ -114,7 +113,7 @@ namespace PrintLogApi.Services
                 printQuery = printQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
             }
 
-
+            // Apply sorting
             if (sortRequest != null)
             {
                 if (sortRequest.SortColumn == PrintSummarySortColumn.Title)
@@ -141,23 +140,24 @@ namespace PrintLogApi.Services
                 }
                 else if (sortRequest.SortColumn == PrintSummarySortColumn.FilamentUsage)
                 {
+                    // NOTE: This is still problematic - consider computing and storing this value
                     if (sortRequest.SortDirection == SortDirection.Asc)
                     {
                         printQuery = printQuery.OrderBy(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
-                                                                                                                    p.AmountMg > 0 ?
-                                                                                                                    p.AmountMg :
-                                                                                                                    p.EstimatedAmountMg.HasValue &&
-                                                                                                                    p.EstimatedAmountMg > 0 ?
-                                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                                                                                                    p.AmountMg > 0 ?
+                                                                                                    p.AmountMg :
+                                                                                                    p.EstimatedAmountMg.HasValue &&
+                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
                     }
                     else
                     {
                         printQuery = printQuery.OrderByDescending(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
-                                                                                                                    p.AmountMg > 0 ?
-                                                                                                                    p.AmountMg :
-                                                                                                                    p.EstimatedAmountMg.HasValue &&
-                                                                                                                    p.EstimatedAmountMg > 0 ?
-                                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                                                                                                    p.AmountMg > 0 ?
+                                                                                                    p.AmountMg :
+                                                                                                    p.EstimatedAmountMg.HasValue &&
+                                                                                                    p.EstimatedAmountMg > 0 ?
+                                                                                                    p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
                     }
                 }
             }
@@ -166,13 +166,44 @@ namespace PrintLogApi.Services
                 printQuery = printQuery.OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate);
             }
 
+            // **KEY CHANGE: Select only the Print IDs first**
+            var printIds = await printQuery
+                .Select(p => p.Id)
+                .Skip((pagingRequest.PageNumber - 1) * pagingRequest.PageSize)
+                .Take(pagingRequest.PageSize)
+                .ToListAsync();
 
-            var prints = printQuery
-                .ProjectTo<PrintSummaryDTO>(_mapper.ConfigurationProvider)
-                .AsNoTracking();
+            var totalCount = await printQuery.CountAsync();
 
-            PagedList<PrintSummaryDTO> response = await PagedList<PrintSummaryDTO>.CreateAsync(prints, pagingRequest.PageNumber, pagingRequest.PageSize);
-            return response;
+            // **Now load the full data for just these IDs with explicit includes**
+            var prints = await _context.Prints
+                .Where(p => printIds.Contains(p.Id))
+                .Include(p => p.Printer)
+                    .ThenInclude(pr => pr.Category)
+                        .ThenInclude(c => c.MaterialCategory)
+                .Include(p => p.FilamentUsage)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.MaterialCategory)
+                .Include(p => p.Images)
+                .AsNoTracking()
+                .AsSplitQuery()  // Now we CAN use split query!
+                .ToListAsync();
+
+            // **Project to DTO in-memory (more efficient than complex DB projection)**
+            var dtos = prints
+                .Select(p => _mapper.Map<PrintSummaryDTO>(p))
+                .ToList();
+
+            // **Restore original sort order**
+            var orderedDtos = printIds
+                .Select(id => dtos.First(d => d.Id == id))
+                .ToList();
+
+            return new PagedList<PrintSummaryDTO>(
+                orderedDtos,
+                totalCount,
+                pagingRequest.PageNumber,
+                pagingRequest.PageSize);
         }
 
         public async Task<List<long>> GetPublicPrintIds()
