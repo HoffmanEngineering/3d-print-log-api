@@ -85,7 +85,7 @@ namespace PrintLogApi
                 ShowMaterialRefreshRatio = false,
                 ShowRecommendedInitialLayerTimeInSeconds = false,
                 ShowRecommendedLayerTimeInSeconds = false,
-                
+
             };
             var resinCategory = new MaterialCategory()
             {
@@ -405,9 +405,118 @@ namespace PrintLogApi
                 .Property(p => p.CategoryNickname)
                     .HasDefaultValue(FFFPrinterCategory.Nickname);
 
-            modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new { pf.FilamentId, pf.AmountMg, pf.EstimatedAmountMg });
+            modelBuilder.Entity<Printer>()
+                .HasIndex(p => p.Id)
+                .IncludeProperties(p => new
+                {
+                    p.UserId,
+                    p.Make,
+                    p.Model,
+                    p.Description,
+                    p.NozzleDiameter,
+                    p.FilamentDiameter,
+                    p.IsActive,
+                    p.Name,
+                    p.CategoryNickname,
+                    p.BeamDiameter,
+                    p.BedDepthMm,
+                    p.BedHeightMm,
+                    p.BedWidthMm,
+                    p.HasHeatedBed,
+                    p.HasHeatedChamber,
+                    p.ScreenResolutionXPixels,
+                    p.ScreenResolutionYPixels
+                })
+                .HasDatabaseName("IX_Printers_Id_Covering");
 
-            modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate});
+            modelBuilder.Entity<Filament>()
+                .HasIndex(f => f.Id)
+                .IncludeProperties(f => new
+                {
+                    f.DisplayName,
+                    f.Brand,
+                    f.MaterialType,
+                    f.MaterialCategoryNickname,
+                    f.MaterialDensityGramPerCubicCm,
+                    f.ColorName,
+                    f.ColorHex,
+                    f.RecommendedTemp,
+                    f.IsActive,
+                    f.Notes,
+                    f.CreatedDate,
+                    f.PurchasePriceValue,
+                    f.InitialNominalWeightMg,
+                    f.DiameterMm,
+                    f.StorageLocation,
+                    f.IsFavorite,
+                    f.InitialNominalVolumeMl
+                })
+                .HasDatabaseName("IX_Filaments_Id_Covering");
+
+            modelBuilder.Entity<Print>()
+                .HasIndex(p => new { p.CreatedById, p.ViewStatus, p.StartDate, p.CreatedDate })
+                .IncludeProperties(p => new { p.Id, p.Title, p.Status, p.PrinterId, p.EstimatedPrintTimeInSeconds, p.PrintTimeInSeconds })
+                .HasDatabaseName("IX_Prints_Summary");
+
+            modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new
+            {
+                pf.FilamentId,
+                pf.AmountMg,
+                pf.EstimatedAmountMg,
+                pf.Notes,
+                pf.EstimatedLengthInM,
+                pf.LengthInM,
+                pf.EstimatedSource,
+                pf.EstimatedVolumeMl,
+                pf.Source,
+                pf.VolumeMl
+            });
+
+            modelBuilder.Entity<PrintFilament>()
+                .HasIndex(pf => pf.FilamentId)
+                .IncludeProperties(pf => new
+                {
+                    pf.PrintId,
+                    pf.EstimatedAmountMg,
+                    pf.AmountMg,
+                    pf.EstimatedLengthInM,
+                    pf.LengthInM,
+                    pf.EstimatedVolumeMl,
+                    pf.VolumeMl,
+                    pf.EstimatedSource,
+                    pf.Source,
+                    pf.Notes
+                })
+                .HasDatabaseName("IX_PrintFilament_FilamentId_Covering");
+
+            modelBuilder.Entity<FilamentAdjustment>()
+                .HasIndex(fa => fa.FilamentId)
+                .IncludeProperties(fa => new
+                {
+                    fa.AmountMg,
+                    fa.VolumeMl,
+                    fa.LengthInM,
+                    fa.CreatedDate,
+                    fa.Notes
+                })
+                .HasDatabaseName("IX_FilamentAdjustments_FilamentId_Covering");
+
+            modelBuilder.Entity<PrintImage>()
+                .HasIndex(pi => pi.PrintId)
+                .IncludeProperties(pi => new
+                {
+                    pi.Id,
+                    pi.FileId,
+                    pi.IsDefault,
+                    pi.CreatedDate,
+                    pi.CreatedById,
+                    pi.UpdatedDate,
+                    pi.UpdatedById
+                })
+                .HasDatabaseName("IX_PrintImages_PrintId_Default")
+                .HasFilter("[IsDefault] = 1");
+
+            modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 
             modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
                 .HasName("fnNaturalSort");
