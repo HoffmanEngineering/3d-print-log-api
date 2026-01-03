@@ -393,28 +393,37 @@ namespace PrintLogApi.Controllers
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
         public async Task<IActionResult> GetImage(long printId, int imageId)
         {
-            var existingPrint = await _context.Prints.Where(p => p.Id == printId).Include(p => p.Images).ThenInclude(p => p.File).SingleOrDefaultAsync();
+            // Optimized query: only load the specific image and minimal print data needed for authorization
+            var imageData = await _context.PrintImages
+                .Where(pi => pi.PrintId == printId && pi.Id == imageId)
+                .Select(pi => new 
+                { 
+                    pi.File,
+                    PrintViewStatus = pi.Print.ViewStatus,
+                    PrintCreatedById = pi.Print.CreatedById
+                })
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
 
-            if (existingPrint == null)
+            if (imageData == null)
             {
                 return NotFound();
             }
 
-            if (!await CanViewPrint(existingPrint))
+            // Simplified authorization check without loading full print entity
+            var userId = User.GetUserId();
+            if (imageData.PrintViewStatus == Print.PrintViewStatus.Private && 
+                (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
             {
                 return Forbid();
             }
 
-            
-
             try
             {
-                var imageFile = existingPrint.Images.Where(i => i.Id == imageId).Select(i => i.File).SingleOrDefault();
-
-                var printImageDto = await _printImageService.DownloadPrintFile(imageFile);
+                var printImageDto = await _printImageService.DownloadPrintFile(imageData.File);
 
                 new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName, out var contentType);
-                return File(printImageDto.File, contentType);
+                return File(printImageDto.File, contentType ?? "application/octet-stream");
 
             } catch (DoesNotExistException)
             {
