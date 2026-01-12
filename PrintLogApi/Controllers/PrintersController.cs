@@ -8,6 +8,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Extensions;
@@ -26,6 +27,7 @@ namespace PrintLogApi.Controllers
     public class PrintersController : ControllerBase
     {
         private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = "FFF";
+        private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
 
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
@@ -33,13 +35,17 @@ namespace PrintLogApi.Controllers
         private readonly IFilamentService _filamentService;
         private readonly IPrinterService _printerService;
         private readonly IPrinterCategoryService _printerCategoryService;
+        private readonly IMemoryCache _cache;
+        private readonly ICacheVersionService _cacheVersionService;
 
         public PrintersController(PrintLogContext context,
                                   IMapper mapper,
                                   TelemetryClient telemetry,
                                   IFilamentService filamentService,
                                   IPrinterService printerService,
-                                  IPrinterCategoryService printerCategoryService)
+                                  IPrinterCategoryService printerCategoryService,
+                                  IMemoryCache cache,
+                                  ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
@@ -47,6 +53,8 @@ namespace PrintLogApi.Controllers
             _filamentService = filamentService;
             _printerService = printerService;
             _printerCategoryService = printerCategoryService;
+            _cache = cache;
+            _cacheVersionService = cacheVersionService;
         }
 
 
@@ -61,12 +69,20 @@ namespace PrintLogApi.Controllers
         [HttpGet("summary")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrintSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
+        public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)
             {
                 return Unauthorized();
+            }
+
+            var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
+            var cacheKey = GeneratePrinterCacheKey(userId.Value, version, pagingRequest, searchText, includeInactive);
+
+            if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummaryWithFilamentDto> cachedResult))
+            {
+                return Ok(cachedResult);
             }
 
             var printers = _context.Printers
@@ -86,6 +102,14 @@ namespace PrintLogApi.Controllers
                 .ProjectTo<PrinterSummaryWithFilamentDto>(_mapper.ConfigurationProvider);
 
             var response = await PagedList<PrinterSummaryWithFilamentDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+
+            var cacheOptions = new MemoryCacheEntryOptions()
+                .SetSize(EstimatePrinterCacheSize(response))
+                .SetSlidingExpiration(TimeSpan.FromMinutes(5))
+                .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
+                .SetPriority(CacheItemPriority.Normal);
+
+            _cache.Set(cacheKey, response, cacheOptions);
 
             return Ok(response);
         }
@@ -225,6 +249,8 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrinterEdit");
 
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+
             return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, _mapper.Map<PrinterDetailDto>(existingPrinter));
         }
 
@@ -267,6 +293,8 @@ namespace PrintLogApi.Controllers
             await _context.SaveChangesAsync();
 
             _telemetry.TrackEvent("PrinterAdded");
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<PrinterDetailDto>(newPrinter));
         }
@@ -355,6 +383,8 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrinterFilamentUnloaded");
 
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+
             return Ok();
         }
 
@@ -400,12 +430,36 @@ namespace PrintLogApi.Controllers
                 return BadRequest("This Printer is used in a Print and cannot be deleted. Try editing the Printer and marking it as Inactive instead.");
             }
 
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+
             return NoContent();
         }
 
         private bool PrinterExists(long id)
         {
             return _context.Printers.Any(e => e.Id == id);
+        }
+
+        /// <summary>
+        /// Generates a unique cache key for printer summary queries based on user and query parameters.
+        /// </summary>
+        private string GeneratePrinterCacheKey(long userId, string version,
+                                               PagedRequest pagingRequest, string searchText,
+                                               bool includeInactive)
+        {
+            return $"{PRINTER_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
+                   $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
+                   $"q{searchText ?? "none"}_" +
+                   $"ia{includeInactive}";
+        }
+
+        /// <summary>
+        /// Estimates the cache size for a paged list result in cache size units (approximate KB).
+        /// </summary>
+        private long EstimatePrinterCacheSize(PagedList<PrinterSummaryWithFilamentDto> result)
+        {
+            // Rough estimate: ~3KB per printer summary item (includes loaded filament info) + overhead
+            return (result?.Items?.Count ?? 0) * 3;
         }
     }
 }

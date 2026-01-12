@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -43,8 +44,11 @@ namespace PrintLogApi.Controllers
         private readonly IPrintService _printService;
         private readonly ICommentService _commentService;
         private readonly IPrintImageService _printImageService;
+        private readonly IMemoryCache _cache;
+        private readonly ICacheVersionService _cacheVersionService;
         private readonly string printImageContainerName = "printimages";
         private readonly BlobContainerClient printImageContainer;
+        private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
         public PrintsController(
             PrintLogContext context,
@@ -54,7 +58,9 @@ namespace PrintLogApi.Controllers
             TelemetryClient telemetry,
             IPrintService printService,
             IPrintImageService printImageService,
-            ICommentService commentService)
+            ICommentService commentService,
+            IMemoryCache cache,
+            ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
@@ -63,6 +69,8 @@ namespace PrintLogApi.Controllers
             _printService = printService;
             _commentService = commentService;
             _printImageService = printImageService;
+            _cache = cache;
+            _cacheVersionService = cacheVersionService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -102,7 +110,27 @@ namespace PrintLogApi.Controllers
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
 
-            return await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByStatus, userId, currentUserId);
+            var targetUserId = userId ?? currentUserId.Value;
+            var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
+            var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText, 
+                                            filterByPrinterIds, sortRequest, filterByStatus);
+
+            if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
+            {
+                return cachedResult;
+            }
+
+            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByStatus, userId, currentUserId);
+
+            var cacheOptions = new MemoryCacheEntryOptions()
+                .SetSize(EstimateCacheSize(result))
+                .SetSlidingExpiration(TimeSpan.FromMinutes(5))
+                .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
+                .SetPriority(CacheItemPriority.Normal);
+
+            _cache.Set(cacheKey, result, cacheOptions);
+
+            return result;
         }
 
         
@@ -241,6 +269,8 @@ namespace PrintLogApi.Controllers
             {
                 var updatedPrint = await _printService.UpdatePrint(id, printDTO, userId.Value);
 
+                _cacheVersionService.InvalidateUserCache(userId.Value);
+
                 return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
             } catch (UserCannotAccessPrinterException)
             {
@@ -289,6 +319,9 @@ namespace PrintLogApi.Controllers
             try
             {
                 var updatedPrint = await _printService.UpdatePrintStatus(id, newStatus, userId.Value);
+                
+                _cacheVersionService.InvalidateUserCache(userId.Value);
+                
                 return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
             } catch (DoesNotExistException)
             {
@@ -323,6 +356,8 @@ namespace PrintLogApi.Controllers
             {
                 var newPrint = await _printService.AddPrint(print, userId.Value);
                 _telemetry.TrackEvent("PrintAdded");
+
+                _cacheVersionService.InvalidateUserCache(userId.Value);
 
                 return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
             } catch (UserCannotAccessPrinterException)
@@ -371,6 +406,8 @@ namespace PrintLogApi.Controllers
             }
 
             await _printService.DeletePrint(existingPrint);
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             var properties = new Dictionary<string, string> { 
                 { "PrintId", existingPrint.Id.ToString() }, 
@@ -705,6 +742,36 @@ namespace PrintLogApi.Controllers
         private bool PrintExists(long id)
         {
             return _context.Prints.Any(e => e.Id == id);
+        }
+
+        /// <summary>
+        /// Generates a unique cache key for print summary queries based on user and query parameters.
+        /// </summary>
+        private string GenerateCacheKey(long userId, string version, 
+                                        PagedRequest pagingRequest, string searchText,
+                                        IEnumerable<long> filterByPrinterIds, 
+                                        SortRequest<PrintSummarySortColumn> sortRequest,
+                                        Print.PrintStatus? filterByStatus)
+        {
+            var printerIds = filterByPrinterIds?.Any() == true 
+                ? string.Join(",", filterByPrinterIds.OrderBy(x => x)) 
+                : "none";
+            
+            return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
+                   $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
+                   $"q{searchText ?? "none"}_" +
+                   $"pr{printerIds}_" +
+                   $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
+                   $"fs{filterByStatus}";
+        }
+
+        /// <summary>
+        /// Estimates the cache size for a paged list result in cache size units (approximate KB).
+        /// </summary>
+        private long EstimateCacheSize(PagedList<PrintSummaryDTO> result)
+        {
+            // Rough estimate: ~2KB per print summary item + overhead
+            return (result?.Items?.Count ?? 0) * 2;
         }
     }
 }
