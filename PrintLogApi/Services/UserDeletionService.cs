@@ -74,90 +74,138 @@ namespace PrintLogApi.Services
             }
 
             long userId = user.Id;
-            // Prints
-            var prints = await _context.Prints
-                .Include(p => p.Printer)
-                .Include(p => p.Images)
-                    .ThenInclude(p => p.File)
-                .Include(p => p.Comments)
-                    .ThenInclude(p => p.Comment)
-                .Include(p => p.FilamentUsage)
-                    .ThenInclude(pf => pf.Filament)
-                .Where(p => p.CreatedById == userId)
-                .AsSplitQuery()
-                .ToListAsync();
+            
+            // Increase command timeout for this complex operation
+            var previousTimeout = _context.Database.GetCommandTimeout();
+            _context.Database.SetCommandTimeout(300); // 5 minutes
 
-            foreach (var print in prints)
+            try
             {
-                // Remove Print Comments.
-                foreach (var comment in print.Comments.ToArray())
+                // Get print IDs for this user (needed for cascading deletes)
+                var printIds = await _context.Prints
+                    .Where(p => p.CreatedById == userId)
+                    .Select(p => p.Id)
+                    .ToListAsync();
+
+                // Get comment IDs created by this user
+                var commentIds = await _context.Comments
+                    .Where(c => c.CreatedById == userId)
+                    .Select(c => c.Id)
+                    .ToListAsync();
+
+                // Delete in order to respect foreign key constraints
+                // Child tables first, then parent tables
+
+                // Delete PrintComments for user's prints
+                if (printIds.Count > 0)
                 {
-                    _context.Comments.Remove(comment.Comment);
+                    await _context.PrintComments
+                        .Where(pc => printIds.Contains(pc.PrintId))
+                        .ExecuteDeleteAsync();
                 }
-                _context.PrintComments.RemoveRange(print.Comments.ToArray());
 
-                // Remove Print Images.
-                foreach (var image in print.Images.ToArray())
+                // Delete PrintComments for user's comments on other prints
+                if (commentIds.Count > 0)
                 {
-                    _context.Files.Remove(image.File);
+                    await _context.PrintComments
+                        .Where(pc => commentIds.Contains(pc.CommentId))
+                        .ExecuteDeleteAsync();
                 }
-                _context.PrintImages.RemoveRange(print.Images.ToArray());
 
-                // Remove PrintFilament for this print.
-                _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
+                // Delete Comments created by user
+                await _context.Comments
+                    .Where(c => c.CreatedById == userId)
+                    .ExecuteDeleteAsync();
 
-                _context.Prints.Remove(print);
+                // Delete PrintImages and their associated Files for user's prints
+                if (printIds.Count > 0)
+                {
+                    var printImageFileIds = await _context.PrintImages
+                        .Where(pi => printIds.Contains(pi.PrintId))
+                        .Select(pi => pi.FileId)
+                        .ToListAsync();
+
+                    await _context.PrintImages
+                        .Where(pi => printIds.Contains(pi.PrintId))
+                        .ExecuteDeleteAsync();
+
+                    if (printImageFileIds.Count > 0)
+                    {
+                        await _context.Files
+                            .Where(f => printImageFileIds.Contains(f.Id))
+                            .ExecuteDeleteAsync();
+                    }
+                }
+
+                // Delete PrintFilament for user's prints
+                if (printIds.Count > 0)
+                {
+                    await _context.PrintFilament
+                        .Where(pf => printIds.Contains(pf.PrintId))
+                        .ExecuteDeleteAsync();
+                }
+
+                // Delete Prints
+                await _context.Prints
+                    .Where(p => p.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete PrinterFilament (loaded filaments) for user's printers
+                await _context.PrinterFilament
+                    .Where(pf => pf.Printer.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete Printer Maintenance
+                await _context.PrinterMaintenance
+                    .Where(pm => pm.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete Printers
+                await _context.Printers
+                    .Where(p => p.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete FilamentAdjustments for user's filaments
+                await _context.FilamentAdjustments
+                    .Where(fa => fa.Filament.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete Filaments
+                await _context.Filaments
+                    .Where(f => f.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete API Keys
+                await _context.UserApiKeys
+                    .Where(key => key.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete remaining Files
+                await _context.Files
+                    .Where(f => f.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete Feedback
+                await _context.Feedback
+                    .Where(f => f.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                // Delete User Settings
+                await _context.UserSettings
+                    .Where(us => us.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // Finally, delete the user
+                _context.Users.Remove(user);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Successfully deleted all data for user {userId}", userId);
             }
-
-            // Other Print Comments.
-            var comments = await _context.Comments
-                .Where(c => c.CreatedById == userId)
-                .ToListAsync();
-            var commentIds = comments.Select(c => c.Id).ToList();
-            var associatedPrintComments = await _context.PrintComments.Where(pc => commentIds.Contains(pc.CommentId)).ToListAsync();
-            _context.Comments.RemoveRange(comments);
-            _context.PrintComments.RemoveRange(associatedPrintComments);
-
-            // Printer Maintenance
-            var maintenanceEntries = await _context.PrinterMaintenance.Where(p => p.CreatedById == userId).ToListAsync();
-            _context.PrinterMaintenance.RemoveRange(maintenanceEntries);
-
-            // Printers
-            var printers = await _context.Printers
-                .Where(p => p.UserId == userId)
-                .Include(p => p.LoadedFilaments)
-                .ToListAsync();
-            _context.Printers.RemoveRange(printers);
-
-
-            // Filament
-            var filaments = await _context.Filaments
-                .Include(f => f.FilamentAdjustments)
-                .Where(f => f.CreatedById == userId)
-                .ToListAsync();
-            _context.Filaments.RemoveRange(filaments);
-
-            // API Keys
-            var keys = await _context.UserApiKeys.Where(key => key.UserId == userId).ToListAsync();
-            _context.UserApiKeys.RemoveRange(keys);
-
-            // Files
-            var files = await _context.Files.Where(f => f.CreatedById == userId).ToListAsync();
-            _context.Files.RemoveRange(files);
-
-            // Feedbacks
-            var feedbacks = await _context.Feedback.Where(f => f.CreatedById == userId).ToListAsync();
-            _context.Feedback.RemoveRange(feedbacks);
-
-            // User Settings.
-            var userSettings = await _context.UserSettings.Where(u => u.UserId == userId).ToListAsync();
-            _context.UserSettings.RemoveRange(userSettings);
-
-            // Finally, remove the user.
-            _context.Users.Remove(user);
-
-            await _context.SaveChangesAsync();
-
+            finally
+            {
+                // Restore previous timeout
+                _context.Database.SetCommandTimeout(previousTimeout);
+            }
         }
     }
 }

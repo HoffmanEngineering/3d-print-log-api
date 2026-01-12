@@ -135,6 +135,14 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             });
 
+            // Configure memory cache with size limit
+            services.AddMemoryCache(options =>
+            {
+                options.SizeLimit = 8192; // 8192 "units" - each unit ~= 1KB
+                options.CompactionPercentage = 0.25; // Remove 25% of entries when limit reached
+                options.ExpirationScanFrequency = TimeSpan.FromMinutes(2);
+            });
+
             services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
             services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
             services.AddHttpContextAccessor();
@@ -152,6 +160,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IUserDeletionService, UserDeletionService>();
             services.AddTransient<IAuth0Service, Auth0Service>();
             services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
+            services.AddSingleton<ICacheVersionService, CacheVersionService>();
             services.AddApplicationInsightsTelemetry();
 
 
