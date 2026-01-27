@@ -53,6 +53,8 @@ namespace PrintLogApi
 
         public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
+        public DbSet<Notification> Notifications { get; set; }
+
         public static int fnNaturalSort(string sortKey)
             => throw new NotSupportedException();
 
@@ -517,6 +519,16 @@ namespace PrintLogApi
                 .HasFilter("[IsDefault] = 1");
 
             modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
+
+            // Notification indexes for efficient queries
+            modelBuilder.Entity<Notification>()
+                .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedDate })
+                .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedDate");
+
+            modelBuilder.Entity<Notification>()
+                .HasIndex(n => n.UserId)
+                .IncludeProperties(n => n.IsRead)
+                .HasDatabaseName("IX_Notifications_UserId_UnreadCount");
 
             modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
                 .HasName("fnNaturalSort");

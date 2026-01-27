@@ -21,12 +21,14 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly INotificationService _notificationService;
 
-        public UserApiKeyService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public UserApiKeyService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, INotificationService notificationService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _notificationService = notificationService;
         }
 
         public async Task<List<UserApiKeyDto>> GetApiKeySummaryForUser(long userId)
@@ -57,7 +59,10 @@ namespace PrintLogApi.Services
             existingKey.IsDeleted = true;
 
             await _context.SaveChangesAsync();
-            
+
+            // Send security notification
+            await _notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
+
         }
 
         public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string description)
@@ -89,6 +94,9 @@ namespace PrintLogApi.Services
             };
 
             _telemetry.TrackEvent("NewApiKeyGenerated");
+
+            // Send security notification
+            await _notificationService.CreateApiKeyCreatedNotification(userId, description);
 
             return response;
 
@@ -141,13 +149,8 @@ namespace PrintLogApi.Services
 
         private Guid CreateCryptographicallySecureGuid()
         {
-            using (var provider = new RNGCryptoServiceProvider())
-            {
-                var bytes = new byte[16];
-                provider.GetBytes(bytes);
-
-                return new Guid(bytes);
-            }
+            var bytes = RandomNumberGenerator.GetBytes(16);
+            return new Guid(bytes);
         }
     }
 }
