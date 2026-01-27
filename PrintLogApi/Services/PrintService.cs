@@ -28,18 +28,21 @@ namespace PrintLogApi.Services
         private readonly TelemetryClient _telemetry;
         private readonly IFilamentService _filamentService;
         private readonly IPrinterService _printerService;
+        private readonly INotificationService _notificationService;
 
         public PrintService(PrintLogContext context,
                             IMapper mapper,
                             TelemetryClient telemetry,
                             IFilamentService filamentService,
-                            IPrinterService printerService)
+                            IPrinterService printerService,
+                            INotificationService notificationService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _filamentService = filamentService;
             _printerService = printerService;
+            _notificationService = notificationService;
         }
 
         /// <summary>
@@ -617,6 +620,45 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync();
 
             _telemetry.TrackEvent("CommentAdded");
+
+            // Get commenter info for notifications
+            var commenter = await _context.Users.FindAsync(userId);
+            var commenterDisplayName = commenter?.DisplayName ?? "Someone";
+
+            // Send notification to print owner if commenter is not the owner
+            if (print.CreatedById != userId)
+            {
+                await _notificationService.CreateCommentNotification(
+                    print.CreatedById,
+                    print.Id,
+                    print.Title,
+                    comment.Id,
+                    userId,
+                    commenterDisplayName,
+                    isRecipientPrintOwner: true);
+            }
+
+            // Send notifications to all previous commenters on this print
+            // (excluding the current commenter and the print owner who already got notified)
+            var previousCommenterIds = await _context.PrintComments
+                .Where(pc => pc.PrintId == print.Id && pc.CommentId != comment.Id)
+                .Select(pc => pc.Comment.CreatedById)
+                .Distinct()
+                .Where(id => id != userId && id != print.CreatedById)
+                .ToListAsync();
+
+            foreach (var previousCommenterId in previousCommenterIds)
+            {
+                await _notificationService.CreateCommentNotification(
+                    previousCommenterId,
+                    print.Id,
+                    print.Title,
+                    comment.Id,
+                    userId,
+                    commenterDisplayName,
+                    isRecipientPrintOwner: false);
+            }
+
             return comment;
         }
         private bool PrintExists(long id)

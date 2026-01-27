@@ -36,16 +36,19 @@ namespace PrintLogApi.Controllers
         private readonly TelemetryClient _telemetry;
         private readonly ILogger _logger;
         private readonly IPrintService _printService;
+        private readonly INotificationService _notificationService;
 
         public MoonrakerController(PrintLogContext context,
                                    TelemetryClient telemetry,
                                    ILogger<MoonrakerController> logger,
-                                   IPrintService printService)
+                                   IPrintService printService,
+                                   INotificationService notificationService)
         {
             _context = context;
             _telemetry = telemetry;
             _logger = logger;
             _printService = printService;
+            _notificationService = notificationService;
 
         }
 
@@ -322,6 +325,9 @@ namespace PrintLogApi.Controllers
 
             _ = await _context.SaveChangesAsync();
 
+            // Send notification for print failure
+            await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
+
         }
 
         private async Task HandlePrintCompleted(PrintEventMessageDto data, long userId)
@@ -348,6 +354,11 @@ namespace PrintLogApi.Controllers
                 .FirstOrDefaultAsync();
             }
             else
+            {
+                // We have no other way of correlating files other than filename, so...
+                _logger.LogWarning("Not enough information from moonraker to find matching print.", data);
+                return;
+            }
 
             if (print == null)
             {
@@ -390,6 +401,9 @@ namespace PrintLogApi.Controllers
             }
 
             _ = await _context.SaveChangesAsync();
+
+            // Send notification for print completion
+            await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
 
         }
 

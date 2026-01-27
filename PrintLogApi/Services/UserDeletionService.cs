@@ -195,6 +195,17 @@ namespace PrintLogApi.Services
                     .Where(us => us.UserId == userId)
                     .ExecuteDeleteAsync();
 
+                // Delete Notifications for this user
+                await _context.Notifications
+                    .Where(n => n.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // Set TriggeredByUserId to null for notifications this user triggered
+                await _context.Notifications
+                    .Where(n => n.TriggeredByUserId == userId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(n => n.TriggeredByUserId, (long?)null));
+
                 // Finally, delete the user
                 _context.Users.Remove(user);
                 await _context.SaveChangesAsync();

@@ -35,6 +35,7 @@ namespace PrintLogApi.Controllers
         private readonly ILogger _logger;
         private readonly IUserApiKeyService _userApiKeyService;
         private readonly IPrintService _printService;
+        private readonly INotificationService _notificationService;
 
         // TODO: Move this out of here....
         private readonly string printImageContainerName = "printimages";
@@ -46,6 +47,7 @@ namespace PrintLogApi.Controllers
                                    ILogger<OctoprintController> logger,
                                    IUserApiKeyService userApiKeyService,
                                    IPrintService printService,
+                                   INotificationService notificationService,
                                    IConfiguration config)
         {
             _context = context;
@@ -54,6 +56,7 @@ namespace PrintLogApi.Controllers
             _logger = logger;
             _userApiKeyService = userApiKeyService;
             _printService = printService;
+            _notificationService = notificationService;
 
             var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
             printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
@@ -460,6 +463,9 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
 
+            // Send notification for print failure
+            await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
+
         }
 
         private async Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
@@ -558,6 +564,9 @@ namespace PrintLogApi.Controllers
             }
 
             await _context.SaveChangesAsync();
+
+            // Send notification for print completion
+            await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
 
         }
 
