@@ -532,6 +532,11 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
+            if (reorderDto.Images == null || reorderDto.Images.Count == 0)
+            {
+                return BadRequest("Images list cannot be null or empty");
+            }
+
             // Validate all image IDs belong to this print
             var printImageIds = print.Images.Select(i => i.Id).ToHashSet();
             var requestedIds = reorderDto.Images.Select(i => i.ImageId).ToHashSet();
@@ -549,6 +554,8 @@ namespace PrintLogApi.Controllers
             }
 
             await _context.SaveChangesAsync();
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             return Ok();
         }
@@ -702,6 +709,8 @@ namespace PrintLogApi.Controllers
             }
 
             await _context.SaveChangesAsync();
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             return Ok();
         }
