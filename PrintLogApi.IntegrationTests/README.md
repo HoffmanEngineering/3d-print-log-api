@@ -23,7 +23,39 @@ dotnet test PrintLogApi.IntegrationTests
 
 # Run with verbose output
 dotnet test PrintLogApi.IntegrationTests -v n
+
+# Run with code coverage (generates HTML report)
+./coverage.ps1
+
+# Run with coverage and open report in browser
+./coverage.ps1 -Open
 ```
+
+## Code Coverage
+
+Code coverage is collected using [Coverlet](https://github.com/coverlet-coverage/coverlet) and reports are generated with [ReportGenerator](https://github.com/danielpalme/ReportGenerator).
+
+### Local Reports
+
+Run the PowerShell script from the solution root:
+
+```powershell
+# Generate HTML report
+./coverage.ps1
+
+# Generate and open in browser
+./coverage.ps1 -Open
+```
+
+The HTML report is generated at `TestResults/CoverageReport/index.html`.
+
+### CI/CD Integration
+
+Azure Pipelines automatically:
+1. Runs tests with coverage collection
+2. Publishes coverage to the "Code Coverage" tab in build results
+
+Coverage data is in Cobertura XML format for Azure DevOps integration.
 
 ## Test Infrastructure
 
