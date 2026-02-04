@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -6,6 +7,7 @@ using System.Threading.Tasks;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using Xunit;
+using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.IntegrationTests.Controllers
 {
@@ -104,10 +106,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(model);
             Assert.NotEmpty(model.Items);
 
-            var firstPrint = model.Items[0];
-            Assert.True(firstPrint.Id > 0);
-            Assert.NotNull(firstPrint.Title);
-            Assert.Contains("Test Print", firstPrint.Title);
+            // Check that seeded test prints exist (there may be other prints from other tests)
+            Assert.True(model.Items.Any(p => p.Title.Contains("Test Print")),
+                "Should contain at least one seeded Test Print");
+
+            // Verify print structure
+            var anyPrint = model.Items.First();
+            Assert.True(anyPrint.Id > 0);
+            Assert.NotNull(anyPrint.Title);
         }
 
         [Fact]
@@ -138,6 +144,421 @@ namespace PrintLogApi.IntegrationTests.Controllers
             {
                 await _httpClient.GetAsync("/api/Prints/summary");
             });
+        }
+
+        #endregion
+
+        #region GET Single Print (Read)
+
+        [Fact]
+        public async Task GetPrintById_PublicPrint_ReturnsSuccess()
+        {
+            // Arrange - first get a print ID from the summary
+            var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+            summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var summaryResponse = await _httpClient.SendAsync(summaryRequest);
+            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var printId = summary.Items.First().Id;
+
+            // Act - get the print by ID (anonymous request should work for public prints)
+            var response = await _httpClient.GetAsync($"/api/Prints/{printId}");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintById_ReturnsExpectedData()
+        {
+            // Arrange - find a seeded test print (other tests may have added prints)
+            var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+            summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var summaryResponse = await _httpClient.SendAsync(summaryRequest);
+            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var seededPrint = summary.Items.First(p => p.Title.Contains("Test Print"));
+
+            // Act
+            var print = await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}");
+
+            // Assert
+            Assert.NotNull(print);
+            Assert.Equal(seededPrint.Id, print.Id);
+            Assert.NotNull(print.Title);
+            Assert.Contains("Test Print", print.Title);
+            Assert.Equal(IntegrationTestSeeder.TestPrinterId, print.PrinterId);
+            Assert.Equal(IntegrationTestSeeder.TestUserId, print.CreatedByUserId);
+        }
+
+        [Fact]
+        public async Task GetPrintById_NonExistent_ReturnsNotFound()
+        {
+            // Act
+            var response = await _httpClient.GetAsync("/api/Prints/999999");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region POST Print (Create)
+
+        [Fact]
+        public async Task CreatePrint_Authenticated_ReturnsCreated()
+        {
+            // Arrange
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Integration Test Created Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                Notes = "Created during integration test"
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task CreatePrint_Authenticated_ReturnsCreatedPrint()
+        {
+            // Arrange
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Integration Test Print With Data",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Printing,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                Notes = "This print has detailed data",
+                EstimatedPrintTimeInSeconds = 7200,
+                StartDate = DateTimeOffset.UtcNow
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var createdPrint = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.NotNull(createdPrint);
+            Assert.True(createdPrint.Id > 0);
+            Assert.Equal("Integration Test Print With Data", createdPrint.Title);
+            Assert.Equal(IntegrationTestSeeder.TestPrinterId, createdPrint.PrinterId);
+            Assert.Equal(PrintStatus.Printing, createdPrint.Status);
+            Assert.Equal(7200, createdPrint.EstimatedPrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task CreatePrint_NotAuthenticated_ReturnsUnauthorized()
+        {
+            // Arrange
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Should Not Be Created",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Content = JsonContent.Create(newPrint);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithMissingTitle_ReturnsBadRequest()
+        {
+            // Arrange - Title is required
+            var newPrint = new AddPrintDTO
+            {
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        #endregion
+
+        #region PUT Print (Update)
+
+        [Fact]
+        public async Task UpdatePrint_Authenticated_ReturnsSuccess()
+        {
+            // Arrange - first create a print to update
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print To Update",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrint);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Arrange - prepare update
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = createdPrint.Id,
+                Title = "Updated Print Title",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Success,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                Notes = "Updated notes"
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{createdPrint.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var updateResponse = await _httpClient.SendAsync(updateRequest);
+
+            // Assert - PUT endpoint returns CreatedAtAction (201)
+            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrint_Authenticated_ReturnsUpdatedData()
+        {
+            // Arrange - first create a print to update
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print For Update Test",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrint);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Arrange - prepare update with all fields changed
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = createdPrint.Id,
+                Title = "Completely Updated Title",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Success,
+                ViewStatus = PrintViewStatus.Unlisted,
+                AllowComments = false,
+                Notes = "These are new notes",
+                PrintTimeInSeconds = 3600,
+                EstimatedPrintTimeInSeconds = 4000
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{createdPrint.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var updateResponse = await _httpClient.SendAsync(updateRequest);
+            var updatedPrint = await updateResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Assert - PUT endpoint returns CreatedAtAction (201)
+            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.NotNull(updatedPrint);
+            Assert.Equal("Completely Updated Title", updatedPrint.Title);
+            Assert.Equal(PrintStatus.Success, updatedPrint.Status);
+            Assert.Equal(PrintViewStatus.Unlisted, updatedPrint.ViewStatus);
+            Assert.False(updatedPrint.AllowComments);
+            Assert.Equal("These are new notes", updatedPrint.Notes);
+            Assert.Equal(3600, updatedPrint.PrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task UpdatePrint_NotAuthenticated_ReturnsUnauthorized()
+        {
+            // Arrange - get an existing print ID
+            var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+            summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var summaryResponse = await _httpClient.SendAsync(summaryRequest);
+            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var printId = summary.Items.First().Id;
+
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = printId,
+                Title = "Should Not Update",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{printId}");
+            request.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrint_IdMismatch_ReturnsBadRequest()
+        {
+            // Arrange - get an existing print
+            var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+            summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var summaryResponse = await _httpClient.SendAsync(summaryRequest);
+            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var printId = summary.Items.First().Id;
+
+            // ID in DTO doesn't match route ID
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = printId + 100, // Mismatched ID
+                Title = "Updated Title",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{printId}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        #endregion
+
+        #region DELETE Print
+
+        [Fact]
+        public async Task DeletePrint_Authenticated_ReturnsSuccess()
+        {
+            // Arrange - first create a print to delete
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print To Delete",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrint);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Act
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrint_Authenticated_PrintNoLongerExists()
+        {
+            // Arrange - first create a print to delete
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print To Delete And Verify",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrint);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Act - delete the print
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - try to get the deleted print
+            var getResponse = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}");
+            Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrint_NotAuthenticated_ReturnsUnauthorized()
+        {
+            // Arrange - get an existing print ID
+            var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+            summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var summaryResponse = await _httpClient.SendAsync(summaryRequest);
+            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var printId = summary.Items.First().Id;
+
+            // Act - try to delete without auth
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{printId}");
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrint_NonExistent_ReturnsNotFound()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Delete, "/api/Prints/999999");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         #endregion
