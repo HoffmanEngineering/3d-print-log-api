@@ -21,5 +21,7 @@ namespace PrintLogApi.Models
         public File File { get; set; }
 
         public bool IsDefault { get; set; }
+
+        public int DisplayOrder { get; set; }
     }
 }
