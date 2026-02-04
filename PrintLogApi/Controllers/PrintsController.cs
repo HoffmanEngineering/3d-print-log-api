@@ -504,6 +504,56 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
+        /// Reorder images attached to a print.
+        /// </summary>
+        /// <param name="printId">The id of the print.</param>
+        /// <param name="reorderDto">The new image ordering.</param>
+        /// <returns>Ok if the operation was successful.</returns>
+        [HttpPut("{printId}/images/reorder")]
+        public async Task<ActionResult> ReorderImages(long printId, [FromBody] ReorderImagesDto reorderDto)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var print = await _context.Prints
+                .Include(p => p.Images)
+                .FirstOrDefaultAsync(p => p.Id == printId);
+
+            if (print == null)
+            {
+                return NotFound();
+            }
+
+            if (print.CreatedById != userId)
+            {
+                return Forbid();
+            }
+
+            // Validate all image IDs belong to this print
+            var printImageIds = print.Images.Select(i => i.Id).ToHashSet();
+            var requestedIds = reorderDto.Images.Select(i => i.ImageId).ToHashSet();
+
+            if (!requestedIds.SetEquals(printImageIds))
+            {
+                return BadRequest("Image IDs do not match print images");
+            }
+
+            // Update display order for each image
+            foreach (var imageOrder in reorderDto.Images)
+            {
+                var image = print.Images.First(i => i.Id == imageOrder.ImageId);
+                image.DisplayOrder = imageOrder.DisplayOrder;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        /// <summary>
         /// Create a new image and attach it to an existing print. If the "isDefault" param is set to true, then
         /// it will mark the image as the print's default image.
         /// </summary>
@@ -533,6 +583,13 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
+            // Check image limit (max 5 images per print)
+            var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
+            if (existingImageCount >= 5)
+            {
+                return BadRequest("Maximum of 5 images per print allowed");
+            }
+
             //foreach (IFormFile image in images)
             //{
             var fileId = Guid.NewGuid();
@@ -557,6 +614,11 @@ namespace PrintLogApi.Controllers
             };
             _context.Files.Add(file);
 
+            // Calculate next display order
+            var maxDisplayOrder = await _context.PrintImages
+                .Where(pi => pi.PrintId == id)
+                .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
             var printImage = new PrintImage()
             {
                 File = file,
@@ -564,6 +626,7 @@ namespace PrintLogApi.Controllers
                 UpdatedById = userId.Value,
                 Print = print,
                 IsDefault = isDefault,
+                DisplayOrder = maxDisplayOrder + 1,
             };
             _context.PrintImages.Add(printImage);
 
@@ -586,7 +649,7 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        /// Delete an image from a print.
+        /// Delete an image from a print. If the deleted image was the default, the next image by DisplayOrder is promoted.
         /// </summary>
         /// <param name="printid">The id of the print.</param>
         /// <param name="imageId">The id of the image to remove.</param>
@@ -595,21 +658,48 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult> RemoveImage(long printid, int imageId)
         {
             var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
-            var print = await _printService.GetPrintById(printid);
+            var print = await _context.Prints
+                .Include(p => p.Images)
+                .FirstOrDefaultAsync(p => p.Id == printid);
 
-            if (print == null || !print.Images.Any(i => i.Id == imageId))
+            if (print == null)
             {
                 return NotFound();
             }
 
-            if (!userId.HasValue || userId != print.CreatedById)
+            if (print.CreatedById != userId)
             {
                 return Forbid();
             }
 
-            var selectedImage = await _context.PrintImages.FindAsync(imageId);
-            _context.PrintImages.Remove(selectedImage);
+            var imageToDelete = print.Images.FirstOrDefault(i => i.Id == imageId);
+            if (imageToDelete == null)
+            {
+                return NotFound("Image not found");
+            }
+
+            var wasDefault = imageToDelete.IsDefault;
+
+            _context.PrintImages.Remove(imageToDelete);
+
+            // If deleted image was default, promote next image by DisplayOrder
+            if (wasDefault)
+            {
+                var nextDefault = print.Images
+                    .Where(i => i.Id != imageId)
+                    .OrderBy(i => i.DisplayOrder)
+                    .FirstOrDefault();
+
+                if (nextDefault != null)
+                {
+                    nextDefault.IsDefault = true;
+                }
+            }
 
             await _context.SaveChangesAsync();
 
