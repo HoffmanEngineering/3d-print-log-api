@@ -232,8 +232,11 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 context.Database.EnsureDeleted(); // Delete the test database
             }
 
-            // Automatically apply any migrations.
-            context.Database.Migrate();
+            // Apply migrations (skip for IntegrationTesting which uses EnsureCreated with SQLite)
+            if (!env.IsEnvironment("IntegrationTesting"))
+            {
+                context.Database.Migrate();
+            }
 
             if (env.IsEnvironment("E2ETesting"))
             {
