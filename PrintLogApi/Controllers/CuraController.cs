@@ -55,6 +55,11 @@ namespace PrintLogApi.Controllers
 
             var settings = await _context.CuraSettings.Where(c => c.Id == id).FirstOrDefaultAsync();
 
+            if (settings == null)
+            {
+                return NotFound();
+            }
+
             if (settings.UserId.HasValue)
             {
                 if (settings.UserId.Value != userId.Value)
