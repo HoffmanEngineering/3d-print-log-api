@@ -30,11 +30,12 @@ Write-Host "Generating HTML report..." -ForegroundColor Cyan
 # Restore tools if needed
 dotnet tool restore
 
-# Generate HTML report
+# Generate HTML report (excluding Migrations folder)
 dotnet reportgenerator `
     -reports:$($coverageFile.FullName) `
     -targetdir:TestResults/CoverageReport `
-    -reporttypes:Html
+    -reporttypes:Html `
+    -filefilters:-**/Migrations/*
 
 Write-Host "Coverage report generated at: TestResults/CoverageReport/index.html" -ForegroundColor Green
 
