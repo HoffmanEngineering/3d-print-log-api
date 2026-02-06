@@ -16,6 +16,9 @@ namespace PrintLogApi.IntegrationTests
         // These are populated after seeding
         public static long TestUserId { get; private set; }
         public static long TestPrinterId { get; private set; }
+        public static Guid TestNotificationId1 { get; private set; }
+        public static Guid TestNotificationId2 { get; private set; }
+        public static Guid TestNotificationId3 { get; private set; }
 
         public static void Seed(PrintLogContext context)
         {
@@ -27,6 +30,7 @@ namespace PrintLogApi.IntegrationTests
 
             SeedFilaments(context, user.Id);
             SeedPrints(context, user.Id, printer.Id);
+            SeedNotifications(context, user.Id);
         }
 
         private static User SeedUser(PrintLogContext context)
@@ -160,6 +164,56 @@ namespace PrintLogApi.IntegrationTests
             {
                 throw new Exception($"Expected 5 prints to be seeded, but found {savedCount}");
             }
+        }
+
+        private static void SeedNotifications(PrintLogContext context, long userId)
+        {
+            var now = DateTime.UtcNow;
+
+            var notification1 = new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Type = NotificationType.PrintCompleted,
+                Title = "Print Completed",
+                Message = "Your print 'Test Print 1' has completed successfully.",
+                IsRead = false,
+                CreatedDate = now.AddHours(-1),
+                ActionUrl = "/prints/1"
+            };
+            context.Notifications.Add(notification1);
+
+            var notification2 = new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Type = NotificationType.PrintFailed,
+                Title = "Print Failed",
+                Message = "Your print 'Test Print 2' has failed.",
+                IsRead = false,
+                CreatedDate = now.AddHours(-2),
+                ActionUrl = "/prints/2"
+            };
+            context.Notifications.Add(notification2);
+
+            var notification3 = new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Type = NotificationType.SystemAnnouncement,
+                Title = "Welcome!",
+                Message = "Welcome to 3D Print Log.",
+                IsRead = true,
+                CreatedDate = now.AddDays(-1),
+                ReadDate = now.AddHours(-12)
+            };
+            context.Notifications.Add(notification3);
+
+            context.SaveChanges();
+
+            TestNotificationId1 = notification1.Id;
+            TestNotificationId2 = notification2.Id;
+            TestNotificationId3 = notification3.Id;
         }
     }
 }
