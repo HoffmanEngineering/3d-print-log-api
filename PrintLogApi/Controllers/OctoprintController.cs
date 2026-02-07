@@ -4,13 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
-using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -36,10 +34,9 @@ namespace PrintLogApi.Controllers
         private readonly IUserApiKeyService _userApiKeyService;
         private readonly IPrintService _printService;
         private readonly INotificationService _notificationService;
+        private readonly IBlobStorageService _blobStorageService;
 
-        // TODO: Move this out of here....
         private readonly string printImageContainerName = "printimages";
-        private readonly BlobContainerClient printImageContainer;
 
         public OctoprintController(PrintLogContext context,
                                    IMapper mapper,
@@ -48,7 +45,7 @@ namespace PrintLogApi.Controllers
                                    IUserApiKeyService userApiKeyService,
                                    IPrintService printService,
                                    INotificationService notificationService,
-                                   IConfiguration config)
+                                   IBlobStorageService blobStorageService)
         {
             _context = context;
             _mapper = mapper;
@@ -57,9 +54,7 @@ namespace PrintLogApi.Controllers
             _userApiKeyService = userApiKeyService;
             _printService = printService;
             _notificationService = notificationService;
-
-            var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
-            printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
+            _blobStorageService = blobStorageService;
         }
 
 
@@ -331,34 +326,30 @@ namespace PrintLogApi.Controllers
                 var fileId = Guid.NewGuid();
                 var fileName = fileId + Path.GetExtension(image.FileName);
 
-
-
-                var blobClient = printImageContainer.GetBlobClient(fileName);
-
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    await blobClient.UploadAsync(uploadFileStream);
-                };
+                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                var file = new Models.File()
-                {
-                    Size = image.Length,
-                    Path = $"{printImageContainerName}/{fileName}",
-                    Id = fileId,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                };
-                _context.Files.Add(file);
+                    var file = new Models.File()
+                    {
+                        Size = image.Length,
+                        Path = blobPath,
+                        Id = fileId,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                    };
+                    _context.Files.Add(file);
 
-                var printImage = new PrintImage()
-                {
-                    File = file,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                    Print = newPrint,
-                    IsDefault = true,
-                };
-                _context.PrintImages.Add(printImage);
+                    var printImage = new PrintImage()
+                    {
+                        File = file,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                        Print = newPrint,
+                        IsDefault = true,
+                    };
+                    _context.PrintImages.Add(printImage);
+                }
             }
 
 
@@ -426,39 +417,35 @@ namespace PrintLogApi.Controllers
                 var fileId = Guid.NewGuid();
                 var fileName = fileId + Path.GetExtension(image.FileName);
 
-
-
-                var blobClient = printImageContainer.GetBlobClient(fileName);
-
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    await blobClient.UploadAsync(uploadFileStream);
-                };
+                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                var file = new Models.File()
-                {
-                    Size = image.Length,
-                    Path = $"{printImageContainerName}/{fileName}",
-                    Id = fileId,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                };
-                _context.Files.Add(file);
+                    var file = new Models.File()
+                    {
+                        Size = image.Length,
+                        Path = blobPath,
+                        Id = fileId,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                    };
+                    _context.Files.Add(file);
 
-                var printImage = new PrintImage()
-                {
-                    File = file,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                    Print = print,
-                    IsDefault = true,
-                };
-                _context.PrintImages.Add(printImage);
+                    var printImage = new PrintImage()
+                    {
+                        File = file,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                        Print = print,
+                        IsDefault = true,
+                    };
+                    _context.PrintImages.Add(printImage);
 
 
-                // Set other defaults to false;
-                var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                otherEntities.ForEach(p => p.IsDefault = false);
+                    // Set other defaults to false;
+                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                    otherEntities.ForEach(p => p.IsDefault = false);
+                }
             }
 
             await _context.SaveChangesAsync();
@@ -528,39 +515,35 @@ namespace PrintLogApi.Controllers
                 var fileId = Guid.NewGuid();
                 var fileName = fileId + Path.GetExtension(image.FileName);
 
-
-
-                var blobClient = printImageContainer.GetBlobClient(fileName);
-
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    await blobClient.UploadAsync(uploadFileStream);
-                };
+                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                var file = new Models.File()
-                {
-                    Size = image.Length,
-                    Path = $"{printImageContainerName}/{fileName}",
-                    Id = fileId,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                };
-                _context.Files.Add(file);
+                    var file = new Models.File()
+                    {
+                        Size = image.Length,
+                        Path = blobPath,
+                        Id = fileId,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                    };
+                    _context.Files.Add(file);
 
-                var printImage = new PrintImage()
-                {
-                    File = file,
-                    CreatedById = userId,
-                    UpdatedById = userId,
-                    Print = print,
-                    IsDefault = true,
-                };
-                _context.PrintImages.Add(printImage);
+                    var printImage = new PrintImage()
+                    {
+                        File = file,
+                        CreatedById = userId,
+                        UpdatedById = userId,
+                        Print = print,
+                        IsDefault = true,
+                    };
+                    _context.PrintImages.Add(printImage);
 
 
-                // Set other defaults to false;
-                var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                otherEntities.ForEach(p => p.IsDefault = false);
+                    // Set other defaults to false;
+                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                    otherEntities.ForEach(p => p.IsDefault = false);
+                }
             }
 
             await _context.SaveChangesAsync();
