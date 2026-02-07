@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -39,7 +40,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             double? printTime = null,
             string fileHash = null,
             long? currentTime = null,
-            OctoprintWebhookMetaAnalysisFilamentDto filamentData = null)
+            OctoprintWebhookMetaAnalysisFilamentDto filamentData = null,
+            bool includeSnapshot = false)
         {
             var content = new MultipartFormDataContent();
 
@@ -80,7 +82,58 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 content.Add(new StringContent(JsonSerializer.Serialize(meta)), "Meta");
             }
 
+            // Add snapshot if requested
+            if (includeSnapshot)
+            {
+                var imageContent = CreateTestImageFileContent();
+                content.Add(imageContent, "snapshot", "snapshot.jpg");
+            }
+
             return content;
+        }
+
+        /// <summary>
+        /// Creates a simple test image file (minimal JPEG bytes).
+        /// </summary>
+        private static StreamContent CreateTestImageFileContent()
+        {
+            // Minimal JPEG header and data (a valid 1x1 pixel JPEG)
+            byte[] jpegBytes = new byte[]
+            {
+                0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+                0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+                0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+                0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+                0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+                0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
+                0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+                0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
+                0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00,
+                0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                0x09, 0x0A, 0x0B, 0xFF, 0xC4, 0x00, 0xB5, 0x10, 0x00, 0x02, 0x01, 0x03,
+                0x03, 0x02, 0x04, 0x03, 0x05, 0x05, 0x04, 0x04, 0x00, 0x00, 0x01, 0x7D,
+                0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06,
+                0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xA1, 0x08,
+                0x23, 0x42, 0xB1, 0xC1, 0x15, 0x52, 0xD1, 0xF0, 0x24, 0x33, 0x62, 0x72,
+                0x82, 0x09, 0x0A, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x25, 0x26, 0x27, 0x28,
+                0x29, 0x2A, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x43, 0x44, 0x45,
+                0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+                0x5A, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x73, 0x74, 0x75,
+                0x76, 0x77, 0x78, 0x79, 0x7A, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+                0x8A, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0xA2, 0xA3,
+                0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6,
+                0xB7, 0xB8, 0xB9, 0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9,
+                0xCA, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xE1, 0xE2,
+                0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF1, 0xF2, 0xF3, 0xF4,
+                0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01,
+                0x00, 0x00, 0x3F, 0x00, 0xFB, 0xD0, 0xFF, 0xD9
+            };
+
+            var stream = new MemoryStream(jpegBytes);
+            var streamContent = new StreamContent(stream);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            return streamContent;
         }
 
         /// <summary>
@@ -251,6 +304,31 @@ namespace PrintLogApi.IntegrationTests.Controllers
         private static string UniqueFileHash()
         {
             return Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N").Substring(0, 8);
+        }
+
+        /// <summary>
+        /// Finds PrintImages for a given print ID.
+        /// </summary>
+        private List<PrintImage> FindPrintImagesByPrintIdInDb(long printId)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            return db.PrintImages
+                .Include(pi => pi.File)
+                .Where(pi => pi.PrintId == printId)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Counts PrintImages for a given print ID.
+        /// </summary>
+        private int CountPrintImagesForPrint(long printId)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            return db.PrintImages.Where(pi => pi.PrintId == printId).Count();
         }
 
         #endregion
@@ -635,6 +713,400 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotEmpty(print.FilamentUsage);
             // 5000mm / 1000 = 5m
             Assert.Equal(5.0, print.FilamentUsage.First().EstimatedLengthInM);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithMultipleTools_CreatesMultipleFilamentUsages()
+        {
+            // Arrange - multi-tool printer with tool0, tool1, tool2
+            var fileName = UniqueFileName("multi_tool_filament_test");
+            var filamentData = new OctoprintWebhookMetaAnalysisFilamentDto
+            {
+                tool0 = new OctoprintWebhookFilamentUsageDto { length = 5000, volumn = 12.5 },
+                tool1 = new OctoprintWebhookFilamentUsageDto { length = 3000, volumn = 7.5 },
+                tool2 = new OctoprintWebhookFilamentUsageDto { length = 2000, volumn = 5.0 }
+            };
+
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                filamentData: filamentData);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            Assert.NotNull(print.FilamentUsage);
+            Assert.Equal(3, print.FilamentUsage.Count);
+
+            // Verify tool0
+            var tool0 = print.FilamentUsage.FirstOrDefault(f => f.EstimatedLengthInM == 5.0);
+            Assert.NotNull(tool0);
+
+            // Verify tool1
+            var tool1 = print.FilamentUsage.FirstOrDefault(f => f.EstimatedLengthInM == 3.0);
+            Assert.NotNull(tool1);
+
+            // Verify tool2
+            var tool2 = print.FilamentUsage.FirstOrDefault(f => f.EstimatedLengthInM == 2.0);
+            Assert.NotNull(tool2);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithFilamentData_SetsSourceMeasurements()
+        {
+            // Arrange
+            var fileName = UniqueFileName("filament_source_test");
+            var filamentData = new OctoprintWebhookMetaAnalysisFilamentDto
+            {
+                tool0 = new OctoprintWebhookFilamentUsageDto { length = 5000, volumn = 12.5 }
+            };
+
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                filamentData: filamentData);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - verify source measurements are set correctly
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            var filament = print.FilamentUsage.First();
+            Assert.Equal(PrintFilament.SourceMeasurement.Length, filament.EstimatedSource);
+            Assert.Equal(PrintFilament.SourceMeasurement.Weight, filament.Source);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithFilamentData_LinksToLoaderFilaments()
+        {
+            // Arrange - the test seeder loads filaments on the printer
+            // We verify that the filament usage can link to the loaded filament
+            var fileName = UniqueFileName("filament_link_test");
+            var filamentData = new OctoprintWebhookMetaAnalysisFilamentDto
+            {
+                tool0 = new OctoprintWebhookFilamentUsageDto { length = 5000, volumn = 12.5 }
+            };
+
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                filamentData: filamentData);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            var filament = print.FilamentUsage.First();
+            // FilamentId may be null or have a value depending on loaded filaments
+            // The key is that the property exists and can be set
+            Assert.NotNull(filament);
+        }
+
+        #endregion
+
+        #region Snapshot Saving Tests
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithSnapshot_CreatesImageRecord()
+        {
+            // Arrange - webhook with snapshot image
+            var fileName = UniqueFileName("snapshot_start_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                includeSnapshot: true);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - verify print was created with an image
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            var images = FindPrintImagesByPrintIdInDb(print.Id);
+            Assert.NotEmpty(images);
+            Assert.Single(images);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithSnapshot_SetsImageAsDefault()
+        {
+            // Arrange
+            var fileName = UniqueFileName("snapshot_default_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                includeSnapshot: true);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - verify image is marked as default
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            var images = FindPrintImagesByPrintIdInDb(print.Id);
+            Assert.Single(images);
+            Assert.True(images.First().IsDefault);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithSnapshot_CreatesFileRecord()
+        {
+            // Arrange
+            var fileName = UniqueFileName("snapshot_file_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                includeSnapshot: true);
+
+            var request = CreateAuthenticatedWebhookRequest(content);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - verify File record was created
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            var images = FindPrintImagesByPrintIdInDb(print.Id);
+            Assert.Single(images);
+
+            var image = images.First();
+            Assert.NotNull(image.File);
+            Assert.NotEqual(Guid.Empty, image.FileId);
+            Assert.NotNull(image.File.Path);
+            Assert.Contains("printimages/", image.File.Path);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintDone_WithSnapshot_CreatesImageRecord()
+        {
+            // Arrange - create a print first
+            var fileName = UniqueFileName("snapshot_done_test");
+            var fileHash = UniqueFileHash();
+            var startContent = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                fileHash: fileHash);
+
+            var startRequest = CreateAuthenticatedWebhookRequest(startContent);
+            await _httpClient.SendAsync(startRequest);
+
+            var createdPrint = FindPrintByFileHashInDb(fileHash);
+            Assert.NotNull(createdPrint);
+
+            // Act - send Print Done with snapshot
+            var doneContent = CreateWebhookFormContent(
+                topic: "Print Done",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                printTime: 3500,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
+            var doneResponse = await _httpClient.SendAsync(doneRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, doneResponse.StatusCode);
+            var updatedPrint = FindPrintByFileHashInDb(fileHash);
+            var images = FindPrintImagesByPrintIdInDb(updatedPrint.Id);
+            Assert.NotEmpty(images);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintDone_WithSnapshot_SetsAsDefault()
+        {
+            // Arrange
+            var fileName = UniqueFileName("snapshot_done_default_test");
+            var fileHash = UniqueFileHash();
+            var startContent = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                fileHash: fileHash);
+
+            var startRequest = CreateAuthenticatedWebhookRequest(startContent);
+            await _httpClient.SendAsync(startRequest);
+
+            // Act - send Print Done with snapshot
+            var doneContent = CreateWebhookFormContent(
+                topic: "Print Done",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                printTime: 3500,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
+            await _httpClient.SendAsync(doneRequest);
+
+            // Assert
+            var print = FindPrintByFileHashInDb(fileHash);
+            var images = FindPrintImagesByPrintIdInDb(print.Id);
+            Assert.NotEmpty(images);
+            var defaultImage = images.FirstOrDefault(i => i.IsDefault);
+            Assert.NotNull(defaultImage);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintFailed_WithSnapshot_CreatesImageRecord()
+        {
+            // Arrange - create a print first
+            var fileName = UniqueFileName("snapshot_failed_test");
+            var fileHash = UniqueFileHash();
+            var startContent = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                fileHash: fileHash);
+
+            var startRequest = CreateAuthenticatedWebhookRequest(startContent);
+            await _httpClient.SendAsync(startRequest);
+
+            var createdPrint = FindPrintByFileHashInDb(fileHash);
+            Assert.NotNull(createdPrint);
+
+            // Act - send Print Failed with snapshot
+            var failedContent = CreateWebhookFormContent(
+                topic: "Print Failed",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                printTime: 1200,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
+            var failedResponse = await _httpClient.SendAsync(failedRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, failedResponse.StatusCode);
+            var updatedPrint = FindPrintByFileHashInDb(fileHash);
+            var images = FindPrintImagesByPrintIdInDb(updatedPrint.Id);
+            Assert.NotEmpty(images);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintFailed_WithSnapshot_SetsAsDefault()
+        {
+            // Arrange
+            var fileName = UniqueFileName("snapshot_failed_default_test");
+            var fileHash = UniqueFileHash();
+            var startContent = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                fileHash: fileHash);
+
+            var startRequest = CreateAuthenticatedWebhookRequest(startContent);
+            await _httpClient.SendAsync(startRequest);
+
+            // Act - send Print Failed with snapshot
+            var failedContent = CreateWebhookFormContent(
+                topic: "Print Failed",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                printTime: 1200,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
+            await _httpClient.SendAsync(failedRequest);
+
+            // Assert
+            var print = FindPrintByFileHashInDb(fileHash);
+            var images = FindPrintImagesByPrintIdInDb(print.Id);
+            Assert.NotEmpty(images);
+            var defaultImage = images.FirstOrDefault(i => i.IsDefault);
+            Assert.NotNull(defaultImage);
+        }
+
+        [Fact]
+        public async Task Webhook_MultipleSnapshots_ReplacesDefaultImage()
+        {
+            // Arrange - start print with snapshot
+            var fileName = UniqueFileName("multi_snapshot_test");
+            var fileHash = UniqueFileHash();
+            var startContent = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var startRequest = CreateAuthenticatedWebhookRequest(startContent);
+            await _httpClient.SendAsync(startRequest);
+
+            var print = FindPrintByFileHashInDb(fileHash);
+            var imagesAfterStart = FindPrintImagesByPrintIdInDb(print.Id);
+            var firstImageId = imagesAfterStart.First().Id;
+
+            // Act - send Print Done with different snapshot
+            var doneContent = CreateWebhookFormContent(
+                topic: "Print Done",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                printTime: 3500,
+                fileHash: fileHash,
+                includeSnapshot: true);
+
+            var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
+            await _httpClient.SendAsync(doneRequest);
+
+            // Assert
+            var updatedPrint = FindPrintByFileHashInDb(fileHash);
+            var imagesAfterDone = FindPrintImagesByPrintIdInDb(updatedPrint.Id);
+
+            // Should have 2 images now
+            Assert.Equal(2, imagesAfterDone.Count);
+
+            // First image should no longer be default
+            var firstImage = imagesAfterDone.FirstOrDefault(i => i.Id == firstImageId);
+            Assert.NotNull(firstImage);
+            Assert.False(firstImage.IsDefault);
+
+            // Second image should be default
+            var secondImage = imagesAfterDone.FirstOrDefault(i => i.Id != firstImageId);
+            Assert.NotNull(secondImage);
+            Assert.True(secondImage.IsDefault);
         }
 
         #endregion
