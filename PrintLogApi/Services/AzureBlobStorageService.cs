@@ -21,14 +21,18 @@ namespace PrintLogApi.Services
         /// <summary>
         /// Uploads a file stream to Azure Blob Storage.
         /// </summary>
-        public async Task<string> UploadAsync(string containerName, string blobName, Stream stream)
+        public async Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
         {
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
 
             await blobClient.UploadAsync(stream, overwrite: true);
 
-            return $"{containerName}/{blobName}";
+            return new BlobUploadResult
+            {
+                BlobPath = $"{containerName}/{blobName}",
+                BlobUri = blobClient.Uri
+            };
         }
     }
 }

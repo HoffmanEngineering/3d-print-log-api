@@ -6,13 +6,11 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
@@ -37,17 +35,17 @@ namespace PrintLogApi.Controllers
         private readonly IUserDeletionService _userDeletionService;
         private readonly TelemetryClient _telemetry;
         private readonly IUserService _userService;
+        private readonly IBlobStorageService _blobStorageService;
 
         private readonly string profileImageContainerName = "userprofile";
-        private readonly BlobContainerClient userProfileImageContainer;
 
         public UsersController(PrintLogContext context,
                                IUserDeletionService userDeletionService,
                                IUserService userService,
                                IMapper mapper,
-                               IConfiguration config,
                                IAuthorizationService authorizationService,
-                               TelemetryClient telemetry)
+                               TelemetryClient telemetry,
+                               IBlobStorageService blobStorageService)
         {
             _context = context;
             _mapper = mapper;
@@ -55,9 +53,7 @@ namespace PrintLogApi.Controllers
             _userDeletionService = userDeletionService;
             _telemetry = telemetry;
             _userService = userService;
-
-            var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
-            userProfileImageContainer = blobServiceClient.GetBlobContainerClient(profileImageContainerName);
+            _blobStorageService = blobStorageService;
         }
 
         /// <summary>
@@ -259,30 +255,27 @@ namespace PrintLogApi.Controllers
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
-            var blobClient = userProfileImageContainer.GetBlobClient(fileName);
-
             using (var uploadFileStream = image.OpenReadStream())
             {
-                var info = await blobClient.UploadAsync(uploadFileStream);
-            };
+                var uploadResult = await _blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
 
+                var file = new Models.File()
+                {
+                    Size = image.Length,
+                    Path = uploadResult.BlobPath,
+                    Id = fileId,
+                    CreatedById = userId.Value,
+                    UpdatedById = userId.Value,
+                };
+                _context.Files.Add(file);
 
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = $"{profileImageContainerName}/{fileName}",
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            _context.Files.Add(file);
-
-            user.ProfilePicture = blobClient.Uri.AbsoluteUri;
+                user.ProfilePicture = uploadResult.BlobUri.AbsoluteUri;
+            }
 
             await _context.SaveChangesAsync();
             _telemetry.TrackEvent("UserProfilePictureUploaded");
 
-            return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
+            return new UserUrlDto() { Url = user.ProfilePicture };
         }
 
         /// <summary>
@@ -294,7 +287,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue) 
+            if(!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -309,30 +302,27 @@ namespace PrintLogApi.Controllers
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
-            var blobClient = userProfileImageContainer.GetBlobClient(fileName);
-
             using (var uploadFileStream = image.OpenReadStream())
             {
-                var info = await blobClient.UploadAsync(uploadFileStream);
-            };
+                var uploadResult = await _blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
 
+                var file = new Models.File()
+                {
+                    Size = image.Length,
+                    Path = uploadResult.BlobPath,
+                    Id = fileId,
+                    CreatedById = userId.Value,
+                    UpdatedById = userId.Value,
+                };
+                _context.Files.Add(file);
 
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = $"{profileImageContainerName}/{fileName}",
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            _context.Files.Add(file);
-
-            user.CoverPicture = blobClient.Uri.AbsoluteUri;
+                user.CoverPicture = uploadResult.BlobUri.AbsoluteUri;
+            }
 
             await _context.SaveChangesAsync();
             _telemetry.TrackEvent("UserCoverPictureUploaded");
 
-            return new UserUrlDto() { Url = blobClient.Uri.AbsoluteUri };
+            return new UserUrlDto() { Url = user.CoverPicture };
         }
 
         /// <summary>

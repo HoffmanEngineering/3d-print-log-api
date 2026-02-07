@@ -328,12 +328,12 @@ namespace PrintLogApi.Controllers
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
                         Size = image.Length,
-                        Path = blobPath,
+                        Path = uploadResult.BlobPath,
                         Id = fileId,
                         CreatedById = userId,
                         UpdatedById = userId,
@@ -419,12 +419,12 @@ namespace PrintLogApi.Controllers
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
                         Size = image.Length,
-                        Path = blobPath,
+                        Path = uploadResult.BlobPath,
                         Id = fileId,
                         CreatedById = userId,
                         UpdatedById = userId,
@@ -517,12 +517,12 @@ namespace PrintLogApi.Controllers
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var blobPath = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
                         Size = image.Length,
-                        Path = blobPath,
+                        Path = uploadResult.BlobPath,
                         Id = fileId,
                         CreatedById = userId,
                         UpdatedById = userId,
