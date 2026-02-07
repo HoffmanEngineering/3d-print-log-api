@@ -12,8 +12,8 @@ PrintLogApi is an ASP.NET Core 9.0 Web API for [3dprintlog.com](https://3dprintl
 # Build
 dotnet build --configuration Release
 
-# Run tests
-dotnet test
+# Run tests (use --verbosity quiet to minimize output; re-run with --verbosity minimal on failure)
+dotnet test --verbosity quiet
 
 # Run specific test project
 dotnet test PrintLogApi.IntegrationTests

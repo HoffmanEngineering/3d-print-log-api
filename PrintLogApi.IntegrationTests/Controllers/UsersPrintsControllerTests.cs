@@ -12,10 +12,6 @@ namespace PrintLogApi.IntegrationTests.Controllers
     /// <summary>
     /// Integration tests for the UsersPrintsController.
     /// Tests user statistics endpoints (filament usage, print count, print time).
-    ///
-    /// Note: All endpoints use DateTimeOffset comparisons in WHERE clauses,
-    /// which SQLite does not support. These tests are skipped but would work
-    /// in production with SQL Server.
     /// </summary>
     public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
@@ -43,7 +39,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region GET /api/Users/{userId}/total-filament-usage Tests
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalFilamentUsage_WithValidUser_ReturnsOk()
         {
             // Arrange
@@ -61,7 +57,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(result.Stat);
         }
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalFilamentUsage_WithNonExistentUser_ReturnsOkWithZero()
         {
             // Arrange - Non-existent user should return 0
@@ -83,7 +79,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region GET /api/Users/{userId}/print-count Tests
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalPrintCount_WithValidUser_ReturnsOk()
         {
             // Arrange
@@ -101,7 +97,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(result.Stat);
         }
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalPrintCount_WithNonExistentUser_ReturnsZero()
         {
             // Arrange
@@ -123,7 +119,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region GET /api/Users/{userId}/total-print-time Tests
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalPrintTime_WithValidUser_ReturnsOk()
         {
             // Arrange
@@ -141,7 +137,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(result.Stat);
         }
 
-        [Fact(Skip = "SQLite doesn't support DateTimeOffset in WHERE clauses - this works in production with SQL Server")]
+        [Fact]
         public async Task GetUsersTotalPrintTime_WithNonExistentUser_ReturnsZero()
         {
             // Arrange
