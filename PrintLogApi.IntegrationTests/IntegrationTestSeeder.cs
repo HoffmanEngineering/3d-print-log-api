@@ -23,6 +23,11 @@ namespace PrintLogApi.IntegrationTests
         public static Guid TestNotificationId2 { get; private set; }
         public static Guid TestNotificationId3 { get; private set; }
 
+        // Filament IDs (populated after seeding)
+        public static Guid TestFilamentId1 { get; private set; } // Hatchbox Red PLA
+        public static Guid TestFilamentId2 { get; private set; } // Prusament Blue PETG
+        public static Guid TestFilamentId3 { get; private set; } // eSUN Black ABS
+
         public static void Seed(PrintLogContext context)
         {
             var user = SeedUser(context);
@@ -31,7 +36,11 @@ namespace PrintLogApi.IntegrationTests
             var printer = SeedPrinter(context, user.Id);
             TestPrinterId = printer.Id;
 
-            SeedFilaments(context, user.Id);
+            var filamentIds = SeedFilaments(context, user.Id);
+            TestFilamentId1 = filamentIds[0];
+            TestFilamentId2 = filamentIds[1];
+            TestFilamentId3 = filamentIds[2];
+
             var firstPrint = SeedPrints(context, user.Id, printer.Id);
             TestPrintId = firstPrint.Id;
             SeedPrintImages(context, firstPrint.Id, user.Id);
@@ -76,15 +85,19 @@ namespace PrintLogApi.IntegrationTests
             return printer;
         }
 
-        private static void SeedFilaments(PrintLogContext context, long userId)
+        private static Guid[] SeedFilaments(PrintLogContext context, long userId)
         {
             var now = DateTime.UtcNow;
+
+            var filament1Id = Guid.NewGuid();
+            var filament2Id = Guid.NewGuid();
+            var filament3Id = Guid.NewGuid();
 
             context.Filaments.AddRange(new[]
             {
                 new Filament
                 {
-                    Id = Guid.NewGuid(),
+                    Id = filament1Id,
                     Brand = "Hatchbox",
                     ColorHex = "FF0000",
                     ColorName = "Red",
@@ -101,7 +114,7 @@ namespace PrintLogApi.IntegrationTests
                 },
                 new Filament
                 {
-                    Id = Guid.NewGuid(),
+                    Id = filament2Id,
                     Brand = "Prusament",
                     ColorHex = "0000FF",
                     ColorName = "Blue",
@@ -118,7 +131,7 @@ namespace PrintLogApi.IntegrationTests
                 },
                 new Filament
                 {
-                    Id = Guid.NewGuid(),
+                    Id = filament3Id,
                     Brand = "eSUN",
                     ColorHex = "000000",
                     ColorName = "Black",
@@ -135,6 +148,8 @@ namespace PrintLogApi.IntegrationTests
                 }
             });
             context.SaveChanges();
+
+            return new[] { filament1Id, filament2Id, filament3Id };
         }
 
         private static Print SeedPrints(PrintLogContext context, long userId, long printerId)

@@ -1,8 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using Xunit;
@@ -12,10 +16,26 @@ namespace PrintLogApi.IntegrationTests.Controllers
     public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly HttpClient _httpClient;
+        private readonly CustomWebApplicationFactory _factory;
+        private Guid _filamentId1;
+        private Guid _filamentId2;
+        private Guid _filamentId3;
 
         public PrintersControllerTests(CustomWebApplicationFactory factory)
         {
+            _factory = factory;
             _httpClient = factory.CreateClient();
+
+            // Get filament IDs from this instance's database
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var filaments = db.Filaments.OrderBy(f => f.DisplayName).Take(3).ToList();
+            if (filaments.Count >= 3)
+            {
+                _filamentId1 = filaments[0].Id;
+                _filamentId2 = filaments[1].Id;
+                _filamentId3 = filaments[2].Id;
+            }
         }
 
         #region GET Summary Tests
@@ -548,6 +568,369 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Loaded Filament Tests
+
+        [Fact]
+        public async Task GetLoadedFilament_Authenticated_ReturnsSuccess()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetLoadedFilament_Authenticated_ReturnsFilamentList()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var filaments = await response.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+
+            // Assert
+            Assert.NotNull(filaments);
+            Assert.IsType<List<PrinterFilamentSummaryDto>>(filaments);
+        }
+
+        [Fact]
+        public async Task GetLoadedFilament_NotAuthenticated_ReturnsUnauthorized()
+        {
+            // Arrange - no auth header
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament");
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetLoadedFilament_NonExistentPrinter_ReturnsNotFound()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Printers/999999/filament");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region PUT Unload Printer Filament Tests
+
+        [Fact]
+        public async Task UnloadPrinterFilament_Authenticated_ReturnsSuccess()
+        {
+            // Arrange - first create a printer and load filament
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer For Unload Test",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId1 }
+                }
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Act - unload all filaments
+            var unloadRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}/filament/unload");
+            unloadRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var unloadResponse = await _httpClient.SendAsync(unloadRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, unloadResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task UnloadPrinterFilament_Authenticated_ClearsLoadedFilaments()
+        {
+            // Arrange - create a printer with loaded filament
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer For Unload Verify Test",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId1 },
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId2 }
+                }
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Verify filament is loaded
+            var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
+            getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var getResponse1 = await _httpClient.SendAsync(getRequest1);
+            var filamentsBefore = await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            Assert.NotEmpty(filamentsBefore);
+
+            // Act - unload all filaments
+            var unloadRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}/filament/unload");
+            unloadRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            await _httpClient.SendAsync(unloadRequest);
+
+            // Assert - verify filaments are now empty
+            var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
+            getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var getResponse2 = await _httpClient.SendAsync(getRequest2);
+            var filamentsAfter = await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            Assert.Empty(filamentsAfter);
+        }
+
+        [Fact]
+        public async Task UnloadPrinterFilament_NotAuthenticated_ReturnsUnauthorized()
+        {
+            // Arrange - no auth header
+            var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament/unload");
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UnloadPrinterFilament_NonExistentPrinter_ReturnsNotFound()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Put, "/api/Printers/999999/filament/unload");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region PUT Printer With Loaded Filament Tests
+
+        [Fact]
+        public async Task UpdatePrinter_WithLoadedFilament_ReturnsSuccess()
+        {
+            // Arrange - create a printer first
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer To Update With Filament",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Arrange - update with loaded filament
+            var updateDto = new AddPrinterDTO
+            {
+                Id = createdPrinter.Id,
+                Name = createdPrinter.Name,
+                Make = createdPrinter.Make,
+                Model = createdPrinter.Model,
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId1 },
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId2 }
+                }
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var updateResponse = await _httpClient.SendAsync(updateRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrinter_WithLoadedFilament_SetsFilaments()
+        {
+            // Arrange - create a printer first
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer To Update With Filament Verify",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Arrange - update with loaded filaments
+            var updateDto = new AddPrinterDTO
+            {
+                Id = createdPrinter.Id,
+                Name = createdPrinter.Name,
+                Make = createdPrinter.Make,
+                Model = createdPrinter.Model,
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId1 },
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId2 },
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId3 }
+                }
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            // Act
+            await _httpClient.SendAsync(updateRequest);
+
+            // Assert - verify filaments are set
+            var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
+            getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var getResponse = await _httpClient.SendAsync(getRequest);
+            var filaments = await getResponse.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+
+            Assert.NotNull(filaments);
+            Assert.Equal(3, filaments.Count);
+        }
+
+        [Fact]
+        public async Task UpdatePrinter_WithUnauthorizedFilament_ReturnsForbidden()
+        {
+            // Arrange - Create another user's filament that we don't have access to
+            var otherUserFilamentId = Guid.NewGuid();
+
+            // Create a printer first
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer For Filament Access Test",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Act - try to update with a filament we don't have access to
+            var updateDto = new AddPrinterDTO
+            {
+                Id = createdPrinter.Id,
+                Name = createdPrinter.Name,
+                Make = createdPrinter.Make,
+                Model = createdPrinter.Model,
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = otherUserFilamentId }
+                }
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            var updateResponse = await _httpClient.SendAsync(updateRequest);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Forbidden, updateResponse.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrinter_RemoveLoadedFilament_ClearsFilament()
+        {
+            // Arrange - create a printer with loaded filament
+            var newPrinter = new AddPrinterDTO
+            {
+                Name = "Printer For Filament Removal Test",
+                Make = "Test Make",
+                Model = "Test Model",
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>
+                {
+                    new AddPrinterFilamentDto { Id = Guid.Empty, FilamentId = _filamentId1 }
+                }
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newPrinter);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+
+            // Verify filament is loaded
+            var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
+            getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var getResponse1 = await _httpClient.SendAsync(getRequest1);
+            var filamentsBefore = await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            Assert.NotEmpty(filamentsBefore);
+
+            // Act - update with empty filaments list
+            var updateDto = new AddPrinterDTO
+            {
+                Id = createdPrinter.Id,
+                Name = createdPrinter.Name,
+                Make = createdPrinter.Make,
+                Model = createdPrinter.Model,
+                IsActive = true,
+                LoadedFilaments = new List<AddPrinterFilamentDto>()
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+            await _httpClient.SendAsync(updateRequest);
+
+            // Assert - verify filaments are now empty
+            var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
+            getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var getResponse2 = await _httpClient.SendAsync(getRequest2);
+            var filamentsAfter = await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            Assert.Empty(filamentsAfter);
         }
 
         #endregion
