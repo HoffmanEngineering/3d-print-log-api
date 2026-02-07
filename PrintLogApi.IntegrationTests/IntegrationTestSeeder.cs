@@ -16,6 +16,9 @@ namespace PrintLogApi.IntegrationTests
         // These are populated after seeding
         public static long TestUserId { get; private set; }
         public static long TestPrinterId { get; private set; }
+        public static long TestPrintId { get; private set; }
+        public static int TestPrintImageId1 { get; private set; }
+        public static int TestPrintImageId2 { get; private set; }
         public static Guid TestNotificationId1 { get; private set; }
         public static Guid TestNotificationId2 { get; private set; }
         public static Guid TestNotificationId3 { get; private set; }
@@ -29,7 +32,9 @@ namespace PrintLogApi.IntegrationTests
             TestPrinterId = printer.Id;
 
             SeedFilaments(context, user.Id);
-            SeedPrints(context, user.Id, printer.Id);
+            var firstPrint = SeedPrints(context, user.Id, printer.Id);
+            TestPrintId = firstPrint.Id;
+            SeedPrintImages(context, firstPrint.Id, user.Id);
             SeedNotifications(context, user.Id);
         }
 
@@ -132,14 +137,15 @@ namespace PrintLogApi.IntegrationTests
             context.SaveChanges();
         }
 
-        private static void SeedPrints(PrintLogContext context, long userId, long printerId)
+        private static Print SeedPrints(PrintLogContext context, long userId, long printerId)
         {
             var now = DateTime.UtcNow;
             var baseDate = DateTimeOffset.UtcNow.AddDays(-7);
 
+            Print firstPrint = null;
             for (int i = 1; i <= 5; i++)
             {
-                context.Prints.Add(new Print
+                var print = new Print
                 {
                     Title = $"Test Print {i}",
                     Notes = $"Integration test print number {i}",
@@ -153,7 +159,9 @@ namespace PrintLogApi.IntegrationTests
                     UpdatedById = userId,
                     UpdatedDate = now,
                     EstimatedPrintTimeInSeconds = 3600 * i
-                });
+                };
+                context.Prints.Add(print);
+                if (i == 1) firstPrint = print;
             }
 
             context.SaveChanges();
@@ -164,6 +172,63 @@ namespace PrintLogApi.IntegrationTests
             {
                 throw new Exception($"Expected 5 prints to be seeded, but found {savedCount}");
             }
+
+            return firstPrint;
+        }
+
+        private static void SeedPrintImages(PrintLogContext context, long printId, long userId)
+        {
+            var now = DateTime.UtcNow;
+
+            var file1 = new Models.File
+            {
+                Id = Guid.NewGuid(),
+                Path = "printimages/test-image-1.jpg",
+                Size = 1024,
+                CreatedById = userId,
+                UpdatedById = userId,
+                CreatedDate = now,
+                UpdatedDate = now
+            };
+            var file2 = new Models.File
+            {
+                Id = Guid.NewGuid(),
+                Path = "printimages/test-image-2.jpg",
+                Size = 2048,
+                CreatedById = userId,
+                UpdatedById = userId,
+                CreatedDate = now,
+                UpdatedDate = now
+            };
+            context.Files.AddRange(file1, file2);
+
+            var image1 = new PrintImage
+            {
+                PrintId = printId,
+                File = file1,
+                IsDefault = true,
+                DisplayOrder = 0,
+                CreatedById = userId,
+                UpdatedById = userId,
+                CreatedDate = now,
+                UpdatedDate = now
+            };
+            var image2 = new PrintImage
+            {
+                PrintId = printId,
+                File = file2,
+                IsDefault = false,
+                DisplayOrder = 1,
+                CreatedById = userId,
+                UpdatedById = userId,
+                CreatedDate = now,
+                UpdatedDate = now
+            };
+            context.PrintImages.AddRange(image1, image2);
+            context.SaveChanges();
+
+            TestPrintImageId1 = image1.Id;
+            TestPrintImageId2 = image2.Id;
         }
 
         private static void SeedNotifications(PrintLogContext context, long userId)

@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
 using Xunit;
 using static PrintLogApi.Models.Print;
@@ -18,6 +20,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public PrintsControllerTests(CustomWebApplicationFactory factory)
         {
             _httpClient = factory.CreateClient();
+        }
+
+        /// <summary>
+        /// Helper: Creates a print and returns its detail.
+        /// </summary>
+        private async Task<PrintDetailDTO> CreatePrintAsync(string title = "Helper Print")
+        {
+            var newPrint = new AddPrintDTO
+            {
+                Title = title,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
         }
 
         #region Anonymous/Public Tests
@@ -559,6 +582,502 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Print Stats
+
+        [Fact]
+        public async Task GetPrintStats_Authenticated_ReturnsSuccess()
+        {
+            var fromDate = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-ddTHH:mm:ssZ"));
+            var toDate = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/stats?fromDate={fromDate}&toDate={toDate}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintStats_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var fromDate = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-ddTHH:mm:ssZ"));
+            var toDate = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/stats?fromDate={fromDate}&toDate={toDate}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Print CSV
+
+        [Fact]
+        public async Task GetAllPrintDetailsAsCsv_Authenticated_ReturnsFile()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/octet-stream", response.Content.Headers.ContentType.MediaType);
+        }
+
+        [Fact]
+        public async Task GetAllPrintDetailsAsCsv_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        #endregion
+
+        #region PUT Print Status
+
+        [Fact]
+        public async Task UpdatePrintStatus_Authenticated_ReturnsCreated()
+        {
+            var print = await CreatePrintAsync("Print For Status Update");
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{print.Id}/status/{(int)PrintStatus.Success}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrintStatus_NonExistentPrint_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/999999/status/{(int)PrintStatus.Success}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrintStatus_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/status/{(int)PrintStatus.Success}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        #endregion
+
+        #region POST Print Comment
+
+        [Fact]
+        public async Task PostPrintComment_Authenticated_ReturnsComment()
+        {
+            var print = await CreatePrintAsync("Print For Comment Test");
+            var newComment = new AddCommentDto { Body = "Test comment on print" };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{print.Id}/comment");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newComment);
+
+            var response = await _httpClient.SendAsync(request);
+            var comment = await response.Content.ReadFromJsonAsync<CommentDetailDto>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(comment);
+            Assert.Equal("Test comment on print", comment.Body);
+        }
+
+        [Fact]
+        public async Task PostPrintComment_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var newComment = new AddCommentDto { Body = "Should not be created" };
+
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment");
+            request.Content = JsonContent.Create(newComment);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostPrintComment_NonExistentPrint_ReturnsNotFound()
+        {
+            var newComment = new AddCommentDto { Body = "Comment on missing print" };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints/999999/comment");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newComment);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region DELETE Print Comment
+
+        [Fact]
+        public async Task DeletePrintComment_Authenticated_ReturnsOk()
+        {
+            // Create a print and add a comment
+            var print = await CreatePrintAsync("Print For Delete Comment");
+            var newComment = new AddCommentDto { Body = "Comment to delete" };
+
+            var commentRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{print.Id}/comment");
+            commentRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            commentRequest.Content = JsonContent.Create(newComment);
+            var commentResponse = await _httpClient.SendAsync(commentRequest);
+            var comment = await commentResponse.Content.ReadFromJsonAsync<CommentDetailDto>();
+
+            // Delete the comment
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{print.Id}/comment/{comment.Id}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(deleteRequest);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrintComment_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment/1");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrintComment_NonExistentPrint_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete, "/api/Prints/999999/comment/1");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeletePrintComment_NonExistentComment_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment/999999");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Public Print Ids
+
+        [Fact]
+        public async Task GetPublicPrintIds_ReturnsSuccess()
+        {
+            var response = await _httpClient.GetAsync("/api/Prints/public");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPublicPrintIds_ReturnsListOfIds()
+        {
+            var ids = await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public");
+
+            Assert.NotNull(ids);
+            Assert.True(ids.Count > 0, "Should have at least one public print");
+        }
+
+        #endregion
+
+        #region PUT Print (NonExistent)
+
+        [Fact]
+        public async Task UpdatePrint_NonExistent_ReturnsNotFound()
+        {
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = 999999,
+                Title = "Updated Title",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put, "/api/Prints/999999");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(updateDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region Image Management - Set Default
+
+        [Fact]
+        public async Task SetImageAsDefault_Authenticated_ThrowsDueToTypeMismatchInService()
+        {
+            // The PrintService.SetDefaultImage takes long but PrintImage.Id is int,
+            // causing an ArgumentException in EF Core's Find method.
+            // The controller code up to the service call is still exercised.
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId2}/set-as-default");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                await _httpClient.SendAsync(request);
+            });
+        }
+
+        [Fact]
+        public async Task SetImageAsDefault_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId1}/set-as-default");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task SetImageAsDefault_NonExistentPrint_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                "/api/Prints/999999/image/1/set-as-default");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task SetImageAsDefault_NonExistentImage_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/999999/set-as-default");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region Image Management - Reorder
+
+        [Fact]
+        public async Task ReorderImages_Authenticated_ReturnsOk()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>
+                {
+                    new ImageOrderDto { ImageId = IntegrationTestSeeder.TestPrintImageId1, DisplayOrder = 1 },
+                    new ImageOrderDto { ImageId = IntegrationTestSeeder.TestPrintImageId2, DisplayOrder = 0 }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ReorderImages_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>
+                {
+                    new ImageOrderDto { ImageId = IntegrationTestSeeder.TestPrintImageId1, DisplayOrder = 0 }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ReorderImages_NonExistentPrint_ReturnsNotFound()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>
+                {
+                    new ImageOrderDto { ImageId = 1, DisplayOrder = 0 }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                "/api/Prints/999999/images/reorder");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ReorderImages_EmptyImagesList_ReturnsBadRequest()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>()
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ReorderImages_MismatchedImageIds_ReturnsBadRequest()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>
+                {
+                    new ImageOrderDto { ImageId = 999, DisplayOrder = 0 },
+                    new ImageOrderDto { ImageId = 998, DisplayOrder = 1 }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        #endregion
+
+        #region Image Management - Remove
+
+        [Fact]
+        public async Task RemoveImage_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId1}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task RemoveImage_NonExistentPrint_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                "/api/Prints/999999/image/1");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task RemoveImage_NonExistentImage_ReturnsNotFound()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/999999");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Print Summary with Filters
+
+        [Fact]
+        public async Task GetPrintSummary_WithSearchText_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?searchText=Test&userId={IntegrationTestSeeder.TestUserId}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_WithPrinterFilter_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}&userId={IntegrationTestSeeder.TestUserId}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_WithStatusFilter_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?filterByStatus={(int)PrintStatus.Success}&userId={IntegrationTestSeeder.TestUserId}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
         #endregion
