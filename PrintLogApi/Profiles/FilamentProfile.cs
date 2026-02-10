@@ -10,6 +10,9 @@ namespace PrintLogApi.Profiles
     {
         public FilamentProfile()
         {
+            // Lightweight mapping for printer summary views - avoids expensive calculations
+            CreateMap<Filament, FilamentSummaryForPrinterDto>();
+
             CreateMap<Filament, FilamentSummaryDto>()
                 .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
                 .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => (src.InitialNominalWeightMg ?? 0)

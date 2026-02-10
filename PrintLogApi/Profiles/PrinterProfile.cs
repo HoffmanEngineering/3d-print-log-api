@@ -18,12 +18,19 @@ namespace PrintLogApi.Profiles
             CreateMap<Printer, PrinterSummaryWithoutCategory>();
             CreateMap<Printer, PrinterDetailDto>();
 
+            // New lightweight mapping for improved query performance
+            CreateMap<Printer, PrinterSummarySimpleDto>();
+
             CreateMap<AddPrinterDTO, Printer>()
                 .ForMember(dest => dest.Category, opt => opt.Ignore());
 
             CreateMap<PrinterFilament, PrinterFilamentSummaryDto>()
                 .ForMember(dest => dest.Filament, opt => opt.MapFrom(src => src.Filament))
                 .ReverseMap();
+
+            // New lightweight filament mapping for summary views
+            CreateMap<PrinterFilament, PrinterFilamentForSummaryDto>()
+                .ForMember(dest => dest.Filament, opt => opt.MapFrom(src => src.Filament));
 
             CreateMap<AddPrinterFilamentDto, PrinterFilament>();
 
