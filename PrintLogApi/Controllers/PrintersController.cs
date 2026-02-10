@@ -69,7 +69,7 @@ namespace PrintLogApi.Controllers
         [HttpGet("summary")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<PrinterSummaryWithFilamentDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
+        public async Task<ActionResult<IEnumerable<PrinterSummarySimpleDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)
@@ -80,12 +80,13 @@ namespace PrintLogApi.Controllers
             var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
             var cacheKey = GeneratePrinterCacheKey(userId.Value, version, pagingRequest, searchText, includeInactive);
 
-            if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummaryWithFilamentDto> cachedResult))
+            if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto> cachedResult))
             {
                 return Ok(cachedResult);
             }
 
             var printers = _context.Printers
+                .AsNoTracking()
                 .Where(p => p.UserId == userId);
 
             if (!includeInactive)
@@ -98,10 +99,16 @@ namespace PrintLogApi.Controllers
                 printers = printers.Where(p => p.Name.Contains(searchText) || p.Make.Contains(searchText) || p.Model.Contains(searchText));
             }
 
-            var result = printers.OrderByDescending(p => p.Name).OrderByDescending(p => p.Make).ThenByDescending(p => p.Model)
-                .ProjectTo<PrinterSummaryWithFilamentDto>(_mapper.ConfigurationProvider);
+            var result = printers
+                .Include(p => p.Category)
+                .Include(p => p.LoadedFilaments)
+                    .ThenInclude(lf => lf.Filament)
+                .OrderByDescending(p => p.Name)
+                .ThenByDescending(p => p.Make)
+                .ThenByDescending(p => p.Model)
+                .ProjectTo<PrinterSummarySimpleDto>(_mapper.ConfigurationProvider);
 
-            var response = await PagedList<PrinterSummaryWithFilamentDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+            var response = await PagedList<PrinterSummarySimpleDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
 
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(EstimatePrinterCacheSize(response))
@@ -456,10 +463,10 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Estimates the cache size for a paged list result in cache size units (approximate KB).
         /// </summary>
-        private long EstimatePrinterCacheSize(PagedList<PrinterSummaryWithFilamentDto> result)
+        private long EstimatePrinterCacheSize(PagedList<PrinterSummarySimpleDto> result)
         {
-            // Rough estimate: ~3KB per printer summary item (includes loaded filament info) + overhead
-            return (result?.Items?.Count ?? 0) * 3;
+            // Rough estimate: ~1KB per printer summary item (lightweight DTO) + overhead
+            return (result?.Items?.Count ?? 0);
         }
     }
 }
