@@ -567,9 +567,9 @@ namespace PrintLogApi.Controllers
         /// <param name="id">The ID of the print to save the image to.</param>
         /// <param name="image">The image file to save.</param>
         /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
-        /// <returns></returns>
+        /// <returns>The created PrintImage with its ID.</returns>
         [HttpPost("{id}/image")]
-        public async Task<ActionResult> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
+        public async Task<ActionResult<PrintImageDto>> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -650,9 +650,15 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrintPictureAdded");
 
-            return Ok();
+            // Return the created image with its ID so the client can use it for reordering
+            var printImageDto = new PrintImageDto
+            {
+                Id = printImage.Id,
+                IsDefault = printImage.IsDefault,
+                DisplayOrder = printImage.DisplayOrder
+            };
 
-            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            return CreatedAtAction("GetImage", new { printId = id, imageId = printImage.Id }, printImageDto);
         }
 
         /// <summary>
