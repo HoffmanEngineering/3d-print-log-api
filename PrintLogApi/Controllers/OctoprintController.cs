@@ -319,9 +319,9 @@ namespace PrintLogApi.Controllers
             _context.Prints.Add(newPrint);
 
 
-            var maxImagesStarted = await _printService.GetMaxImagesPerPrint(userId);
-            var existingImageCountStarted = await _context.PrintImages.CountAsync(pi => pi.PrintId == newPrint.Id);
-            if (data.snapshot is not null && existingImageCountStarted < maxImagesStarted)
+            var maxImages = await _printService.GetMaxImagesPerPrint(userId);
+            // No existing images to count: this is a newly created print.
+            if (data.snapshot is not null && 0 < maxImages)
             {
                 // Images
                 var image = data.snapshot;
@@ -415,48 +415,51 @@ namespace PrintLogApi.Controllers
             _context.Entry(print).State = EntityState.Modified;
 
             // Images
-            var maxImagesFailed = await _printService.GetMaxImagesPerPrint(userId);
-            var existingImageCountFailed = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
-            if (data.snapshot != null && existingImageCountFailed < maxImagesFailed)
+            if (data.snapshot != null)
             {
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
+                var maxImages = await _printService.GetMaxImagesPerPrint(userId);
+                var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+                if (existingImageCount < maxImages)
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var image = data.snapshot;
+                    var fileId = Guid.NewGuid();
+                    var fileName = fileId + Path.GetExtension(image.FileName);
 
-                    var file = new Models.File()
+                    using (var uploadFileStream = image.OpenReadStream())
                     {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    _context.Files.Add(file);
+                        var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                    // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await _context.PrintImages
-                        .Where(pi => pi.PrintId == print.Id)
-                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+                        var file = new Models.File()
+                        {
+                            Size = image.Length,
+                            Path = uploadResult.BlobPath,
+                            Id = fileId,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                        };
+                        _context.Files.Add(file);
 
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = print,
-                        IsDefault = true,
-                        DisplayOrder = maxDisplayOrder + 1,
-                    };
-                    _context.PrintImages.Add(printImage);
+                        // Calculate next display order: the print may already have an image from the "Started" webhook.
+                        var maxDisplayOrder = await _context.PrintImages
+                            .Where(pi => pi.PrintId == print.Id)
+                            .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
+                        var printImage = new PrintImage()
+                        {
+                            File = file,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                            Print = print,
+                            IsDefault = true,
+                            DisplayOrder = maxDisplayOrder + 1,
+                        };
+                        _context.PrintImages.Add(printImage);
 
 
-                    // Set other defaults to false;
-                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                    otherEntities.ForEach(p => p.IsDefault = false);
+                        // Set other defaults to false;
+                        var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                        otherEntities.ForEach(p => p.IsDefault = false);
+                    }
                 }
             }
 
@@ -521,48 +524,51 @@ namespace PrintLogApi.Controllers
             _context.Entry(print).State = EntityState.Modified;
 
             // Images
-            var maxImagesCompleted = await _printService.GetMaxImagesPerPrint(userId);
-            var existingImageCountCompleted = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
-            if (data.snapshot != null && existingImageCountCompleted < maxImagesCompleted)
+            if (data.snapshot != null)
             {
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
+                var maxImages = await _printService.GetMaxImagesPerPrint(userId);
+                var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+                if (existingImageCount < maxImages)
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var image = data.snapshot;
+                    var fileId = Guid.NewGuid();
+                    var fileName = fileId + Path.GetExtension(image.FileName);
 
-                    var file = new Models.File()
+                    using (var uploadFileStream = image.OpenReadStream())
                     {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    _context.Files.Add(file);
+                        var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                    // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await _context.PrintImages
-                        .Where(pi => pi.PrintId == print.Id)
-                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+                        var file = new Models.File()
+                        {
+                            Size = image.Length,
+                            Path = uploadResult.BlobPath,
+                            Id = fileId,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                        };
+                        _context.Files.Add(file);
 
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = print,
-                        IsDefault = true,
-                        DisplayOrder = maxDisplayOrder + 1,
-                    };
-                    _context.PrintImages.Add(printImage);
+                        // Calculate next display order: the print may already have an image from the "Started" webhook.
+                        var maxDisplayOrder = await _context.PrintImages
+                            .Where(pi => pi.PrintId == print.Id)
+                            .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
+                        var printImage = new PrintImage()
+                        {
+                            File = file,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                            Print = print,
+                            IsDefault = true,
+                            DisplayOrder = maxDisplayOrder + 1,
+                        };
+                        _context.PrintImages.Add(printImage);
 
 
-                    // Set other defaults to false;
-                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                    otherEntities.ForEach(p => p.IsDefault = false);
+                        // Set other defaults to false;
+                        var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                        otherEntities.ForEach(p => p.IsDefault = false);
+                    }
                 }
             }
 
