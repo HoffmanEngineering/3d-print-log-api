@@ -585,11 +585,12 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            // Check image limit (max 5 images per print)
+            // Check image limit
+            var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
             var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
-            if (existingImageCount >= 5)
+            if (existingImageCount >= maxImages)
             {
-                return BadRequest("Maximum of 5 images per print allowed");
+                return BadRequest($"Maximum of {maxImages} images per print allowed");
             }
 
             //foreach (IFormFile image in images)

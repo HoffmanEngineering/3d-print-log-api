@@ -542,6 +542,12 @@ namespace PrintLogApi.Services
             return existingPrint;
         }
 
+        public Task<int> GetMaxImagesPerPrint(long userId)
+        {
+            // Intentionally constant for now; per-user limits (premium membership) will be added later.
+            return Task.FromResult(5);
+        }
+
         public async Task SetDefaultImage(long printId, int newDefaultImageId)
         {
             var print = await GetPrintById(printId);

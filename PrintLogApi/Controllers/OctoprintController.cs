@@ -319,7 +319,9 @@ namespace PrintLogApi.Controllers
             _context.Prints.Add(newPrint);
 
 
-            if (data.snapshot is not null)
+            var maxImagesStarted = await _printService.GetMaxImagesPerPrint(userId);
+            var existingImageCountStarted = await _context.PrintImages.CountAsync(pi => pi.PrintId == newPrint.Id);
+            if (data.snapshot is not null && existingImageCountStarted < maxImagesStarted)
             {
                 // Images
                 var image = data.snapshot;
@@ -340,6 +342,7 @@ namespace PrintLogApi.Controllers
                     };
                     _context.Files.Add(file);
 
+                    // DisplayOrder = 0: this is the first (and only) image for a newly created print from a webhook.
                     var printImage = new PrintImage()
                     {
                         File = file,
@@ -347,6 +350,7 @@ namespace PrintLogApi.Controllers
                         UpdatedById = userId,
                         Print = newPrint,
                         IsDefault = true,
+                        DisplayOrder = 0,
                     };
                     _context.PrintImages.Add(printImage);
                 }
@@ -411,7 +415,9 @@ namespace PrintLogApi.Controllers
             _context.Entry(print).State = EntityState.Modified;
 
             // Images
-            if (data.snapshot != null)
+            var maxImagesFailed = await _printService.GetMaxImagesPerPrint(userId);
+            var existingImageCountFailed = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+            if (data.snapshot != null && existingImageCountFailed < maxImagesFailed)
             {
                 var image = data.snapshot;
                 var fileId = Guid.NewGuid();
@@ -431,6 +437,11 @@ namespace PrintLogApi.Controllers
                     };
                     _context.Files.Add(file);
 
+                    // Calculate next display order: the print may already have an image from the "Started" webhook.
+                    var maxDisplayOrder = await _context.PrintImages
+                        .Where(pi => pi.PrintId == print.Id)
+                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
                     var printImage = new PrintImage()
                     {
                         File = file,
@@ -438,6 +449,7 @@ namespace PrintLogApi.Controllers
                         UpdatedById = userId,
                         Print = print,
                         IsDefault = true,
+                        DisplayOrder = maxDisplayOrder + 1,
                     };
                     _context.PrintImages.Add(printImage);
 
@@ -509,7 +521,9 @@ namespace PrintLogApi.Controllers
             _context.Entry(print).State = EntityState.Modified;
 
             // Images
-            if (data.snapshot != null)
+            var maxImagesCompleted = await _printService.GetMaxImagesPerPrint(userId);
+            var existingImageCountCompleted = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+            if (data.snapshot != null && existingImageCountCompleted < maxImagesCompleted)
             {
                 var image = data.snapshot;
                 var fileId = Guid.NewGuid();
@@ -529,6 +543,11 @@ namespace PrintLogApi.Controllers
                     };
                     _context.Files.Add(file);
 
+                    // Calculate next display order: the print may already have an image from the "Started" webhook.
+                    var maxDisplayOrder = await _context.PrintImages
+                        .Where(pi => pi.PrintId == print.Id)
+                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
                     var printImage = new PrintImage()
                     {
                         File = file,
@@ -536,6 +555,7 @@ namespace PrintLogApi.Controllers
                         UpdatedById = userId,
                         Print = print,
                         IsDefault = true,
+                        DisplayOrder = maxDisplayOrder + 1,
                     };
                     _context.PrintImages.Add(printImage);
 
