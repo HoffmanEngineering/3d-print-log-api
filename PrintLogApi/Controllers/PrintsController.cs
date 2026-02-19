@@ -105,7 +105,7 @@ namespace PrintLogApi.Controllers
 
             long? currentUserId = User.GetUserId();
 
-            if (!userId.HasValue && userId != currentUserId && !currentUserId.HasValue)
+            if (!userId.HasValue && !currentUserId.HasValue)
             {
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }

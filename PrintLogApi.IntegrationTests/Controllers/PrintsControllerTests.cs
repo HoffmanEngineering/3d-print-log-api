@@ -157,16 +157,12 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
-        public async Task GetPrintSummary_NotAuthenticated_WithoutUserId_Fails()
+        public async Task GetPrintSummary_NotAuthenticated_WithoutUserId_ReturnsBadRequest()
         {
-            // Act & Assert - no auth header, no userId parameter should fail
-            // Due to a bug in the controller (line 113), this throws InvalidOperationException
-            // "Nullable object must have a value" because it tries to access currentUserId.Value
-            // when currentUserId is null
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                await _httpClient.GetAsync("/api/Prints/summary");
-            });
+            // Act & Assert - no auth header, no userId parameter should return BadRequest
+            var response = await _httpClient.GetAsync("/api/Prints/summary");
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         #endregion
@@ -847,19 +843,15 @@ namespace PrintLogApi.IntegrationTests.Controllers
         #region Image Management - Set Default
 
         [Fact]
-        public async Task SetImageAsDefault_Authenticated_ThrowsDueToTypeMismatchInService()
+        public async Task SetImageAsDefault_Authenticated_ReturnsOk()
         {
-            // The PrintService.SetDefaultImage takes long but PrintImage.Id is int,
-            // causing an ArgumentException in EF Core's Find method.
-            // The controller code up to the service call is still exercised.
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId2}/set-as-default");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                await _httpClient.SendAsync(request);
-            });
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
         [Fact]

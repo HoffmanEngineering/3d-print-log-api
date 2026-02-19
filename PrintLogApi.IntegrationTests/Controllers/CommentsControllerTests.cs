@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
@@ -129,11 +130,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
         #region PUT Comment (Edit)
 
         [Fact]
-        public async Task EditComment_Authenticated_ThrowsDueToMissingGetCommentRoute()
+        public async Task EditComment_Authenticated_ReturnsOk()
         {
-            // The PutComment endpoint uses CreatedAtAction("GetComment", ...) but the
-            // GetComment action is commented out, so route generation fails after the
-            // edit is saved. The TestHost propagates this as an exception.
             var comment = await CreateCommentAsync("Original body");
 
             var editDto = new EditCommentDto { Body = "Edited body" };
@@ -141,11 +139,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             request.Content = JsonContent.Create(editDto);
 
-            // Act & Assert - the edit succeeds in the DB but the response throws
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                await _httpClient.SendAsync(request);
-            });
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<CommentDetailDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Assert.NotNull(result);
+            Assert.Equal("Edited body", result.Body);
         }
 
         [Fact]

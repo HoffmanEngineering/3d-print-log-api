@@ -69,7 +69,12 @@ namespace PrintLogApi.Controllers
                 .Where(u => u.Id == id)
                 .ProjectTo<UserSummaryDto>(_mapper.ConfigurationProvider)
                 .AsNoTracking()
-                .SingleAsync();
+                .SingleOrDefaultAsync();
+
+            if (user == null)
+            {
+                return NotFound();
+            }
 
             return user;
         }
@@ -174,7 +179,12 @@ namespace PrintLogApi.Controllers
             var user = await _context.Users
             .Where(u => u.Id == id)
             .AsNoTracking()
-            .SingleAsync();
+            .SingleOrDefaultAsync();
+
+            if (user == null)
+            {
+                return NotFound();
+            }
 
             if (!await CanViewUserProfile(user))
             {

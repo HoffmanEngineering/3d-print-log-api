@@ -107,13 +107,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
-        public async Task GetUserSummary_NonExistent_ThrowsException()
+        public async Task GetUserSummary_NonExistent_ReturnsNotFound()
         {
-            // The API uses .Single() which throws when user not found instead of returning 404
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                await _httpClient.GetAsync("/api/Users/999999/summary");
-            });
+            var response = await _httpClient.GetAsync("/api/Users/999999/summary");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         #endregion
@@ -144,13 +142,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
-        public async Task GetUserById_NonExistent_ThrowsException()
+        public async Task GetUserById_NonExistent_ReturnsNotFound()
         {
-            // The API uses .Single() which throws when user not found instead of returning 404
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                await _httpClient.GetAsync("/api/Users/999999");
-            });
+            var response = await _httpClient.GetAsync("/api/Users/999999");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         #endregion
