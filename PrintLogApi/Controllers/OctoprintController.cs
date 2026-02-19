@@ -319,40 +319,42 @@ namespace PrintLogApi.Controllers
             _context.Prints.Add(newPrint);
 
 
-            var maxImages = await _printService.GetMaxImagesPerPrint(userId);
-            // No existing images to count: this is a newly created print.
-            if (data.snapshot is not null && 0 < maxImages)
+            if (data.snapshot is not null)
             {
-                // Images
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
+                var maxImages = await _printService.GetMaxImagesPerPrint(userId);
+                // No existing images to count: this is a newly created print, so count is always 0.
+                if (0 < maxImages)
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var image = data.snapshot;
+                    var fileId = Guid.NewGuid();
+                    var fileName = fileId + Path.GetExtension(image.FileName);
 
-                    var file = new Models.File()
+                    using (var uploadFileStream = image.OpenReadStream())
                     {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    _context.Files.Add(file);
+                        var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
-                    // DisplayOrder = 0: this is the first (and only) image for a newly created print from a webhook.
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = newPrint,
-                        IsDefault = true,
-                        DisplayOrder = 0,
-                    };
-                    _context.PrintImages.Add(printImage);
+                        var file = new Models.File()
+                        {
+                            Size = image.Length,
+                            Path = uploadResult.BlobPath,
+                            Id = fileId,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                        };
+                        _context.Files.Add(file);
+
+                        // DisplayOrder = 0: this is the first (and only) image for a newly created print from a webhook.
+                        var printImage = new PrintImage()
+                        {
+                            File = file,
+                            CreatedById = userId,
+                            UpdatedById = userId,
+                            Print = newPrint,
+                            IsDefault = true,
+                            DisplayOrder = 0,
+                        };
+                        _context.PrintImages.Add(printImage);
+                    }
                 }
             }
 
