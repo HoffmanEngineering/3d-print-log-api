@@ -4,11 +4,9 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -17,7 +15,6 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -46,21 +43,21 @@ namespace PrintLogApi.Controllers
         private readonly IPrintImageService _printImageService;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
+        private readonly IBlobStorageService _blobStorageService;
         private readonly string printImageContainerName = "printimages";
-        private readonly BlobContainerClient printImageContainer;
         private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
         public PrintsController(
             PrintLogContext context,
             IMapper mapper,
-            IConfiguration config,
             IAuthorizationService authorizationService,
             TelemetryClient telemetry,
             IPrintService printService,
             IPrintImageService printImageService,
             ICommentService commentService,
             IMemoryCache cache,
-            ICacheVersionService cacheVersionService)
+            ICacheVersionService cacheVersionService,
+            IBlobStorageService blobStorageService)
         {
             _context = context;
             _mapper = mapper;
@@ -71,9 +68,7 @@ namespace PrintLogApi.Controllers
             _printImageService = printImageService;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
-
-            var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
-            printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
+            _blobStorageService = blobStorageService;
         }
 
         /// <summary>
@@ -604,17 +599,13 @@ namespace PrintLogApi.Controllers
 
 
 
-            var blobClient = printImageContainer.GetBlobClient(fileName);
-
-            using (var uploadFileStream = image.OpenReadStream())
-            {
-                await blobClient.UploadAsync(uploadFileStream);
-            };
+            using var uploadFileStream = image.OpenReadStream();
+            var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
             var file = new Models.File()
             {
                 Size = image.Length,
-                Path = $"{printImageContainerName}/{fileName}",
+                Path = uploadResult.BlobPath,
                 Id = fileId,
                 CreatedById = userId.Value,
                 UpdatedById = userId.Value,
