@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using PrintLogApi.Services;
 
-namespace PrintLogApi.Services
+namespace PrintLogApi.IntegrationTests
 {
     /// <summary>
-    /// In-memory blob storage implementation for testing.
+    /// In-memory blob storage implementation for integration testing.
     /// Stores files in memory without actual blob storage calls.
     /// </summary>
     public class InMemoryBlobStorageService : IBlobStorageService
