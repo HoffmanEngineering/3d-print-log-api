@@ -43,7 +43,7 @@ steps:
       projects: |
          **/*.csproj
          !**/*Tests.csproj
-      arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)"
+      arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory) /p:PublishReadyToRun=true"
       zipAfterPublish: True
 
   - task: AzureRmWebAppDeployment@4
