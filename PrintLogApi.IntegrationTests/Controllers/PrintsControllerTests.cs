@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
@@ -16,9 +17,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
     public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly HttpClient _httpClient;
+        private readonly CustomWebApplicationFactory _factory;
 
         public PrintsControllerTests(CustomWebApplicationFactory factory)
         {
+            _factory = factory;
             _httpClient = factory.CreateClient();
         }
 
@@ -1033,6 +1036,273 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task RemoveImage_NonDefaultImage_ReturnsOkAndImageIsRemoved()
+        {
+            // Arrange - create a fresh print so this test is isolated
+            var print = await CreatePrintAsync("Print For RemoveImage NonDefault Test");
+            var now = DateTime.UtcNow;
+
+            int defaultImageId;
+            int nonDefaultImageId;
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+                var file1 = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/remove-test-default.jpg",
+                    Size = 1024,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var file2 = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/remove-test-non-default.jpg",
+                    Size = 2048,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.Files.AddRange(file1, file2);
+
+                var defaultImage = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file1,
+                    IsDefault = true,
+                    DisplayOrder = 0,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var nonDefaultImage = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file2,
+                    IsDefault = false,
+                    DisplayOrder = 1,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.PrintImages.AddRange(defaultImage, nonDefaultImage);
+                db.SaveChanges();
+
+                defaultImageId = defaultImage.Id;
+                nonDefaultImageId = nonDefaultImage.Id;
+            }
+
+            // Act - delete the non-default image
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{print.Id}/image/{nonDefaultImageId}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - 200 OK
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - the non-default image no longer exists in DB
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+                var deletedImage = db.PrintImages.FirstOrDefault(i => i.Id == nonDefaultImageId);
+                Assert.Null(deletedImage);
+
+                // The default image should remain and still be the default
+                var remainingDefault = db.PrintImages.FirstOrDefault(i => i.Id == defaultImageId);
+                Assert.NotNull(remainingDefault);
+                Assert.True(remainingDefault.IsDefault, "The original default image should still be marked as default");
+            }
+        }
+
+        [Fact]
+        public async Task RemoveImage_DefaultImage_PromotesNextImageByDisplayOrder()
+        {
+            // Arrange - create a fresh print so this test is isolated
+            var print = await CreatePrintAsync("Print For RemoveImage Default Promotion Test");
+            var now = DateTime.UtcNow;
+
+            int imageIdOrder0;
+            int imageIdOrder1;
+            int imageIdOrder2;
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+                var file0 = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/promote-test-order0.jpg",
+                    Size = 1024,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var file1 = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/promote-test-order1.jpg",
+                    Size = 1024,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var file2 = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/promote-test-order2.jpg",
+                    Size = 1024,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.Files.AddRange(file0, file1, file2);
+
+                var imageOrder0 = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file0,
+                    IsDefault = true,
+                    DisplayOrder = 0,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var imageOrder1 = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file1,
+                    IsDefault = false,
+                    DisplayOrder = 1,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                var imageOrder2 = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file2,
+                    IsDefault = false,
+                    DisplayOrder = 2,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.PrintImages.AddRange(imageOrder0, imageOrder1, imageOrder2);
+                db.SaveChanges();
+
+                imageIdOrder0 = imageOrder0.Id;
+                imageIdOrder1 = imageOrder1.Id;
+                imageIdOrder2 = imageOrder2.Id;
+            }
+
+            // Act - delete the default image (DisplayOrder=0)
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{print.Id}/image/{imageIdOrder0}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - 200 OK
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert DB state
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+                // Deleted image is gone
+                var deletedImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder0);
+                Assert.Null(deletedImage);
+
+                // Image with DisplayOrder=1 is now the default
+                var promotedImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder1);
+                Assert.NotNull(promotedImage);
+                Assert.True(promotedImage.IsDefault, "Image with DisplayOrder=1 should be promoted to default");
+
+                // Image with DisplayOrder=2 is still not the default
+                var remainingImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder2);
+                Assert.NotNull(remainingImage);
+                Assert.False(remainingImage.IsDefault, "Image with DisplayOrder=2 should not be promoted");
+            }
+        }
+
+        [Fact]
+        public async Task RemoveImage_LastImage_ReturnsOkAndPrintHasNoImages()
+        {
+            // Arrange - create a fresh print so this test is isolated
+            var print = await CreatePrintAsync("Print For RemoveImage LastImage Test");
+            var now = DateTime.UtcNow;
+
+            int soleImageId;
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+                var file = new Models.File
+                {
+                    Id = Guid.NewGuid(),
+                    Path = "printimages/last-image-test.jpg",
+                    Size = 1024,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.Files.Add(file);
+
+                var soleImage = new PrintImage
+                {
+                    PrintId = print.Id,
+                    File = file,
+                    IsDefault = true,
+                    DisplayOrder = 0,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.PrintImages.Add(soleImage);
+                db.SaveChanges();
+
+                soleImageId = soleImage.Id;
+            }
+
+            // Act - delete the only image
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
+                $"/api/Prints/{print.Id}/image/{soleImageId}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - 200 OK
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            // Assert - no PrintImages remain for this print
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var remainingImages = db.PrintImages.Where(i => i.PrintId == print.Id).ToList();
+                Assert.Empty(remainingImages);
+            }
         }
 
         #endregion
