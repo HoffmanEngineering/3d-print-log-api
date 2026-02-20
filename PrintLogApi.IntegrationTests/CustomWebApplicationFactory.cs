@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests
 {
@@ -52,6 +53,14 @@ namespace PrintLogApi.IntegrationTests
                     options.ConfigureWarnings(warnings =>
                         warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
                 });
+
+                // Replace IBlobStorageService with in-memory implementation for testing
+                var blobDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IBlobStorageService));
+                if (blobDescriptor != null)
+                {
+                    services.Remove(blobDescriptor);
+                }
+                services.AddSingleton<IBlobStorageService, InMemoryBlobStorageService>();
 
                 // Add test authentication scheme
                 services.AddAuthentication(options =>
