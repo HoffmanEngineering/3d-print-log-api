@@ -106,7 +106,7 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("CommentEdit");
 
-            return CreatedAtAction("GetComment", new { id = existingComment.Id }, _mapper.Map<CommentDetailDto>(existingComment));
+            return Ok(_mapper.Map<CommentDetailDto>(existingComment));
         }
 
         /// <summary>

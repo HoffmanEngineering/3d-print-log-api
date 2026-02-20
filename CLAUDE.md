@@ -12,8 +12,8 @@ PrintLogApi is an ASP.NET Core 9.0 Web API for [3dprintlog.com](https://3dprintl
 # Build
 dotnet build --configuration Release
 
-# Run tests
-dotnet test
+# Run tests (use --verbosity quiet to minimize output; re-run with --verbosity minimal on failure)
+dotnet test --verbosity quiet
 
 # Run specific test project
 dotnet test PrintLogApi.IntegrationTests
@@ -85,6 +85,44 @@ Version-based cache invalidation using `ICacheVersionService` (singleton):
 - SQL Server with connection retry (5 retries, 30s max delay)
 - Split queries used for complex operations (see PR 229, 235)
 - Migrations auto-applied on startup
+
+## Integration Testing
+
+Integration tests use `WebApplicationFactory` with SQLite in-memory database. See `PrintLogApi.IntegrationTests/README.md` for full documentation.
+
+### Key Components
+- `CustomWebApplicationFactory` - Configures SQLite and test authentication
+- `IntegrationTestSeeder` - Seeds minimal test data (user, printers, filaments, prints)
+- `TestAuthHandler` - Handles test authentication via `X-Test-User-Id` header
+
+### Writing Tests
+```csharp
+public class MyTests : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly HttpClient _httpClient;
+
+    public MyTests(CustomWebApplicationFactory factory)
+    {
+        _httpClient = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task AuthenticatedEndpoint_ReturnsSuccess()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/MyEndpoint");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+}
+```
+
+### Test Data Access
+- `IntegrationTestSeeder.TestUserOAuthId` - OAuth ID for test authentication header
+- `IntegrationTestSeeder.TestUserId` - Internal user ID (populated after seeding)
+- `IntegrationTestSeeder.TestPrinterId` - Internal printer ID (populated after seeding)
 
 ## Code Style
 

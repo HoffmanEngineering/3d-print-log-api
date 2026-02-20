@@ -44,7 +44,7 @@ namespace PrintLogApi.Profiles
 
             CreateMap<Print, PrintDetailDTO>()
                 .ForMember(dest => dest.PrinterId, opt => opt.MapFrom(src => src.Printer.Id))
-                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images))
+                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images.OrderBy(i => i.DisplayOrder)))
                 .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
                 .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments.Select(c => c.Comment)));
 

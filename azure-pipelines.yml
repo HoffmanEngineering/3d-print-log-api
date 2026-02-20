@@ -25,6 +25,18 @@ steps:
     displayName: "dotnet build $(buildConfiguration)"
 
   - task: DotNetCoreCLI@2
+    displayName: "Run tests with coverage"
+    inputs:
+      command: test
+      projects: "**/*Tests.csproj"
+      arguments: "--configuration $(buildConfiguration) --collect:\"XPlat Code Coverage\" --results-directory $(Agent.TempDirectory)/TestResults"
+
+  - task: PublishCodeCoverageResults@2
+    displayName: "Publish code coverage"
+    inputs:
+      summaryFileLocation: "$(Agent.TempDirectory)/TestResults/**/coverage.cobertura.xml"
+
+  - task: DotNetCoreCLI@2
     inputs:
       command: publish
       publishWebProjects: False

@@ -4,11 +4,9 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Azure.Storage.Blobs;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -17,7 +15,6 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -46,21 +43,21 @@ namespace PrintLogApi.Controllers
         private readonly IPrintImageService _printImageService;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
+        private readonly IBlobStorageService _blobStorageService;
         private readonly string printImageContainerName = "printimages";
-        private readonly BlobContainerClient printImageContainer;
         private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
         public PrintsController(
             PrintLogContext context,
             IMapper mapper,
-            IConfiguration config,
             IAuthorizationService authorizationService,
             TelemetryClient telemetry,
             IPrintService printService,
             IPrintImageService printImageService,
             ICommentService commentService,
             IMemoryCache cache,
-            ICacheVersionService cacheVersionService)
+            ICacheVersionService cacheVersionService,
+            IBlobStorageService blobStorageService)
         {
             _context = context;
             _mapper = mapper;
@@ -71,9 +68,7 @@ namespace PrintLogApi.Controllers
             _printImageService = printImageService;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
-
-            var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
-            printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
+            _blobStorageService = blobStorageService;
         }
 
         /// <summary>
@@ -105,7 +100,7 @@ namespace PrintLogApi.Controllers
 
             long? currentUserId = User.GetUserId();
 
-            if (!userId.HasValue && userId != currentUserId && !currentUserId.HasValue)
+            if (!userId.HasValue && !currentUserId.HasValue)
             {
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
@@ -499,8 +494,83 @@ namespace PrintLogApi.Controllers
             await _printService.SetDefaultImage(printid, imageId);
             
             return Ok();
+        }
 
-            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+        /// <summary>
+        /// Reorder the images attached to a print by assigning a display order to each image.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint requires a <strong>complete</strong> set of image IDs for the print.
+        /// Every image currently attached to the print must be included in <paramref name="reorderDto"/> —
+        /// partial updates (supplying only a subset of IDs, or including extra IDs) are not supported.
+        /// If the supplied set of image IDs does not exactly match the images belonging to the print,
+        /// the request is rejected with a 400 Bad Request response.
+        /// </remarks>
+        /// <param name="printId">The id of the print whose images are being reordered.</param>
+        /// <param name="reorderDto">
+        /// The complete list of image IDs and their new display order values.
+        /// Must contain every image ID that belongs to the print — no more, no less.
+        /// </param>
+        /// <response code="200">The images were successfully reordered.</response>
+        /// <response code="400">
+        /// Returned when the supplied image ID set does not exactly match the images attached to the print,
+        /// or when the images list is null or empty.
+        /// </response>
+        /// <response code="403">Returned when the authenticated user does not own the requested print.</response>
+        /// <response code="404">Returned when no print is found with the given <paramref name="printId"/>.</response>
+        [HttpPut("{printId}/images/reorder")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult> ReorderImages(long printId, [FromBody] ReorderImagesDto reorderDto)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var print = await _context.Prints
+                .Include(p => p.Images)
+                .FirstOrDefaultAsync(p => p.Id == printId);
+
+            if (print == null)
+            {
+                return NotFound();
+            }
+
+            if (print.CreatedById != userId)
+            {
+                return Forbid();
+            }
+
+            if (reorderDto.Images == null || reorderDto.Images.Count == 0)
+            {
+                return BadRequest("Images list cannot be null or empty");
+            }
+
+            // Validate all image IDs belong to this print
+            var printImageIds = print.Images.Select(i => i.Id).ToHashSet();
+            var requestedIds = reorderDto.Images.Select(i => i.ImageId).ToHashSet();
+
+            if (!requestedIds.SetEquals(printImageIds))
+            {
+                return BadRequest("Image IDs do not match print images");
+            }
+
+            // Update display order for each image
+            foreach (var imageOrder in reorderDto.Images)
+            {
+                var image = print.Images.First(i => i.Id == imageOrder.ImageId);
+                image.DisplayOrder = imageOrder.DisplayOrder;
+            }
+
+            await _context.SaveChangesAsync();
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+
+            return Ok();
         }
 
         /// <summary>
@@ -510,9 +580,9 @@ namespace PrintLogApi.Controllers
         /// <param name="id">The ID of the print to save the image to.</param>
         /// <param name="image">The image file to save.</param>
         /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
-        /// <returns></returns>
+        /// <returns>The created PrintImage with its ID.</returns>
         [HttpPost("{id}/image")]
-        public async Task<ActionResult> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
+        public async Task<ActionResult<PrintImageDto>> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -533,29 +603,36 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            //foreach (IFormFile image in images)
-            //{
+            // Check image limit
+            var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
+            var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
+            if (existingImageCount >= maxImages)
+            {
+                return BadRequest($"Maximum of {maxImages} images per print allowed");
+            }
+
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
 
 
-            var blobClient = printImageContainer.GetBlobClient(fileName);
-
-            using (var uploadFileStream = image.OpenReadStream())
-            {
-                await blobClient.UploadAsync(uploadFileStream);
-            };
+            using var uploadFileStream = image.OpenReadStream();
+            var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
             var file = new Models.File()
             {
                 Size = image.Length,
-                Path = $"{printImageContainerName}/{fileName}",
+                Path = uploadResult.BlobPath,
                 Id = fileId,
                 CreatedById = userId.Value,
                 UpdatedById = userId.Value,
             };
             _context.Files.Add(file);
+
+            // Calculate next display order
+            var maxDisplayOrder = await _context.PrintImages
+                .Where(pi => pi.PrintId == id)
+                .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
 
             var printImage = new PrintImage()
             {
@@ -564,10 +641,9 @@ namespace PrintLogApi.Controllers
                 UpdatedById = userId.Value,
                 Print = print,
                 IsDefault = isDefault,
+                DisplayOrder = maxDisplayOrder + 1,
             };
             _context.PrintImages.Add(printImage);
-
-            //}
 
             if (isDefault)
             {
@@ -580,13 +656,19 @@ namespace PrintLogApi.Controllers
 
             _telemetry.TrackEvent("PrintPictureAdded");
 
-            return Ok();
+            // Return the created image with its ID so the client can use it for reordering
+            var printImageDto = new PrintImageDto
+            {
+                Id = printImage.Id,
+                IsDefault = printImage.IsDefault,
+                DisplayOrder = printImage.DisplayOrder
+            };
 
-            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            return CreatedAtAction("GetImage", new { printId = id, imageId = printImage.Id }, printImageDto);
         }
 
         /// <summary>
-        /// Delete an image from a print.
+        /// Delete an image from a print. If the deleted image was the default, the next image by DisplayOrder is promoted.
         /// </summary>
         /// <param name="printid">The id of the print.</param>
         /// <param name="imageId">The id of the image to remove.</param>
@@ -595,23 +677,52 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult> RemoveImage(long printid, int imageId)
         {
             var userId = User.GetUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
-            var print = await _printService.GetPrintById(printid);
+            var print = await _context.Prints
+                .Include(p => p.Images)
+                .FirstOrDefaultAsync(p => p.Id == printid);
 
-            if (print == null || !print.Images.Any(i => i.Id == imageId))
+            if (print == null)
             {
                 return NotFound();
             }
 
-            if (!userId.HasValue || userId != print.CreatedById)
+            if (print.CreatedById != userId)
             {
                 return Forbid();
             }
 
-            var selectedImage = await _context.PrintImages.FindAsync(imageId);
-            _context.PrintImages.Remove(selectedImage);
+            var imageToDelete = print.Images.FirstOrDefault(i => i.Id == imageId);
+            if (imageToDelete == null)
+            {
+                return NotFound("Image not found");
+            }
+
+            var wasDefault = imageToDelete.IsDefault;
+
+            _context.PrintImages.Remove(imageToDelete);
+
+            // If deleted image was default, promote next image by DisplayOrder
+            if (wasDefault)
+            {
+                var nextDefault = print.Images
+                    .Where(i => i.Id != imageId)
+                    .OrderBy(i => i.DisplayOrder)
+                    .FirstOrDefault();
+
+                if (nextDefault != null)
+                {
+                    nextDefault.IsDefault = true;
+                }
+            }
 
             await _context.SaveChangesAsync();
+
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             return Ok();
         }

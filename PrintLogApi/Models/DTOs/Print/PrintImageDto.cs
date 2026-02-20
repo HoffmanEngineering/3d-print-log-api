@@ -5,5 +5,7 @@
         public int Id { get; set; }
 
         public bool IsDefault { get; set; }
+
+        public int DisplayOrder { get; set; }
     }
 }

@@ -1,0 +1,36 @@
+# PR Validation Pipeline
+# Runs build and tests on pull requests targeting master.
+# Wire this up as a required Build Validation policy under:
+#   Repos → Branches → master → Branch Policies → Build Validation
+
+trigger: none
+
+pr:
+  - master
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  buildConfiguration: "Release"
+
+steps:
+  - task: UseDotNet@2
+    inputs:
+      version: 9.x
+    displayName: Use .NET 9
+
+  - script: dotnet build --configuration $(buildConfiguration)
+    displayName: "Build"
+
+  - task: DotNetCoreCLI@2
+    displayName: "Run tests with coverage"
+    inputs:
+      command: test
+      projects: "**/*Tests.csproj"
+      arguments: "--configuration $(buildConfiguration) --collect:\"XPlat Code Coverage\" --results-directory $(Agent.TempDirectory)/TestResults"
+
+  - task: PublishCodeCoverageResults@2
+    displayName: "Publish code coverage"
+    inputs:
+      summaryFileLocation: "$(Agent.TempDirectory)/TestResults/**/coverage.cobertura.xml"

@@ -20,7 +20,8 @@ namespace PrintLogApi.Services
         Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);
         Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
 
-        Task SetDefaultImage(long printId, long newDefaultImageId);
+        Task<int> GetMaxImagesPerPrint(long userId);
+        Task SetDefaultImage(long printId, int newDefaultImageId);
         Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
         Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
         Task UpdateFilamentUsageWeights(Print print);
