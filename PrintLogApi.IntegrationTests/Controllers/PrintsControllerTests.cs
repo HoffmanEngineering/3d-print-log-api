@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
@@ -1117,11 +1118,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
             {
                 var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
-                var deletedImage = db.PrintImages.FirstOrDefault(i => i.Id == nonDefaultImageId);
+                var deletedImage = db.PrintImages.AsNoTracking().FirstOrDefault(i => i.Id == nonDefaultImageId);
                 Assert.Null(deletedImage);
 
                 // The default image should remain and still be the default
-                var remainingDefault = db.PrintImages.FirstOrDefault(i => i.Id == defaultImageId);
+                var remainingDefault = db.PrintImages.AsNoTracking().FirstOrDefault(i => i.Id == defaultImageId);
                 Assert.NotNull(remainingDefault);
                 Assert.True(remainingDefault.IsDefault, "The original default image should still be marked as default");
             }
@@ -1230,16 +1231,16 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
                 // Deleted image is gone
-                var deletedImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder0);
+                var deletedImage = db.PrintImages.AsNoTracking().FirstOrDefault(i => i.Id == imageIdOrder0);
                 Assert.Null(deletedImage);
 
                 // Image with DisplayOrder=1 is now the default
-                var promotedImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder1);
+                var promotedImage = db.PrintImages.AsNoTracking().FirstOrDefault(i => i.Id == imageIdOrder1);
                 Assert.NotNull(promotedImage);
                 Assert.True(promotedImage.IsDefault, "Image with DisplayOrder=1 should be promoted to default");
 
                 // Image with DisplayOrder=2 is still not the default
-                var remainingImage = db.PrintImages.FirstOrDefault(i => i.Id == imageIdOrder2);
+                var remainingImage = db.PrintImages.AsNoTracking().FirstOrDefault(i => i.Id == imageIdOrder2);
                 Assert.NotNull(remainingImage);
                 Assert.False(remainingImage.IsDefault, "Image with DisplayOrder=2 should not be promoted");
             }
@@ -1300,7 +1301,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             using (var scope = _factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                var remainingImages = db.PrintImages.Where(i => i.PrintId == print.Id).ToList();
+                var remainingImages = db.PrintImages.AsNoTracking().Where(i => i.PrintId == print.Id).ToList();
                 Assert.Empty(remainingImages);
             }
         }
