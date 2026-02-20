@@ -4,19 +4,17 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests
 {
 
-    public class MetricsTests : IClassFixture<WebApplicationFactory<Startup>>
+    public class MetricsTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly HttpClient _httpClient;
 
-        public MetricsTests(WebApplicationFactory<Startup> factory)
+        public MetricsTests(CustomWebApplicationFactory factory)
         {
-            
             _httpClient = factory.CreateDefaultClient();
         }
 
