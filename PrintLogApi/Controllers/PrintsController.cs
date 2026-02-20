@@ -499,12 +499,32 @@ namespace PrintLogApi.Controllers
         }
 
         /// <summary>
-        /// Reorder images attached to a print.
+        /// Reorder the images attached to a print by assigning a display order to each image.
         /// </summary>
-        /// <param name="printId">The id of the print.</param>
-        /// <param name="reorderDto">The new image ordering.</param>
-        /// <returns>Ok if the operation was successful.</returns>
+        /// <remarks>
+        /// This endpoint requires a <strong>complete</strong> set of image IDs for the print.
+        /// Every image currently attached to the print must be included in <paramref name="reorderDto"/> —
+        /// partial updates (supplying only a subset of IDs, or including extra IDs) are not supported.
+        /// If the supplied set of image IDs does not exactly match the images belonging to the print,
+        /// the request is rejected with a 400 Bad Request response.
+        /// </remarks>
+        /// <param name="printId">The id of the print whose images are being reordered.</param>
+        /// <param name="reorderDto">
+        /// The complete list of image IDs and their new display order values.
+        /// Must contain every image ID that belongs to the print — no more, no less.
+        /// </param>
+        /// <response code="200">The images were successfully reordered.</response>
+        /// <response code="400">
+        /// Returned when the supplied image ID set does not exactly match the images attached to the print,
+        /// or when the images list is null or empty.
+        /// </response>
+        /// <response code="403">Returned when the authenticated user does not own the requested print.</response>
+        /// <response code="404">Returned when no print is found with the given <paramref name="printId"/>.</response>
         [HttpPut("{printId}/images/reorder")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult> ReorderImages(long printId, [FromBody] ReorderImagesDto reorderDto)
         {
             var userId = User.GetUserId();
