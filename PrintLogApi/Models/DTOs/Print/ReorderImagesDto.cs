@@ -11,6 +11,7 @@ namespace PrintLogApi.Models.DTOs.Print
 
     public class ImageOrderDto
     {
+        [Range(1, int.MaxValue, ErrorMessage = "ImageId must be a valid image identifier.")]
         public int ImageId { get; set; }
         public int DisplayOrder { get; set; }
     }

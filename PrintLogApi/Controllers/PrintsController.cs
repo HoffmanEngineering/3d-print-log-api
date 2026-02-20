@@ -494,8 +494,6 @@ namespace PrintLogApi.Controllers
             await _printService.SetDefaultImage(printid, imageId);
             
             return Ok();
-
-            //return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
         }
 
         /// <summary>
@@ -613,8 +611,6 @@ namespace PrintLogApi.Controllers
                 return BadRequest($"Maximum of {maxImages} images per print allowed");
             }
 
-            //foreach (IFormFile image in images)
-            //{
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
@@ -648,8 +644,6 @@ namespace PrintLogApi.Controllers
                 DisplayOrder = maxDisplayOrder + 1,
             };
             _context.PrintImages.Add(printImage);
-
-            //}
 
             if (isDefault)
             {
