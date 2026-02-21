@@ -1057,6 +1057,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
+        [Fact]
+        public async Task ReorderImages_NegativeDisplayOrder_ReturnsBadRequest()
+        {
+            var reorderDto = new ReorderImagesDto
+            {
+                Images = new List<ImageOrderDto>
+                {
+                    new ImageOrderDto { ImageId = 1, DisplayOrder = -1 }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(reorderDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
         #endregion
 
         #region Image Management - Remove
