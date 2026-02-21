@@ -674,7 +674,7 @@ namespace PrintLogApi.Services
 
         public async Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime)
         {
-            // TODO: User the currentUserId to filter the feed based on friends, likes, etcetc
+            // TODO: Use the currentUserId to filter the feed based on friends, likes, etcetc
 
             var prints = await _context.Prints
                 .Where(p => p.CreatedDate < fromDateTime)

@@ -38,21 +38,6 @@ namespace PrintLogApi.Controllers
             _commentService = commentService;
         }
 
-        // TODO: Figure out authorization, as you'd want to make sure someone has the right permission to view this comment when requesting standalone.
-        //// GET: api/Comments/5
-        //[HttpGet("{id}", Name = "GetComment")]
-        //public async Task<ActionResult<CommentDetailDto>> GetComment(long id)
-        //{
-        //    var comment = await _commentService.GetCommentDetailById(id);
-
-        //    if (comment == null)
-        //    {
-        //        return NotFound();
-        //    }
-
-        //    return comment;
-        //}
-
         /// <summary>
         /// Edit a comment.
         /// </summary>
@@ -81,7 +66,7 @@ namespace PrintLogApi.Controllers
 
             if (userId != existingComment.CreatedById)
             {
-                return StatusCode(403, "Cannot edit another user's comment");
+                return Forbid();
             }
 
             existingComment.Body = edittedComment.Body;
