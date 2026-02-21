@@ -39,6 +39,9 @@ namespace PrintLogApi.Controllers
 
         private readonly string profileImageContainerName = "userprofile";
 
+        private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+        private const long MaxImageSizeBytes = 10 * 1024 * 1024;
+
         public UsersController(PrintLogContext context,
                                IUserDeletionService userDeletionService,
                                IUserService userService,
@@ -267,6 +270,16 @@ namespace PrintLogApi.Controllers
                 return BadRequest("Image file is required.");
             }
 
+            if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
+            {
+                return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            }
+
+            if (image.Length > MaxImageSizeBytes)
+            {
+                return BadRequest("Image must be under 10MB.");
+            }
+
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
@@ -317,6 +330,16 @@ namespace PrintLogApi.Controllers
             if (image == null)
             {
                 return BadRequest("Image file is required.");
+            }
+
+            if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
+            {
+                return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            }
+
+            if (image.Length > MaxImageSizeBytes)
+            {
+                return BadRequest("Image must be under 10MB.");
             }
 
             var fileId = Guid.NewGuid();

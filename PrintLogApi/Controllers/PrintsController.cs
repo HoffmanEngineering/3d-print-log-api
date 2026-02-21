@@ -608,6 +608,18 @@ namespace PrintLogApi.Controllers
                 return BadRequest("Image file is required.");
             }
 
+            var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+            if (!allowedImageTypes.Contains(image.ContentType.ToLowerInvariant()))
+            {
+                return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            }
+
+            const long maxImageSizeBytes = 10 * 1024 * 1024;
+            if (image.Length > maxImageSizeBytes)
+            {
+                return BadRequest("Image must be under 10MB.");
+            }
+
             // Check image limit
             var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
             var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
