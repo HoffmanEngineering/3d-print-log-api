@@ -362,8 +362,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Act
             var updateResponse = await _httpClient.SendAsync(updateRequest);
 
-            // Assert - PUT endpoint returns CreatedAtAction (201)
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
         }
 
         [Fact]
@@ -410,7 +410,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var updatedPrinter = await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
 
             // Assert
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
             Assert.NotNull(updatedPrinter);
             Assert.Equal("Completely Updated Printer", updatedPrinter.Name);
             Assert.Equal("New Make", updatedPrinter.Make);
@@ -802,7 +802,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var updateResponse = await _httpClient.SendAsync(updateRequest);
 
             // Assert
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
         }
 
         [Fact]

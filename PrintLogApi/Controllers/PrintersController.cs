@@ -258,7 +258,7 @@ namespace PrintLogApi.Controllers
 
             _cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, _mapper.Map<PrinterDetailDto>(existingPrinter));
+            return Ok(_mapper.Map<PrinterDetailDto>(existingPrinter));
         }
 
         /// <summary>
