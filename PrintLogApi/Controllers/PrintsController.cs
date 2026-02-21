@@ -603,6 +603,11 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
+            if (image == null)
+            {
+                return BadRequest("Image file is required.");
+            }
+
             // Check image limit
             var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
             var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);

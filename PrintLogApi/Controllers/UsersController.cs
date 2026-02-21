@@ -262,6 +262,11 @@ namespace PrintLogApi.Controllers
                 return NotFound();
             }
 
+            if (image == null)
+            {
+                return BadRequest("Image file is required.");
+            }
+
             var fileId = Guid.NewGuid();
             var fileName = fileId + Path.GetExtension(image.FileName);
 
@@ -307,6 +312,11 @@ namespace PrintLogApi.Controllers
             if (user == null)
             {
                 return NotFound();
+            }
+
+            if (image == null)
+            {
+                return BadRequest("Image file is required.");
             }
 
             var fileId = Guid.NewGuid();
