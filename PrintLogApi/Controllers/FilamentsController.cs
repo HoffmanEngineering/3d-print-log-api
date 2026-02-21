@@ -231,7 +231,7 @@ namespace PrintLogApi.Controllers
 
             if (!currentUserId.HasValue)
             {
-                return Forbid();
+                return Unauthorized();
             }
 
             var locations = await this._filamentService.GetFilamentStorageLocations(currentUserId.Value);
@@ -253,7 +253,7 @@ namespace PrintLogApi.Controllers
 
             if (!currentUserId.HasValue)
             {
-                return Forbid();
+                return Unauthorized();
             }
 
             var locations = await this._filamentService.GetFilamentPurchaseLocations(currentUserId.Value);
@@ -276,7 +276,7 @@ namespace PrintLogApi.Controllers
 
             if (!currentUserId.HasValue)
             {
-                return Forbid();
+                return Unauthorized();
             }
 
             var brands = await this._filamentService.GetFilamentBrands(currentUserId.Value);

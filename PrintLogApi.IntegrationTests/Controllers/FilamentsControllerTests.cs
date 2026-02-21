@@ -614,5 +614,72 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         #endregion
+
+        #region GET Storage/Purchase Locations and Brands
+
+        [Fact]
+        public async Task GetFilamentStorageLocations_Authenticated_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/storage-locations");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFilamentStorageLocations_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/storage-locations");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFilamentPurchaseLocations_Authenticated_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/purchase-locations");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFilamentPurchaseLocations_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/purchase-locations");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFilamentBrands_Authenticated_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/brands");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFilamentBrands_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/brands");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        #endregion
     }
 }
