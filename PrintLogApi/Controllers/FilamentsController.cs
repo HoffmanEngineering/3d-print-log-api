@@ -122,7 +122,7 @@ namespace PrintLogApi.Controllers
         {
             if (id != filamentDto.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var existingFilament = await _filamentService.GetFilamentById(id);

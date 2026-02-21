@@ -239,7 +239,7 @@ namespace PrintLogApi.Controllers
         {
             if (id != printDTO.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var existingPrint = await _printService.GetPrintById(id);

@@ -194,7 +194,7 @@ namespace PrintLogApi.Controllers
 
             if (id != printer.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var existingPrinter = await _printerService.getPrinterById(id);
