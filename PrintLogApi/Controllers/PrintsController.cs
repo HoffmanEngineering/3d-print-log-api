@@ -255,7 +255,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
@@ -306,7 +306,7 @@ namespace PrintLogApi.Controllers
             {
                 return Unauthorized();
             }
-            if ( userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
