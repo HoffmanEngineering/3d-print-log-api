@@ -494,6 +494,62 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task PostProfileImage_WithNoFile_ReturnsBadRequest()
+        {
+            // Arrange - send multipart with no image field
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/profile-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = new MultipartFormDataContent();
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostProfileImage_WithInvalidFileType_ReturnsBadRequest()
+        {
+            // Arrange - send a text file instead of an image
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/profile-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var fileContent = new ByteArrayContent(new byte[] { 0x00, 0x01, 0x02 });
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "document.txt");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostProfileImage_WithOversizedFile_ReturnsBadRequest()
+        {
+            // Arrange - send a file 1 byte over the 10MB limit
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/profile-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var oversizedBytes = new byte[10 * 1024 * 1024 + 1];
+            var fileContent = new ByteArrayContent(oversizedBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "too-big.jpg");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
         public async Task PostProfileImage_NotAuthenticated_ReturnsUnauthorized()
         {
             // Arrange - no auth header
@@ -609,6 +665,62 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(user);
             Assert.NotNull(user.CoverPicture);
             Assert.Equal(result.Url, user.CoverPicture);
+        }
+
+        [Fact]
+        public async Task PostCoverImage_WithNoFile_ReturnsBadRequest()
+        {
+            // Arrange - send multipart with no image field
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/cover-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = new MultipartFormDataContent();
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostCoverImage_WithInvalidFileType_ReturnsBadRequest()
+        {
+            // Arrange - send a text file instead of an image
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/cover-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var fileContent = new ByteArrayContent(new byte[] { 0x00, 0x01, 0x02 });
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "document.txt");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostCoverImage_WithOversizedFile_ReturnsBadRequest()
+        {
+            // Arrange - send a file 1 byte over the 10MB limit
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/cover-image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var oversizedBytes = new byte[10 * 1024 * 1024 + 1];
+            var fileContent = new ByteArrayContent(oversizedBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "too-big.jpg");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         [Fact]

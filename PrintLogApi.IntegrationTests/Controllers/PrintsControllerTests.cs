@@ -430,6 +430,40 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task UpdatePrint_AsDifferentAuthenticatedUser_ReturnsForbidden()
+        {
+            // Arrange - create a second user who owns neither this print nor its printer
+            const string otherUserOAuthId = "auth0|test-other-user-update-print";
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Users.Add(new User { OAuthUserId = otherUserOAuthId, ViewStatus = User.ProfileViewStatus.Public });
+                db.SaveChanges();
+            }
+
+            var updateDto = new PutPrintDetailDto
+            {
+                Id = IntegrationTestSeeder.TestPrintId,
+                Title = "Should Not Update",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, otherUserOAuthId);
+            request.Content = JsonContent.Create(updateDto);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        [Fact]
         public async Task UpdatePrint_NotAuthenticated_ReturnsUnauthorized()
         {
             // Arrange - get an existing print ID
@@ -659,6 +693,29 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrintStatus_AsDifferentAuthenticatedUser_ReturnsForbidden()
+        {
+            // Arrange - create a second user who owns neither this print nor its printer
+            const string otherUserOAuthId = "auth0|test-other-user-update-status";
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Users.Add(new User { OAuthUserId = otherUserOAuthId, ViewStatus = User.ProfileViewStatus.Public });
+                db.SaveChanges();
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Put,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/status/{(int)PrintStatus.Success}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, otherUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
 
         [Fact]
@@ -1304,6 +1361,69 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 var remainingImages = db.PrintImages.AsNoTracking().Where(i => i.PrintId == print.Id).ToList();
                 Assert.Empty(remainingImages);
             }
+        }
+
+        #endregion
+
+        #region POST Print Image
+
+        [Fact]
+        public async Task PostImage_WithNoFile_ReturnsBadRequest()
+        {
+            // Arrange - send multipart with no image field
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = new MultipartFormDataContent();
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostImage_WithInvalidFileType_ReturnsBadRequest()
+        {
+            // Arrange - send a text file instead of an image
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var fileContent = new ByteArrayContent(new byte[] { 0x00, 0x01, 0x02 });
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "document.txt");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostImage_WithOversizedFile_ReturnsBadRequest()
+        {
+            // Arrange - send a file 1 byte over the 10MB limit
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var oversizedBytes = new byte[10 * 1024 * 1024 + 1];
+            var fileContent = new ByteArrayContent(oversizedBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            var formContent = new MultipartFormDataContent();
+            formContent.Add(fileContent, "image", "too-big.jpg");
+            request.Content = formContent;
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         #endregion
