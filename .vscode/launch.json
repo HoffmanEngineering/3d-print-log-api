@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch (Development)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/PrintLogApi/bin/Debug/net9.0/PrintLogApi.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/PrintLogApi",
+            "stopAtEntry": false,
+            "launchSettingsFilePath": "${workspaceFolder}/PrintLogApi/Properties/launchSettings.json",
+            "launchSettingsProfile": "PrintLogApi"
+        },
+        {
+            "name": "Launch (Staging)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/PrintLogApi/bin/Debug/net9.0/PrintLogApi.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/PrintLogApi",
+            "stopAtEntry": false,
+            "launchSettingsFilePath": "${workspaceFolder}/PrintLogApi/Properties/launchSettings.json",
+            "launchSettingsProfile": "PrintLogApi - Staging"
+        },
+        {
+            "name": "Launch (E2E Testing)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/PrintLogApi/bin/Debug/net9.0/PrintLogApi.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/PrintLogApi",
+            "stopAtEntry": false,
+            "launchSettingsFilePath": "${workspaceFolder}/PrintLogApi/Properties/launchSettings.json",
+            "launchSettingsProfile": "E2E Testing"
+        },
+        {
+            "name": "Attach to Process",
+            "type": "coreclr",
+            "request": "attach"
+        }
+    ]
+}

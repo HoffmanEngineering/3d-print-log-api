@@ -122,7 +122,7 @@ namespace PrintLogApi.Controllers
         {
             if (id != maintenanceDto.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var userId = User.GetUserId();

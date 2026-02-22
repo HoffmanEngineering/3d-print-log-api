@@ -362,8 +362,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Act
             var updateResponse = await _httpClient.SendAsync(updateRequest);
 
-            // Assert - PUT endpoint returns CreatedAtAction (201)
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
         }
 
         [Fact]
@@ -410,7 +410,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var updatedPrinter = await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
 
             // Assert
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
             Assert.NotNull(updatedPrinter);
             Assert.Equal("Completely Updated Printer", updatedPrinter.Name);
             Assert.Equal("New Make", updatedPrinter.Make);
@@ -466,6 +466,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task UpdatePrinter_IdMismatch_ReturnsBadRequest()
+        {
+            var updateDto = new AddPrinterDTO
+            {
+                Id = 999998, // Mismatched — route says 999999
+                Name = "Mismatch Test",
+                Make = "Test",
+                Model = "Test",
+                IsActive = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put, "/api/Printers/999999");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(updateDto);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         #endregion
@@ -781,7 +802,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var updateResponse = await _httpClient.SendAsync(updateRequest);
 
             // Assert
-            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
         }
 
         [Fact]

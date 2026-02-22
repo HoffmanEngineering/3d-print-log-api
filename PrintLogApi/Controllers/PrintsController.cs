@@ -239,7 +239,7 @@ namespace PrintLogApi.Controllers
         {
             if (id != printDTO.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var existingPrint = await _printService.GetPrintById(id);
@@ -255,7 +255,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            if (userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
@@ -306,7 +306,7 @@ namespace PrintLogApi.Controllers
             {
                 return Unauthorized();
             }
-            if ( userId != existingPrint.CreatedById || userId != existingPrint.Printer.UserId)
+            if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
             {
                 return Forbid();
             }
@@ -466,11 +466,11 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Prints have a single "default" image, which is the image used in thumbnails. This is used to mark a specific image as the default image.
         /// </summary>
-        /// <param name="printid">The id of the print.</param>
+        /// <param name="printId">The id of the print.</param>
         /// <param name="imageId">The id of the image to make default.</param>
         /// <returns>Ok if the operation was successful.</returns>
-        [HttpPost("{printid}/image/{imageId}/set-as-default")]
-        public async Task<ActionResult> SetImageAsDefault(long printid, int imageId)
+        [HttpPost("{printId}/image/{imageId}/set-as-default")]
+        public async Task<ActionResult> SetImageAsDefault(long printId, int imageId)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -478,7 +478,7 @@ namespace PrintLogApi.Controllers
                 return Unauthorized();
             }
 
-            var print = await _printService.GetPrintById(printid);
+            var print = await _printService.GetPrintById(printId);
 
             if (print == null || !print.Images.Any(i => i.Id == imageId))
             {
@@ -491,7 +491,7 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            await _printService.SetDefaultImage(printid, imageId);
+            await _printService.SetDefaultImage(printId, imageId);
             
             return Ok();
         }
@@ -603,6 +603,23 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
+            if (image == null)
+            {
+                return BadRequest("Image file is required.");
+            }
+
+            var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+            if (!allowedImageTypes.Contains(image.ContentType.ToLowerInvariant()))
+            {
+                return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            }
+
+            const long maxImageSizeBytes = 10 * 1024 * 1024;
+            if (image.Length > maxImageSizeBytes)
+            {
+                return BadRequest("Image must be under 10MB.");
+            }
+
             // Check image limit
             var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
             var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
@@ -670,11 +687,11 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Delete an image from a print. If the deleted image was the default, the next image by DisplayOrder is promoted.
         /// </summary>
-        /// <param name="printid">The id of the print.</param>
+        /// <param name="printId">The id of the print.</param>
         /// <param name="imageId">The id of the image to remove.</param>
         /// <returns></returns>
-        [HttpDelete("{printid}/image/{imageId}")]
-        public async Task<ActionResult> RemoveImage(long printid, int imageId)
+        [HttpDelete("{printId}/image/{imageId}")]
+        public async Task<ActionResult> RemoveImage(long printId, int imageId)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -684,7 +701,7 @@ namespace PrintLogApi.Controllers
 
             var print = await _context.Prints
                 .Include(p => p.Images)
-                .FirstOrDefaultAsync(p => p.Id == printid);
+                .FirstOrDefaultAsync(p => p.Id == printId);
 
             if (print == null)
             {

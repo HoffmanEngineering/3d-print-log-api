@@ -192,22 +192,6 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             {
                 jwtOptions.Authority = domain;
                 jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
-
-                //jwtOptions.Events = new JwtBearerEvents
-                //{
-                //    OnAuthenticationFailed = c =>
-                //    {
-                //        c.NoResult();
-                //        c.Response.StatusCode = 401;
-                //        c.Response.ContentType = "text/plain";
-                //        c.Response.WriteAsync(c.Exception.ToString()).Wait();
-                //        return Task.CompletedTask;
-                //    },
-                //    OnTokenValidated = async ctx =>
-                //    {
-                //        var clientId = ctx.Principal.FindFirst("appid");
-                //    }
-                //};
             });
 
             services.AddAuthorization(options =>

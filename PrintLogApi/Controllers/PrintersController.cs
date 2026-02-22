@@ -194,7 +194,7 @@ namespace PrintLogApi.Controllers
 
             if (id != printer.Id)
             {
-                return BadRequest();
+                return BadRequest("ID in route does not match body.");
             }
 
             var existingPrinter = await _printerService.getPrinterById(id);
@@ -258,7 +258,7 @@ namespace PrintLogApi.Controllers
 
             _cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrinter", new { id = existingPrinter.Id }, _mapper.Map<PrinterDetailDto>(existingPrinter));
+            return Ok(_mapper.Map<PrinterDetailDto>(existingPrinter));
         }
 
         /// <summary>

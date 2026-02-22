@@ -13,6 +13,7 @@ namespace PrintLogApi.Models.DTOs.Print
     {
         [Range(1, int.MaxValue, ErrorMessage = "ImageId must be a valid image identifier.")]
         public int ImageId { get; set; }
+        [Range(0, int.MaxValue, ErrorMessage = "DisplayOrder must be a non-negative integer.")]
         public int DisplayOrder { get; set; }
     }
 }
