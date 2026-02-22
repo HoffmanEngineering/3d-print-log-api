@@ -52,6 +52,7 @@ namespace PrintLogApi.Services
         /// <param name="searchText"></param>
         /// <param name="sortRequest"></param>
         /// <param name="filterByPrinterIds"></param>
+        /// <param name="filterByFilamentIds"></param>
         /// <param name="filterByStatus"></param>
         /// <param name="userId"></param>
         /// <param name="currentUserId"></param>
@@ -61,6 +62,7 @@ namespace PrintLogApi.Services
             string searchText,
             SortRequest<PrintSummarySortColumn> sortRequest,
             IEnumerable<long> filterByPrinterIds,
+            IEnumerable<Guid> filterByFilamentIds,
             PrintStatus? filterByStatus,
             long? userId,
             long? currentUserId)
@@ -116,7 +118,13 @@ namespace PrintLogApi.Services
                 printQuery = printQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
             }
 
-            // Apply sorting
+            // Filter by any of the selected filament ids.
+            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            {
+                var lookup = filterByFilamentIds.ToList();
+                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid) pf.FilamentId)));
+            }
+
             if (sortRequest != null)
             {
                 if (sortRequest.SortColumn == PrintSummarySortColumn.Title)

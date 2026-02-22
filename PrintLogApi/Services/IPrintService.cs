@@ -17,7 +17,7 @@ namespace PrintLogApi.Services
         Task<Print> GetPrintById(long id);
         Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
         Task<List<long>> GetPublicPrintIds();
-        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);
+        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, IEnumerable<Guid> filterByFilamentIds, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId);
         Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
 
         Task<int> GetMaxImagesPerPrint(long userId);
