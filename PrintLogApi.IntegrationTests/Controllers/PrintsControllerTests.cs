@@ -1484,6 +1484,34 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
+        [Fact]
+        public async Task GetPrintSummary_WithFilamentFilter_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?filterByFilamentIds={IntegrationTestSeeder.TestFilamentId1}&userId={IntegrationTestSeeder.TestUserId}");
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_WithFilamentFilter_ReturnsOnlyMatchingPrints()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?filterByFilamentIds={IntegrationTestSeeder.TestFilamentId1}&userId={IntegrationTestSeeder.TestUserId}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            Assert.NotNull(result);
+            Assert.All(result.Items, print =>
+                Assert.Contains(print.FilamentUsage, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
+        }
+
         #endregion
     }
 }

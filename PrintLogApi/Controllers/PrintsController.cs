@@ -80,6 +80,7 @@ namespace PrintLogApi.Controllers
         /// <param name="searchText">Optionally search for text in a print's title or notes.</param>
         /// <param name="filterByPrinterIds">Optionally filter by specific printer ids.</param>
         /// <param name="sortRequest">The sorting request.</param>
+        /// <param name="filterByFilamentIds">Optionally filter by specific filament ids.</param>
         /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
         /// <param name="userId">Optionally search for public</param>
         /// <returns>A Paged List of Print Summaries matching the search criteria.</returns>
@@ -94,6 +95,7 @@ namespace PrintLogApi.Controllers
             [FromQuery, MaxLength(50)] string searchText,
             [FromQuery] IEnumerable<long> filterByPrinterIds,
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
+            [FromQuery] IEnumerable<Guid> filterByFilamentIds,
             [FromQuery] Print.PrintStatus? filterByStatus,
             [FromQuery] long? userId)
         {
@@ -107,15 +109,15 @@ namespace PrintLogApi.Controllers
 
             var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
-            var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText, 
-                                            filterByPrinterIds, sortRequest, filterByStatus);
+            var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText,
+                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus);
 
             if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
             {
                 return cachedResult;
             }
 
-            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByStatus, userId, currentUserId);
+            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId);
 
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(EstimateCacheSize(result))
@@ -875,20 +877,26 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Generates a unique cache key for print summary queries based on user and query parameters.
         /// </summary>
-        private string GenerateCacheKey(long userId, string version, 
+        private string GenerateCacheKey(long userId, string version,
                                         PagedRequest pagingRequest, string searchText,
-                                        IEnumerable<long> filterByPrinterIds, 
+                                        IEnumerable<long> filterByPrinterIds,
+                                        IEnumerable<Guid> filterByFilamentIds,
                                         SortRequest<PrintSummarySortColumn> sortRequest,
                                         Print.PrintStatus? filterByStatus)
         {
-            var printerIds = filterByPrinterIds?.Any() == true 
-                ? string.Join(",", filterByPrinterIds.OrderBy(x => x)) 
+            var printerIds = filterByPrinterIds?.Any() == true
+                ? string.Join(",", filterByPrinterIds.OrderBy(x => x))
                 : "none";
-            
+
+            var filamentIds = filterByFilamentIds?.Any() == true
+                ? string.Join(",", filterByFilamentIds.OrderBy(x => x))
+                : "none";
+
             return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
                    $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
                    $"q{searchText ?? "none"}_" +
                    $"pr{printerIds}_" +
+                   $"fl{filamentIds}_" +
                    $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
                    $"fs{filterByStatus}";
         }
