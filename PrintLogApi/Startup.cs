@@ -22,6 +22,7 @@ using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
+using PrintLogApi.Models.Stripe;
 using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -180,6 +181,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 options.SenderEmail = Configuration["ExternalProviders:Smtp:SenderEmail"];
                 options.SenderName = Configuration["ExternalProviders:Smtp:SenderName"];
             });
+
+            services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
+            Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
         }
 
