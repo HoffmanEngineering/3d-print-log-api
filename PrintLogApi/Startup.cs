@@ -21,7 +21,7 @@ using Microsoft.OpenApi.Models;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
-using PrintLogApi.Models.SendGrid;
+using PrintLogApi.Models.Smtp;
 using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -170,12 +170,15 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddApplicationInsightsTelemetry();
 
 
-            services.AddTransient<IEmailSender, SendGridEmailSender>();
-            services.Configure<SendGridEmailSenderOptions>(options =>
+            services.AddTransient<IEmailSender, SmtpEmailSender>();
+            services.Configure<SmtpEmailSenderOptions>(options =>
             {
-                options.ApiKey = Configuration["ExternalProviders:SendGrid:ApiKey"];
-                options.SenderEmail = Configuration["ExternalProviders:SendGrid:SenderEmail"];
-                options.SenderName = Configuration["ExternalProviders:SendGrid:SenderName"];
+                options.Host = Configuration["ExternalProviders:Smtp:Host"];
+                options.Port = int.Parse(Configuration["ExternalProviders:Smtp:Port"] ?? "587");
+                options.Username = Configuration["ExternalProviders:Smtp:Username"];
+                options.Password = Configuration["ExternalProviders:Smtp:Password"];
+                options.SenderEmail = Configuration["ExternalProviders:Smtp:SenderEmail"];
+                options.SenderName = Configuration["ExternalProviders:Smtp:SenderName"];
             });
 
         }
