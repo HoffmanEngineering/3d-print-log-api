@@ -56,6 +56,8 @@ namespace PrintLogApi
 
         public DbSet<Notification> Notifications { get; set; }
 
+        public DbSet<Subscription> Subscriptions { get; set; }
+
         public static int fnNaturalSort(string sortKey)
             => throw new NotSupportedException();
 
@@ -530,6 +532,19 @@ namespace PrintLogApi
                 .HasIndex(n => n.UserId)
                 .IncludeProperties(n => n.IsRead)
                 .HasDatabaseName("IX_Notifications_UserId_UnreadCount");
+
+            modelBuilder.Entity<Subscription>()
+                .HasIndex(s => s.UserId)
+                .IsUnique()
+                .HasDatabaseName("IX_Subscriptions_UserId");
+
+            modelBuilder.Entity<Subscription>()
+                .HasIndex(s => s.StripeCustomerId)
+                .HasDatabaseName("IX_Subscriptions_StripeCustomerId");
+
+            modelBuilder.Entity<Subscription>()
+                .HasIndex(s => s.StripeSubscriptionId)
+                .HasDatabaseName("IX_Subscriptions_StripeSubscriptionId");
 
             modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
                 .HasName("fnNaturalSort");
