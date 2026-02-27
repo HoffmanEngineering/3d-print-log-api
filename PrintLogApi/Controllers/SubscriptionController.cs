@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
@@ -105,7 +106,7 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> HandleWebhook()
         {
-            var json = await new StreamReader(HttpContext.Request.Body).ReadToEndAsync();
+            var json = await new StreamReader(HttpContext.Request.Body, Encoding.UTF8).ReadToEndAsync();
             var signature = Request.Headers["Stripe-Signature"].ToString();
 
             try
