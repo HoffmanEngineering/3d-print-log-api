@@ -45,8 +45,8 @@ namespace PrintLogApi.Services
             {
                 return new SubscriptionDto
                 {
-                    Status = SubscriptionStatus.None,
-                    Plan = SubscriptionPlan.Free,
+                    Status = "none",
+                    Plan = "free",
                     IsPro = false,
                     CancelAtPeriodEnd = false,
                     CurrentPeriodEnd = null
@@ -218,14 +218,15 @@ namespace PrintLogApi.Services
                 }
             }
 
-            var priceId = stripeSubscription.Items.Data.FirstOrDefault()?.Price.Id;
+            var stripeItem = stripeSubscription.Items.Data.FirstOrDefault();
+            var priceId = stripeItem?.Price.Id;
 
             subscription.StripeSubscriptionId = stripeSubscriptionId;
             subscription.StripePriceId = priceId;
             subscription.Status = SubscriptionStatus.Active;
             subscription.Plan = MapPriceIdToPlan(priceId);
-            subscription.CurrentPeriodStart = stripeSubscription.CurrentPeriodStart;
-            subscription.CurrentPeriodEnd = stripeSubscription.CurrentPeriodEnd;
+            subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
+            subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
             subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
 
             await _context.SaveChangesAsync();
@@ -248,13 +249,14 @@ namespace PrintLogApi.Services
 
             if (subscription == null) return;
 
-            var priceId = stripeSubscription.Items.Data.FirstOrDefault()?.Price.Id;
+            var stripeItem = stripeSubscription.Items.Data.FirstOrDefault();
+            var priceId = stripeItem?.Price.Id;
 
             subscription.StripePriceId = priceId;
             subscription.Status = MapStripeStatus(stripeSubscription.Status);
             subscription.Plan = MapPriceIdToPlan(priceId);
-            subscription.CurrentPeriodStart = stripeSubscription.CurrentPeriodStart;
-            subscription.CurrentPeriodEnd = stripeSubscription.CurrentPeriodEnd;
+            subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
+            subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
             subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
 
             if (stripeSubscription.CanceledAt.HasValue)
