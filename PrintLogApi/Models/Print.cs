@@ -67,6 +67,8 @@ namespace PrintLogApi.Models
 
         public bool AllowComments { get; set; }
 
+        public bool AllowFileDownloads { get; set; }
+
         /// <summary>
         /// The SHA1 file hash of the gcode file this print was created from.
         /// </summary>
@@ -78,6 +80,8 @@ namespace PrintLogApi.Models
         public string FileName { get; set; }
 
         public ICollection<PrintImage> Images { get; set; }
+
+        public ICollection<PrintAttachment> Attachments { get; set; }
 
         public ICollection<PrintComment> Comments { get; set; }
 
