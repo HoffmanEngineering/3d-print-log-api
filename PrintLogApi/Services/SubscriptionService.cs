@@ -22,6 +22,13 @@ namespace PrintLogApi.Services
         private readonly TelemetryClient _telemetry;
         private readonly StripeOptions _stripeOptions;
 
+        private const int FreeMaxImagesPerPrint = 5;
+        private const int ProMaxImagesPerPrint = 20;
+        private const int FreeMaxFilesPerPrint = 0;
+        private const int ProMaxFilesPerPrint = 5;
+        private const long FreeMaxFileStorageBytes = 0L;
+        private const long ProMaxFileStorageBytes = 50L * 1024 * 1024 * 1024; // 50 GB
+
         public SubscriptionService(
             PrintLogContext context,
             IMapper mapper,
@@ -41,19 +48,33 @@ namespace PrintLogApi.Services
                 .AsNoTracking()
                 .SingleOrDefaultAsync();
 
+            bool isPro = subscription?.Status == SubscriptionStatus.Active;
+
+            SubscriptionDto dto;
             if (subscription == null)
             {
-                return new SubscriptionDto
+                dto = new SubscriptionDto
                 {
                     Status = "none",
                     Plan = "free",
                     IsPro = false,
                     CancelAtPeriodEnd = false,
-                    CurrentPeriodEnd = null
+                    CurrentPeriodEnd = null,
                 };
             }
+            else
+            {
+                dto = _mapper.Map<SubscriptionDto>(subscription);
+            }
 
-            return _mapper.Map<SubscriptionDto>(subscription);
+            dto.MaxImagesPerPrint = isPro ? ProMaxImagesPerPrint : FreeMaxImagesPerPrint;
+            dto.MaxFilesPerPrint = isPro ? ProMaxFilesPerPrint : FreeMaxFilesPerPrint;
+            dto.MaxFileStorageBytes = isPro ? ProMaxFileStorageBytes : FreeMaxFileStorageBytes;
+            dto.UsedFileStorageBytes = await _context.PrintAttachments
+                .Where(pa => pa.CreatedById == userId)
+                .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
+
+            return dto;
         }
 
         public async Task<string> CreateCheckoutSession(long userId, string planId, string successUrl, string cancelUrl)

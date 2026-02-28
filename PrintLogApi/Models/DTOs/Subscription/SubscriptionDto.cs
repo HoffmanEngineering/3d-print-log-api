@@ -9,5 +9,9 @@ namespace PrintLogApi.Models.DTOs.Subscription
         public DateTimeOffset? CurrentPeriodEnd { get; set; }
         public bool CancelAtPeriodEnd { get; set; }
         public bool IsPro { get; set; }
+        public int MaxImagesPerPrint { get; set; }
+        public int MaxFilesPerPrint { get; set; }
+        public long MaxFileStorageBytes { get; set; }
+        public long UsedFileStorageBytes { get; set; }
     }
 }
