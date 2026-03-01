@@ -602,6 +602,17 @@ namespace PrintLogApi.Services
             }
             _context.PrintImages.RemoveRange(print.Images.ToArray());
 
+            // Remove Print Attachments.
+            var attachments = await _context.PrintAttachments
+                .Include(a => a.File)
+                .Where(a => a.PrintId == print.Id)
+                .ToListAsync();
+            foreach (var attachment in attachments)
+            {
+                _context.Files.Remove(attachment.File);
+            }
+            _context.PrintAttachments.RemoveRange(attachments);
+
             // Remove PrintFilament for this print.
             _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
 

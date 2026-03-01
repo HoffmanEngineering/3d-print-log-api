@@ -128,6 +128,12 @@ namespace PrintLogApi.Services
 
             // Allow download if: owner, or AllowFileDownloads is true
             bool isOwner = userId.HasValue && attachment.Print.CreatedById == userId;
+
+            // Private prints are only accessible to their owner
+            if (attachment.Print.ViewStatus == Print.PrintViewStatus.Private && !isOwner)
+                throw new ForbiddenException("This print is private.");
+
+            // For non-private prints, check AllowFileDownloads
             if (!isOwner && !attachment.Print.AllowFileDownloads)
                 throw new ForbiddenException("File downloads are not enabled for this print.");
 
