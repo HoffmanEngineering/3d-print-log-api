@@ -138,6 +138,13 @@ namespace PrintLogApi.Services
                 Metadata = new Dictionary<string, string>
                 {
                     { "userId", userId.ToString() }
+                },
+                SubscriptionData = new SessionSubscriptionDataOptions
+                {
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "userId", userId.ToString() }
+                    }
                 }
             });
 
@@ -189,6 +196,77 @@ namespace PrintLogApi.Services
                     await HandlePaymentFailed(stripeEvent);
                     break;
             }
+        }
+
+        public async Task CancelSubscriptionAtPeriodEnd(long userId)
+        {
+            var subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
+                .SingleOrDefaultAsync();
+
+            if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+                return;
+
+            var stripeService = new Stripe.SubscriptionService();
+            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
+            {
+                CancelAtPeriodEnd = true
+            });
+
+            subscription.CancelAtPeriodEnd = true;
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("Subscription_MarkedForCancellation", new Dictionary<string, string>
+            {
+                { "userId", userId.ToString() }
+            });
+        }
+
+        public async Task CancelSubscriptionImmediately(long userId)
+        {
+            var subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
+                .SingleOrDefaultAsync();
+
+            if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+                return;
+
+            var stripeService = new Stripe.SubscriptionService();
+            await stripeService.CancelAsync(subscription.StripeSubscriptionId);
+
+            subscription.Status = SubscriptionStatus.Canceled;
+            subscription.CanceledAt = DateTimeOffset.UtcNow;
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("Subscription_CanceledImmediately", new Dictionary<string, string>
+            {
+                { "userId", userId.ToString() }
+            });
+        }
+
+        public async Task ResumeSubscription(long userId)
+        {
+            var subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active && s.CancelAtPeriodEnd)
+                .SingleOrDefaultAsync();
+
+            if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+                return;
+
+            var stripeService = new Stripe.SubscriptionService();
+            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
+            {
+                CancelAtPeriodEnd = false
+            });
+
+            subscription.CancelAtPeriodEnd = false;
+            subscription.CanceledAt = null;
+            await _context.SaveChangesAsync();
+
+            _telemetry.TrackEvent("Subscription_Resumed", new Dictionary<string, string>
+            {
+                { "userId", userId.ToString() }
+            });
         }
 
         private async Task HandleCheckoutSessionCompleted(Event stripeEvent)
