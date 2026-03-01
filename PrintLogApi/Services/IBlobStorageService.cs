@@ -49,5 +49,12 @@ namespace PrintLogApi.Services
             string contentType,
             string originalFileName,
             TimeSpan expiry);
+
+        /// <summary>
+        /// Deletes a blob from storage. Does nothing if the blob does not exist.
+        /// </summary>
+        /// <param name="containerName">The blob container name</param>
+        /// <param name="blobName">The name/path of the blob file</param>
+        Task DeleteBlobAsync(string containerName, string blobName);
     }
 }

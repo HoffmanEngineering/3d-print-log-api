@@ -86,5 +86,15 @@ namespace PrintLogApi.Services
 
             return Task.FromResult(blobClient.GenerateSasUri(sasBuilder));
         }
+
+        /// <summary>
+        /// Deletes a blob from Azure Blob Storage. Does nothing if the blob does not exist.
+        /// </summary>
+        public async Task DeleteBlobAsync(string containerName, string blobName)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+            var blobClient = containerClient.GetBlobClient(blobName);
+            await blobClient.DeleteIfExistsAsync();
+        }
     }
 }

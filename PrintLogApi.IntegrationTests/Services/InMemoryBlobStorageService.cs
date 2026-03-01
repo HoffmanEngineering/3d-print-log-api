@@ -60,6 +60,15 @@ namespace PrintLogApi.IntegrationTests
             => Task.FromResult(new Uri("https://fake-blob-storage.example.com/download-sas"));
 
         /// <summary>
+        /// Removes the blob from in-memory storage. No-op if it does not exist.
+        /// </summary>
+        public Task DeleteBlobAsync(string containerName, string blobName)
+        {
+            Blobs.Remove($"{containerName}/{blobName}");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
         /// Clears all stored blobs (useful between tests).
         /// </summary>
         public void Clear()
