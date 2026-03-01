@@ -48,6 +48,18 @@ namespace PrintLogApi.IntegrationTests
         }
 
         /// <summary>
+        /// Returns a dummy SAS upload URI for testing purposes.
+        /// </summary>
+        public Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry)
+            => Task.FromResult(new Uri("https://fake-blob-storage.example.com/upload-sas"));
+
+        /// <summary>
+        /// Returns a dummy SAS download URI for testing purposes.
+        /// </summary>
+        public Task<Uri> GenerateSasDownloadUrlAsync(string containerName, string blobName, string contentType, string originalFileName, TimeSpan expiry)
+            => Task.FromResult(new Uri("https://fake-blob-storage.example.com/download-sas"));
+
+        /// <summary>
         /// Clears all stored blobs (useful between tests).
         /// </summary>
         public void Clear()

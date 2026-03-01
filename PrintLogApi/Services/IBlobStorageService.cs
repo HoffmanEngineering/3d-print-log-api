@@ -33,5 +33,21 @@ namespace PrintLogApi.Services
         /// <param name="stream">The file stream to upload</param>
         /// <returns>Upload result containing blob path and URI</returns>
         Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream);
+
+        /// <summary>
+        /// Generates a time-limited SAS URL that allows a client to PUT a file directly to Azure Blob Storage.
+        /// </summary>
+        Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry);
+
+        /// <summary>
+        /// Generates a time-limited SAS URL that allows a client to GET/download a blob.
+        /// Includes Content-Disposition and Content-Type headers in the SAS so the browser handles the download correctly.
+        /// </summary>
+        Task<Uri> GenerateSasDownloadUrlAsync(
+            string containerName,
+            string blobName,
+            string contentType,
+            string originalFileName,
+            TimeSpan expiry);
     }
 }
