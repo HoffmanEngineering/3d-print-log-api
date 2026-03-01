@@ -21,17 +21,20 @@ namespace PrintLogApi.Services
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
         private readonly StripeOptions _stripeOptions;
+        private readonly INotificationService _notificationService;
 
         public SubscriptionService(
             PrintLogContext context,
             IMapper mapper,
             TelemetryClient telemetry,
-            IOptions<StripeOptions> stripeOptions)
+            IOptions<StripeOptions> stripeOptions,
+            INotificationService notificationService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _stripeOptions = stripeOptions.Value;
+            _notificationService = notificationService;
         }
 
         public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -328,6 +331,14 @@ namespace PrintLogApi.Services
                 { "userId", subscription.UserId.ToString() },
                 { "plan", subscription.Plan.ToString() }
             });
+
+            var planDisplay = subscription.Plan switch
+            {
+                SubscriptionPlan.ProMonthly => "Pro Monthly",
+                SubscriptionPlan.ProAnnual => "Pro Annual",
+                _ => "Pro"
+            };
+            await _notificationService.CreateSubscriptionActivatedNotification(subscription.UserId, planDisplay);
         }
 
         private async Task HandleSubscriptionUpdated(Event stripeEvent)
@@ -381,6 +392,8 @@ namespace PrintLogApi.Services
 
             await _context.SaveChangesAsync();
 
+            await _notificationService.CreateSubscriptionCanceledNotification(subscription.UserId);
+
             _telemetry.TrackEvent("Subscription_Canceled", new Dictionary<string, string>
             {
                 { "userId", subscription.UserId.ToString() }
@@ -401,6 +414,8 @@ namespace PrintLogApi.Services
             subscription.Status = SubscriptionStatus.PastDue;
 
             await _context.SaveChangesAsync();
+
+            await _notificationService.CreateSubscriptionPaymentFailedNotification(subscription.UserId);
 
             _telemetry.TrackEvent("Subscription_PaymentFailed", new Dictionary<string, string>
             {
