@@ -138,7 +138,16 @@ namespace PrintLogApi.Services
                         {
                             var parts = f.Path.Split('/', 2);
                             if (parts.Length == 2)
-                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                            {
+                                try
+                                {
+                                    await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to delete blob {BlobPath} during user deletion; continuing", f.Path);
+                                }
+                            }
                         }
                     }
 
@@ -178,7 +187,16 @@ namespace PrintLogApi.Services
                         {
                             var parts = f.Path.Split('/', 2);
                             if (parts.Length == 2)
-                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                            {
+                                try
+                                {
+                                    await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to delete blob {BlobPath} during user deletion; continuing", f.Path);
+                                }
+                            }
                         }
                     }
 
@@ -256,8 +274,26 @@ namespace PrintLogApi.Services
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(n => n.TriggeredByUserId, (long?)null));
 
-                // Cancel Stripe subscription and delete Subscription record
-                await _subscriptionService.CancelSubscriptionImmediately(userId);
+                // Cancel the active Stripe subscription, then delete the Subscription record
+                var stripeSubscriptionId = await _context.Subscriptions
+                    .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
+                    .Select(s => s.StripeSubscriptionId)
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync();
+
+                if (!string.IsNullOrEmpty(stripeSubscriptionId))
+                {
+                    try
+                    {
+                        var stripeService = new Stripe.SubscriptionService();
+                        await stripeService.CancelAsync(stripeSubscriptionId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cancel Stripe subscription {StripeSubscriptionId} during user deletion; continuing", stripeSubscriptionId);
+                    }
+                }
+
                 await _context.Subscriptions
                     .Where(s => s.UserId == userId)
                     .ExecuteDeleteAsync();
