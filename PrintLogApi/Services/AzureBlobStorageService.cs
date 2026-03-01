@@ -17,6 +17,8 @@ namespace PrintLogApi.Services
         public AzureBlobStorageService(IConfiguration configuration)
         {
             var connectionString = configuration["AZURE_STORAGE_CONNECTION_STRING"];
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Azure Storage connection string is required for blob operations.");
             _blobServiceClient = new BlobServiceClient(connectionString);
         }
 
@@ -78,7 +80,7 @@ namespace PrintLogApi.Services
                 Resource = "b",
                 ExpiresOn = DateTimeOffset.UtcNow.Add(expiry),
                 ContentType = contentType,
-                ContentDisposition = $"attachment; filename=\"{originalFileName}\"",
+                ContentDisposition = $"attachment; filename=\"{originalFileName.Replace("\\", "_").Replace("\"", "_")}\"",
             };
             sasBuilder.SetPermissions(BlobSasPermissions.Read);
 
