@@ -16,8 +16,6 @@ namespace PrintLogApi.Services
         private readonly IBlobStorageService _blobStorageService;
 
         private const string AttachmentContainer = "printattachments";
-        private const int MaxFilesPerPrintPro = 5;
-        private const long MaxFileStorageBytesPro = 50L * 1024 * 1024 * 1024;
         private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200MB
         private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj" };
 
@@ -134,6 +132,8 @@ namespace PrintLogApi.Services
                 throw new ForbiddenException("File downloads are not enabled for this print.");
 
             var blobPathParts = attachment.File.Path.Split('/', 2);
+            if (blobPathParts.Length != 2)
+                throw new InvalidOperationException($"Stored blob path is invalid: {attachment.File.Path}");
             var expiresIn = TimeSpan.FromHours(1);
             var sasUri = await _blobStorageService.GenerateSasDownloadUrlAsync(
                 blobPathParts[0],
@@ -188,15 +188,15 @@ namespace PrintLogApi.Services
                 .Where(pa => pa.PrintId == printId)
                 .CountAsync();
 
-            if (fileCount >= MaxFilesPerPrintPro)
-                throw new BadRequestException($"Maximum of {MaxFilesPerPrintPro} files per print allowed.");
+            if (fileCount >= SubscriptionLimits.ProMaxFilesPerPrint)
+                throw new BadRequestException($"Maximum of {SubscriptionLimits.ProMaxFilesPerPrint} files per print allowed.");
 
             // Per-user storage quota
             var usedBytes = await _context.PrintAttachments
                 .Where(pa => pa.CreatedById == userId)
                 .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
 
-            if (usedBytes + newFileSizeBytes > MaxFileStorageBytesPro)
+            if (usedBytes + newFileSizeBytes > SubscriptionLimits.ProMaxFileStorageBytes)
                 throw new BadRequestException("Storage quota exceeded. Delete files to free up space.");
 
             // Per-file size limit (also validated client-side and in the DTO range attribute)
