@@ -36,6 +36,7 @@ namespace PrintLogApi.Controllers
         private readonly TelemetryClient _telemetry;
         private readonly IUserService _userService;
         private readonly IBlobStorageService _blobStorageService;
+        private readonly ISubscriptionService _subscriptionService;
 
         private readonly string profileImageContainerName = "userprofile";
 
@@ -48,7 +49,8 @@ namespace PrintLogApi.Controllers
                                IMapper mapper,
                                IAuthorizationService authorizationService,
                                TelemetryClient telemetry,
-                               IBlobStorageService blobStorageService)
+                               IBlobStorageService blobStorageService,
+                               ISubscriptionService subscriptionService)
         {
             _context = context;
             _mapper = mapper;
@@ -57,6 +59,7 @@ namespace PrintLogApi.Controllers
             _telemetry = telemetry;
             _userService = userService;
             _blobStorageService = blobStorageService;
+            _subscriptionService = subscriptionService;
         }
 
         /// <summary>
@@ -118,6 +121,7 @@ namespace PrintLogApi.Controllers
             }
 
             await _userService.MarkUserAsDeactivated(userId.Value);
+            await _subscriptionService.CancelSubscriptionAtPeriodEnd(userId.Value);
 
             _telemetry.TrackEvent("UserDeactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
 
@@ -144,6 +148,7 @@ namespace PrintLogApi.Controllers
             }
 
             await _userService.ReactivateUser(userId.Value);
+            await _subscriptionService.ResumeSubscription(userId.Value);
 
             _telemetry.TrackEvent("UserReactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
 
