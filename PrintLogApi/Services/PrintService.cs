@@ -23,9 +23,6 @@ namespace PrintLogApi.Services
     public class PrintService : IPrintService
     {
 
-        private const int FreeMaxImagesPerPrint = 5;
-        private const int ProMaxImagesPerPrint = 20;
-
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
@@ -561,8 +558,8 @@ namespace PrintLogApi.Services
                 .SingleOrDefaultAsync();
 
             return subscription?.Status == SubscriptionStatus.Active
-                ? ProMaxImagesPerPrint
-                : FreeMaxImagesPerPrint;
+                ? SubscriptionLimits.ProMaxImagesPerPrint
+                : SubscriptionLimits.FreeMaxImagesPerPrint;
         }
 
         public async Task SetDefaultImage(long printId, int newDefaultImageId)
