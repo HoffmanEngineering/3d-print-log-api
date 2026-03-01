@@ -1513,5 +1513,67 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         #endregion
+
+        #region File Attachments
+
+        [Fact]
+        public async Task GetFiles_ReturnsEmptyList_WhenNoneExist()
+        {
+            // GET /api/prints/{id}/files is AllowAnonymous
+            var response = await _httpClient.GetAsync($"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files");
+            response.EnsureSuccessStatusCode();
+            var files = await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>();
+            Assert.NotNull(files);
+            Assert.Empty(files);
+        }
+
+        [Fact]
+        public async Task GetFileUploadUrl_Returns403_ForFreeUser()
+        {
+            // The seeded test user has no Pro subscription, so the service should throw ForbiddenException.
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files/upload-url");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(new GetUploadUrlRequest
+            {
+                FileName = "benchy.gcode",
+                ContentType = "application/octet-stream",
+                SizeBytes = 1024,
+            });
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFileUploadUrl_Returns401_WhenNotAuthenticated()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files/upload-url");
+            request.Content = JsonContent.Create(new GetUploadUrlRequest
+            {
+                FileName = "benchy.gcode",
+                ContentType = "application/octet-stream",
+                SizeBytes = 1024,
+            });
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetFiles_NonExistentPrint_ReturnsEmptyList()
+        {
+            // GetFilesAsync does not throw NotFoundException — it just returns an empty query.
+            var response = await _httpClient.GetAsync("/api/Prints/999999/files");
+            response.EnsureSuccessStatusCode();
+            var files = await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>();
+            Assert.NotNull(files);
+            Assert.Empty(files);
+        }
+
+        #endregion
     }
 }

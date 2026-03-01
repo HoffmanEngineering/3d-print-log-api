@@ -44,6 +44,7 @@ namespace PrintLogApi.Controllers
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
         private readonly IBlobStorageService _blobStorageService;
+        private readonly IFileAttachmentService _fileAttachmentService;
         private readonly string printImageContainerName = "printimages";
         private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
@@ -57,7 +58,8 @@ namespace PrintLogApi.Controllers
             ICommentService commentService,
             IMemoryCache cache,
             ICacheVersionService cacheVersionService,
-            IBlobStorageService blobStorageService)
+            IBlobStorageService blobStorageService,
+            IFileAttachmentService fileAttachmentService)
         {
             _context = context;
             _mapper = mapper;
@@ -69,6 +71,7 @@ namespace PrintLogApi.Controllers
             _cache = cache;
             _cacheVersionService = cacheVersionService;
             _blobStorageService = blobStorageService;
+            _fileAttachmentService = fileAttachmentService;
         }
 
         /// <summary>
@@ -853,6 +856,83 @@ namespace PrintLogApi.Controllers
         {
             this._telemetry.TrackEvent("PublicPrintsQueried");
             return await this._printService.GetPublicPrintIds();
+        }
+
+        // POST api/prints/{id}/files/upload-url
+        [HttpPost("{id}/files/upload-url")]
+        public async Task<ActionResult<GetUploadUrlResponse>> GetFileUploadUrl(
+            long id, [FromBody] GetUploadUrlRequest request)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            try
+            {
+                var result = await _fileAttachmentService.GetUploadUrlAsync(id, userId.Value, request);
+                return Ok(result);
+            }
+            catch (NotFoundException) { return NotFound(); }
+            catch (ForbiddenException) { return Forbid(); }
+            catch (BadRequestException ex) { return BadRequest(ex.Message); }
+        }
+
+        // POST api/prints/{id}/files/confirm
+        [HttpPost("{id}/files/confirm")]
+        public async Task<ActionResult<PrintAttachmentDto>> ConfirmFileUpload(
+            long id, [FromBody] ConfirmUploadRequest request)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            try
+            {
+                var result = await _fileAttachmentService.ConfirmUploadAsync(id, userId.Value, request);
+                return Ok(result);
+            }
+            catch (NotFoundException) { return NotFound(); }
+            catch (ForbiddenException) { return Forbid(); }
+            catch (BadRequestException ex) { return BadRequest(ex.Message); }
+        }
+
+        // GET api/prints/{id}/files
+        [HttpGet("{id}/files")]
+        [AllowAnonymous]
+        public async Task<ActionResult<IEnumerable<PrintAttachmentDto>>> GetFiles(long id)
+        {
+            var files = await _fileAttachmentService.GetFilesAsync(id);
+            return Ok(files);
+        }
+
+        // GET api/prints/{id}/files/{fileId}/download-url
+        [HttpGet("{id}/files/{fileId}/download-url")]
+        [AllowAnonymous]
+        public async Task<ActionResult<GetDownloadUrlResponse>> GetFileDownloadUrl(long id, long fileId)
+        {
+            var userId = User.GetUserId(); // null if anonymous — that's ok
+
+            try
+            {
+                var result = await _fileAttachmentService.GetDownloadUrlAsync(id, fileId, userId);
+                return Ok(result);
+            }
+            catch (NotFoundException) { return NotFound(); }
+            catch (ForbiddenException) { return Forbid(); }
+        }
+
+        // DELETE api/prints/{id}/files/{fileId}
+        [HttpDelete("{id}/files/{fileId}")]
+        public async Task<ActionResult> DeleteFile(long id, long fileId)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            try
+            {
+                await _fileAttachmentService.DeleteFileAsync(id, fileId, userId.Value);
+                return NoContent();
+            }
+            catch (NotFoundException) { return NotFound(); }
+            catch (ForbiddenException) { return Forbid(); }
         }
 
         /// <summary>
