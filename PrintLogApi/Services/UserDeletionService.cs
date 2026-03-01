@@ -17,7 +17,6 @@ namespace PrintLogApi.Services
         private readonly ILogger<UserDeletionService> _logger;
         private readonly TelemetryClient _telemetry;
         private readonly IAuth0Service _auth0Service;
-        private readonly ISubscriptionService _subscriptionService;
         private readonly IBlobStorageService _blobStorageService;
         private readonly int _deactivationTimeInMinutes;
 
@@ -26,14 +25,12 @@ namespace PrintLogApi.Services
                                    TelemetryClient telemetry,
                                    IConfiguration config,
                                    IAuth0Service auth0Service,
-                                   ISubscriptionService subscriptionService,
                                    IBlobStorageService blobStorageService)
         {
             _context = context;
             _logger = logger;
             _telemetry = telemetry;
             _auth0Service = auth0Service;
-            _subscriptionService = subscriptionService;
             _blobStorageService = blobStorageService;
 
             _deactivationTimeInMinutes = int.Parse(config["PendingUserDeactivationTimeInMinutes"], CultureInfo.InvariantCulture);
