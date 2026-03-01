@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -17,18 +17,24 @@ namespace PrintLogApi.Services
         private readonly ILogger<UserDeletionService> _logger;
         private readonly TelemetryClient _telemetry;
         private readonly IAuth0Service _auth0Service;
+        private readonly ISubscriptionService _subscriptionService;
+        private readonly IBlobStorageService _blobStorageService;
         private readonly int _deactivationTimeInMinutes;
 
         public UserDeletionService(PrintLogContext context,
                                    ILogger<UserDeletionService> logger,
                                    TelemetryClient telemetry,
                                    IConfiguration config,
-                                   IAuth0Service auth0Service)
+                                   IAuth0Service auth0Service,
+                                   ISubscriptionService subscriptionService,
+                                   IBlobStorageService blobStorageService)
         {
             _context = context;
             _logger = logger;
             _telemetry = telemetry;
             _auth0Service = auth0Service;
+            _subscriptionService = subscriptionService;
+            _blobStorageService = blobStorageService;
 
             _deactivationTimeInMinutes = int.Parse(config["PendingUserDeactivationTimeInMinutes"], CultureInfo.InvariantCulture);
         }
@@ -49,7 +55,7 @@ namespace PrintLogApi.Services
             {
                 _telemetry.TrackEvent("DeletePendingDeactivatedUsers", new Dictionary<string, string>() { { "Count", usersToDelete.Count.ToString(CultureInfo.InvariantCulture) } });
             }
-            
+
 
             foreach (var user in usersToDelete)
             {
@@ -74,7 +80,7 @@ namespace PrintLogApi.Services
             }
 
             long userId = user.Id;
-            
+
             // Increase command timeout for this complex operation
             var previousTimeout = _context.Database.GetCommandTimeout();
             _context.Database.SetCommandTimeout(300); // 5 minutes
@@ -117,18 +123,30 @@ namespace PrintLogApi.Services
                     .Where(c => c.CreatedById == userId)
                     .ExecuteDeleteAsync();
 
-                // Delete PrintImages and their associated Files for user's prints
+                // Delete PrintImages, their blobs, and their associated Files for user's prints
                 if (printIds.Count > 0)
                 {
-                    var printImageFileIds = await _context.PrintImages
+                    var printImageData = await _context.PrintImages
                         .Where(pi => printIds.Contains(pi.PrintId))
-                        .Select(pi => pi.FileId)
+                        .Select(pi => new { pi.FileId, pi.File.Path })
+                        .AsNoTracking()
                         .ToListAsync();
+
+                    foreach (var f in printImageData)
+                    {
+                        if (!string.IsNullOrEmpty(f.Path))
+                        {
+                            var parts = f.Path.Split('/', 2);
+                            if (parts.Length == 2)
+                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                        }
+                    }
 
                     await _context.PrintImages
                         .Where(pi => printIds.Contains(pi.PrintId))
                         .ExecuteDeleteAsync();
 
+                    var printImageFileIds = printImageData.Select(f => f.FileId).ToList();
                     if (printImageFileIds.Count > 0)
                     {
                         await _context.Files
@@ -143,6 +161,38 @@ namespace PrintLogApi.Services
                     await _context.PrintFilament
                         .Where(pf => printIds.Contains(pf.PrintId))
                         .ExecuteDeleteAsync();
+                }
+
+                // Delete PrintAttachments, their blobs, and their associated Files for user's prints
+                if (printIds.Count > 0)
+                {
+                    var attachmentData = await _context.PrintAttachments
+                        .Where(pa => printIds.Contains(pa.PrintId))
+                        .Select(pa => new { pa.FileId, pa.File.Path })
+                        .AsNoTracking()
+                        .ToListAsync();
+
+                    foreach (var f in attachmentData)
+                    {
+                        if (!string.IsNullOrEmpty(f.Path))
+                        {
+                            var parts = f.Path.Split('/', 2);
+                            if (parts.Length == 2)
+                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                        }
+                    }
+
+                    await _context.PrintAttachments
+                        .Where(pa => printIds.Contains(pa.PrintId))
+                        .ExecuteDeleteAsync();
+
+                    var attachmentFileIds = attachmentData.Select(f => f.FileId).ToList();
+                    if (attachmentFileIds.Count > 0)
+                    {
+                        await _context.Files
+                            .Where(f => attachmentFileIds.Contains(f.Id))
+                            .ExecuteDeleteAsync();
+                    }
                 }
 
                 // Delete Prints
@@ -205,6 +255,12 @@ namespace PrintLogApi.Services
                     .Where(n => n.TriggeredByUserId == userId)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(n => n.TriggeredByUserId, (long?)null));
+
+                // Cancel Stripe subscription and delete Subscription record
+                await _subscriptionService.CancelSubscriptionImmediately(userId);
+                await _context.Subscriptions
+                    .Where(s => s.UserId == userId)
+                    .ExecuteDeleteAsync();
 
                 // Finally, delete the user
                 _context.Users.Remove(user);
