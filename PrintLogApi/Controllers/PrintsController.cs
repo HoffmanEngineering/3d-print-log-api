@@ -858,13 +858,30 @@ namespace PrintLogApi.Controllers
             return await this._printService.GetPublicPrintIds();
         }
 
-        // POST api/prints/{id}/files/upload-url
+        /// <summary>
+        /// Generates a SAS URL for uploading a file directly to blob storage. Pro subscription required.
+        /// </summary>
+        /// <param name="id">The ID of the print to attach the file to.</param>
+        /// <param name="request">Details about the file to be uploaded.</param>
+        /// <response code="200">Returns the SAS upload URL and blob path.</response>
+        /// <response code="400">If the file type is not supported or quota is exceeded.</response>
+        /// <response code="401">If the user is not authenticated.</response>
+        /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
+        /// <response code="404">If the print does not exist.</response>
         [HttpPost("{id}/files/upload-url")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<GetUploadUrlResponse>> GetFileUploadUrl(
             long id, [FromBody] GetUploadUrlRequest request)
         {
             var userId = User.GetUserId();
-            if (!userId.HasValue) return Unauthorized();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             try
             {
@@ -876,13 +893,31 @@ namespace PrintLogApi.Controllers
             catch (BadRequestException ex) { return BadRequest(ex.Message); }
         }
 
-        // POST api/prints/{id}/files/confirm
+        /// <summary>
+        /// Confirms that a file has been uploaded to blob storage and records it as an attachment on the print.
+        /// Pro subscription required.
+        /// </summary>
+        /// <param name="id">The ID of the print the file was uploaded for.</param>
+        /// <param name="request">The blob path and file metadata returned from the upload-url step.</param>
+        /// <response code="200">Returns the created PrintAttachment details.</response>
+        /// <response code="400">If the blob path is invalid.</response>
+        /// <response code="401">If the user is not authenticated.</response>
+        /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
+        /// <response code="404">If the print does not exist.</response>
         [HttpPost("{id}/files/confirm")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<PrintAttachmentDto>> ConfirmFileUpload(
             long id, [FromBody] ConfirmUploadRequest request)
         {
             var userId = User.GetUserId();
-            if (!userId.HasValue) return Unauthorized();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             try
             {
@@ -894,18 +929,58 @@ namespace PrintLogApi.Controllers
             catch (BadRequestException ex) { return BadRequest(ex.Message); }
         }
 
-        // GET api/prints/{id}/files
+        /// <summary>
+        /// Returns all file attachments for a print.
+        /// Anonymous access is permitted for public prints; private prints require the owner to be authenticated.
+        /// </summary>
+        /// <param name="id">The ID of the print whose attachments to retrieve.</param>
+        /// <response code="200">Returns the list of file attachments (may be empty).</response>
+        /// <response code="403">If the print is private and the requesting user is not the owner.</response>
+        /// <response code="404">If the print does not exist.</response>
         [HttpGet("{id}/files")]
         [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<IEnumerable<PrintAttachmentDto>>> GetFiles(long id)
         {
+            // Load minimal print data needed to check visibility — mirrors the GetImage pattern.
+            var printData = await _context.Prints
+                .Where(p => p.Id == id)
+                .Select(p => new { p.ViewStatus, p.CreatedById })
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
+
+            if (printData == null)
+            {
+                return NotFound();
+            }
+
+            var userId = User.GetUserId();
+            if (printData.ViewStatus == Print.PrintViewStatus.Private &&
+                (!userId.HasValue || userId.Value != printData.CreatedById))
+            {
+                return Forbid();
+            }
+
             var files = await _fileAttachmentService.GetFilesAsync(id);
             return Ok(files);
         }
 
-        // GET api/prints/{id}/files/{fileId}/download-url
+        /// <summary>
+        /// Generates a time-limited SAS download URL for a file attachment.
+        /// Anonymous access is permitted when the print has file downloads enabled; otherwise the owner must be authenticated.
+        /// </summary>
+        /// <param name="id">The ID of the print the file is attached to.</param>
+        /// <param name="fileId">The ID of the attachment to download.</param>
+        /// <response code="200">Returns the download URL and its expiry time.</response>
+        /// <response code="403">If file downloads are not enabled for this print and the user is not the owner.</response>
+        /// <response code="404">If the print or attachment does not exist.</response>
         [HttpGet("{id}/files/{fileId}/download-url")]
         [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<GetDownloadUrlResponse>> GetFileDownloadUrl(long id, long fileId)
         {
             var userId = User.GetUserId(); // null if anonymous — that's ok
@@ -919,17 +994,32 @@ namespace PrintLogApi.Controllers
             catch (ForbiddenException) { return Forbid(); }
         }
 
-        // DELETE api/prints/{id}/files/{fileId}
+        /// <summary>
+        /// Deletes a file attachment from a print. Only the owner of the attachment may delete it.
+        /// </summary>
+        /// <param name="id">The ID of the print the file is attached to.</param>
+        /// <param name="fileId">The ID of the attachment to delete.</param>
+        /// <response code="200">If the file was deleted successfully.</response>
+        /// <response code="401">If the user is not authenticated.</response>
+        /// <response code="403">If the user does not own the file attachment.</response>
+        /// <response code="404">If the print or attachment does not exist.</response>
         [HttpDelete("{id}/files/{fileId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult> DeleteFile(long id, long fileId)
         {
             var userId = User.GetUserId();
-            if (!userId.HasValue) return Unauthorized();
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
 
             try
             {
                 await _fileAttachmentService.DeleteFileAsync(id, fileId, userId.Value);
-                return NoContent();
+                return Ok();
             }
             catch (NotFoundException) { return NotFound(); }
             catch (ForbiddenException) { return Forbid(); }
