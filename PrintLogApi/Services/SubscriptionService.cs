@@ -332,13 +332,20 @@ namespace PrintLogApi.Services
                 { "plan", subscription.Plan.ToString() }
             });
 
-            var planDisplay = subscription.Plan switch
+            try
             {
-                SubscriptionPlan.ProMonthly => "Pro Monthly",
-                SubscriptionPlan.ProAnnual => "Pro Annual",
-                _ => "Pro"
-            };
-            await _notificationService.CreateSubscriptionActivatedNotification(subscription.UserId, planDisplay);
+                var planDisplay = subscription.Plan switch
+                {
+                    SubscriptionPlan.ProMonthly => "Pro Monthly",
+                    SubscriptionPlan.ProAnnual => "Pro Annual",
+                    _ => "Pro"
+                };
+                await _notificationService.CreateSubscriptionActivatedNotification(subscription.UserId, planDisplay);
+            }
+            catch (Exception ex)
+            {
+                _telemetry.TrackException(ex);
+            }
         }
 
         private async Task HandleSubscriptionUpdated(Event stripeEvent)
@@ -392,7 +399,14 @@ namespace PrintLogApi.Services
 
             await _context.SaveChangesAsync();
 
-            await _notificationService.CreateSubscriptionCanceledNotification(subscription.UserId);
+            try
+            {
+                await _notificationService.CreateSubscriptionCanceledNotification(subscription.UserId);
+            }
+            catch (Exception ex)
+            {
+                _telemetry.TrackException(ex);
+            }
 
             _telemetry.TrackEvent("Subscription_Canceled", new Dictionary<string, string>
             {
@@ -415,7 +429,14 @@ namespace PrintLogApi.Services
 
             await _context.SaveChangesAsync();
 
-            await _notificationService.CreateSubscriptionPaymentFailedNotification(subscription.UserId);
+            try
+            {
+                await _notificationService.CreateSubscriptionPaymentFailedNotification(subscription.UserId);
+            }
+            catch (Exception ex)
+            {
+                _telemetry.TrackException(ex);
+            }
 
             _telemetry.TrackEvent("Subscription_PaymentFailed", new Dictionary<string, string>
             {
