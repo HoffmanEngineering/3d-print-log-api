@@ -252,5 +252,35 @@ namespace PrintLogApi.Services
                 message,
                 actionUrl);
         }
+
+        public Task<Notification> CreateSubscriptionActivatedNotification(long userId, string planDisplayName)
+        {
+            return CreateNotification(
+                userId,
+                NotificationType.SubscriptionActivated,
+                "Pro subscription activated",
+                $"Welcome to {planDisplayName}! You now have access to all Pro features.",
+                actionUrl: "/settings/subscription");
+        }
+
+        public Task<Notification> CreateSubscriptionPaymentFailedNotification(long userId)
+        {
+            return CreateNotification(
+                userId,
+                NotificationType.SubscriptionPaymentFailed,
+                "Payment failed",
+                "Your Pro subscription payment failed. Please update your payment method to keep Pro access.",
+                actionUrl: "/settings/subscription");
+        }
+
+        public Task<Notification> CreateSubscriptionCanceledNotification(long userId)
+        {
+            return CreateNotification(
+                userId,
+                NotificationType.SubscriptionCanceled,
+                "Pro subscription ended",
+                "Your Pro subscription has ended. Upgrade again to restore Pro features.",
+                actionUrl: "/settings/subscription");
+        }
     }
 }

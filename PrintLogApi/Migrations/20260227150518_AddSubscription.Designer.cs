@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20260227150518_AddSubscription")]
+    partial class AddSubscription
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -651,9 +654,6 @@ namespace PrintLogApi.Migrations
                     b.Property<bool>("AllowComments")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("AllowFileDownloads")
-                        .HasColumnType("bit");
-
                     b.Property<long>("CreatedById")
                         .HasColumnType("bigint");
 
@@ -725,58 +725,6 @@ namespace PrintLogApi.Migrations
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById", "ViewStatus", "StartDate", "CreatedDate"), new[] { "Id", "Title", "Status", "PrinterId", "EstimatedPrintTimeInSeconds", "PrintTimeInSeconds" });
 
                     b.ToTable("Prints");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.PrintAttachment", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<long>("CreatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("FileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("OriginalFileName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<long>("PrintId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("UpdatedById")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("UpdatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("FileId");
-
-                    b.HasIndex("PrintId");
-
-                    b.HasIndex("UpdatedById");
-
-                    b.ToTable("PrintAttachments");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrintComment", b =>
@@ -1748,41 +1696,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.PrintAttachment", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.File", "File")
-                        .WithMany()
-                        .HasForeignKey("FileId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.Print", "Print")
-                        .WithMany("Attachments")
-                        .HasForeignKey("PrintId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
-                        .WithMany()
-                        .HasForeignKey("UpdatedById")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("File");
-
-                    b.Navigation("Print");
-
-                    b.Navigation("UpdatedBy");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.PrintComment", b =>
                 {
                     b.HasOne("PrintLogApi.Models.Comment", "Comment")
@@ -2040,8 +1953,6 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
                 {
-                    b.Navigation("Attachments");
-
                     b.Navigation("Comments");
 
                     b.Navigation("FilamentUsage");

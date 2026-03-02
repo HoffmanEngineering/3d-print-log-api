@@ -75,6 +75,11 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public bool AllowComments { get; set; }
 
+        /// <summary>
+        /// Whether or not file downloads are allowed on this print.
+        /// </summary>
+        public bool AllowFileDownloads { get; set; }
+
         public PrintStatus Status { get; set; }
 
         public PrintViewStatus ViewStatus { get; set; }

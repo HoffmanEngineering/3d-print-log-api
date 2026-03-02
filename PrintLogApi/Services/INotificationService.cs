@@ -27,5 +27,8 @@ namespace PrintLogApi.Services
         Task<Notification> CreatePrintFailedNotification(long userId, long printId, string printTitle);
         Task<Notification> CreateApiKeyCreatedNotification(long userId, string keyDescription);
         Task<Notification> CreateApiKeyDeletedNotification(long userId, string keyDescription);
+        Task<Notification> CreateSubscriptionActivatedNotification(long userId, string planDisplayName);
+        Task<Notification> CreateSubscriptionPaymentFailedNotification(long userId);
+        Task<Notification> CreateSubscriptionCanceledNotification(long userId);
     }
 }

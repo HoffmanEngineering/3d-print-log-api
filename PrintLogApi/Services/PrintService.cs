@@ -550,10 +550,16 @@ namespace PrintLogApi.Services
             return existingPrint;
         }
 
-        public Task<int> GetMaxImagesPerPrint(long userId)
+        public async Task<int> GetMaxImagesPerPrint(long userId)
         {
-            // Intentionally constant for now; per-user limits (premium membership) will be added later.
-            return Task.FromResult(5);
+            var subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId)
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
+
+            return subscription?.Status == SubscriptionStatus.Active
+                ? SubscriptionLimits.ProMaxImagesPerPrint
+                : SubscriptionLimits.FreeMaxImagesPerPrint;
         }
 
         public async Task SetDefaultImage(long printId, int newDefaultImageId)
@@ -595,6 +601,17 @@ namespace PrintLogApi.Services
                 _context.Files.Remove(image.File);
             }
             _context.PrintImages.RemoveRange(print.Images.ToArray());
+
+            // Remove Print Attachments.
+            var attachments = await _context.PrintAttachments
+                .Include(a => a.File)
+                .Where(a => a.PrintId == print.Id)
+                .ToListAsync();
+            foreach (var attachment in attachments)
+            {
+                _context.Files.Remove(attachment.File);
+            }
+            _context.PrintAttachments.RemoveRange(attachments);
 
             // Remove PrintFilament for this print.
             _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
