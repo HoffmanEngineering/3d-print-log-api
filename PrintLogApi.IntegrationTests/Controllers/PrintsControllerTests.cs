@@ -618,6 +618,46 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
+        [Fact]
+        public async Task DeletePrint_WithLinkedNotification_SucceedsAndDeletesNotification()
+        {
+            // Arrange - create a print, then seed a notification linked to it
+            var createdPrint = await CreatePrintAsync("Print With Linked Notification");
+
+            Guid notificationId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var notification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    Type = NotificationType.PrintCompleted,
+                    Title = "Your print completed",
+                    IsRead = false,
+                    CreatedDate = DateTime.UtcNow,
+                    PrintId = createdPrint.Id
+                };
+                db.Notifications.Add(notification);
+                db.SaveChanges();
+                notificationId = notification.Id;
+            }
+
+            // Act
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - delete succeeded and notification was cleaned up
+            Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var orphanedNotification = db.Notifications.Find(notificationId);
+                Assert.Null(orphanedNotification);
+            }
+        }
+
         #endregion
 
         #region GET Print Stats

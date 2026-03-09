@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
@@ -16,9 +17,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
     public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly HttpClient _httpClient;
+        private readonly CustomWebApplicationFactory _factory;
 
         public CommentsControllerTests(CustomWebApplicationFactory factory)
         {
+            _factory = factory;
             _httpClient = factory.CreateClient();
         }
 
@@ -250,6 +253,46 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeleteComment_WithLinkedNotification_SucceedsAndDeletesNotification()
+        {
+            // Arrange - create a comment, then seed a notification linked to it
+            var comment = await CreateCommentAsync("Comment with linked notification");
+
+            Guid notificationId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var notification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    Type = NotificationType.Comment,
+                    Title = "New comment on your print",
+                    IsRead = false,
+                    CreatedDate = DateTime.UtcNow,
+                    CommentId = comment.Id
+                };
+                db.Notifications.Add(notification);
+                db.SaveChanges();
+                notificationId = notification.Id;
+            }
+
+            // Act
+            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Comments/{comment.Id}");
+            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+
+            // Assert - delete succeeded and notification was cleaned up
+            Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var orphanedNotification = db.Notifications.Find(notificationId);
+                Assert.Null(orphanedNotification);
+            }
         }
 
         #endregion
