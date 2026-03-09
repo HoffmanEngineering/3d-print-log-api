@@ -616,6 +616,12 @@ namespace PrintLogApi.Services
             // Remove PrintFilament for this print.
             _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
 
+            // Remove Notifications referencing this print.
+            var notifications = await _context.Notifications
+                .Where(n => n.PrintId == print.Id)
+                .ToListAsync();
+            _context.Notifications.RemoveRange(notifications);
+
             _context.Prints.Remove(print);
 
             await _context.SaveChangesAsync();

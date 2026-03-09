@@ -57,6 +57,12 @@ namespace PrintLogApi.Services
                 _context.PrintComments.RemoveRange(printComments);
             }
 
+            // Remove Notifications referencing this comment.
+            var notifications = await _context.Notifications
+                .Where(n => n.CommentId == id)
+                .ToListAsync();
+            _context.Notifications.RemoveRange(notifications);
+
             _context.Comments.Remove(comment);
             await _context.SaveChangesAsync();
 
