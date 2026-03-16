@@ -615,6 +615,95 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #endregion
 
+        #region Filter by Storage Location
+
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByStorageLocation_ReturnsOnlyMatchingFilaments()
+        {
+            // Arrange - filaments 1 and 2 are seeded with TestStorageLocation; filament 3 has none
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Filaments?filterByStorageLocation={Uri.EscapeDataString(IntegrationTestSeeder.TestStorageLocation)}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Items.Any(f => f.Brand == "Hatchbox"),
+                "Hatchbox (storage location set) should be included");
+            Assert.True(model.Items.Any(f => f.Brand == "Prusament"),
+                "Prusament (storage location set) should be included");
+            Assert.DoesNotContain(model.Items, f => f.Brand == "eSUN");
+            Assert.All(model.Items, f =>
+                Assert.Equal(IntegrationTestSeeder.TestStorageLocation, f.StorageLocation));
+        }
+
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByStorageLocation_Unassigned_ReturnsOnlyUnassignedFilaments()
+        {
+            // Arrange - filament 3 has no storage location; filaments 1 and 2 do
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Filaments?filterByStorageLocation=__unassigned__");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Items.Any(f => f.Brand == "eSUN"),
+                "eSUN (no storage location) should be included");
+            Assert.DoesNotContain(model.Items, f => f.Brand == "Hatchbox");
+            Assert.DoesNotContain(model.Items, f => f.Brand == "Prusament");
+            Assert.All(model.Items, f =>
+                Assert.True(f.StorageLocation == null || f.StorageLocation == "",
+                    $"All results should have no storage location, but got: {f.StorageLocation}"));
+        }
+
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByStorageLocation_NonExistent_ReturnsEmpty()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Filaments?filterByStorageLocation=DoesNotExist");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.Empty(model.Items);
+            Assert.Equal(0, model.Paging.TotalCount);
+        }
+
+        [Fact]
+        public async Task GetFilamentSummaries_NoStorageLocationFilter_ReturnsAllFilaments()
+        {
+            // Arrange - no filter param
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Paging.TotalCount >= 3,
+                "All seeded filaments should be returned when no filter is applied");
+        }
+
+        #endregion
+
         #region GET Storage/Purchase Locations and Brands
 
         [Fact]

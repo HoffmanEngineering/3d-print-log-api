@@ -36,6 +36,7 @@ namespace PrintLogApi.Services
             int pageSize,
             string searchText,
             string filterByMaterialCategoryNickname,
+            string filterByStorageLocation,
             bool? includeInactive,
             bool? showFavoritesOnly,
             bool? showLoadedFilamentOnly)
@@ -53,6 +54,14 @@ namespace PrintLogApi.Services
             if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
             {
                 filament = filament.Where(f => f.MaterialCategory.Nickname == filterByMaterialCategoryNickname);
+            }
+
+            if (!string.IsNullOrEmpty(filterByStorageLocation))
+            {
+                if (filterByStorageLocation == "__unassigned__")
+                    filament = filament.Where(f => f.StorageLocation == null || f.StorageLocation == "");
+                else
+                    filament = filament.Where(f => f.StorageLocation == filterByStorageLocation);
             }
 
             var filamentsBase = filament
