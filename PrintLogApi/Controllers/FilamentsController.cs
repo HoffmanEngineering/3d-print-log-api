@@ -49,6 +49,7 @@ namespace PrintLogApi.Controllers
             [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest,
             [FromQuery] string searchText,
             [FromQuery] string filterByMaterialCategoryNickname,
+            [FromQuery] string filterByStorageLocation,
             [FromQuery] bool? includeInactive,
             [FromQuery] bool? showFavoritesOnly,
             [FromQuery] bool? showLoadedFilamentOnly)
@@ -66,6 +67,7 @@ namespace PrintLogApi.Controllers
                 pagingRequest.PageSize,
                 searchText,
                 filterByMaterialCategoryNickname,
+                filterByStorageLocation,
                 includeInactive,
                 showFavoritesOnly,
                 showLoadedFilamentOnly);
