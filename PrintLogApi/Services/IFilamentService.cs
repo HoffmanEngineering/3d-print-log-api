@@ -17,7 +17,7 @@ namespace PrintLogApi.Services
         Task<Filament> GetFilamentById(Guid id);
         Task<string[]> GetFilamentPurchaseLocations(long userId);
         Task<string[]> GetFilamentStorageLocations(long userId);
-        Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string searchText, string filterByMaterialCategoryNickname, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly);
+        Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string searchText, string filterByMaterialCategoryNickname, string filterByStorageLocation, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly);
         Task<Filament> UpdateFilament(Guid id, FilamentDetailDto dto, long userId);
     }
 }
