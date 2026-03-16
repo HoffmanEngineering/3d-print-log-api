@@ -632,11 +632,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
-            Assert.True(model.Items.Any(f => f.Id == IntegrationTestSeeder.TestFilamentId1),
+            Assert.True(model.Items.Any(f => f.Brand == "Hatchbox"),
                 "Hatchbox (storage location set) should be included");
-            Assert.True(model.Items.Any(f => f.Id == IntegrationTestSeeder.TestFilamentId2),
+            Assert.True(model.Items.Any(f => f.Brand == "Prusament"),
                 "Prusament (storage location set) should be included");
-            Assert.DoesNotContain(model.Items, f => f.Id == IntegrationTestSeeder.TestFilamentId3);
+            Assert.DoesNotContain(model.Items, f => f.Brand == "eSUN");
             Assert.All(model.Items, f =>
                 Assert.Equal(IntegrationTestSeeder.TestStorageLocation, f.StorageLocation));
         }
@@ -656,10 +656,10 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
-            Assert.True(model.Items.Any(f => f.Id == IntegrationTestSeeder.TestFilamentId3),
+            Assert.True(model.Items.Any(f => f.Brand == "eSUN"),
                 "eSUN (no storage location) should be included");
-            Assert.DoesNotContain(model.Items, f => f.Id == IntegrationTestSeeder.TestFilamentId1);
-            Assert.DoesNotContain(model.Items, f => f.Id == IntegrationTestSeeder.TestFilamentId2);
+            Assert.DoesNotContain(model.Items, f => f.Brand == "Hatchbox");
+            Assert.DoesNotContain(model.Items, f => f.Brand == "Prusament");
             Assert.All(model.Items, f =>
                 Assert.True(f.StorageLocation == null || f.StorageLocation == "",
                     $"All results should have no storage location, but got: {f.StorageLocation}"));
