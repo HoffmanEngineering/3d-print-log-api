@@ -24,9 +24,11 @@ namespace PrintLogApi.IntegrationTests
         public static Guid TestNotificationId3 { get; private set; }
 
         // Filament IDs (populated after seeding)
-        public static Guid TestFilamentId1 { get; private set; } // Hatchbox Red PLA
-        public static Guid TestFilamentId2 { get; private set; } // Prusament Blue PETG
-        public static Guid TestFilamentId3 { get; private set; } // eSUN Black ABS
+        public static Guid TestFilamentId1 { get; private set; } // Hatchbox Red PLA - StorageLocation: "Test Shelf"
+        public static Guid TestFilamentId2 { get; private set; } // Prusament Blue PETG - StorageLocation: "Test Shelf"
+        public static Guid TestFilamentId3 { get; private set; } // eSUN Black ABS - StorageLocation: null (unassigned)
+
+        public const string TestStorageLocation = "Test Shelf";
 
         public static void Seed(PrintLogContext context)
         {
@@ -110,7 +112,8 @@ namespace PrintLogApi.IntegrationTests
                     MaterialType = "PLA",
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
-                    Source = Filament.SourceMeasurement.Weight
+                    Source = Filament.SourceMeasurement.Weight,
+                    StorageLocation = TestStorageLocation
                 },
                 new Filament
                 {
@@ -127,7 +130,8 @@ namespace PrintLogApi.IntegrationTests
                     MaterialType = "PETG",
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
-                    Source = Filament.SourceMeasurement.Weight
+                    Source = Filament.SourceMeasurement.Weight,
+                    StorageLocation = TestStorageLocation
                 },
                 new Filament
                 {
