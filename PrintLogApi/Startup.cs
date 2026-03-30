@@ -47,7 +47,7 @@ namespace PrintLogApi
         {
             services.AddControllers();
 
-            services.AddAutoMapper(typeof(Startup));
+            services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Startup).Assembly));
 
             services.AddCors();
 

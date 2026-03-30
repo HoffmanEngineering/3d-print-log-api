@@ -15,8 +15,8 @@ variables:
 steps:
   - task: UseDotNet@2
     inputs:
-      version: 9.x
-    displayName: Change to Dotnet 9
+      version: 10.x
+    displayName: Use .NET 10
 
   - script: dotnet --version
     displayName: Check dotnet version
@@ -53,4 +53,4 @@ steps:
       appType: "webAppLinux"
       WebAppName: "3d-print-log-api-prod"
       packageForLinux: "$(Build.ArtifactStagingDirectory)/**/*.zip"
-      RuntimeStack: "DOTNETCORE|9.0"
+      RuntimeStack: "DOTNETCORE|10.0"
