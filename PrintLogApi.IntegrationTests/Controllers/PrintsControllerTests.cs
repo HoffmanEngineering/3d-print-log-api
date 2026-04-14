@@ -1730,6 +1730,35 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task PostPrint_WithNewProjectName_CreatesProjectAndAssignsPrint()
+        {
+            var dto = new
+            {
+                title = "Voron Part 1",
+                printerId = IntegrationTestSeeder.TestPrinterId,
+                status = 3, // Success
+                viewStatus = 3, // Private
+                allowComments = false,
+                filamentUsage = Array.Empty<object>(),
+                filamentType = "",
+                notes = "",
+                url = "",
+                fileName = "",
+                newProjectName = "My Voron Build"
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(dto);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            Assert.NotNull(result.ProjectId);
+        }
+
+        [Fact]
         public async Task ConfirmAndDeleteFile_HappyPath_RequiresProSubscription()
         {
             // NOTE: A full happy-path confirm+delete test is not feasible with the current test seed

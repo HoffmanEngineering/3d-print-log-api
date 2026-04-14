@@ -347,6 +347,27 @@ namespace PrintLogApi.Services
             newPrint.CreatedById = userId;
             newPrint.UpdatedById = userId;
 
+            // Resolve project assignment
+            if (print.ProjectId.HasValue)
+            {
+                var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == print.ProjectId.Value && p.CreatedById == userId);
+                if (project == null) throw new DoesNotExistException();
+                newPrint.ProjectId = project.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(print.NewProjectName))
+            {
+                var newProject = new Project
+                {
+                    Id = Guid.NewGuid(),
+                    Name = print.NewProjectName.Trim(),
+                    Status = Project.ProjectStatus.InProgress,
+                    ViewStatus = Project.ProjectViewStatus.Private,
+                    CreatedById = userId,
+                    UpdatedById = userId
+                };
+                _context.Projects.Add(newProject);
+                newPrint.ProjectId = newProject.Id;
+            }
 
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
@@ -396,6 +417,32 @@ namespace PrintLogApi.Services
 
             updatedPrint.UpdatedById = userId;
 
+            // Resolve project assignment
+            if (dto.ProjectId.HasValue)
+            {
+                var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId);
+                if (project == null) throw new DoesNotExistException();
+                updatedPrint.ProjectId = project.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(dto.NewProjectName))
+            {
+                var newProject = new Project
+                {
+                    Id = Guid.NewGuid(),
+                    Name = dto.NewProjectName.Trim(),
+                    Status = Project.ProjectStatus.InProgress,
+                    ViewStatus = Project.ProjectViewStatus.Private,
+                    CreatedById = userId,
+                    UpdatedById = userId
+                };
+                _context.Projects.Add(newProject);
+                updatedPrint.ProjectId = newProject.Id;
+            }
+            else
+            {
+                // Explicit null clears the project assignment
+                updatedPrint.ProjectId = dto.ProjectId; // null
+            }
 
             _context.Entry(updatedPrint).State = EntityState.Modified;
 
