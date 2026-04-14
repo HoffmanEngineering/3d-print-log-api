@@ -48,6 +48,9 @@ namespace PrintLogApi
 
         public DbSet<PrintAttachment> PrintAttachments { get; set; }
 
+        public DbSet<Project> Projects { get; set; }
+        public DbSet<ProjectImage> ProjectImages { get; set; }
+
         public DbSet<Feedback> Feedback { get; set; }
 
         public DbSet<UserApiKey> UserApiKeys { get; set; }
@@ -522,6 +525,28 @@ namespace PrintLogApi
                 })
                 .HasDatabaseName("IX_PrintImages_PrintId_Default")
                 .HasFilter("[IsDefault] = 1");
+
+            modelBuilder.Entity<ProjectImage>()
+                .HasIndex(pi => pi.ProjectId)
+                .IncludeProperties(pi => new
+                {
+                    pi.Id,
+                    pi.FileId,
+                    pi.IsDefault,
+                    pi.DisplayOrder,
+                    pi.CreatedDate,
+                    pi.CreatedById
+                })
+                .HasDatabaseName("IX_ProjectImages_ProjectId");
+
+            modelBuilder.Entity<Project>()
+                .HasIndex(p => new { p.CreatedById, p.CreatedDate })
+                .IncludeProperties(p => new { p.Id, p.Name, p.Status, p.ViewStatus, p.Reference })
+                .HasDatabaseName("IX_Projects_CreatedById_CreatedDate");
+
+            modelBuilder.Entity<Print>()
+                .HasIndex(p => p.ProjectId)
+                .HasDatabaseName("IX_Prints_ProjectId");
 
             modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 
