@@ -28,10 +28,14 @@ namespace PrintLogApi.Profiles
                                                                                                                     p.EstimatedAmountMg : 0)))
                 .ForMember(dest => dest.TotalFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
                                                                                                                     p.AmountMg > 0 ?
-                                                                                                                    p.AmountMg : 
+                                                                                                                    p.AmountMg :
                                                                                                                     p.EstimatedAmountMg.HasValue &&
                                                                                                                     p.EstimatedAmountMg > 0 ?
-                                                                                                                    p.EstimatedAmountMg : 0)));
+                                                                                                                    p.EstimatedAmountMg : 0)))
+                .ForMember(dest => dest.ProjectId,
+                    opt => opt.MapFrom(src => src.ProjectId))
+                .ForMember(dest => dest.ProjectName,
+                    opt => opt.MapFrom(src => src.Project != null ? src.Project.Name : null));
 
             CreateMap<Print, PrintFeedSummaryDto>()
                 .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images
