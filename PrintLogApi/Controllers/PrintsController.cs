@@ -159,13 +159,31 @@ namespace PrintLogApi.Controllers
         
 
         /// <summary>
+        /// Returns a chronologically interleaved list of project rows and standalone print rows for the current user.
+        /// </summary>
+        [HttpGet("grouped")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<PagedList<GroupedFeedItemDto>>> GetGrouped(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+
+            var result = await _printService.GetGroupedFeedAsync(pageNumber, pageSize, userId.Value);
+            return Ok(result);
+        }
+
+        /// <summary>
         ///     Get a print's detailed information by print id.
         /// </summary>
         /// <param name="id">The id of a print to query</param>
         /// <returns></returns>
         /// <response code="200">Returns the Print's Detailed information.</response>
         /// <response code="403">
-        ///     Returned when the current user (authenticated or not) cannot access the requested print id. 
+        ///     Returned when the current user (authenticated or not) cannot access the requested print id.
         ///     Normally when the print is marked as private, and the current user cannot access it.
         /// </response>
         /// <response code="404">Returned when a print with that ID does not exist.</response>

@@ -772,5 +772,80 @@ namespace PrintLogApi.Services
 
             return prints;
         }
+
+        public async Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(int pageNumber, int pageSize, long userId)
+        {
+            // Fetch all project summaries for this user
+            var projects = await _context.Projects
+                .Where(p => p.CreatedById == userId)
+                .Include(p => p.Images)
+                .Include(p => p.Prints)
+                    .ThenInclude(pr => pr.FilamentUsage)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var projectItems = projects.Select(p => new GroupedFeedItemDto
+            {
+                Type = "project",
+                SortDate = (DateTimeOffset)DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+                ProjectId = p.Id,
+                ProjectName = p.Name,
+                ProjectReference = p.Reference,
+                ProjectStatus = p.Status,
+                PrintCount = p.Prints.Count,
+                TotalPrintTimeInSeconds = p.Prints.Sum(pr => pr.PrintTimeInSeconds ?? 0),
+                TotalEstimatedPrintTimeInSeconds = p.Prints.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0),
+                TotalFilamentWeightMg = p.Prints.SelectMany(pr => pr.FilamentUsage)
+                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
+                        ? (long)pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
+                            ? (long)pf.EstimatedAmountMg.Value : 0L),
+                DefaultProjectImageId = p.Images.Where(i => i.IsDefault).Select(i => i.Id).FirstOrDefault(),
+            }).ToList();
+
+            // Fetch standalone prints (no project)
+            var standalonePrintIds = await _context.Prints
+                .Where(p => p.CreatedById == userId && p.ProjectId == null)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            var standalonePrints = await _context.Prints
+                .Where(p => standalonePrintIds.Contains(p.Id))
+                .Include(p => p.Printer)
+                    .ThenInclude(pr => pr.Category)
+                        .ThenInclude(c => c.MaterialCategory)
+                .Include(p => p.FilamentUsage)
+                    .ThenInclude(pf => pf.Filament)
+                        .ThenInclude(f => f.MaterialCategory)
+                .Include(p => p.Images)
+                .AsNoTracking()
+                .AsSplitQuery()
+                .ToListAsync();
+
+            var printItems = standalonePrints.Select(p =>
+            {
+                var sortDate = p.StartDate ?? (DateTimeOffset)DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc);
+                return new GroupedFeedItemDto
+                {
+                    Type = "print",
+                    SortDate = sortDate,
+                    Print = _mapper.Map<PrintSummaryDTO>(p)
+                };
+            }).ToList();
+
+            // Merge and sort descending by SortDate
+            var merged = projectItems
+                .Concat(printItems)
+                .OrderByDescending(x => x.SortDate)
+                .ToList();
+
+            var total = merged.Count;
+            var paged = merged
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<GroupedFeedItemDto>(paged, total, pageNumber, pageSize);
+        }
     }
 }

@@ -1817,5 +1817,23 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         #endregion
+
+        #region Grouped Feed
+
+        [Fact]
+        public async Task GetPrintsGrouped_ReturnsMixedFeed()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            Assert.NotNull(result);
+            Assert.All(result.Items, item => Assert.Contains(item.Type, new[] { "project", "print" }));
+        }
+
+        #endregion
     }
 }
