@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 using Xunit;
+using System.Net.Http.Headers;
 
 namespace PrintLogApi.IntegrationTests.Controllers
 {
@@ -72,6 +73,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
             var result = await getResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
             Assert.Equal(created.Id, result.Id);
+        }
+
+        [Fact]
+        public async Task PostProjectImage_ReturnsCreated()
+        {
+            // Create project
+            var createDto = new AddProjectDto { Name = "Image Test Project", Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private };
+            var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            createReq.Content = JsonContent.Create(createDto);
+            var createResp = await _client.SendAsync(createReq);
+            var project = await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+
+            // Upload image (1x1 transparent PNG as base64)
+            var imageBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+            var form = new MultipartFormDataContent();
+            form.Add(new ByteArrayContent(imageBytes), "file", "test.png");
+
+            var imgReq = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
+            imgReq.Content = form;
+            var imgResp = await _client.SendAsync(imgReq);
+            Assert.Equal(HttpStatusCode.Created, imgResp.StatusCode);
         }
 
         [Fact]

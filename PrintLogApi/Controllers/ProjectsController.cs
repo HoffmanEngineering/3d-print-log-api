@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -143,6 +144,65 @@ namespace PrintLogApi.Controllers
             {
                 return NotFound();
             }
+        }
+
+        [HttpPost("{id}/images")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        public async Task<ActionResult<ProjectImageDto>> PostProjectImage(Guid id, IFormFile file)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            var project = await _projectService.GetProjectByIdAsync(id);
+            if (project == null) return NotFound();
+            if (project.CreatedById != userId.Value) return Forbid();
+
+            try
+            {
+                var image = await _projectService.AddImageAsync(id, file, userId.Value);
+                _cacheVersionService.InvalidateUserCache(userId.Value);
+                return CreatedAtAction(nameof(GetProjectById), new { id }, _mapper.Map<ProjectImageDto>(image));
+            }
+            catch (DoesNotExistException)
+            {
+                return NotFound();
+            }
+        }
+
+        [HttpDelete("{id}/images/{imageId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult> DeleteProjectImage(Guid id, int imageId)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            var project = await _projectService.GetProjectByIdAsync(id);
+            if (project == null) return NotFound();
+            if (project.CreatedById != userId.Value) return Forbid();
+
+            try
+            {
+                await _projectService.DeleteImageAsync(id, imageId, userId.Value);
+                _cacheVersionService.InvalidateUserCache(userId.Value);
+                return Ok();
+            }
+            catch (DoesNotExistException) { return NotFound(); }
+        }
+
+        [HttpPut("{id}/images/reorder")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult> ReorderProjectImages(Guid id, [FromBody] IList<int> orderedImageIds)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            var project = await _projectService.GetProjectByIdAsync(id);
+            if (project == null) return NotFound();
+            if (project.CreatedById != userId.Value) return Forbid();
+
+            await _projectService.ReorderImagesAsync(id, orderedImageIds, userId.Value);
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+            return Ok();
         }
     }
 }

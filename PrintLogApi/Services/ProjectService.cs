@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
@@ -13,11 +15,13 @@ namespace PrintLogApi.Services
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly IBlobStorageService _blobStorageService;
 
-        public ProjectService(PrintLogContext context, IMapper mapper)
+        public ProjectService(PrintLogContext context, IMapper mapper, IBlobStorageService blobStorageService)
         {
             _context = context;
             _mapper = mapper;
+            _blobStorageService = blobStorageService;
         }
 
         public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId)
@@ -101,6 +105,57 @@ namespace PrintLogApi.Services
 
             _context.ProjectImages.RemoveRange(project.Images);
             _context.Projects.Remove(project);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId)
+        {
+            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+            if (project == null) throw new DoesNotExistException();
+
+            var blobName = $"{Guid.NewGuid()}{System.IO.Path.GetExtension(file.FileName)}";
+            using var stream = file.OpenReadStream();
+            await _blobStorageService.UploadAsync("projectimages", blobName, stream);
+
+            var fileEntity = new Models.File { Path = blobName, Size = file.Length, CreatedById = userId, UpdatedById = userId };
+            _context.Files.Add(fileEntity);
+            await _context.SaveChangesAsync();
+
+            var existingCount = await _context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+            var image = new ProjectImage
+            {
+                ProjectId = projectId,
+                FileId = fileEntity.Id,
+                IsDefault = existingCount == 0,
+                DisplayOrder = existingCount,
+                CreatedById = userId,
+                UpdatedById = userId
+            };
+            _context.ProjectImages.Add(image);
+            await _context.SaveChangesAsync();
+            return image;
+        }
+
+        public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
+        {
+            var image = await _context.ProjectImages
+                .FirstOrDefaultAsync(pi => pi.ProjectId == projectId && pi.Id == imageId);
+            if (image == null) throw new DoesNotExistException();
+            _context.ProjectImages.Remove(image);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId)
+        {
+            var images = await _context.ProjectImages
+                .Where(pi => pi.ProjectId == projectId)
+                .ToListAsync();
+
+            for (int i = 0; i < orderedImageIds.Count; i++)
+            {
+                var img = images.FirstOrDefault(im => im.Id == orderedImageIds[i]);
+                if (img != null) img.DisplayOrder = i;
+            }
             await _context.SaveChangesAsync();
         }
     }
