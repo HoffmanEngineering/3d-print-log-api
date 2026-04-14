@@ -146,8 +146,12 @@ namespace PrintLogApi.Controllers
             }
         }
 
+        /// <summary>Upload an image to a project.</summary>
         [HttpPost("{id}/images")]
         [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<ProjectImageDto>> PostProjectImage(Guid id, IFormFile file)
         {
             var userId = User.GetUserId();
@@ -169,8 +173,12 @@ namespace PrintLogApi.Controllers
             }
         }
 
+        /// <summary>Remove an image from a project.</summary>
         [HttpDelete("{id}/images/{imageId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult> DeleteProjectImage(Guid id, int imageId)
         {
             var userId = User.GetUserId();
@@ -189,8 +197,12 @@ namespace PrintLogApi.Controllers
             catch (DoesNotExistException) { return NotFound(); }
         }
 
+        /// <summary>Reorder a project's images.</summary>
         [HttpPut("{id}/images/reorder")]
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult> ReorderProjectImages(Guid id, [FromBody] IList<int> orderedImageIds)
         {
             var userId = User.GetUserId();
