@@ -36,5 +36,8 @@ namespace PrintLogApi.Models.DTOs.Print
         public int DefaultPrintImageId { get; set; }
 
         public int CommentCount { get; set; }
+
+        public Guid? ProjectId { get; set; }
+        public string ProjectName { get; set; }
     }
 }

@@ -84,5 +84,10 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public PrintViewStatus ViewStatus { get; set; }
 
+        public Guid? ProjectId { get; set; }
+
+        [MaxLength(100)]
+        public string NewProjectName { get; set; }
+
     }
 }
