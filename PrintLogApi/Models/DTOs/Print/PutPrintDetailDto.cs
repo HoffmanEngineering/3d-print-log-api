@@ -84,8 +84,14 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public PrintViewStatus ViewStatus { get; set; }
 
+        /// <summary>
+        /// Assign to an existing project. Takes precedence over NewProjectName.
+        /// </summary>
         public Guid? ProjectId { get; set; }
 
+        /// <summary>
+        /// Create a new project inline and assign this print to it. Ignored if ProjectId is set.
+        /// </summary>
         [MaxLength(100)]
         public string NewProjectName { get; set; }
 
