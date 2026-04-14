@@ -100,7 +100,8 @@ namespace PrintLogApi.Controllers
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
             [FromQuery] IEnumerable<Guid> filterByFilamentIds,
             [FromQuery] Print.PrintStatus? filterByStatus,
-            [FromQuery] long? userId)
+            [FromQuery] long? userId,
+            [FromQuery] Guid? filterByProjectId = null)
         {
 
             long? currentUserId = User.GetUserId();
@@ -113,14 +114,14 @@ namespace PrintLogApi.Controllers
             var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
             var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText,
-                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus);
+                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus, filterByProjectId);
 
             if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
             {
                 return cachedResult;
             }
 
-            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId);
+            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId, filterByProjectId);
 
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(EstimateCacheSize(result))
@@ -1052,7 +1053,8 @@ namespace PrintLogApi.Controllers
                                         IEnumerable<long> filterByPrinterIds,
                                         IEnumerable<Guid> filterByFilamentIds,
                                         SortRequest<PrintSummarySortColumn> sortRequest,
-                                        Print.PrintStatus? filterByStatus)
+                                        Print.PrintStatus? filterByStatus,
+                                        Guid? filterByProjectId = null)
         {
             var printerIds = filterByPrinterIds?.Any() == true
                 ? string.Join(",", filterByPrinterIds.OrderBy(x => x))
@@ -1068,7 +1070,8 @@ namespace PrintLogApi.Controllers
                    $"pr{printerIds}_" +
                    $"fl{filamentIds}_" +
                    $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
-                   $"fs{filterByStatus}";
+                   $"fs{filterByStatus}_" +
+                   $"fp{filterByProjectId}";
         }
 
         /// <summary>

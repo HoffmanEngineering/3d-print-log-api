@@ -65,7 +65,8 @@ namespace PrintLogApi.Services
             IEnumerable<Guid> filterByFilamentIds,
             PrintStatus? filterByStatus,
             long? userId,
-            long? currentUserId)
+            long? currentUserId,
+            Guid? filterByProjectId = null)
         {
             if (pagingRequest == null)
             {
@@ -123,6 +124,11 @@ namespace PrintLogApi.Services
             {
                 var lookup = filterByFilamentIds.ToList();
                 printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid) pf.FilamentId)));
+            }
+
+            if (filterByProjectId.HasValue)
+            {
+                printQuery = printQuery.Where(p => p.ProjectId == filterByProjectId.Value);
             }
 
             if (sortRequest != null)
@@ -196,6 +202,7 @@ namespace PrintLogApi.Services
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.MaterialCategory)
                 .Include(p => p.Images)
+                .Include(p => p.Project)
                 .AsNoTracking()
                 .AsSplitQuery()  // Now we CAN use split query!
                 .ToListAsync();

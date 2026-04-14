@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Project;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -1756,6 +1757,41 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var result = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
             Assert.NotNull(result.ProjectId);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_FilterByProjectId_ReturnsPrintsInProject()
+        {
+            // Create project
+            var projectDto = new { name = "Filter Test Project", status = 1, viewStatus = 3 };
+            var projReq = new HttpRequestMessage(HttpMethod.Post, "/api/Projects");
+            projReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            projReq.Content = JsonContent.Create(projectDto);
+            var projResp = await _httpClient.SendAsync(projReq);
+            var project = await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+
+            // Create print assigned to project
+            var printDto = new
+            {
+                title = "Filtered Print",
+                printerId = IntegrationTestSeeder.TestPrinterId,
+                status = 3, viewStatus = 3, allowComments = false,
+                filamentUsage = Array.Empty<object>(), filamentType = "", notes = "", url = "", fileName = "",
+                projectId = project.Id
+            };
+            var printReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            printReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            printReq.Content = JsonContent.Create(printDto);
+            await _httpClient.SendAsync(printReq);
+
+            // Filter by project
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/summary?PageNumber=1&PageSize=10&filterByProjectId={project.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            Assert.All(result.Items, item => Assert.Equal(project.Id, item.ProjectId));
         }
 
         [Fact]
