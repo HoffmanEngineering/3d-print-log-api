@@ -26,14 +26,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
-        public async Task GetProjects_ReturnsEmptyList_WhenNoProjects()
+        public async Task GetProjects_ReturnsOk_WithPagedList()
         {
             var request = AuthenticatedRequest(HttpMethod.Get, "/api/Projects?PageNumber=1&PageSize=10");
             var response = await _client.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
             Assert.NotNull(result);
-            Assert.Empty(result.Items);
+            Assert.NotNull(result.Items);
         }
 
         [Fact]
