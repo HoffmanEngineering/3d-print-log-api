@@ -888,7 +888,10 @@ namespace PrintLogApi.Services
                     ProjectStatus = p.Status,
                     PrintCount = p.Prints.Count,
                     FilteredPrintCount = hasFilters ? filteredGroup.FilteredPrintCount : (int?)null,
-                    TotalPrintTimeInSeconds = p.Prints.Sum(pr => pr.PrintTimeInSeconds ?? 0),
+                    TotalPrintTimeInSeconds = p.Prints.Sum(pr =>
+                        (pr.PrintTimeInSeconds ?? 0) > 0
+                            ? pr.PrintTimeInSeconds.Value
+                            : (pr.EstimatedPrintTimeInSeconds ?? 0)),
                     TotalEstimatedPrintTimeInSeconds = p.Prints.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0),
                     TotalFilamentWeightMg = p.Prints.SelectMany(pr => pr.FilamentUsage)
                         .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
