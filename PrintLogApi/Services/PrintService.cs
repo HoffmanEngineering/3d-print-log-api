@@ -773,7 +773,15 @@ namespace PrintLogApi.Services
             return prints;
         }
 
-        public async Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(int pageNumber, int pageSize, long userId)
+        public async Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(
+            int pageNumber,
+            int pageSize,
+            long userId,
+            string searchText = null,
+            IEnumerable<long> filterByPrinterIds = null,
+            IEnumerable<Guid> filterByFilamentIds = null,
+            Print.PrintStatus? filterByStatus = null,
+            SortRequest<PrintSummarySortColumn> sortRequest = null)
         {
             // Fetch all project summaries for this user
             var projects = await _context.Projects

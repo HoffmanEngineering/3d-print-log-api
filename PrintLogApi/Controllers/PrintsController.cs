@@ -159,20 +159,30 @@ namespace PrintLogApi.Controllers
         
 
         /// <summary>
-        /// Returns a chronologically interleaved list of project rows and standalone print rows for the current user.
+        /// Returns a chronologically interleaved list of project rows and standalone print rows for the current user,
+        /// with optional filtering and sorting.
         /// </summary>
         [HttpGet("grouped")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<ActionResult<PagedList<GroupedFeedItemDto>>> GetGrouped(
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 20)
+            [FromQuery] int pageSize = 20,
+            [FromQuery, MaxLength(50)] string searchText = null,
+            [FromQuery] IEnumerable<long> filterByPrinterIds = null,
+            [FromQuery] IEnumerable<Guid> filterByFilamentIds = null,
+            [FromQuery] Print.PrintStatus? filterByStatus = null,
+            [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest = null)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
                 return Unauthorized();
 
-            var result = await _printService.GetGroupedFeedAsync(pageNumber, pageSize, userId.Value);
+            var result = await _printService.GetGroupedFeedAsync(
+                pageNumber, pageSize, userId.Value,
+                searchText, filterByPrinterIds, filterByFilamentIds,
+                filterByStatus, sortRequest);
+
             return Ok(result);
         }
 
