@@ -13,7 +13,9 @@ using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
 using static PrintLogApi.Services.MeasurementUtilities;
@@ -783,42 +785,129 @@ namespace PrintLogApi.Services
             Print.PrintStatus? filterByStatus = null,
             SortRequest<PrintSummarySortColumn> sortRequest = null)
         {
-            // Fetch all project summaries for this user
+            bool hasFilters = !string.IsNullOrWhiteSpace(searchText)
+                || filterByStatus.HasValue
+                || (filterByPrinterIds != null && filterByPrinterIds.Any())
+                || (filterByFilamentIds != null && filterByFilamentIds.Any());
+
+            // Build filtered print query (same pattern as SearchPrintSummary)
+            IQueryable<Print> filteredPrintQuery = _context.Prints
+                .Where(p => p.CreatedById == userId);
+
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                var criterias = searchText.Split('"')
+                    .Select((element, index) => index % 2 == 0
+                        ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                        : new string[] { element })
+                    .SelectMany(element => element).ToList();
+                foreach (var text in criterias)
+                {
+                    filteredPrintQuery = filteredPrintQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
+                }
+            }
+
+            if (filterByStatus.HasValue)
+                filteredPrintQuery = filteredPrintQuery.Where(p => p.Status == filterByStatus.Value);
+
+            if (filterByPrinterIds != null && filterByPrinterIds.Any())
+                filteredPrintQuery = filteredPrintQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
+
+            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            {
+                var lookup = filterByFilamentIds.ToList();
+                filteredPrintQuery = filteredPrintQuery.Where(p =>
+                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
+            }
+
+            // --- Project rows ---
+            // Find which project IDs have at least one matching print, and how many
+            var filteredProjectGroups = await filteredPrintQuery
+                .Where(p => p.ProjectId != null)
+                .GroupBy(p => p.ProjectId)
+                .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
+                .ToListAsync();
+
+            var matchingProjectIds = filteredProjectGroups.Select(x => x.ProjectId).ToList();
+
+            // Load full project data for those projects
             var projects = await _context.Projects
-                .Where(p => p.CreatedById == userId)
+                .Where(p => matchingProjectIds.Contains(p.Id))
                 .Include(p => p.Images)
                 .Include(p => p.Prints)
+                    .ThenInclude(pr => pr.Printer)
+                .Include(p => p.Prints)
                     .ThenInclude(pr => pr.FilamentUsage)
+                        .ThenInclude(pf => pf.Filament)
+                            .ThenInclude(f => f.MaterialCategory)
                 .AsNoTracking()
+                .AsSplitQuery()
                 .ToListAsync();
 
-            var projectItems = projects.Select(p => new GroupedFeedItemDto
+            var projectItems = projects.Select(p =>
             {
-                Type = "project",
-                SortDate = (DateTimeOffset)DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
-                ProjectId = p.Id,
-                ProjectName = p.Name,
-                ProjectReference = p.Reference,
-                ProjectStatus = p.Status,
-                PrintCount = p.Prints.Count,
-                TotalPrintTimeInSeconds = p.Prints.Sum(pr => pr.PrintTimeInSeconds ?? 0),
-                TotalEstimatedPrintTimeInSeconds = p.Prints.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0),
-                TotalFilamentWeightMg = p.Prints.SelectMany(pr => pr.FilamentUsage)
-                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
-                        ? (long)pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
-                            ? (long)pf.EstimatedAmountMg.Value : 0L),
-                DefaultProjectImageId = p.Images.Where(i => i.IsDefault).Select(i => i.Id).FirstOrDefault(),
+                var filteredGroup = filteredProjectGroups.First(g => g.ProjectId == p.Id);
+
+                // Aggregate filament usage across all prints, grouped by FilamentId, summing weights
+                var aggregatedFilament = p.Prints
+                    .SelectMany(pr => pr.FilamentUsage)
+                    .GroupBy(pf => pf.FilamentId)
+                    .Select(g =>
+                    {
+                        var first = g.First();
+                        var totalAmountMg = g.Sum(pf =>
+                            pf.AmountMg.HasValue && pf.AmountMg > 0
+                                ? (long)pf.AmountMg.Value
+                                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
+                                    ? (long)pf.EstimatedAmountMg.Value : 0L);
+                        return new PrintFilamentSummaryDto
+                        {
+                            Id = first.Id,
+                            Filament = _mapper.Map<FilamentSummaryDto>(first.Filament),
+                            AmountMg = (int?)totalAmountMg,
+                        };
+                    })
+                    .ToList();
+
+                // Distinct printers across all prints
+                var distinctPrinters = p.Prints
+                    .Select(pr => pr.Printer)
+                    .Where(pr => pr != null)
+                    .GroupBy(pr => pr.Id)
+                    .Select(g => g.First())
+                    .Select(pr => _mapper.Map<PrinterSummary>(pr))
+                    .ToList();
+
+                return new GroupedFeedItemDto
+                {
+                    Type = "project",
+                    SortDate = (DateTimeOffset)DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+                    ProjectId = p.Id,
+                    ProjectName = p.Name,
+                    ProjectReference = p.Reference,
+                    ProjectStatus = p.Status,
+                    PrintCount = p.Prints.Count,
+                    FilteredPrintCount = hasFilters ? filteredGroup.FilteredPrintCount : (int?)null,
+                    TotalPrintTimeInSeconds = p.Prints.Sum(pr => pr.PrintTimeInSeconds ?? 0),
+                    TotalEstimatedPrintTimeInSeconds = p.Prints.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0),
+                    TotalFilamentWeightMg = p.Prints.SelectMany(pr => pr.FilamentUsage)
+                        .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
+                            ? (long)pf.AmountMg.Value
+                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
+                                ? (long)pf.EstimatedAmountMg.Value : 0L),
+                    DefaultProjectImageId = p.Images.Where(i => i.IsDefault).Select(i => i.Id).FirstOrDefault(),
+                    FilamentUsage = aggregatedFilament,
+                    Printers = distinctPrinters,
+                };
             }).ToList();
 
-            // Fetch standalone prints (no project)
-            var standalonePrintIds = await _context.Prints
-                .Where(p => p.CreatedById == userId && p.ProjectId == null)
-                .Select(p => p.Id)
-                .ToListAsync();
+            // --- Ungrouped print rows ---
+            var standalonePrintQuery = filteredPrintQuery.Where(p => p.ProjectId == null);
+
+            var standaloneIds = await standalonePrintQuery.Select(p => p.Id).ToListAsync();
 
             var standalonePrints = await _context.Prints
-                .Where(p => standalonePrintIds.Contains(p.Id))
+                .Where(p => standaloneIds.Contains(p.Id))
                 .Include(p => p.Printer)
                     .ThenInclude(pr => pr.Category)
                         .ThenInclude(c => c.MaterialCategory)
@@ -841,17 +930,33 @@ namespace PrintLogApi.Services
                 };
             }).ToList();
 
-            // Merge and sort descending by SortDate
-            var merged = projectItems
-                .Concat(printItems)
-                .OrderByDescending(x => x.SortDate)
-                .ToList();
+            // --- Merge and sort ---
+            var merged = projectItems.Concat(printItems).AsEnumerable();
 
-            var total = merged.Count;
-            var paged = merged
-                .Skip((pageNumber - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
+            if (sortRequest != null && sortRequest.SortColumn == PrintSummarySortColumn.Title)
+            {
+                merged = sortRequest.SortDirection == SortDirection.Asc
+                    ? merged.OrderBy(x => x.Type == "project" ? x.ProjectName : x.Print?.Title)
+                    : merged.OrderByDescending(x => x.Type == "project" ? x.ProjectName : x.Print?.Title);
+            }
+            else if (sortRequest != null && sortRequest.SortColumn == PrintSummarySortColumn.FilamentUsage)
+            {
+                merged = sortRequest.SortDirection == SortDirection.Asc
+                    ? merged.OrderBy(x => x.Type == "project" ? x.TotalFilamentWeightMg : x.Print?.TotalFilamentWeightMg)
+                    : merged.OrderByDescending(x => x.Type == "project" ? x.TotalFilamentWeightMg : x.Print?.TotalFilamentWeightMg);
+            }
+            else
+            {
+                // Default: StartDate descending
+                bool asc = sortRequest?.SortDirection == SortDirection.Asc;
+                merged = asc
+                    ? merged.OrderBy(x => x.SortDate)
+                    : merged.OrderByDescending(x => x.SortDate);
+            }
+
+            var mergedList = merged.ToList();
+            var total = mergedList.Count;
+            var paged = mergedList.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList();
 
             return new PagedList<GroupedFeedItemDto>(paged, total, pageNumber, pageSize);
         }
