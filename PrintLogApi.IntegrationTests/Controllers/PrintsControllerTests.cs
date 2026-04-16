@@ -1888,7 +1888,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(result);
             Assert.NotNull(result.Paging);
             Assert.Equal(1, result.Paging.CurrentPage);
-            Assert.True(result.Paging.TotalCount >= 0);
+            Assert.True(result.Paging.TotalCount > 0, "Authenticated user should see their own seeded prints");
             Assert.NotNull(result.Items);
         }
 
@@ -1935,7 +1935,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Contains(result.Items, item => item.Type == "project");
             var projectItem = result.Items.First(item => item.Type == "project" && item.ProjectId == project.Id);
             Assert.Equal(project.Name, projectItem.ProjectName);
-            Assert.True(projectItem.PrintCount >= 1);
+            Assert.Equal(1, projectItem.PrintCount);
         }
 
         [Fact]
@@ -1949,6 +1949,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             Assert.NotNull(result);
             Assert.Equal(2, result.Paging.CurrentPage);
+            Assert.True(result.Paging.TotalCount > 2, "Need more than 2 items to meaningfully test page 2");
             Assert.True(result.Items.Count <= 2);
         }
 
