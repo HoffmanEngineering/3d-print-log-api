@@ -759,6 +759,15 @@ namespace PrintLogApi.Services
             return _context.Prints.Any(e => e.Id == id);
         }
 
+        private sealed class FeedSortItem
+        {
+            public string Id { get; init; }
+            public string Type { get; init; }
+            public DateTimeOffset SortDate { get; init; }
+            public string SortTitle { get; init; }
+            public long TotalFilamentWeightMg { get; init; }
+        }
+
         public async Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime)
         {
             // TODO: Use the currentUserId to filter the feed based on friends, likes, etcetc
