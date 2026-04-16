@@ -28,6 +28,25 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         /// <summary>
+        /// Helper: Creates a project and returns its detail.
+        /// </summary>
+        private async Task<ProjectDetailDto> CreateProjectAsync(string name = "Helper Project")
+        {
+            var dto = new AddProjectDto
+            {
+                Name = name,
+                Status = Project.ProjectStatus.InProgress,
+                ViewStatus = Project.ProjectViewStatus.Private
+            };
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Projects");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(dto);
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<ProjectDetailDto>();
+        }
+
+        /// <summary>
         /// Helper: Creates a print and returns its detail.
         /// </summary>
         private async Task<PrintDetailDTO> CreatePrintAsync(string title = "Helper Print")
@@ -1832,6 +1851,130 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
             Assert.NotNull(result);
             Assert.All(result.Items, item => Assert.Contains(item.Type, new[] { "project", "print" }));
+        }
+
+        #endregion
+
+        #region GetGrouped Tests
+
+        [Fact]
+        public async Task GetGrouped_Authenticated_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetGrouped_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var response = await _httpClient.GetAsync("/api/Prints/grouped?pageNumber=1&pageSize=10");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetGrouped_ReturnsPaged_WithCorrectStructure()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.Paging);
+            Assert.Equal(1, result.Paging.CurrentPage);
+            Assert.True(result.Paging.TotalCount >= 0);
+            Assert.NotNull(result.Items);
+        }
+
+        [Fact]
+        public async Task GetGrouped_StandalonePrints_ReturnPrintTypeItems()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Contains(result.Items, item => item.Type == "print");
+            var printItem = result.Items.First(item => item.Type == "print");
+            Assert.NotNull(printItem.Print);
+            Assert.True(printItem.Print.Id > 0);
+        }
+
+        [Fact]
+        public async Task GetGrouped_WithProject_ReturnsProjectTypeItem()
+        {
+            var project = await CreateProjectAsync("Grouped Feed Test Project");
+            var printRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            printRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            printRequest.Content = JsonContent.Create(new AddPrintDTO
+            {
+                Title = "Assigned Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Public,
+                AllowComments = false,
+                ProjectId = project.Id
+            });
+            var printResp = await _httpClient.SendAsync(printRequest);
+            printResp.EnsureSuccessStatusCode();
+
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Contains(result.Items, item => item.Type == "project");
+            var projectItem = result.Items.First(item => item.Type == "project" && item.ProjectId == project.Id);
+            Assert.Equal(project.Name, projectItem.ProjectName);
+            Assert.True(projectItem.PrintCount >= 1);
+        }
+
+        [Fact]
+        public async Task GetGrouped_Pagination_SecondPageHasFewerOrEqualItems()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=2&pageSize=2");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Paging.CurrentPage);
+            Assert.True(result.Items.Count <= 2);
+        }
+
+        [Fact]
+        public async Task GetGrouped_SortByTitle_ReturnsItemsInOrder()
+        {
+            var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                "/api/Prints/grouped?pageNumber=1&pageSize=25&sortColumn=Title&sortDirection=Asc");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            for (int i = 0; i < result.Items.Count - 1; i++)
+            {
+                var current = result.Items[i].Type == "project"
+                    ? result.Items[i].ProjectName
+                    : result.Items[i].Print?.Title;
+                var next = result.Items[i + 1].Type == "project"
+                    ? result.Items[i + 1].ProjectName
+                    : result.Items[i + 1].Print?.Title;
+                if (current != null && next != null)
+                    Assert.True(string.Compare(current, next, StringComparison.OrdinalIgnoreCase) <= 0);
+            }
         }
 
         #endregion
