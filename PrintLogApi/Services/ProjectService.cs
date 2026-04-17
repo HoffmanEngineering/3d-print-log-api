@@ -158,5 +158,17 @@ namespace PrintLogApi.Services
             }
             await _context.SaveChangesAsync();
         }
+
+        public async Task SetDefaultImageAsync(Guid projectId, int imageId, long userId)
+        {
+            var images = await _context.ProjectImages
+                .Where(pi => pi.ProjectId == projectId)
+                .ToListAsync();
+
+            foreach (var img in images)
+                img.IsDefault = img.Id == imageId;
+
+            await _context.SaveChangesAsync();
+        }
     }
 }

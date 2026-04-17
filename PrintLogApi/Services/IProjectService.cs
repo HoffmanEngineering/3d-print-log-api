@@ -17,5 +17,6 @@ namespace PrintLogApi.Services
         Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId);
         Task DeleteImageAsync(Guid projectId, int imageId, long userId);
         Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
+        Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);
     }
 }

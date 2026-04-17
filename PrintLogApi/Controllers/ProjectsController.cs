@@ -216,5 +216,25 @@ namespace PrintLogApi.Controllers
             _cacheVersionService.InvalidateUserCache(userId.Value);
             return Ok();
         }
+
+        /// <summary>Set a project image as the default.</summary>
+        [HttpPost("{id}/images/{imageId}/set-as-default")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult> SetProjectImageAsDefault(Guid id, int imageId)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue) return Unauthorized();
+
+            var project = await _projectService.GetProjectByIdAsync(id);
+            if (project == null) return NotFound();
+            if (project.CreatedById != userId.Value) return Forbid();
+
+            await _projectService.SetDefaultImageAsync(id, imageId, userId.Value);
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+            return Ok();
+        }
     }
 }
