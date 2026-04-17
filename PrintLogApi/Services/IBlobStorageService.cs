@@ -51,6 +51,12 @@ namespace PrintLogApi.Services
             TimeSpan expiry);
 
         /// <summary>
+        /// Downloads a blob and returns its content as a stream.
+        /// Returns null if the blob does not exist.
+        /// </summary>
+        Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName);
+
+        /// <summary>
         /// Deletes a blob from storage. Does nothing if the blob does not exist.
         /// </summary>
         /// <param name="containerName">The blob container name</param>

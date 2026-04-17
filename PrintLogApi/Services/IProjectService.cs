@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using PrintLogApi.Models;
@@ -18,5 +19,6 @@ namespace PrintLogApi.Services
         Task DeleteImageAsync(Guid projectId, int imageId, long userId);
         Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
         Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);
+        Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId);
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
@@ -172,6 +173,29 @@ namespace PrintLogApi.Services
                 img.IsDefault = img.Id == imageId;
 
             await _context.SaveChangesAsync();
+        }
+
+        public async Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId)
+        {
+            var data = await _context.ProjectImages
+                .Where(pi => pi.ProjectId == projectId && pi.Id == imageId)
+                .Select(pi => new
+                {
+                    pi.File.Path,
+                    ProjectViewStatus = pi.Project.ViewStatus,
+                    ProjectCreatedById = pi.Project.CreatedById,
+                })
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
+
+            if (data == null) return null;
+
+            if (data.ProjectViewStatus == Project.ProjectViewStatus.Private &&
+                (!userId.HasValue || userId.Value != data.ProjectCreatedById))
+                return null;
+
+            var blobName = Path.GetFileName(data.Path);
+            return await _blobStorageService.DownloadAsync("projectimages", blobName);
         }
     }
 }

@@ -60,6 +60,19 @@ namespace PrintLogApi.IntegrationTests
             => Task.FromResult(new Uri("https://fake-blob-storage.example.com/download-sas"));
 
         /// <summary>
+        /// Downloads a blob from in-memory storage. Returns null if it does not exist.
+        /// </summary>
+        public Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)
+        {
+            var blobPath = $"{containerName}/{blobName}";
+            if (!Blobs.TryGetValue(blobPath, out var bytes))
+                return Task.FromResult<(Stream, string)?>(null);
+
+            Stream ms = new MemoryStream(bytes);
+            return Task.FromResult<(Stream, string)?>((ms, blobName));
+        }
+
+        /// <summary>
         /// Removes the blob from in-memory storage. No-op if it does not exist.
         /// </summary>
         public Task DeleteBlobAsync(string containerName, string blobName)

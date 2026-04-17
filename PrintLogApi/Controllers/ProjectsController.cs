@@ -146,6 +146,23 @@ namespace PrintLogApi.Controllers
             }
         }
 
+        /// <summary>Get a project image.</summary>
+        [AllowAnonymous]
+        [HttpGet("{id}/images/{imageId}")]
+        [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetProjectImage(Guid id, int imageId)
+        {
+            var userId = User.GetUserId();
+            var result = await _projectService.GetImageAsync(id, imageId, userId);
+            if (result == null) return NotFound();
+
+            new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
+                .TryGetContentType(result.Value.fileName, out var contentType);
+            return File(result.Value.stream, contentType ?? "application/octet-stream");
+        }
+
         /// <summary>Upload an image to a project.</summary>
         [HttpPost("{id}/images")]
         [ProducesResponseType(StatusCodes.Status201Created)]

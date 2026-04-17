@@ -88,6 +88,23 @@ namespace PrintLogApi.Services
         }
 
         /// <summary>
+        /// Downloads a blob from Azure Blob Storage. Returns null if the blob does not exist.
+        /// </summary>
+        public async Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+            var blobClient = containerClient.GetBlobClient(blobName);
+
+            if (!await blobClient.ExistsAsync())
+                return null;
+
+            var ms = new MemoryStream();
+            await blobClient.DownloadToAsync(ms);
+            ms.Position = 0;
+            return (ms, Path.GetFileName(blobName));
+        }
+
+        /// <summary>
         /// Deletes a blob from Azure Blob Storage. Does nothing if the blob does not exist.
         /// </summary>
         public async Task DeleteBlobAsync(string containerName, string blobName)
