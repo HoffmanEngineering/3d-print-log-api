@@ -855,7 +855,10 @@ namespace PrintLogApi.Services
                         p.CreatedDate,
                         p.Name,
                         TotalFilamentWeightMg = (long?)p.Prints.SelectMany(pr => pr.FilamentUsage)
-                            .Sum(pf => (long?)(pf.AmountMg ?? pf.EstimatedAmountMg)) ?? 0L
+                            .Sum(pf =>
+                                pf.AmountMg > 0 ? (long?)pf.AmountMg
+                                : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
+                                : (long?)0) ?? 0L
                     })
                     .AsNoTracking()
                     .ToListAsync();
@@ -879,7 +882,10 @@ namespace PrintLogApi.Services
                     p.CreatedDate,
                     p.Title,
                     TotalFilamentWeightMg = (long?)p.FilamentUsage
-                        .Sum(pf => (long?)(pf.AmountMg ?? pf.EstimatedAmountMg)) ?? 0L
+                        .Sum(pf =>
+                            pf.AmountMg > 0 ? (long?)pf.AmountMg
+                            : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
+                            : (long?)0) ?? 0L
                 })
                 .AsNoTracking()
                 .ToListAsync();
@@ -976,7 +982,8 @@ namespace PrintLogApi.Services
             {
                 if (key.Type == "project")
                 {
-                    var p = projectLookup[Guid.Parse(key.Id)];
+                    if (!projectLookup.TryGetValue(Guid.Parse(key.Id), out var p))
+                        return null;
 
                     var aggregatedFilament = p.Prints
                         .SelectMany(pr => pr.FilamentUsage)
@@ -1033,7 +1040,8 @@ namespace PrintLogApi.Services
                 }
                 else
                 {
-                    var p = printLookup[long.Parse(key.Id)];
+                    if (!printLookup.TryGetValue(long.Parse(key.Id), out var p))
+                        return null;
                     var sortDate = p.StartDate ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc));
                     return new GroupedFeedItemDto
                     {
@@ -1042,7 +1050,7 @@ namespace PrintLogApi.Services
                         Print = _mapper.Map<PrintSummaryDTO>(p)
                     };
                 }
-            }).ToList();
+            }).Where(item => item != null).ToList();
 
             return new PagedList<GroupedFeedItemDto>(pagedItems, total, pageNumber, pageSize);
         }
