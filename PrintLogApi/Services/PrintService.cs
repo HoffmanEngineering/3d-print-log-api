@@ -854,6 +854,7 @@ namespace PrintLogApi.Services
                         p.Id,
                         p.CreatedDate,
                         p.Name,
+                        // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
                         TotalFilamentWeightMg = (long?)p.Prints.SelectMany(pr => pr.FilamentUsage)
                             .Sum(pf =>
                                 pf.AmountMg > 0 ? (long?)pf.AmountMg
