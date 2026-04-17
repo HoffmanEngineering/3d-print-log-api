@@ -232,9 +232,13 @@ namespace PrintLogApi.Controllers
             if (project == null) return NotFound();
             if (project.CreatedById != userId.Value) return Forbid();
 
-            await _projectService.SetDefaultImageAsync(id, imageId, userId.Value);
-            _cacheVersionService.InvalidateUserCache(userId.Value);
-            return Ok();
+            try
+            {
+                await _projectService.SetDefaultImageAsync(id, imageId, userId.Value);
+                _cacheVersionService.InvalidateUserCache(userId.Value);
+                return Ok();
+            }
+            catch (DoesNotExistException) { return NotFound(); }
         }
     }
 }

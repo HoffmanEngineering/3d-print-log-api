@@ -165,6 +165,9 @@ namespace PrintLogApi.Services
                 .Where(pi => pi.ProjectId == projectId)
                 .ToListAsync();
 
+            if (!images.Any(img => img.Id == imageId))
+                throw new DoesNotExistException();
+
             foreach (var img in images)
                 img.IsDefault = img.Id == imageId;
 
