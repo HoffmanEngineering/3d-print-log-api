@@ -12,8 +12,8 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    [Migration("20260419110854_LimitProjectDescriptionTo5000")]
-    partial class LimitProjectDescriptionTo5000
+    [Migration("20260419135103_LimitProjectDescription")]
+    partial class LimitProjectDescription
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -1299,7 +1299,7 @@ namespace PrintLogApi.Migrations
 
                     b.Property<string>("Description")
                         .HasMaxLength(5000)
-                        .HasColumnType("nvarchar(5000)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
