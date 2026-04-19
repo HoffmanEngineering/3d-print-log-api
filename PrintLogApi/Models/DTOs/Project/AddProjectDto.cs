@@ -12,6 +12,7 @@ namespace PrintLogApi.Models.DTOs.Project
         [MaxLength(100)]
         public string Reference { get; set; }
 
+        [MaxLength(5000)]
         public string Description { get; set; }
 
         [MaxLength(1000)]
