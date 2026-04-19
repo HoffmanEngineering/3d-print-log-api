@@ -1295,7 +1295,8 @@ namespace PrintLogApi.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(5000)
+                        .HasColumnType("nvarchar(5000)");
 
                     b.Property<string>("Name")
                         .IsRequired()
