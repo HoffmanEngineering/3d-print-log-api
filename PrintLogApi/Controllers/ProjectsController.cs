@@ -38,13 +38,16 @@ namespace PrintLogApi.Controllers
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<ActionResult<PagedList<ProjectSummaryDto>>> GetProjects(
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? search = null,
+            [FromQuery] Project.ProjectStatus? status = null,
+            [FromQuery] string sortBy = "updatedDate")
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
                 return Unauthorized();
 
-            var result = await _projectService.GetProjectSummariesAsync(pageNumber, pageSize, userId.Value);
+            var result = await _projectService.GetProjectSummariesAsync(pageNumber, pageSize, userId.Value, search, status, sortBy);
             return Ok(result);
         }
 

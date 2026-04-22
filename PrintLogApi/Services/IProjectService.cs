@@ -10,7 +10,7 @@ namespace PrintLogApi.Services
 {
     public interface IProjectService
     {
-        Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId);
+        Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId, string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate");
         Task<Project> GetProjectByIdAsync(Guid id);
         Task<Project> CreateProjectAsync(AddProjectDto dto, long userId);
         Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId);

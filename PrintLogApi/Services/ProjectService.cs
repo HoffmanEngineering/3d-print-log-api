@@ -25,18 +25,29 @@ namespace PrintLogApi.Services
             _blobStorageService = blobStorageService;
         }
 
-        public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId)
+        public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(
+            int pageNumber, int pageSize, long userId,
+            string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate")
         {
-            var query = _context.Projects
+            IQueryable<Project> query = _context.Projects
                 .Where(p => p.CreatedById == userId)
                 .Include(p => p.Images)
                 .Include(p => p.Prints)
                     .ThenInclude(pr => pr.FilamentUsage)
-                .OrderByDescending(p => p.CreatedDate)
                 .AsNoTracking();
 
-            var total = await query.CountAsync();
-            var items = await query
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(p => p.Name.Contains(search.Trim()));
+
+            if (status.HasValue)
+                query = query.Where(p => p.Status == status.Value);
+
+            var orderedQuery = sortBy == "createdDate"
+                ? query.OrderByDescending(p => p.CreatedDate)
+                : query.OrderByDescending(p => p.UpdatedDate);
+
+            var total = await orderedQuery.CountAsync();
+            var items = await orderedQuery
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
