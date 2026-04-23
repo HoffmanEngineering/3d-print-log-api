@@ -32,8 +32,14 @@ namespace PrintLogApi.TestData
             context.Filaments.AddRange(filament);
             context.SaveChanges();
 
+            // Add Projects
+            var projects = GetTestProjects();
+
+            context.Projects.AddRange(projects);
+            context.SaveChanges();
+
             // Add Prints
-            var prints = GetTestPrints(filament);
+            var prints = GetTestPrints(filament, projects);
 
             context.Prints.AddRange(prints);
             Save<Print>(context);
@@ -84,6 +90,30 @@ namespace PrintLogApi.TestData
                     return testFilament;
         }
 
+        private static List<Project> GetTestProjects()
+        {
+            var projects = new List<Project>();
+            var createdDate = new DateTime();
+
+            for (int i = 1; i <= 500; i++)
+            {
+                projects.Add(new Project
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"Test Project {i}",
+                    Description = $"Description for test project {i}",
+                    Status = (Project.ProjectStatus)((i % 4) + 1),
+                    ViewStatus = Project.ProjectViewStatus.Public,
+                    CreatedById = 1,
+                    CreatedDate = createdDate,
+                    UpdatedById = 1,
+                    UpdatedDate = createdDate,
+                });
+            }
+
+            return projects;
+        }
+
         private static List<User> GetTestUsers()
         {
             List<User> testUsers = new List<User>()
@@ -117,74 +147,73 @@ namespace PrintLogApi.TestData
             return testPrinters;
         }
 
-        private static List<Print> GetTestPrints(List<Filament> filaments)
+        private static List<Print> GetTestPrints(List<Filament> filaments, List<Project> projects)
         {
-            List<Print> testPrinters = new List<Print>()
-            {
+            var prints = new List<Print>();
+            int printId = 1;
 
-            };
-
-            for (int i = 1; i <= 10000; i++)
+            for (int p = 0; p < projects.Count; p++)
             {
-                var createdDate = new DateTime();
-                var print = new Print()
+                int printCount = (p % 10) + 1;
+                for (int j = 0; j < printCount; j++)
                 {
-                    Id = i,
-                    StartDate = DateTimeOffset.Now.AddDays(-1),
-                    Notes = "This is a Test Note for Print " + i + ".",
-                    FilamentUsage = new List<PrintFilament>() {
-                        new PrintFilament()
-                        {
-                            Filament = filaments[i-1],
-                            EstimatedAmountMg = i,
-                            EstimatedSource = PrintFilament.SourceMeasurement.Weight,
-                            Source = PrintFilament.SourceMeasurement.Weight,
-                            Notes = $"This is filament {i}"
-
-                        }
-                    },
-                    EstimatedPrintTimeInSeconds = i,
-                    CreatedById = 1,
-                    CreatedDate = createdDate,
-                    UpdatedById = 1,
-                    UpdatedDate = createdDate,
-                    PrinterId = 1,
-                    Status = Print.PrintStatus.Success,
-                    Title = "Test Successful Print" + i,
-                    ViewStatus = Print.PrintViewStatus.Public,
-                    AllowComments = true,
-                    //Comments = new List<PrintComment>()
-                    //{
-                    //    new PrintComment
-                    //    {
-                    //        Id = i,
-                    //        PrintId = i,
-                    //        Comment = new Comment
-                    //        {
-                    //            Id = i,
-                    //            Body = "Test Comment",
-                    //            CreatedById = 1,
-                    //            UpdatedById = 1,
-                    //            CreatedDate= createdDate,
-                    //            UpdatedDate = createdDate,
-                    //        }
-                    //    }
-                    //}
-                };
-
-                testPrinters.Add(print);
+                    prints.Add(MakePrint(printId, filaments, projectId: projects[p].Id));
+                    printId++;
+                }
             }
 
-            return testPrinters;
+            for (; printId <= 10000; printId++)
+            {
+                prints.Add(MakePrint(printId, filaments, projectId: null));
+            }
+
+            return prints;
+        }
+
+        private static Print MakePrint(int id, List<Filament> filaments, Guid? projectId)
+        {
+            var createdDate = new DateTime();
+            return new Print()
+            {
+                Id = id,
+                StartDate = DateTimeOffset.Now.AddDays(-1),
+                Notes = $"This is a Test Note for Print {id}.",
+                FilamentUsage = new List<PrintFilament>()
+                {
+                    new PrintFilament()
+                    {
+                        Filament = filaments[id - 1],
+                        EstimatedAmountMg = id,
+                        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        Notes = $"This is filament {id}"
+                    }
+                },
+                EstimatedPrintTimeInSeconds = id,
+                CreatedById = 1,
+                CreatedDate = createdDate,
+                UpdatedById = 1,
+                UpdatedDate = createdDate,
+                PrinterId = 1,
+                Status = Print.PrintStatus.Success,
+                Title = $"Test Successful Print {id}",
+                ViewStatus = Print.PrintViewStatus.Public,
+                AllowComments = true,
+                ProjectId = projectId,
+            };
         }
 
         private static void Save<TModel>(PrintLogContext context)
         {
-            using var transaction = context.Database.BeginTransaction();
-            context.Database.ExecuteSqlRaw("SET IDENTITY_INSERT " + context.Model.FindEntityType(typeof(TModel)).GetTableName() + " ON;");
-            context.SaveChanges();
-            context.Database.ExecuteSqlRaw("SET IDENTITY_INSERT " + context.Model.FindEntityType(typeof(TModel)).GetTableName() + " OFF;");
-            transaction.Commit();
+            var tableName = context.Model.FindEntityType(typeof(TModel)).GetTableName();
+            context.Database.CreateExecutionStrategy().Execute(() =>
+            {
+                using var transaction = context.Database.BeginTransaction();
+                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} ON;");
+                context.SaveChanges();
+                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} OFF;");
+                transaction.Commit();
+            });
         }
     }
 }

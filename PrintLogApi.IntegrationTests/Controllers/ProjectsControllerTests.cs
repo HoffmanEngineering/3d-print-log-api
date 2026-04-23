@@ -97,6 +97,84 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task GetProjects_Search_ByName_ReturnsMatchingProject()
+        {
+            var uniqueName = $"NameSearch-{Guid.NewGuid():N}";
+            var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            createReq.Content = JsonContent.Create(new AddProjectDto
+            {
+                Name = uniqueName,
+                Status = Models.Project.ProjectStatus.InProgress,
+                ViewStatus = Models.Project.ProjectViewStatus.Private
+            });
+            await _client.SendAsync(createReq);
+
+            var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={uniqueName}&PageNumber=1&PageSize=10");
+            var response = await _client.SendAsync(searchReq);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            Assert.Contains(result.Items, p => p.Name == uniqueName);
+        }
+
+        [Fact]
+        public async Task GetProjects_Search_ByReference_ReturnsMatchingProject()
+        {
+            var uniqueRef = $"REF-{Guid.NewGuid():N}";
+            var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            createReq.Content = JsonContent.Create(new AddProjectDto
+            {
+                Name = "Search By Reference Test",
+                Reference = uniqueRef,
+                Status = Models.Project.ProjectStatus.InProgress,
+                ViewStatus = Models.Project.ProjectViewStatus.Private
+            });
+            await _client.SendAsync(createReq);
+
+            var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={uniqueRef}&PageNumber=1&PageSize=10");
+            var response = await _client.SendAsync(searchReq);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            Assert.Contains(result.Items, p => p.Reference == uniqueRef);
+        }
+
+        [Fact]
+        public async Task GetProjects_Search_WithNoMatch_ReturnsEmptyList()
+        {
+            var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search=NOMATCH-{Guid.NewGuid():N}&PageNumber=1&PageSize=10");
+            var response = await _client.SendAsync(searchReq);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            Assert.Empty(result.Items);
+        }
+
+        [Fact]
+        public async Task GetProjects_Search_DoesNotReturnNonMatchingProjects()
+        {
+            var matchTerm = $"MATCH-{Guid.NewGuid():N}";
+            var otherName = $"OTHER-{Guid.NewGuid():N}";
+
+            var matchReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            matchReq.Content = JsonContent.Create(new AddProjectDto { Name = matchTerm, Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private });
+            await _client.SendAsync(matchReq);
+
+            var otherReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            otherReq.Content = JsonContent.Create(new AddProjectDto { Name = otherName, Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private });
+            var otherResp = await _client.SendAsync(otherReq);
+            var otherProject = await otherResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+
+            var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={matchTerm}&PageNumber=1&PageSize=100");
+            var response = await _client.SendAsync(searchReq);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            Assert.Contains(result.Items, p => p.Name == matchTerm);
+            Assert.DoesNotContain(result.Items, p => p.Id == otherProject.Id);
+        }
+
+        [Fact]
         public async Task DeleteProject_UnlinksPrints_WhenDeletePrintsFalse()
         {
             // Create project

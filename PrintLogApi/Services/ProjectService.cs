@@ -37,7 +37,10 @@ namespace PrintLogApi.Services
                 .AsNoTracking();
 
             if (!string.IsNullOrWhiteSpace(search))
-                query = query.Where(p => p.Name.Contains(search.Trim()));
+            {
+                var trimmed = search.Trim();
+                query = query.Where(p => p.Name.Contains(trimmed) || p.Reference.Contains(trimmed));
+            }
 
             if (status.HasValue)
                 query = query.Where(p => p.Status == status.Value);

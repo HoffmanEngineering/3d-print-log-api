@@ -125,7 +125,7 @@ namespace PrintLogApi.Services
             if (filterByFilamentIds != null && filterByFilamentIds.Any())
             {
                 var lookup = filterByFilamentIds.ToList();
-                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid) pf.FilamentId)));
+                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
             }
 
             if (filterByProjectId.HasValue)
@@ -386,7 +386,7 @@ namespace PrintLogApi.Services
         public async Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId)
         {
             var existingPrint = await GetPrintById(id);
-            
+
             if (existingPrint == null)
             {
                 throw new ArgumentNullException(nameof(id));
@@ -481,7 +481,7 @@ namespace PrintLogApi.Services
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
-            foreach(var pf in print.FilamentUsage)
+            foreach (var pf in print.FilamentUsage)
             {
                 if (!pf.FilamentId.HasValue || pf.FilamentId == default(Guid))
                 {
@@ -491,7 +491,7 @@ namespace PrintLogApi.Services
 
                 var filament = await _filamentService.GetFilamentById(pf.FilamentId.Value);
 
-                if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || ( filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+                if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
                 {
                     // Skip any filament that doesn't have the required properties to compute.
                     continue;
@@ -505,7 +505,8 @@ namespace PrintLogApi.Services
                         pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                         pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, filament.DiameterMm.Value);
                     }
-                } else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
+                }
+                else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
                 {
                     if (pf.VolumeMl.HasValue)
                     {
@@ -517,7 +518,8 @@ namespace PrintLogApi.Services
                         }
                     }
 
-                } else
+                }
+                else
                 {
 
                     if (pf.AmountMg.HasValue)
@@ -811,7 +813,7 @@ namespace PrintLogApi.Services
                         : new string[] { element })
                     .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
-                    filteredPrintQuery = filteredPrintQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
+                    filteredPrintQuery = filteredPrintQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text) || p.Project.Name.Contains(text));
             }
 
             if (filterByStatus.HasValue)
@@ -1001,6 +1003,7 @@ namespace PrintLogApi.Services
                                 Id = first.Id,
                                 Filament = _mapper.Map<FilamentSummaryDto>(first.Filament),
                                 AmountMg = (int?)totalAmountMg,
+                                Source = PrintFilament.SourceMeasurement.Weight,
                             };
                         })
                         .ToList();
