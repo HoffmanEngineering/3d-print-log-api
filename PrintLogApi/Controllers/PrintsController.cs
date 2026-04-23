@@ -113,7 +113,7 @@ namespace PrintLogApi.Controllers
 
             var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
-            var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText,
+            var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                             filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus, filterByProjectId);
 
             if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
@@ -1076,7 +1076,7 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Generates a unique cache key for print summary queries based on user and query parameters.
         /// </summary>
-        private string GenerateCacheKey(long userId, string version,
+        private string GenerateCacheKey(long userId, long? currentUserId, string version,
                                         PagedRequest pagingRequest, string searchText,
                                         IEnumerable<long> filterByPrinterIds,
                                         IEnumerable<Guid> filterByFilamentIds,
@@ -1092,7 +1092,9 @@ namespace PrintLogApi.Controllers
                 ? string.Join(",", filterByFilamentIds.OrderBy(x => x))
                 : "none";
 
-            return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
+            var viewerKey = currentUserId.HasValue ? currentUserId.Value.ToString() : "anon";
+
+            return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_viewer{viewerKey}_v{version}_" +
                    $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
                    $"q{searchText ?? "none"}_" +
                    $"pr{printerIds}_" +
