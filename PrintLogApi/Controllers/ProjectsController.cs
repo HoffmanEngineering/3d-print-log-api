@@ -169,6 +169,7 @@ namespace PrintLogApi.Controllers
         /// <summary>Upload an image to a project.</summary>
         [HttpPost("{id}/images")]
         [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -181,11 +182,22 @@ namespace PrintLogApi.Controllers
             if (project == null) return NotFound();
             if (project.CreatedById != userId.Value) return Forbid();
 
+            if (file == null)
+                return BadRequest("Image file is required.");
+
+            var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+            if (!allowedImageTypes.Contains(file.ContentType.ToLowerInvariant()))
+                return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+
+            const long maxImageSizeBytes = 10 * 1024 * 1024;
+            if (file.Length > maxImageSizeBytes)
+                return BadRequest("Image must be under 10MB.");
+
             try
             {
                 var image = await _projectService.AddImageAsync(id, file, userId.Value);
                 _cacheVersionService.InvalidateUserCache(userId.Value);
-                return CreatedAtAction(nameof(GetProjectById), new { id }, _mapper.Map<ProjectImageDto>(image));
+                return CreatedAtAction(nameof(GetProjectImage), new { id, imageId = image.Id }, _mapper.Map<ProjectImageDto>(image));
             }
             catch (DoesNotExistException)
             {

@@ -34,6 +34,7 @@ namespace PrintLogApi.Services
                 .Include(p => p.Images)
                 .Include(p => p.Prints)
                     .ThenInclude(pr => pr.FilamentUsage)
+                .AsSplitQuery()
                 .AsNoTracking();
 
             if (!string.IsNullOrWhiteSpace(search))
@@ -49,7 +50,7 @@ namespace PrintLogApi.Services
                 ? query.OrderByDescending(p => p.CreatedDate)
                 : query.OrderByDescending(p => p.UpdatedDate);
 
-            var total = await orderedQuery.CountAsync();
+            var total = await query.CountAsync();
             var items = await orderedQuery
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
@@ -101,6 +102,7 @@ namespace PrintLogApi.Services
             var project = await _context.Projects
                 .Include(p => p.Prints)
                 .Include(p => p.Images)
+                    .ThenInclude(img => img.File)
                 .FirstOrDefaultAsync(p => p.Id == id);
 
             if (project == null)
@@ -116,6 +118,12 @@ namespace PrintLogApi.Services
                 {
                     print.ProjectId = null;
                 }
+            }
+
+            foreach (var image in project.Images)
+            {
+                if (image.File != null)
+                    await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path));
             }
 
             _context.ProjectImages.RemoveRange(project.Images);
@@ -154,8 +162,13 @@ namespace PrintLogApi.Services
         public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
         {
             var image = await _context.ProjectImages
+                .Include(pi => pi.File)
                 .FirstOrDefaultAsync(pi => pi.ProjectId == projectId && pi.Id == imageId);
             if (image == null) throw new DoesNotExistException();
+
+            if (image.File != null)
+                await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path));
+
             _context.ProjectImages.Remove(image);
             await _context.SaveChangesAsync();
         }

@@ -86,6 +86,7 @@ namespace PrintLogApi.Controllers
         /// <param name="filterByFilamentIds">Optionally filter by specific filament ids.</param>
         /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
         /// <param name="userId">Optionally search for public</param>
+        /// <param name="filterByProjectId">Optionally filter prints belonging to a specific project.</param>
         /// <returns>A Paged List of Print Summaries matching the search criteria.</returns>
         /// <response code="200">A Paged List of Print Summaries matching the search criteria.</response>
         /// <response code="400">Returned if no user is logged in, and no userId is provided.</response>

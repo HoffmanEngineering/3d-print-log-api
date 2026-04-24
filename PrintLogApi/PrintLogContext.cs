@@ -544,6 +544,11 @@ namespace PrintLogApi
                 .IncludeProperties(p => new { p.Id, p.Name, p.Status, p.ViewStatus, p.Reference })
                 .HasDatabaseName("IX_Projects_CreatedById_CreatedDate");
 
+            modelBuilder.Entity<Project>()
+                .HasIndex(p => new { p.CreatedById, p.UpdatedDate })
+                .IncludeProperties(p => new { p.Id, p.Name, p.Status, p.ViewStatus, p.Reference })
+                .HasDatabaseName("IX_Projects_CreatedById_UpdatedDate");
+
             modelBuilder.Entity<Print>()
                 .HasIndex(p => p.ProjectId)
                 .HasDatabaseName("IX_Prints_ProjectId");

@@ -3,8 +3,10 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Services;
 using Xunit;
 using System.Net.Http.Headers;
 
@@ -13,9 +15,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
     public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly HttpClient _client;
+        private readonly CustomWebApplicationFactory _factory;
 
         public ProjectsControllerTests(CustomWebApplicationFactory factory)
         {
+            _factory = factory;
             _client = factory.CreateClient();
         }
 
@@ -24,6 +28,34 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             return request;
+        }
+
+        private async Task<ProjectDetailDto> CreateProject(string name)
+        {
+            var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+            req.Content = JsonContent.Create(new AddProjectDto
+            {
+                Name = name,
+                Status = Project.ProjectStatus.InProgress,
+                ViewStatus = Project.ProjectViewStatus.Private
+            });
+            var resp = await _client.SendAsync(req);
+            return await resp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+        }
+
+        private async Task<int> UploadImage(Guid projectId)
+        {
+            var imageBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+            var form = new MultipartFormDataContent();
+            var content = new ByteArrayContent(imageBytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(content, "file", "test.png");
+
+            var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{projectId}/images");
+            req.Content = form;
+            var resp = await _client.SendAsync(req);
+            var image = await resp.Content.ReadFromJsonAsync<ProjectImageDto>();
+            return image.Id;
         }
 
         [Fact]
@@ -79,21 +111,108 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task PostProjectImage_ReturnsCreated()
         {
             // Create project
-            var createDto = new AddProjectDto { Name = "Image Test Project", Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private };
-            var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
-            createReq.Content = JsonContent.Create(createDto);
-            var createResp = await _client.SendAsync(createReq);
-            var project = await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var project = await CreateProject("Image Test Project");
 
-            // Upload image (1x1 transparent PNG as base64)
+            // Upload image with explicit content type
             var imageBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
             var form = new MultipartFormDataContent();
-            form.Add(new ByteArrayContent(imageBytes), "file", "test.png");
+            var content = new ByteArrayContent(imageBytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(content, "file", "test.png");
 
             var imgReq = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
             imgReq.Content = form;
             var imgResp = await _client.SendAsync(imgReq);
             Assert.Equal(HttpStatusCode.Created, imgResp.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostProjectImage_LocationHeader_PointsToImageEndpoint()
+        {
+            var project = await CreateProject("Location Header Test");
+            var imageId = await UploadImage(project.Id);
+
+            var imgReq = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
+            var imageBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+            var form = new MultipartFormDataContent();
+            var content = new ByteArrayContent(imageBytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(content, "file", "test.png");
+            imgReq.Content = form;
+
+            var response = await _client.SendAsync(imgReq);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var image = await response.Content.ReadFromJsonAsync<ProjectImageDto>();
+            Assert.Contains($"/api/Projects/{project.Id}/images/{image.Id}",
+                response.Headers.Location?.ToString() ?? "");
+        }
+
+        [Fact]
+        public async Task PostProjectImage_WithUnsupportedFileType_ReturnsBadRequest()
+        {
+            var project = await CreateProject("File Type Validation Test");
+
+            var form = new MultipartFormDataContent();
+            var fileContent = new ByteArrayContent(new byte[] { 0x25, 0x50, 0x44, 0x46 }); // PDF header bytes
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+            form.Add(fileContent, "file", "document.pdf");
+
+            var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
+            req.Content = form;
+            var response = await _client.SendAsync(req);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task PostProjectImage_WithFileTooLarge_ReturnsBadRequest()
+        {
+            var project = await CreateProject("File Size Validation Test");
+
+            var form = new MultipartFormDataContent();
+            var oversizedContent = new ByteArrayContent(new byte[11 * 1024 * 1024]);
+            oversizedContent.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(oversizedContent, "file", "large.png");
+
+            var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
+            req.Content = form;
+            var response = await _client.SendAsync(req);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task DeleteProjectImage_RemovesBlobFromStorage()
+        {
+            var blobService = (InMemoryBlobStorageService)_factory.Services.GetRequiredService<IBlobStorageService>();
+            var initialBlobCount = blobService.Blobs.Count;
+
+            var project = await CreateProject("Blob Image Deletion Test");
+            var imageId = await UploadImage(project.Id);
+            Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
+
+            var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}/images/{imageId}");
+            var deleteResp = await _client.SendAsync(deleteReq);
+            Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
+
+            Assert.Equal(initialBlobCount, blobService.Blobs.Count);
+        }
+
+        [Fact]
+        public async Task DeleteProject_RemovesBlobsFromStorage()
+        {
+            var blobService = (InMemoryBlobStorageService)_factory.Services.GetRequiredService<IBlobStorageService>();
+            var initialBlobCount = blobService.Blobs.Count;
+
+            var project = await CreateProject("Blob Project Deletion Test");
+            await UploadImage(project.Id);
+            Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
+
+            var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}");
+            var deleteResp = await _client.SendAsync(deleteReq);
+            Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
+
+            Assert.Equal(initialBlobCount, blobService.Blobs.Count);
         }
 
         [Fact]
