@@ -848,57 +848,79 @@ namespace PrintLogApi.Services
             }
 
             // ── Phase 3: Lightweight sort-key queries (no navigation loads) ───────────
-            var rawProjectSortKeys = await _context.Projects
+            // Projects: two queries joined in memory to avoid a correlated subquery per row.
+            // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
+            var projectList = await _context.Projects
                 .Where(p => p.CreatedById == userId)
-                .Select(p => new
+                .Select(p => new { p.Id, p.CreatedDate, p.Name })
+                .AsNoTracking()
+                .ToListAsync();
+
+            var projectFilamentTotals = await _context.PrintFilament
+                .Join(
+                    _context.Prints.Where(pr => pr.CreatedById == userId && pr.ProjectId != null),
+                    pf => pf.PrintId, pr => pr.Id,
+                    (pf, pr) => new { pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
+                .GroupBy(x => x.ProjectId)
+                .Select(g => new
                 {
-                    p.Id,
-                    p.CreatedDate,
-                    p.Name,
-                    // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
-                    TotalFilamentWeightMg = (long?)p.Prints.SelectMany(pr => pr.FilamentUsage)
-                        .Sum(pf =>
-                            pf.AmountMg > 0 ? (long?)pf.AmountMg
-                            : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
-                            : (long?)0) ?? 0L
+                    ProjectId = g.Key,
+                    TotalFilamentWeightMg = (long?)g.Sum(x =>
+                        x.AmountMg > 0 ? (long?)x.AmountMg
+                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
+                        : (long?)0) ?? 0L
                 })
                 .AsNoTracking()
                 .ToListAsync();
 
-            var projectSortKeys = rawProjectSortKeys.Select(p => new FeedSortItem
+            var projectFilamentLookup = projectFilamentTotals
+                .Where(x => x.ProjectId.HasValue)
+                .ToDictionary(x => x.ProjectId!.Value, x => x.TotalFilamentWeightMg);
+
+            var projectSortKeys = projectList.Select(p => new FeedSortItem
             {
                 Id = p.Id.ToString(),
                 Type = "project",
                 SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Name,
-                TotalFilamentWeightMg = p.TotalFilamentWeightMg
+                TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var pw) ? pw : 0L
             }).ToList();
 
-            var rawStandaloneSortKeys = await filteredPrintQuery
+            // Standalone prints: same split to avoid correlated subquery per row.
+            var standalonePrintList = await filteredPrintQuery
                 .Where(p => p.ProjectId == null)
-                .Select(p => new
+                .Select(p => new { p.Id, p.StartDate, p.CreatedDate, p.Title })
+                .AsNoTracking()
+                .ToListAsync();
+
+            var standaloneFilamentTotals = await _context.PrintFilament
+                .Join(
+                    filteredPrintQuery.Where(p => p.ProjectId == null),
+                    pf => pf.PrintId, pr => pr.Id,
+                    (pf, pr) => new { pr.Id, pf.AmountMg, pf.EstimatedAmountMg })
+                .GroupBy(x => x.Id)
+                .Select(g => new
                 {
-                    p.Id,
-                    p.StartDate,
-                    p.CreatedDate,
-                    p.Title,
-                    TotalFilamentWeightMg = (long?)p.FilamentUsage
-                        .Sum(pf =>
-                            pf.AmountMg > 0 ? (long?)pf.AmountMg
-                            : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
-                            : (long?)0) ?? 0L
+                    PrintId = g.Key,
+                    TotalFilamentWeightMg = (long?)g.Sum(x =>
+                        x.AmountMg > 0 ? (long?)x.AmountMg
+                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
+                        : (long?)0) ?? 0L
                 })
                 .AsNoTracking()
                 .ToListAsync();
 
-            var standaloneSortKeys = rawStandaloneSortKeys.Select(p => new FeedSortItem
+            var standaloneFilamentLookup = standaloneFilamentTotals
+                .ToDictionary(x => x.PrintId, x => x.TotalFilamentWeightMg);
+
+            var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
             {
                 Id = p.Id.ToString(),
                 Type = "print",
                 SortDate = p.StartDate
                     ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Title,
-                TotalFilamentWeightMg = p.TotalFilamentWeightMg
+                TotalFilamentWeightMg = standaloneFilamentLookup.TryGetValue(p.Id, out var spw) ? spw : 0L
             }).ToList();
 
             // ── Phase 4: Merge, sort, paginate the lightweight keys ───────────────────
