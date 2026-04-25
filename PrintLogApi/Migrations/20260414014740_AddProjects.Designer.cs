@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20260414014740_AddProjects")]
+    partial class AddProjects
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1295,7 +1298,6 @@ namespace PrintLogApi.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(5000)
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
@@ -1331,11 +1333,6 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_Projects_CreatedById_CreatedDate");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById", "CreatedDate"), new[] { "Id", "Name", "Status", "ViewStatus", "Reference" });
-
-                    b.HasIndex("CreatedById", "UpdatedDate")
-                        .HasDatabaseName("IX_Projects_CreatedById_UpdatedDate");
-
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById", "UpdatedDate"), new[] { "Id", "Name", "Status", "ViewStatus", "Reference" });
 
                     b.ToTable("Projects");
                 });

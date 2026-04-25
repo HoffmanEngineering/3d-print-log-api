@@ -89,5 +89,8 @@ namespace PrintLogApi.Models
         public PrintStatus Status { get; set; }
 
         public PrintViewStatus ViewStatus { get; set; }
+
+        public Guid? ProjectId { get; set; }
+        public Project Project { get; set; }
     }
 }

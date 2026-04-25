@@ -86,6 +86,7 @@ namespace PrintLogApi.Controllers
         /// <param name="filterByFilamentIds">Optionally filter by specific filament ids.</param>
         /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
         /// <param name="userId">Optionally search for public</param>
+        /// <param name="filterByProjectId">Optionally filter prints belonging to a specific project.</param>
         /// <returns>A Paged List of Print Summaries matching the search criteria.</returns>
         /// <response code="200">A Paged List of Print Summaries matching the search criteria.</response>
         /// <response code="400">Returned if no user is logged in, and no userId is provided.</response>
@@ -100,7 +101,8 @@ namespace PrintLogApi.Controllers
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
             [FromQuery] IEnumerable<Guid> filterByFilamentIds,
             [FromQuery] Print.PrintStatus? filterByStatus,
-            [FromQuery] long? userId)
+            [FromQuery] long? userId,
+            [FromQuery] Guid? filterByProjectId = null)
         {
 
             long? currentUserId = User.GetUserId();
@@ -112,15 +114,15 @@ namespace PrintLogApi.Controllers
 
             var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
-            var cacheKey = GenerateCacheKey(targetUserId, version, pagingRequest, searchText,
-                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus);
+            var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
+                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus, filterByProjectId);
 
             if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
             {
                 return cachedResult;
             }
 
-            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId);
+            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId, filterByProjectId);
 
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(EstimateCacheSize(result))
@@ -158,13 +160,41 @@ namespace PrintLogApi.Controllers
         
 
         /// <summary>
+        /// Returns a chronologically interleaved list of project rows and standalone print rows for the current user,
+        /// with optional filtering and sorting.
+        /// </summary>
+        [HttpGet("grouped")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<PagedList<GroupedFeedItemDto>>> GetGrouped(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery, MaxLength(50)] string searchText = null,
+            [FromQuery] IEnumerable<long> filterByPrinterIds = null,
+            [FromQuery] IEnumerable<Guid> filterByFilamentIds = null,
+            [FromQuery] Print.PrintStatus? filterByStatus = null,
+            [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest = null)
+        {
+            var userId = User.GetUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+
+            var result = await _printService.GetGroupedFeedAsync(
+                pageNumber, pageSize, userId.Value,
+                searchText, filterByPrinterIds, filterByFilamentIds,
+                filterByStatus, sortRequest);
+
+            return Ok(result);
+        }
+
+        /// <summary>
         ///     Get a print's detailed information by print id.
         /// </summary>
         /// <param name="id">The id of a print to query</param>
         /// <returns></returns>
         /// <response code="200">Returns the Print's Detailed information.</response>
         /// <response code="403">
-        ///     Returned when the current user (authenticated or not) cannot access the requested print id. 
+        ///     Returned when the current user (authenticated or not) cannot access the requested print id.
         ///     Normally when the print is marked as private, and the current user cannot access it.
         /// </response>
         /// <response code="404">Returned when a print with that ID does not exist.</response>
@@ -1047,12 +1077,13 @@ namespace PrintLogApi.Controllers
         /// <summary>
         /// Generates a unique cache key for print summary queries based on user and query parameters.
         /// </summary>
-        private string GenerateCacheKey(long userId, string version,
+        private string GenerateCacheKey(long userId, long? currentUserId, string version,
                                         PagedRequest pagingRequest, string searchText,
                                         IEnumerable<long> filterByPrinterIds,
                                         IEnumerable<Guid> filterByFilamentIds,
                                         SortRequest<PrintSummarySortColumn> sortRequest,
-                                        Print.PrintStatus? filterByStatus)
+                                        Print.PrintStatus? filterByStatus,
+                                        Guid? filterByProjectId = null)
         {
             var printerIds = filterByPrinterIds?.Any() == true
                 ? string.Join(",", filterByPrinterIds.OrderBy(x => x))
@@ -1062,13 +1093,16 @@ namespace PrintLogApi.Controllers
                 ? string.Join(",", filterByFilamentIds.OrderBy(x => x))
                 : "none";
 
-            return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
+            var viewerKey = currentUserId.HasValue ? currentUserId.Value.ToString() : "anon";
+
+            return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_viewer{viewerKey}_v{version}_" +
                    $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
                    $"q{searchText ?? "none"}_" +
                    $"pr{printerIds}_" +
                    $"fl{filamentIds}_" +
                    $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
-                   $"fs{filterByStatus}";
+                   $"fs{filterByStatus}_" +
+                   $"fp{filterByProjectId}";
         }
 
         /// <summary>

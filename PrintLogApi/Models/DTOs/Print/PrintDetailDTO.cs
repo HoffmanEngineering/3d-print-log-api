@@ -49,6 +49,8 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public PrintViewStatus ViewStatus { get; set; }
 
+        public Guid? ProjectId { get; set; }
+
         public ICollection<PrintImageDto> Images { get; set; }
 
         public ICollection<CommentDetailDto> Comments { get; set; }

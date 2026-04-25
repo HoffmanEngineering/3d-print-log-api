@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Project;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -24,6 +25,25 @@ namespace PrintLogApi.IntegrationTests.Controllers
         {
             _factory = factory;
             _httpClient = factory.CreateClient();
+        }
+
+        /// <summary>
+        /// Helper: Creates a project and returns its detail.
+        /// </summary>
+        private async Task<ProjectDetailDto> CreateProjectAsync(string name = "Helper Project")
+        {
+            var dto = new AddProjectDto
+            {
+                Name = name,
+                Status = Project.ProjectStatus.InProgress,
+                ViewStatus = Project.ProjectViewStatus.Private
+            };
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Projects");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(dto);
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<ProjectDetailDto>();
         }
 
         /// <summary>
@@ -1730,6 +1750,70 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task PostPrint_WithNewProjectName_CreatesProjectAndAssignsPrint()
+        {
+            var dto = new
+            {
+                title = "Voron Part 1",
+                printerId = IntegrationTestSeeder.TestPrinterId,
+                status = 3, // Success
+                viewStatus = 3, // Private
+                allowComments = false,
+                filamentUsage = Array.Empty<object>(),
+                filamentType = "",
+                notes = "",
+                url = "",
+                fileName = "",
+                newProjectName = "My Voron Build"
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(dto);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            Assert.NotNull(result.ProjectId);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_FilterByProjectId_ReturnsPrintsInProject()
+        {
+            // Create project
+            var projectDto = new { name = "Filter Test Project", status = 1, viewStatus = 3 };
+            var projReq = new HttpRequestMessage(HttpMethod.Post, "/api/Projects");
+            projReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            projReq.Content = JsonContent.Create(projectDto);
+            var projResp = await _httpClient.SendAsync(projReq);
+            var project = await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+
+            // Create print assigned to project
+            var printDto = new
+            {
+                title = "Filtered Print",
+                printerId = IntegrationTestSeeder.TestPrinterId,
+                status = 3, viewStatus = 3, allowComments = false,
+                filamentUsage = Array.Empty<object>(), filamentType = "", notes = "", url = "", fileName = "",
+                projectId = project.Id
+            };
+            var printReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            printReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            printReq.Content = JsonContent.Create(printDto);
+            await _httpClient.SendAsync(printReq);
+
+            // Filter by project
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/summary?PageNumber=1&PageSize=10&filterByProjectId={project.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            Assert.All(result.Items, item => Assert.Equal(project.Id, item.ProjectId));
+        }
+
+        [Fact]
         public async Task ConfirmAndDeleteFile_HappyPath_RequiresProSubscription()
         {
             // NOTE: A full happy-path confirm+delete test is not feasible with the current test seed
@@ -1749,6 +1833,200 @@ namespace PrintLogApi.IntegrationTests.Controllers
             //
             // This test is intentionally a no-op placeholder documenting the infrastructure gap.
             Assert.True(true, "See comment: happy-path requires a Pro-subscribed user in the test seed.");
+        }
+
+        #endregion
+
+        #region Grouped Feed
+
+        [Fact]
+        public async Task GetPrintsGrouped_ReturnsMixedFeed()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            Assert.NotNull(result);
+            Assert.All(result.Items, item => Assert.Contains(item.Type, new[] { "project", "print" }));
+        }
+
+        #endregion
+
+        #region GetGrouped Tests
+
+        [Fact]
+        public async Task GetGrouped_Authenticated_ReturnsSuccess()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetGrouped_NotAuthenticated_ReturnsUnauthorized()
+        {
+            var response = await _httpClient.GetAsync("/api/Prints/grouped?pageNumber=1&pageSize=10");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetGrouped_ReturnsPaged_WithCorrectStructure()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.Paging);
+            Assert.Equal(1, result.Paging.CurrentPage);
+            Assert.True(result.Paging.TotalCount > 0, "Authenticated user should see their own seeded prints");
+            Assert.NotNull(result.Items);
+        }
+
+        [Fact]
+        public async Task GetGrouped_StandalonePrints_ReturnPrintTypeItems()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Contains(result.Items, item => item.Type == "print");
+            var printItem = result.Items.First(item => item.Type == "print");
+            Assert.NotNull(printItem.Print);
+            Assert.True(printItem.Print.Id > 0);
+        }
+
+        [Fact]
+        public async Task GetGrouped_WithProject_ReturnsProjectTypeItem()
+        {
+            var project = await CreateProjectAsync("Grouped Feed Test Project");
+            var printRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            printRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            printRequest.Content = JsonContent.Create(new AddPrintDTO
+            {
+                Title = "Assigned Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Public,
+                AllowComments = false,
+                ProjectId = project.Id
+            });
+            var printResp = await _httpClient.SendAsync(printRequest);
+            printResp.EnsureSuccessStatusCode();
+
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Contains(result.Items, item => item.Type == "project");
+            var projectItem = result.Items.First(item => item.Type == "project" && item.ProjectId == project.Id);
+            Assert.Equal(project.Name, projectItem.ProjectName);
+            Assert.Equal(1, projectItem.PrintCount);
+        }
+
+        [Fact]
+        public async Task GetGrouped_Pagination_SecondPageHasFewerOrEqualItems()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=2&pageSize=2");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Paging.CurrentPage);
+            Assert.True(result.Paging.TotalCount > 2, "Need more than 2 items to meaningfully test page 2");
+            Assert.True(result.Items.Count <= 2);
+        }
+
+        [Fact]
+        public async Task GetGrouped_SortByTitle_ReturnsItemsInOrder()
+        {
+            var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                "/api/Prints/grouped?pageNumber=1&pageSize=25&sortColumn=Title&sortDirection=Asc");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            for (int i = 0; i < result.Items.Count - 1; i++)
+            {
+                var current = result.Items[i].Type == "project"
+                    ? result.Items[i].ProjectName
+                    : result.Items[i].Print?.Title;
+                var next = result.Items[i + 1].Type == "project"
+                    ? result.Items[i + 1].ProjectName
+                    : result.Items[i + 1].Print?.Title;
+                if (current != null && next != null)
+                    Assert.True(string.Compare(current, next, StringComparison.OrdinalIgnoreCase) <= 0);
+            }
+        }
+
+        [Fact]
+        public async Task GetGrouped_WithStatusFilter_ProjectShowsFilteredPrintCount()
+        {
+            // Create a project with two prints: one Success, one Pending.
+            var project = await CreateProjectAsync("Filter Test Project");
+
+            var successPrintReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            successPrintReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            successPrintReq.Content = JsonContent.Create(new AddPrintDTO
+            {
+                Title = "Success Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                AllowComments = false,
+                ProjectId = project.Id
+            });
+            (await _httpClient.SendAsync(successPrintReq)).EnsureSuccessStatusCode();
+
+            var pendingPrintReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            pendingPrintReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            pendingPrintReq.Content = JsonContent.Create(new AddPrintDTO
+            {
+                Title = "Pending Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = Print.PrintStatus.Pending,
+                ViewStatus = Print.PrintViewStatus.Private,
+                AllowComments = false,
+                ProjectId = project.Id
+            });
+            (await _httpClient.SendAsync(pendingPrintReq)).EnsureSuccessStatusCode();
+
+            // Filter by Success status — only the one Success print matches.
+            var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"/api/Prints/grouped?pageNumber=1&pageSize=25&filterByStatus={(int)Print.PrintStatus.Success}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+
+            Assert.NotNull(result);
+            // The project should appear because it has at least one print matching the filter.
+            var projectItem = result.Items.FirstOrDefault(item => item.Type == "project" && item.ProjectId == project.Id);
+            Assert.NotNull(projectItem);
+            // FilteredPrintCount is non-null when filters are active, and equals the number of matching prints.
+            Assert.NotNull(projectItem.FilteredPrintCount);
+            Assert.Equal(1, projectItem.FilteredPrintCount);
+            // PrintCount reflects all prints in the project regardless of filter.
+            Assert.Equal(2, projectItem.PrintCount);
         }
 
         #endregion
