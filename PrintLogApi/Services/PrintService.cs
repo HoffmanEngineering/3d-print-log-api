@@ -964,20 +964,135 @@ namespace PrintLogApi.Services
                 .Select(x => long.Parse(x.Id))
                 .ToList();
 
-            var pageProjects = pageProjectGuids.Count > 0
-                ? await _context.Projects
+            // — Project detail via targeted projections (avoids loading all prints per project) —
+            Dictionary<Guid, Project> projectEntityLookup;
+            Dictionary<Guid, (int PrintCount, int TotalPrintTime, int TotalEstPrintTime)> projectPrintStats;
+            Dictionary<Guid, int> projectDefaultImageLookup;
+            Dictionary<Guid, List<PrintFilamentSummaryDto>> projectFilamentUsageLookup;
+            Dictionary<Guid, List<PrinterSummary>> projectPrinterLookup;
+
+            if (pageProjectGuids.Count > 0)
+            {
+                var projectEntities = await _context.Projects
                     .Where(p => pageProjectGuids.Contains(p.Id))
-                    .Include(p => p.Images)
-                    .Include(p => p.Prints)
-                        .ThenInclude(pr => pr.Printer)
-                    .Include(p => p.Prints)
-                        .ThenInclude(pr => pr.FilamentUsage)
-                            .ThenInclude(pf => pf.Filament)
-                                .ThenInclude(f => f.MaterialCategory)
                     .AsNoTracking()
-                    .AsSplitQuery()
-                    .ToListAsync()
-                : new List<Project>();
+                    .ToListAsync();
+                projectEntityLookup = projectEntities.ToDictionary(p => p.Id);
+
+                var printStatsRows = await _context.Prints
+                    .Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value))
+                    .GroupBy(pr => pr.ProjectId)
+                    .Select(g => new
+                    {
+                        ProjectId = g.Key,
+                        PrintCount = g.Count(),
+                        TotalPrintTime = g.Sum(pr =>
+                            pr.PrintTimeInSeconds != null && pr.PrintTimeInSeconds > 0
+                                ? pr.PrintTimeInSeconds.Value
+                                : (pr.EstimatedPrintTimeInSeconds ?? 0)),
+                        TotalEstPrintTime = g.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0)
+                    })
+                    .AsNoTracking()
+                    .ToListAsync();
+                projectPrintStats = printStatsRows
+                    .Where(r => r.ProjectId.HasValue)
+                    .ToDictionary(
+                        r => r.ProjectId.Value,
+                        r => (r.PrintCount, r.TotalPrintTime, r.TotalEstPrintTime));
+
+                var defaultImageRows = await _context.ProjectImages
+                    .Where(i => pageProjectGuids.Contains(i.ProjectId) && i.IsDefault)
+                    .Select(i => new { i.ProjectId, i.Id })
+                    .AsNoTracking()
+                    .ToListAsync();
+                projectDefaultImageLookup = defaultImageRows.ToDictionary(i => i.ProjectId, i => i.Id);
+
+                var filamentUsageRows = await _context.PrintFilament
+                    .Join(
+                        _context.Prints.Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value)),
+                        pf => pf.PrintId, pr => pr.Id,
+                        (pf, pr) => new { pf.FilamentId, pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
+                    .Where(x => x.FilamentId != null)
+                    .GroupBy(x => new { x.ProjectId, x.FilamentId })
+                    .Select(g => new
+                    {
+                        ProjectId = g.Key.ProjectId,
+                        FilamentId = g.Key.FilamentId,
+                        TotalAmountMg = (long?)g.Sum(x =>
+                            x.AmountMg > 0 ? (long?)x.AmountMg
+                            : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
+                            : (long?)0) ?? 0L
+                    })
+                    .AsNoTracking()
+                    .ToListAsync();
+
+                var uniqueFilamentIds = filamentUsageRows
+                    .Where(r => r.FilamentId.HasValue)
+                    .Select(r => r.FilamentId.Value)
+                    .Distinct()
+                    .ToList();
+                var filamentEntities = uniqueFilamentIds.Count > 0
+                    ? await _context.Filaments
+                        .Where(f => uniqueFilamentIds.Contains(f.Id))
+                        .Include(f => f.MaterialCategory)
+                        .AsNoTracking()
+                        .ToListAsync()
+                    : new List<Filament>();
+                var filamentEntityLookup = filamentEntities.ToDictionary(f => f.Id);
+                projectFilamentUsageLookup = filamentUsageRows
+                    .Where(r => r.ProjectId.HasValue && r.FilamentId.HasValue)
+                    .GroupBy(r => r.ProjectId.Value)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(r => new PrintFilamentSummaryDto
+                        {
+                            Id = r.FilamentId.Value,
+                            Filament = filamentEntityLookup.TryGetValue(r.FilamentId.Value, out var fil)
+                                ? _mapper.Map<FilamentSummaryDto>(fil)
+                                : null,
+                            AmountMg = (int?)r.TotalAmountMg,
+                            Source = PrintFilament.SourceMeasurement.Weight,
+                        }).ToList());
+
+                var printerMapRows = await _context.Prints
+                    .Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value))
+                    .Select(pr => new { pr.ProjectId, pr.PrinterId })
+                    .Distinct()
+                    .AsNoTracking()
+                    .ToListAsync();
+                var uniquePrinterIds = printerMapRows
+                    .Where(r => r.ProjectId.HasValue)
+                    .Select(r => r.PrinterId)
+                    .Distinct()
+                    .ToList();
+                var printerEntities = uniquePrinterIds.Count > 0
+                    ? await _context.Printers
+                        .Where(pr => uniquePrinterIds.Contains(pr.Id))
+                        .Include(pr => pr.Category)
+                            .ThenInclude(c => c.MaterialCategory)
+                        .AsNoTracking()
+                        .ToListAsync()
+                    : new List<Printer>();
+                var printerDtoLookup = printerEntities.ToDictionary(
+                    pr => pr.Id,
+                    pr => _mapper.Map<PrinterSummary>(pr));
+                projectPrinterLookup = printerMapRows
+                    .Where(r => r.ProjectId.HasValue)
+                    .GroupBy(r => r.ProjectId.Value)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(r => printerDtoLookup.TryGetValue(r.PrinterId, out var ps) ? ps : null)
+                              .Where(ps => ps != null)
+                              .ToList());
+            }
+            else
+            {
+                projectEntityLookup = new Dictionary<Guid, Project>();
+                projectPrintStats = new Dictionary<Guid, (int, int, int)>();
+                projectDefaultImageLookup = new Dictionary<Guid, int>();
+                projectFilamentUsageLookup = new Dictionary<Guid, List<PrintFilamentSummaryDto>>();
+                projectPrinterLookup = new Dictionary<Guid, List<PrinterSummary>>();
+            }
 
             var pageStandalonePrints = pagePrintIds.Count > 0
                 ? await _context.Prints
@@ -995,44 +1110,16 @@ namespace PrintLogApi.Services
                 : new List<Print>();
 
             // ── Phase 6: Build DTOs in page-key order ─────────────────────────────────
-            var projectLookup = pageProjects.ToDictionary(p => p.Id);
             var printLookup = pageStandalonePrints.ToDictionary(p => p.Id);
 
             var pagedItems = pagedKeys.Select(key =>
             {
                 if (key.Type == "project")
                 {
-                    if (!projectLookup.TryGetValue(Guid.Parse(key.Id), out var p))
+                    if (!projectEntityLookup.TryGetValue(Guid.Parse(key.Id), out var p))
                         return null;
 
-                    var aggregatedFilament = p.Prints
-                        .SelectMany(pr => pr.FilamentUsage)
-                        .GroupBy(pf => pf.FilamentId)
-                        .Select(g =>
-                        {
-                            var first = g.First();
-                            var totalAmountMg = g.Sum(pf =>
-                                pf.AmountMg.HasValue && pf.AmountMg > 0 ? (long)pf.AmountMg.Value
-                                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (long)pf.EstimatedAmountMg.Value
-                                : 0L);
-                            return new PrintFilamentSummaryDto
-                            {
-                                Id = first.Id,
-                                Filament = _mapper.Map<FilamentSummaryDto>(first.Filament),
-                                AmountMg = (int?)totalAmountMg,
-                                Source = PrintFilament.SourceMeasurement.Weight,
-                            };
-                        })
-                        .ToList();
-
-                    var distinctPrinters = p.Prints
-                        .Select(pr => pr.Printer)
-                        .Where(pr => pr != null)
-                        .GroupBy(pr => pr.Id)
-                        .Select(g => g.First())
-                        .Select(pr => _mapper.Map<PrinterSummary>(pr))
-                        .ToList();
-
+                    projectPrintStats.TryGetValue(p.Id, out var stats);
                     filteredGroupLookup.TryGetValue(p.Id, out var filteredCount);
 
                     return new GroupedFeedItemDto
@@ -1043,20 +1130,14 @@ namespace PrintLogApi.Services
                         ProjectName = p.Name,
                         ProjectReference = p.Reference,
                         ProjectStatus = p.Status,
-                        PrintCount = p.Prints.Count,
+                        PrintCount = stats.PrintCount,
                         FilteredPrintCount = hasFilters ? (int?)filteredCount : null,
-                        TotalPrintTimeInSeconds = p.Prints.Sum(pr =>
-                            (pr.PrintTimeInSeconds ?? 0) > 0
-                                ? pr.PrintTimeInSeconds.Value
-                                : (pr.EstimatedPrintTimeInSeconds ?? 0)),
-                        TotalEstimatedPrintTimeInSeconds = p.Prints.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0),
-                        TotalFilamentWeightMg = p.Prints.SelectMany(pr => pr.FilamentUsage)
-                            .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0 ? (long)pf.AmountMg.Value
-                                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (long)pf.EstimatedAmountMg.Value
-                                : 0L),
-                        DefaultProjectImageId = p.Images.Where(i => i.IsDefault).Select(i => i.Id).FirstOrDefault(),
-                        FilamentUsage = aggregatedFilament,
-                        Printers = distinctPrinters,
+                        TotalPrintTimeInSeconds = stats.TotalPrintTime,
+                        TotalEstimatedPrintTimeInSeconds = stats.TotalEstPrintTime,
+                        TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var fw) ? fw : 0L,
+                        DefaultProjectImageId = projectDefaultImageLookup.TryGetValue(p.Id, out var imgId) ? imgId : 0,
+                        FilamentUsage = projectFilamentUsageLookup.TryGetValue(p.Id, out var fu) ? fu : new List<PrintFilamentSummaryDto>(),
+                        Printers = projectPrinterLookup.TryGetValue(p.Id, out var printers) ? printers : new List<PrinterSummary>(),
                     };
                 }
                 else
