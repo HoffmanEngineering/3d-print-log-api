@@ -84,7 +84,7 @@ Version-based cache invalidation using `ICacheVersionService` (singleton):
 ### Database
 - SQL Server with connection retry (5 retries, 30s max delay)
 - Split queries used for complex operations (see PR 229, 235)
-- Migrations auto-applied on startup
+- Migrations auto-applied on startup in `Development` and `E2ETesting`; Production applies migrations via the pipeline (see Deployment)
 
 ## Integration Testing
 
@@ -136,3 +136,17 @@ Per `.editorconfig`:
 ## Deployment
 
 Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on master branch commits.
+
+The pipeline has two stages:
+
+1. **Build** — builds, tests, publishes the app, generates a SQL migration script artifact for review, and builds an `efbundle` for applying migrations.
+2. **Deploy** — waits for manual approval (email sent to csh.hoffman@gmail.com), then runs the `efbundle` against the production database before deploying the app.
+
+The `migration-script` artifact is available in the pipeline run's Artifacts panel and should be reviewed before approving the deployment.
+
+To generate a migration script manually (e.g. for emergency patching):
+```bash
+dotnet ef migrations script <LastAppliedMigrationId> --project PrintLogApi --output migrations.sql --idempotent
+```
+
+New migrations must be **backwards compatible** (additive only) since the old app version runs against the database while migrations execute.

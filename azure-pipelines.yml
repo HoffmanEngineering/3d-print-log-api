@@ -79,6 +79,7 @@ stages:
               artifact: migration-script
 
           - script: |
+              dotnet restore PrintLogApi/PrintLogApi.csproj --runtime linux-x64
               dotnet ef migrations bundle --project PrintLogApi --runtime linux-x64 \
                 --output $(Build.ArtifactStagingDirectory)/efbundle
             displayName: Build migrations bundle

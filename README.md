@@ -3,8 +3,26 @@
 ## EF Migrations
 
 ```bash
+# Add a new migration
 dotnet ef migrations add <MigrationName> --project=PrintLogApi
+
+# Apply locally (Development/E2ETesting only — Production uses the pipeline)
 dotnet ef database update
+```
+
+### Production Migrations
+
+Production migrations are applied automatically by the Azure DevOps pipeline via `efbundle`. The pipeline:
+1. Queries the database to find the last applied migration
+2. Generates a targeted SQL script artifact you can download and review
+3. Pauses for manual approval before applying
+4. Runs `efbundle` against the production database, then deploys the app
+
+New migrations must be **backwards compatible** (additive only — new nullable columns, new tables, new indexes) since the running app is live against the database while migrations execute.
+
+To generate a script manually for a specific range:
+```bash
+dotnet ef migrations script <LastAppliedMigrationId> --project PrintLogApi --output migrations.sql --idempotent
 ```
 
 To get user ID in the controllers:
