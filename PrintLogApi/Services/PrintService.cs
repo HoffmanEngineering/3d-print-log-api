@@ -829,52 +829,50 @@ namespace PrintLogApi.Services
                     p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
             }
 
-            // ── Phase 2: Determine qualifying projects + filtered print counts ─────────
-            var filteredProjectGroups = await filteredPrintQuery
-                .Where(p => p.ProjectId != null)
-                .GroupBy(p => p.ProjectId)
-                .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
-                .ToListAsync();
-
-            var matchingProjectIds = filteredProjectGroups
-                .Where(g => g.ProjectId.HasValue)
-                .Select(x => x.ProjectId.Value)
-                .ToList();
-
-            // ── Phase 3: Lightweight sort-key queries (no navigation loads) ───────────
-            List<FeedSortItem> projectSortKeys;
-            if (matchingProjectIds.Count == 0)
+            // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
+            Dictionary<Guid, int> filteredGroupLookup;
+            if (hasFilters)
             {
-                projectSortKeys = new List<FeedSortItem>();
+                var groups = await filteredPrintQuery
+                    .Where(p => p.ProjectId != null)
+                    .GroupBy(p => p.ProjectId)
+                    .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
+                    .ToListAsync();
+                filteredGroupLookup = groups
+                    .Where(g => g.ProjectId.HasValue)
+                    .ToDictionary(g => g.ProjectId.Value, g => g.FilteredPrintCount);
             }
             else
             {
-                var rawProjectSortKeys = await _context.Projects
-                    .Where(p => matchingProjectIds.Contains(p.Id))
-                    .Select(p => new
-                    {
-                        p.Id,
-                        p.CreatedDate,
-                        p.Name,
-                        // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
-                        TotalFilamentWeightMg = (long?)p.Prints.SelectMany(pr => pr.FilamentUsage)
-                            .Sum(pf =>
-                                pf.AmountMg > 0 ? (long?)pf.AmountMg
-                                : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
-                                : (long?)0) ?? 0L
-                    })
-                    .AsNoTracking()
-                    .ToListAsync();
-
-                projectSortKeys = rawProjectSortKeys.Select(p => new FeedSortItem
-                {
-                    Id = p.Id.ToString(),
-                    Type = "project",
-                    SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
-                    SortTitle = p.Name,
-                    TotalFilamentWeightMg = p.TotalFilamentWeightMg
-                }).ToList();
+                filteredGroupLookup = new Dictionary<Guid, int>();
             }
+
+            // ── Phase 3: Lightweight sort-key queries (no navigation loads) ───────────
+            var rawProjectSortKeys = await _context.Projects
+                .Where(p => p.CreatedById == userId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.CreatedDate,
+                    p.Name,
+                    // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
+                    TotalFilamentWeightMg = (long?)p.Prints.SelectMany(pr => pr.FilamentUsage)
+                        .Sum(pf =>
+                            pf.AmountMg > 0 ? (long?)pf.AmountMg
+                            : pf.EstimatedAmountMg > 0 ? (long?)pf.EstimatedAmountMg
+                            : (long?)0) ?? 0L
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            var projectSortKeys = rawProjectSortKeys.Select(p => new FeedSortItem
+            {
+                Id = p.Id.ToString(),
+                Type = "project",
+                SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
+                SortTitle = p.Name,
+                TotalFilamentWeightMg = p.TotalFilamentWeightMg
+            }).ToList();
 
             var rawStandaloneSortKeys = await filteredPrintQuery
                 .Where(p => p.ProjectId == null)
@@ -975,9 +973,6 @@ namespace PrintLogApi.Services
                 : new List<Print>();
 
             // ── Phase 6: Build DTOs in page-key order ─────────────────────────────────
-            var filteredGroupLookup = filteredProjectGroups
-                .Where(g => g.ProjectId.HasValue)
-                .ToDictionary(g => g.ProjectId.Value, g => g.FilteredPrintCount);
             var projectLookup = pageProjects.ToDictionary(p => p.Id);
             var printLookup = pageStandalonePrints.ToDictionary(p => p.Id);
 
@@ -1060,3 +1055,4 @@ namespace PrintLogApi.Services
         }
     }
 }
+
