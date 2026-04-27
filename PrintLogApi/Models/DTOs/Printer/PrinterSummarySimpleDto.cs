@@ -19,6 +19,8 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         public bool IsActive { get; set; }
 
+        public double? WattageW { get; set; }
+
         public PrinterCategoryDto Category { get; set; }
 
         public ICollection<PrinterFilamentForSummaryDto> LoadedFilaments { get; set; }

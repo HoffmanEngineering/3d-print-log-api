@@ -44,5 +44,7 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         public bool? HasHeatedBed { get; set; }
         public bool? HasHeatedChamber { get; set; }
+
+        public double? WattageW { get; set; }
     }
 }
