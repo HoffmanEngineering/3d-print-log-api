@@ -20,6 +20,8 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         public double? WattageW { get; set; }
 
+        public long? PrintTimeInSeconds { get; set; }
+
         public PrinterCategoryDto Category { get; set; }
     }
 }

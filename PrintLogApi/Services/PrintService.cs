@@ -1056,8 +1056,13 @@ namespace PrintLogApi.Services
 
                 var printerMapRows = await _context.Prints
                     .Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value))
-                    .Select(pr => new { pr.ProjectId, pr.PrinterId })
-                    .Distinct()
+                    .GroupBy(pr => new { pr.ProjectId, pr.PrinterId })
+                    .Select(g => new
+                    {
+                        g.Key.ProjectId,
+                        g.Key.PrinterId,
+                        PrintTimeInSeconds = (long)g.Sum(p => p.PrintTimeInSeconds ?? p.EstimatedPrintTimeInSeconds ?? 0)
+                    })
                     .AsNoTracking()
                     .ToListAsync();
                 var uniquePrinterIds = printerMapRows
@@ -1081,7 +1086,21 @@ namespace PrintLogApi.Services
                     .GroupBy(r => r.ProjectId.Value)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.Select(r => printerDtoLookup.TryGetValue(r.PrinterId, out var ps) ? ps : null)
+                        g => g.Select(r =>
+                              {
+                                  if (!printerDtoLookup.TryGetValue(r.PrinterId, out var ps)) return null;
+                                  return new PrinterSummary
+                                  {
+                                      Id = ps.Id,
+                                      Name = ps.Name,
+                                      Make = ps.Make,
+                                      Model = ps.Model,
+                                      IsActive = ps.IsActive,
+                                      WattageW = ps.WattageW,
+                                      Category = ps.Category,
+                                      PrintTimeInSeconds = r.PrintTimeInSeconds
+                                  };
+                              })
                               .Where(ps => ps != null)
                               .ToList());
             }
