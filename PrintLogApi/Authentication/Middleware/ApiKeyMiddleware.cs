@@ -1,6 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Principal;
@@ -12,29 +9,25 @@ namespace PrintLogApi.Authentication.Middleware
 {
     public class ApiKeyMiddleware
     {
+        private static readonly PathString _apiPath = new("/api");
         private readonly RequestDelegate _next;
 
         public ApiKeyMiddleware(RequestDelegate next)
         {
             _next = next;
         }
-        
+
         public async Task InvokeAsync(HttpContext context, IUserApiKeyService userApiKeyService)
         {
-            if (context.Request.Path.StartsWithSegments(new PathString("/api")))
+            if (context.Request.Path.StartsWithSegments(_apiPath))
             {
-                //Let's check if this is an API Call
-                if (context.Request.Headers.Keys.Contains("X-Api-Key", StringComparer.InvariantCultureIgnoreCase))
+                if (context.Request.Headers.TryGetValue("X-Api-Key", out var headerKey))
                 {
-                    // validate the supplied API key
-                    // Validate it
-                    var headerKey = context.Request.Headers["X-Api-Key"].FirstOrDefault();
                     await ValidateApiKey(context, _next, headerKey, userApiKeyService);
                 }
-                else if (context.Request.Query.Keys.Contains("api_key", StringComparer.InvariantCultureIgnoreCase))
+                else if (context.Request.Query.TryGetValue("api_key", out var queryKey))
                 {
-                    var queryStringKey = context.Request.Query["api_key"].FirstOrDefault();
-                    await ValidateApiKey(context, _next, queryStringKey, userApiKeyService);
+                    await ValidateApiKey(context, _next, queryKey, userApiKeyService);
                 }
                 else
                 {
@@ -46,42 +39,28 @@ namespace PrintLogApi.Authentication.Middleware
                 await _next.Invoke(context);
             }
         }
+
         private async Task ValidateApiKey(HttpContext context, RequestDelegate next, string key, IUserApiKeyService userApiKeyService)
         {
-            // validate it here
-            bool valid;
-
-            long userId = -1;
+            long userId;
             try
             {
                 userId = await userApiKeyService.GetUserIdByApiKey(key);
-                valid = true;
             }
             catch (ApiKeyIsNotValidException)
             {
-                valid = false;
-            }
-
-            if (!valid)
-            {
                 context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
                 await context.Response.WriteAsync("Invalid API Key");
+                return;
             }
-            else
-            {
-                var identity = new GenericIdentity("API");
-                
 
-                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId.ToString()));
+            var identity = new GenericIdentity("API");
+            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId.ToString()));
+            context.User = new GenericPrincipal(identity, new[] { "ApiUser" });
 
-                var principal = new GenericPrincipal(identity, new[] { "ApiUser" });
+            await userApiKeyService.UpdateApiKeyLastUsed(key);
 
-                context.User = principal;
-
-                await userApiKeyService.UpdateApiKeyLastUsed(key);
-
-                await next(context);
-            }
+            await next(context);
         }
     }
 }
