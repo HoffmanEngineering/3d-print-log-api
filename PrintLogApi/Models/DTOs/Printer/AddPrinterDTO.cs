@@ -55,5 +55,8 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         public bool? HasHeatedBed { get; set; }
         public bool? HasHeatedChamber { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Only positive number allowed")]
+        public double? WattageW { get; set; }
     }
 }

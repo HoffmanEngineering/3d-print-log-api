@@ -133,6 +133,24 @@ Per `.editorconfig`:
 - System usings sorted first
 - PascalCase for constants
 
+## Pull Requests
+
+This project uses **Azure DevOps** (not GitHub). Use the Azure CLI to create PRs — `gh` is not available.
+
+```bash
+# Create a pull request
+az repos pr create \
+  --title "<title>" \
+  --description "<body>" \
+  --target-branch master \
+  --source-branch <branch-name>
+
+# List open PRs
+az repos pr list --status active
+```
+
+The remote URL is `https://hoffmanengineering.visualstudio.com/3D%20Print%20Log/_git/3D%20Print%20Log%20Api`.
+
 ## Deployment
 
 Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on master branch commits.
