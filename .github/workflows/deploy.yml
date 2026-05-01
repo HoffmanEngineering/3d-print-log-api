@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,8 +26,72 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
 
-      - name: Publish
+      - name: Publish app
         run: dotnet publish PrintLogApi/PrintLogApi.csproj --configuration Release --output ./publish
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: ./publish
+
+      - name: Generate migration SQL script
+        run: |
+          dotnet tool install --global dotnet-ef
+          LAST_MIGRATION=$(dotnet ef migrations list --project PrintLogApi \
+            --connection "$DB_CONNECTION_STRING" \
+            --prefix-output 2>/dev/null \
+            | grep '^data:' | sed 's/^data: //' | grep -v '(Pending)' | tail -1 | xargs)
+          echo "Last applied migration: $LAST_MIGRATION"
+          dotnet ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
+            --output migrations.sql --idempotent
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+
+      - name: Upload migration script artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-script
+          path: migrations.sql
+
+      - name: Build migrations bundle
+        run: |
+          dotnet restore PrintLogApi/PrintLogApi.csproj --runtime linux-x64
+          dotnet ef migrations bundle --project PrintLogApi --runtime linux-x64 \
+            --output ./efbundle
+
+      - name: Upload migrations bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrations-bundle
+          path: ./efbundle
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # Requires manual approval — configure required reviewers in repo Settings → Environments → production
+    # Reviewers receive a GitHub notification and can review the migration-script artifact before approving
+    environment: production
+
+    steps:
+      - name: Download migrations bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: migrations-bundle
+          path: ./migrations-bundle
+
+      - name: Download app artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: ./publish
+
+      - name: Run migrations
+        run: |
+          chmod +x ./migrations-bundle/efbundle
+          ./migrations-bundle/efbundle --connection "$DB_CONNECTION_STRING"
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
