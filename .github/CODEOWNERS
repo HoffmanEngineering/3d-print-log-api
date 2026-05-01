@@ -1,0 +1,6 @@
+# Maintainer review required for CI/CD and auth changes
+.github/workflows/   @ChristopherHoffman
+.github/CODEOWNERS   @ChristopherHoffman
+CLAUDE.md            @ChristopherHoffman
+PrintLogApi/Authentication/ @ChristopherHoffman
+PrintLogApi/Startup.cs      @ChristopherHoffman
