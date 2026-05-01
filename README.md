@@ -11,7 +11,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup.
 
 ## Tech Stack
 
-- ASP.NET Core (.NET 8)
+- ASP.NET Core (.NET 10)
 - Entity Framework Core + SQL Server
 - Auth0 (JWT Bearer authentication)
 - Azure Blob Storage (file storage)
