@@ -192,25 +192,40 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            var domain = $"https://{Configuration["Auth0:Domain"]}/";
-            services.AddAuthentication(options =>
+            if (Environment.IsDevelopment())
             {
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-            })
-            .AddJwtBearer(jwtOptions =>
-            {
-                jwtOptions.Authority = domain;
-                jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
-            });
-
-            services.AddAuthorization(options =>
-            {
-                options.AddPolicy("read:messages", policy =>
+                services.AddAuthentication(options =>
                 {
-                    policy.Requirements.Add(new HasScopeRequirement("read:messages", domain));
+                    options.DefaultAuthenticateScheme = "DevAuth";
+                    options.DefaultChallengeScheme = "DevAuth";
+                })
+                .AddScheme<AuthenticationSchemeOptions, DevAuthenticationHandler>("DevAuth", null);
+            }
+            else
+            {
+                var domain = $"https://{Configuration["Auth0:Domain"]}/";
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                })
+                .AddJwtBearer(jwtOptions =>
+                {
+                    jwtOptions.Authority = domain;
+                    jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
                 });
 
+                // Scope-based policy only applies outside Development (dev bypass token has no scopes)
+                services.AddAuthorization(options =>
+                {
+                    options.AddPolicy("read:messages", policy =>
+                        policy.Requirements.Add(new HasScopeRequirement("read:messages", domain)));
+                });
+            }
+
+            // These policies use custom requirements (not scope-based) and are needed in all environments
+            services.AddAuthorization(options =>
+            {
                 options.AddPolicy("ViewPrint", policy =>
                     policy.Requirements.Add(new PublicOrCreatorRequirement()));
 
@@ -220,7 +235,6 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             services.AddSingleton<IAuthorizationHandler, PrintViewStatusAuthorizationHandler>();
             services.AddSingleton<IAuthorizationHandler, UserProfileViewStatusAuthorizationHandler>();
-
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
