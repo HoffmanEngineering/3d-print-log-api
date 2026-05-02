@@ -3,11 +3,29 @@
 [![CI](https://github.com/HoffmanEngineering/3d-print-log-api/actions/workflows/ci.yml/badge.svg)](https://github.com/HoffmanEngineering/3d-print-log-api/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-The backend API powering [3D Print Log](https://3dprintlog.com) — a web application for tracking 3D prints, printers, and filaments.
+The backend API powering [3D Print Log](https://3dprintlog.com) — a web application for tracking 3D prints, printers, and filaments. Running in production at [api.3dprintlog.com/swagger](https://api.3dprintlog.com/swagger/index.html).
+
+## Features
+
+- **Prints** — log print jobs with duration, material usage, quality ratings, and images
+- **Printers** — manage your printer inventory with per-printer statistics
+- **Filaments** — track filament stock, usage, and costs
+- **Projects** — group related prints together with project-level image galleries
+- **Slicer integration** — import print settings directly from Cura, OrcaSlicer, PrusaSlicer, and Bambu Studio
+- **Printer webhooks** — automatic print logging via OctoPrint and Klipper/Moonraker integrations
+- **Electricity cost tracking** — record wattage per printer and calculate per-print power costs
+- **Dual authentication** — Auth0 JWT Bearer for the web app and API key (`X-Api-Key` header) for integrations
+- **Image uploads** — per-print and per-project image storage via Azure Blob Storage
+
+## API Documentation
+
+Explore the live API: [api.3dprintlog.com/swagger](https://api.3dprintlog.com/swagger/index.html)
 
 ## Getting Started
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, configuration, and running tests.
+
+The frontend lives at [HoffmanEngineering/3d-print-log-ui](https://github.com/HoffmanEngineering/3d-print-log-ui). Most feature work requires both running locally.
 
 ## Tech Stack
 
@@ -16,6 +34,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup.
 - Auth0 (JWT Bearer authentication)
 - Azure Blob Storage (file storage)
 - Stripe (subscription billing)
+
+## Infrastructure
+
+The production environment runs on Azure (App Service, SQL Server, Blob Storage). Infrastructure is manually managed — there is no Terraform or IaC setup.
+
+If your contribution requires infrastructure changes (new environment variables, Azure resource configuration, etc.), call this out explicitly in your PR description so the maintainer can coordinate the changes before the code ships.
 
 ## License
 

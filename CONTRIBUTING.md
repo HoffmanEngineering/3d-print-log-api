@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing!
 
+Most feature work spans both the API and the frontend — the UI repo is at [HoffmanEngineering/3d-print-log-ui](https://github.com/HoffmanEngineering/3d-print-log-ui).
+
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
@@ -56,6 +58,12 @@ No Auth0 account is required for local development. If you need to test the real
 dotnet test
 ```
 
+The test suite is integration tests backed by an in-memory SQLite database — no Docker or external services required. To run a specific project:
+
+```bash
+dotnet test PrintLogApi.IntegrationTests
+```
+
 ## Troubleshooting
 
 ### Port 1433 already in use (SQL Server conflict)
@@ -98,6 +106,7 @@ lsof -ti :5001 | xargs kill
 - Fork the repo and create a branch from `main`
 - Make your changes with tests
 - Open a pull request — CI runs automatically
+- If your change requires infrastructure updates (new environment variables, Azure configuration, storage changes, etc.), call this out in the PR description so it can be coordinated before the code ships
 
 ## Stopping the Local Environment
 
