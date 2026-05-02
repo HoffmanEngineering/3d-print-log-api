@@ -1,3 +1,6 @@
+# All files require maintainer review
+*                    @ChristopherHoffman
+
 # Maintainer review required for CI/CD and auth changes
 .github/workflows/   @ChristopherHoffman
 .github/CODEOWNERS   @ChristopherHoffman
