@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PrintLogApi is an ASP.NET Core 9.0 Web API for [3dprintlog.com](https://3dprintlog.com), a 3D print logging platform. Users manage printers, filaments, and print logs with image uploads.
+PrintLogApi is an ASP.NET Core 10.0 Web API for [3dprintlog.com](https://3dprintlog.com), a 3D print logging platform. Users manage printers, filaments, and print logs with image uploads.
 
 ## Build & Test Commands
 
@@ -25,8 +25,8 @@ dotnet ef database update  #Migrations also happen when the project runs
 
 ## Technology Stack
 
-- **Framework**: ASP.NET Core 9.0
-- **ORM**: Entity Framework Core 9.0 (SQL Server primary, SQLite for tests)
+- **Framework**: ASP.NET Core 10.0
+- **ORM**: Entity Framework Core 10.0 (SQL Server primary, SQLite for tests)
 - **Authentication**: Auth0 (JWT Bearer) + Custom API Key authentication
 - **Storage**: Azure Blob Storage for print images
 - **Caching**: IMemoryCache with version-based invalidation
@@ -142,7 +142,7 @@ This project uses **Azure DevOps** (not GitHub). Use the Azure CLI to create PRs
 az repos pr create \
   --title "<title>" \
   --description "<body>" \
-  --target-branch master \
+  --target-branch main \
   --source-branch <branch-name>
 
 # List open PRs
@@ -153,7 +153,7 @@ The remote URL is `https://hoffmanengineering.visualstudio.com/3D%20Print%20Log/
 
 ## Deployment
 
-Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on master branch commits.
+Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on main branch commits.
 
 The pipeline has two stages:
 
