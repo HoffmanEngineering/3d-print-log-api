@@ -56,6 +56,43 @@ No Auth0 account is required for local development. If you need to test the real
 dotnet test
 ```
 
+## Troubleshooting
+
+### Port 1433 already in use (SQL Server conflict)
+
+If you have a local SQL Server instance installed, it may already be listening on port 1433 and conflict with the Docker container. Symptoms: `dotnet ef database update` or `dotnet run` fail with a login error even though the container is running.
+
+Fix: create a `docker-compose.override.yml` in the repo root to remap the container to a different host port, and update the connection string to match.
+
+**docker-compose.override.yml**
+```yaml
+services:
+  sqlserver:
+    ports:
+      - '1434:1433'
+```
+
+**PrintLogApi/appsettings.Development.json** — change the port in the connection string:
+```json
+"PrintLogDb": "Server=localhost,1434;Database=PrintLogDb;..."
+```
+
+Then restart the containers (`docker compose down && docker compose up -d`) and re-run migrations.
+
+### Port 5001 already in use (API conflict)
+
+If `dotnet run` fails with `Failed to bind to address https://127.0.0.1:5001: address already in use`, a previous API instance is likely still running. Find and stop it:
+
+```bash
+# Windows
+netstat -ano | findstr ":5001"
+# Then kill the listed PID:
+taskkill /PID <pid> /F
+
+# macOS/Linux
+lsof -ti :5001 | xargs kill
+```
+
 ## Submitting a PR
 
 - Fork the repo and create a branch from `master`
