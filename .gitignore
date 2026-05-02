@@ -347,3 +347,6 @@ MigrationBackup/
 PrintLogApi/appsettings.Development.json
 PrintLogApi/appsettings.Staging.json
 PrintLogApi/3dprintlog.env
+
+# Local Docker Compose overrides (e.g. port remapping for dev machines)
+docker-compose.override.yml
