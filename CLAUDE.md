@@ -142,7 +142,7 @@ This project uses **Azure DevOps** (not GitHub). Use the Azure CLI to create PRs
 az repos pr create \
   --title "<title>" \
   --description "<body>" \
-  --target-branch master \
+  --target-branch main \
   --source-branch <branch-name>
 
 # List open PRs
@@ -153,7 +153,7 @@ The remote URL is `https://hoffmanengineering.visualstudio.com/3D%20Print%20Log/
 
 ## Deployment
 
-Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on master branch commits.
+Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on main branch commits.
 
 The pipeline has two stages:
 

@@ -1,12 +1,12 @@
 # PR Validation Pipeline
-# Runs build and tests on pull requests targeting master.
+# Runs build and tests on pull requests targeting main.
 # Wire this up as a required Build Validation policy under:
-#   Repos → Branches → master → Branch Policies → Build Validation
+#   Repos → Branches → main → Branch Policies → Build Validation
 
 trigger: none
 
 pr:
-  - master
+  - main
 
 pool:
   vmImage: "ubuntu-latest"

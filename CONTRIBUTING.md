@@ -95,7 +95,7 @@ lsof -ti :5001 | xargs kill
 
 ## Submitting a PR
 
-- Fork the repo and create a branch from `master`
+- Fork the repo and create a branch from `main`
 - Make your changes with tests
 - Open a pull request — CI runs automatically
 
