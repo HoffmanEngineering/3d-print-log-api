@@ -4,11 +4,11 @@
       "Bash(git -C \"D:\\\\Development\\\\3d-print-log\\\\PrintLogApi\" log --oneline -20)",
       "Bash(git -C \"D:\\\\Development\\\\3d-print-log\\\\PrintLogApi\" log --format=\"%h %s\" --all)",
       "Bash(git -C /d/Development/3d-print-log/PrintLogApi log --oneline AddNotifications -10)",
-      "Bash(git -C /d/Development/3d-print-log/PrintLogApi diff master..AddNotifications --name-only)",
+      "Bash(git -C /d/Development/3d-print-log/PrintLogApi diff main..AddNotifications --name-only)",
       "Bash(dotnet build:*)",
       "Bash(dotnet ef migrations:*)",
       "Bash(dotnet test:*)",
-      "Bash(git --no-pager diff master...HEAD)",
+      "Bash(git --no-pager diff main...HEAD)",
       "Bash(git add:*)",
       "Bash(coverage-check.sh)",
       "Bash(bash coverage-check.sh:*)"
