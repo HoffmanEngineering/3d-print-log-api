@@ -135,21 +135,22 @@ Per `.editorconfig`:
 
 ## Pull Requests
 
-This project uses **Azure DevOps** (not GitHub). Use the Azure CLI to create PRs — `gh` is not available.
+Use the GitHub CLI to create PRs:
 
 ```bash
 # Create a pull request
-az repos pr create \
+gh pr create \
   --title "<title>" \
-  --description "<body>" \
-  --target-branch main \
-  --source-branch <branch-name>
+  --body "<body>" \
+  --base main \
+  --head <branch-name>
 
 # List open PRs
-az repos pr list --status active
-```
+gh pr list
 
-The remote URL is `https://hoffmanengineering.visualstudio.com/3D%20Print%20Log/_git/3D%20Print%20Log%20Api`.
+# View a PR in the browser
+gh pr view --web
+```
 
 ## Deployment
 
