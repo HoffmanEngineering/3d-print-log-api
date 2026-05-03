@@ -1,3 +1,7 @@
+<div align="center">
+  <img src=".github/assets/logo.png" alt="3D Print Log" width="480" />
+</div>
+
 # 3D Print Log API
 
 [![CI](https://github.com/HoffmanEngineering/3d-print-log-api/actions/workflows/ci.yml/badge.svg)](https://github.com/HoffmanEngineering/3d-print-log-api/actions/workflows/ci.yml)
@@ -40,6 +44,14 @@ The frontend lives at [HoffmanEngineering/3d-print-log-ui](https://github.com/Ho
 The production environment runs on Azure (App Service, SQL Server, Blob Storage). Infrastructure is manually managed — there is no Terraform or IaC setup.
 
 If your contribution requires infrastructure changes (new environment variables, Azure resource configuration, etc.), call this out explicitly in your PR description so the maintainer can coordinate the changes before the code ships.
+
+## Support Development
+
+If you find 3D Print Log useful, consider supporting its development:
+
+- [**Subscribe to Pro**](https://3dprintlog.com/subscription) for an ad-free experience and extra cloud storage
+- [**Donate via PayPal**](https://paypal.me/hoffmanengineering) to buy me a coffee
+- [**Become a Patron**](https://www.patreon.com/HoffmanEngineering) on Patreon
 
 ## License
 
