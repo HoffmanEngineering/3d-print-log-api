@@ -182,6 +182,49 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task GetPrintSummary_SortedByTitle_ItemOrderIsPreservedAcrossPages()
+        {
+            // Query two consecutive pages sorted by title ascending.
+            // Items on page 1 must all sort before items on page 2, and items within
+            // each page must be in ascending title order.  This exercises the sort-key
+            // restoration step in SearchPrintSummary that re-orders loaded entities to
+            // match the paged ID list.
+            var page1Req = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Prints/summary?pageNumber=1&pageSize=3&sortColumn=Title&sortDirection=Asc");
+            page1Req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var page2Req = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Prints/summary?pageNumber=2&pageSize=3&sortColumn=Title&sortDirection=Asc");
+            page2Req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var page1Resp = await _httpClient.SendAsync(page1Req);
+            var page2Resp = await _httpClient.SendAsync(page2Req);
+
+            Assert.Equal(HttpStatusCode.OK, page1Resp.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, page2Resp.StatusCode);
+
+            var page1 = await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var page2 = await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+
+            Assert.NotNull(page1);
+            Assert.NotNull(page2);
+            Assert.True(page1.Items.Count > 0);
+            Assert.True(page2.Items.Count > 0);
+
+            // Items within each page are in ascending title order.
+            for (int i = 0; i < page1.Items.Count - 1; i++)
+                Assert.True(string.Compare(page1.Items[i].Title, page1.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                    $"Page 1 item[{i}]='{page1.Items[i].Title}' should come before item[{i+1}]='{page1.Items[i+1].Title}'");
+            for (int i = 0; i < page2.Items.Count - 1; i++)
+                Assert.True(string.Compare(page2.Items[i].Title, page2.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                    $"Page 2 item[{i}]='{page2.Items[i].Title}' should come before item[{i+1}]='{page2.Items[i+1].Title}'");
+
+            // Last item on page 1 must sort <= first item on page 2.
+            Assert.True(
+                string.Compare(page1.Items.Last().Title, page2.Items.First().Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                $"Last page-1 item '{page1.Items.Last().Title}' should sort before first page-2 item '{page2.Items.First().Title}'");
+        }
+
+        [Fact]
         public async Task GetPrintSummary_NotAuthenticated_WithoutUserId_ReturnsBadRequest()
         {
             // Act & Assert - no auth header, no userId parameter should return BadRequest

@@ -217,8 +217,9 @@ namespace PrintLogApi.Services
                 .ToList();
 
             // **Restore original sort order**
+            var dtoById = dtos.ToDictionary(d => d.Id);
             var orderedDtos = printIds
-                .Select(id => dtos.First(d => d.Id == id))
+                .Select(id => dtoById[id])
                 .ToList();
 
             return new PagedList<PrintSummaryDTO>(
