@@ -16,6 +16,7 @@ namespace PrintLogApi.IntegrationTests
         // These are populated after seeding
         public static long TestUserId { get; private set; }
         public static long TestPrinterId { get; private set; }
+        public static long TestPrinterId2 { get; private set; }
         public static long TestPrintId { get; private set; }
         public static int TestPrintImageId1 { get; private set; }
         public static int TestPrintImageId2 { get; private set; }
@@ -35,8 +36,9 @@ namespace PrintLogApi.IntegrationTests
             var user = SeedUser(context);
             TestUserId = user.Id;
 
-            var printer = SeedPrinter(context, user.Id);
+            var (printer, printer2) = SeedPrinter(context, user.Id);
             TestPrinterId = printer.Id;
+            TestPrinterId2 = printer2.Id;
 
             var filamentIds = SeedFilaments(context, user.Id);
             TestFilamentId1 = filamentIds[0];
@@ -61,7 +63,7 @@ namespace PrintLogApi.IntegrationTests
             return user;
         }
 
-        private static Printer SeedPrinter(PrintLogContext context, long userId)
+        private static (Printer, Printer) SeedPrinter(PrintLogContext context, long userId)
         {
             var printer = new Printer
             {
@@ -84,7 +86,7 @@ namespace PrintLogApi.IntegrationTests
             context.Printers.Add(printer2);
 
             context.SaveChanges();
-            return printer;
+            return (printer, printer2);
         }
 
         // Fixed GUIDs so the static properties are stable even when multiple test

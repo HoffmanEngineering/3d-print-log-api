@@ -80,8 +80,11 @@ namespace PrintLogApi.Services
                 throw new ArgumentNullException(nameof(sortRequest));
             }
 
+            var printerIdList = filterByPrinterIds?.ToList();
+            var filamentIdList = filterByFilamentIds?.ToList();
+
             IQueryable<Print> printQuery;
-            // if a userId is provided, filter by 
+            // if a userId is provided, filter by
             if (userId.HasValue && userId != currentUserId)
             {
                 // Get the user's public prints
@@ -116,16 +119,15 @@ namespace PrintLogApi.Services
             }
 
             // Filter by an of the selected printer ids.
-            if (filterByPrinterIds != null && filterByPrinterIds.Any())
+            if (printerIdList != null && printerIdList.Any())
             {
-                printQuery = printQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
+                printQuery = printQuery.Where(p => printerIdList.Contains(p.PrinterId));
             }
 
             // Filter by any of the selected filament ids.
-            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            if (filamentIdList != null && filamentIdList.Any())
             {
-                var lookup = filterByFilamentIds.ToList();
-                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
+                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             if (filterByProjectId.HasValue)
@@ -809,10 +811,13 @@ namespace PrintLogApi.Services
             Print.PrintStatus? filterByStatus = null,
             SortRequest<PrintSummarySortColumn> sortRequest = null)
         {
+            var printerIdList = filterByPrinterIds?.ToList();
+            var filamentIdList = filterByFilamentIds?.ToList();
+
             bool hasFilters = !string.IsNullOrWhiteSpace(searchText)
                 || filterByStatus.HasValue
-                || (filterByPrinterIds != null && filterByPrinterIds.Any())
-                || (filterByFilamentIds != null && filterByFilamentIds.Any());
+                || (printerIdList != null && printerIdList.Any())
+                || (filamentIdList != null && filamentIdList.Any());
 
             // ── Phase 1: Build the filtered print query ───────────────────────────────
             IQueryable<Print> filteredPrintQuery = _context.Prints
@@ -832,14 +837,13 @@ namespace PrintLogApi.Services
             if (filterByStatus.HasValue)
                 filteredPrintQuery = filteredPrintQuery.Where(p => p.Status == filterByStatus.Value);
 
-            if (filterByPrinterIds != null && filterByPrinterIds.Any())
-                filteredPrintQuery = filteredPrintQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
+            if (printerIdList != null && printerIdList.Any())
+                filteredPrintQuery = filteredPrintQuery.Where(p => printerIdList.Contains(p.PrinterId));
 
-            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            if (filamentIdList != null && filamentIdList.Any())
             {
-                var lookup = filterByFilamentIds.ToList();
                 filteredPrintQuery = filteredPrintQuery.Where(p =>
-                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
+                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──

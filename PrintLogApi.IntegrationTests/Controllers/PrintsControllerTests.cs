@@ -1646,6 +1646,48 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task GetPrintSummary_WithMultiplePrinterIds_ReturnsMatchingPrintsFromAllSpecifiedPrinters()
+        {
+            // Create a print on Printer 2 with a far-future StartDate so it sorts first
+            // regardless of how many prints from previous tests are in the DB.
+            var printer2Print = new AddPrintDTO
+            {
+                Title = "Printer2 Filter Test Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId2,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = false,
+                StartDate = DateTimeOffset.UtcNow.AddYears(10)
+            };
+            var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createReq.Content = JsonContent.Create(printer2Print);
+            var createResp = await _httpClient.SendAsync(createReq);
+            Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+            var created = await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Filter by both printers at once; use a large page size so the test is
+            // not affected by how many prints previous tests created.
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?pageSize=200&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId2}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            Assert.NotNull(result);
+            // Both printers should be represented.
+            Assert.Contains(result.Items, p => p.Printer?.Id == IntegrationTestSeeder.TestPrinterId);
+            Assert.Contains(result.Items, p => p.Id == created.Id && p.Printer?.Id == IntegrationTestSeeder.TestPrinterId2);
+            // No print from a different printer slips through.
+            Assert.All(result.Items, p =>
+                Assert.True(p.Printer?.Id == IntegrationTestSeeder.TestPrinterId
+                            || p.Printer?.Id == IntegrationTestSeeder.TestPrinterId2,
+                    $"Unexpected PrinterId {p.Printer?.Id} in filtered result"));
+        }
+
+        [Fact]
         public async Task GetPrintSummary_WithFilamentFilter_ReturnsOnlyMatchingPrints()
         {
             var request = new HttpRequestMessage(HttpMethod.Get,
