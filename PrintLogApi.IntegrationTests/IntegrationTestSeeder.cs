@@ -87,13 +87,19 @@ namespace PrintLogApi.IntegrationTests
             return printer;
         }
 
+        // Fixed GUIDs so the static properties are stable even when multiple test
+        // classes seed in parallel (each has its own DB but shares these statics).
+        private static readonly Guid _filament1Id = new Guid("aaaaaaaa-0001-0000-0000-000000000000");
+        private static readonly Guid _filament2Id = new Guid("aaaaaaaa-0002-0000-0000-000000000000");
+        private static readonly Guid _filament3Id = new Guid("aaaaaaaa-0003-0000-0000-000000000000");
+
         private static Guid[] SeedFilaments(PrintLogContext context, long userId)
         {
             var now = DateTime.UtcNow;
 
-            var filament1Id = Guid.NewGuid();
-            var filament2Id = Guid.NewGuid();
-            var filament3Id = Guid.NewGuid();
+            var filament1Id = _filament1Id;
+            var filament2Id = _filament2Id;
+            var filament3Id = _filament3Id;
 
             context.Filaments.AddRange(new[]
             {
@@ -110,6 +116,8 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "Hatchbox Red PLA",
                     MaterialType = "PLA",
+                    MaterialCategoryNickname = "filament",
+                    MaterialDensityGramPerCubicCm = 1.24,
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight,
@@ -128,6 +136,8 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "Prusament Blue PETG",
                     MaterialType = "PETG",
+                    MaterialCategoryNickname = "filament",
+                    MaterialDensityGramPerCubicCm = 1.27,
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight,
@@ -146,6 +156,7 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "eSUN Black ABS",
                     MaterialType = "ABS",
+                    // Intentionally no MaterialCategoryNickname - used to test null-guard in weight computation
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight

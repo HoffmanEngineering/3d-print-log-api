@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using PrintLogApi.Models.DTOs.Filament;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -349,6 +350,95 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithFilamentHavingNoMaterialCategory_DoesNotReturn500()
+        {
+            // Filament3 has no MaterialCategoryNickname, so its MaterialCategory navigation
+            // property is null. UpdateFilamentUsageWeights must guard against this rather than
+            // throwing NullReferenceException.
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Uncategorised Filament",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto>
+                {
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId3 },
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 15000
+                    }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {responseBody}");
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithTwoFilamentUsageEntries_BothEntriesReturnedWithComputedWeights()
+        {
+            // Both filament1 (PLA, density 1.24) and filament2 (PETG, density 1.27) have
+            // MaterialCategoryNickname set; weight computation should fire for both, producing
+            // non-null VolumeMl for each entry. This acts as a correctness safety net for the
+            // batch-load refactor: a mis-matched lookup would assign the wrong filament's
+            // density and produce wrong (or missing) computed values.
+            var filament1Entry = new PrintFilamentSummaryDto
+            {
+                Id = Guid.NewGuid(),
+                Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId1 },
+                Source = PrintFilament.SourceMeasurement.Weight,
+                AmountMg = 10000
+            };
+            var filament2Entry = new PrintFilamentSummaryDto
+            {
+                Id = Guid.NewGuid(),
+                Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId2 },
+                Source = PrintFilament.SourceMeasurement.Weight,
+                AmountMg = 20000
+            };
+
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Two Filaments",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto> { filament1Entry, filament2Entry }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var created = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            Assert.NotNull(created.FilamentUsage);
+            Assert.Equal(2, created.FilamentUsage.Count);
+
+            var f1 = created.FilamentUsage.FirstOrDefault(f => f.Filament?.Id == IntegrationTestSeeder.TestFilamentId1);
+            var f2 = created.FilamentUsage.FirstOrDefault(f => f.Filament?.Id == IntegrationTestSeeder.TestFilamentId2);
+            Assert.NotNull(f1);
+            Assert.NotNull(f2);
+            Assert.NotNull(f1.VolumeMl);
+            Assert.NotNull(f2.VolumeMl);
+
+            // VolumeMl for f2 (2× weight, slightly higher density) must be larger than f1's.
+            Assert.True(f2.VolumeMl > f1.VolumeMl);
         }
 
         #endregion
