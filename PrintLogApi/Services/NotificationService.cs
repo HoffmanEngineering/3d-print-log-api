@@ -191,6 +191,42 @@ namespace PrintLogApi.Services
                 commenterUserId);
         }
 
+        public async Task CreateCommentNotifications(
+            IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients,
+            long printId,
+            string printTitle,
+            long commentId,
+            long commenterUserId,
+            string commenterDisplayName)
+        {
+            var actionUrl = $"/prints/{printId}#comment-{commentId}";
+            var now = DateTime.UtcNow;
+
+            var notifications = recipients.Select(r => new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = r.RecipientUserId,
+                Type = NotificationType.Comment,
+                Title = r.IsRecipientPrintOwner
+                    ? "New comment on your print"
+                    : "New reply on a print you commented on",
+                Message = r.IsRecipientPrintOwner
+                    ? $"{commenterDisplayName} commented on \"{printTitle}\""
+                    : $"{commenterDisplayName} also commented on \"{printTitle}\"",
+                ActionUrl = actionUrl,
+                PrintId = printId,
+                CommentId = commentId,
+                TriggeredByUserId = commenterUserId,
+                IsRead = false,
+                CreatedDate = now
+            }).ToList();
+
+            if (notifications.Count == 0) return;
+
+            _context.Notifications.AddRange(notifications);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string printTitle)
         {
             var title = "Print completed";

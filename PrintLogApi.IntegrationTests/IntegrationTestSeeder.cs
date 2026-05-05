@@ -16,6 +16,7 @@ namespace PrintLogApi.IntegrationTests
         // These are populated after seeding
         public static long TestUserId { get; private set; }
         public static long TestPrinterId { get; private set; }
+        public static long TestPrinterId2 { get; private set; }
         public static long TestPrintId { get; private set; }
         public static int TestPrintImageId1 { get; private set; }
         public static int TestPrintImageId2 { get; private set; }
@@ -35,8 +36,9 @@ namespace PrintLogApi.IntegrationTests
             var user = SeedUser(context);
             TestUserId = user.Id;
 
-            var printer = SeedPrinter(context, user.Id);
+            var (printer, printer2) = SeedPrinter(context, user.Id);
             TestPrinterId = printer.Id;
+            TestPrinterId2 = printer2.Id;
 
             var filamentIds = SeedFilaments(context, user.Id);
             TestFilamentId1 = filamentIds[0];
@@ -61,7 +63,7 @@ namespace PrintLogApi.IntegrationTests
             return user;
         }
 
-        private static Printer SeedPrinter(PrintLogContext context, long userId)
+        private static (Printer, Printer) SeedPrinter(PrintLogContext context, long userId)
         {
             var printer = new Printer
             {
@@ -84,16 +86,22 @@ namespace PrintLogApi.IntegrationTests
             context.Printers.Add(printer2);
 
             context.SaveChanges();
-            return printer;
+            return (printer, printer2);
         }
+
+        // Fixed GUIDs so the static properties are stable even when multiple test
+        // classes seed in parallel (each has its own DB but shares these statics).
+        private static readonly Guid _filament1Id = new Guid("aaaaaaaa-0001-0000-0000-000000000000");
+        private static readonly Guid _filament2Id = new Guid("aaaaaaaa-0002-0000-0000-000000000000");
+        private static readonly Guid _filament3Id = new Guid("aaaaaaaa-0003-0000-0000-000000000000");
 
         private static Guid[] SeedFilaments(PrintLogContext context, long userId)
         {
             var now = DateTime.UtcNow;
 
-            var filament1Id = Guid.NewGuid();
-            var filament2Id = Guid.NewGuid();
-            var filament3Id = Guid.NewGuid();
+            var filament1Id = _filament1Id;
+            var filament2Id = _filament2Id;
+            var filament3Id = _filament3Id;
 
             context.Filaments.AddRange(new[]
             {
@@ -110,6 +118,8 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "Hatchbox Red PLA",
                     MaterialType = "PLA",
+                    MaterialCategoryNickname = "filament",
+                    MaterialDensityGramPerCubicCm = 1.24,
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight,
@@ -128,6 +138,8 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "Prusament Blue PETG",
                     MaterialType = "PETG",
+                    MaterialCategoryNickname = "filament",
+                    MaterialDensityGramPerCubicCm = 1.27,
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight,
@@ -146,6 +158,7 @@ namespace PrintLogApi.IntegrationTests
                     DiameterMm = 1.75,
                     DisplayName = "eSUN Black ABS",
                     MaterialType = "ABS",
+                    // Intentionally no MaterialCategoryNickname - used to test null-guard in weight computation
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight

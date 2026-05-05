@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using PrintLogApi.Models.DTOs.Filament;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -181,6 +182,49 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task GetPrintSummary_SortedByTitle_ItemOrderIsPreservedAcrossPages()
+        {
+            // Query two consecutive pages sorted by title ascending.
+            // Items on page 1 must all sort before items on page 2, and items within
+            // each page must be in ascending title order.  This exercises the sort-key
+            // restoration step in SearchPrintSummary that re-orders loaded entities to
+            // match the paged ID list.
+            var page1Req = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Prints/summary?pageNumber=1&pageSize=3&sortColumn=Title&sortDirection=Asc");
+            page1Req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var page2Req = new HttpRequestMessage(HttpMethod.Get,
+                "/api/Prints/summary?pageNumber=2&pageSize=3&sortColumn=Title&sortDirection=Asc");
+            page2Req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var page1Resp = await _httpClient.SendAsync(page1Req);
+            var page2Resp = await _httpClient.SendAsync(page2Req);
+
+            Assert.Equal(HttpStatusCode.OK, page1Resp.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, page2Resp.StatusCode);
+
+            var page1 = await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var page2 = await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+
+            Assert.NotNull(page1);
+            Assert.NotNull(page2);
+            Assert.True(page1.Items.Count > 0);
+            Assert.True(page2.Items.Count > 0);
+
+            // Items within each page are in ascending title order.
+            for (int i = 0; i < page1.Items.Count - 1; i++)
+                Assert.True(string.Compare(page1.Items[i].Title, page1.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                    $"Page 1 item[{i}]='{page1.Items[i].Title}' should come before item[{i+1}]='{page1.Items[i+1].Title}'");
+            for (int i = 0; i < page2.Items.Count - 1; i++)
+                Assert.True(string.Compare(page2.Items[i].Title, page2.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                    $"Page 2 item[{i}]='{page2.Items[i].Title}' should come before item[{i+1}]='{page2.Items[i+1].Title}'");
+
+            // Last item on page 1 must sort <= first item on page 2.
+            Assert.True(
+                string.Compare(page1.Items.Last().Title, page2.Items.First().Title, StringComparison.OrdinalIgnoreCase) <= 0,
+                $"Last page-1 item '{page1.Items.Last().Title}' should sort before first page-2 item '{page2.Items.First().Title}'");
+        }
+
+        [Fact]
         public async Task GetPrintSummary_NotAuthenticated_WithoutUserId_ReturnsBadRequest()
         {
             // Act & Assert - no auth header, no userId parameter should return BadRequest
@@ -348,6 +392,135 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithFilamentHavingNoMaterialCategory_DoesNotReturn500()
+        {
+            // Filament3 has no MaterialCategoryNickname, so its MaterialCategory navigation
+            // property is null. UpdateFilamentUsageWeights must guard against this rather than
+            // throwing NullReferenceException.
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Uncategorised Filament",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto>
+                {
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId3 },
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 15000
+                    }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {responseBody}");
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithTwoFilamentUsageEntries_BothEntriesReturnedWithComputedWeights()
+        {
+            // Both filament1 (PLA, density 1.24) and filament2 (PETG, density 1.27) have
+            // MaterialCategoryNickname set; weight computation should fire for both, producing
+            // non-null VolumeMl for each entry. This acts as a correctness safety net for the
+            // batch-load refactor: a mis-matched lookup would assign the wrong filament's
+            // density and produce wrong (or missing) computed values.
+            var filament1Entry = new PrintFilamentSummaryDto
+            {
+                Id = Guid.NewGuid(),
+                Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId1 },
+                Source = PrintFilament.SourceMeasurement.Weight,
+                AmountMg = 10000
+            };
+            var filament2Entry = new PrintFilamentSummaryDto
+            {
+                Id = Guid.NewGuid(),
+                Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId2 },
+                Source = PrintFilament.SourceMeasurement.Weight,
+                AmountMg = 20000
+            };
+
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Two Filaments",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto> { filament1Entry, filament2Entry }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var created = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            Assert.NotNull(created.FilamentUsage);
+            Assert.Equal(2, created.FilamentUsage.Count);
+
+            var f1 = created.FilamentUsage.FirstOrDefault(f => f.Filament?.Id == IntegrationTestSeeder.TestFilamentId1);
+            var f2 = created.FilamentUsage.FirstOrDefault(f => f.Filament?.Id == IntegrationTestSeeder.TestFilamentId2);
+            Assert.NotNull(f1);
+            Assert.NotNull(f2);
+            Assert.NotNull(f1.VolumeMl);
+            Assert.NotNull(f2.VolumeMl);
+
+            // VolumeMl for f2 (2× weight, slightly higher density) must be larger than f1's.
+            Assert.True(f2.VolumeMl > f1.VolumeMl);
+        }
+
+        [Fact]
+        public async Task CreatePrint_WithInaccessibleFilamentAmongMultiple_ReturnsBadRequest()
+        {
+            // One valid filament + one that doesn't exist in the DB — the batch access check
+            // must reject the whole request even when the bad ID is not first in the list.
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Bad Filament",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Printing,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto>
+                {
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId1 },
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 10000
+                    },
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = Guid.NewGuid() }, // non-existent filament
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 5000
+                    }
+                }
+            };
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
@@ -1553,6 +1726,48 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetPrintSummary_WithMultiplePrinterIds_ReturnsMatchingPrintsFromAllSpecifiedPrinters()
+        {
+            // Create a print on Printer 2 with a far-future StartDate so it sorts first
+            // regardless of how many prints from previous tests are in the DB.
+            var printer2Print = new AddPrintDTO
+            {
+                Title = "Printer2 Filter Test Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId2,
+                Status = PrintStatus.Pending,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = false,
+                StartDate = DateTimeOffset.UtcNow.AddYears(10)
+            };
+            var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createReq.Content = JsonContent.Create(printer2Print);
+            var createResp = await _httpClient.SendAsync(createReq);
+            Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+            var created = await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>();
+
+            // Filter by both printers at once; use a large page size so the test is
+            // not affected by how many prints previous tests created.
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Prints/summary?pageSize=200&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId2}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            Assert.NotNull(result);
+            // Both printers should be represented.
+            Assert.Contains(result.Items, p => p.Printer?.Id == IntegrationTestSeeder.TestPrinterId);
+            Assert.Contains(result.Items, p => p.Id == created.Id && p.Printer?.Id == IntegrationTestSeeder.TestPrinterId2);
+            // No print from a different printer slips through.
+            Assert.All(result.Items, p =>
+                Assert.True(p.Printer?.Id == IntegrationTestSeeder.TestPrinterId
+                            || p.Printer?.Id == IntegrationTestSeeder.TestPrinterId2,
+                    $"Unexpected PrinterId {p.Printer?.Id} in filtered result"));
         }
 
         [Fact]

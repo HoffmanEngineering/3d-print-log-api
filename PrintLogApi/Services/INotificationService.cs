@@ -23,6 +23,7 @@ namespace PrintLogApi.Services
         // Create methods
         Task<Notification> CreateNotification(long userId, NotificationType type, string title, string message, string actionUrl = null, long? printId = null, long? commentId = null, long? triggeredByUserId = null, string metadata = null);
         Task<Notification> CreateCommentNotification(long recipientUserId, long printId, string printTitle, long commentId, long commenterUserId, string commenterDisplayName, bool isRecipientPrintOwner);
+        Task CreateCommentNotifications(IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients, long printId, string printTitle, long commentId, long commenterUserId, string commenterDisplayName);
         Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string printTitle);
         Task<Notification> CreatePrintFailedNotification(long userId, long printId, string printTitle);
         Task<Notification> CreateApiKeyCreatedNotification(long userId, string keyDescription);

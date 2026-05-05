@@ -22,7 +22,7 @@ using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services
 {
-    public class PrintService : IPrintService
+    public sealed class PrintService : IPrintService
     {
 
         private readonly PrintLogContext _context;
@@ -80,8 +80,11 @@ namespace PrintLogApi.Services
                 throw new ArgumentNullException(nameof(sortRequest));
             }
 
+            var printerIdList = filterByPrinterIds?.ToList();
+            var filamentIdList = filterByFilamentIds?.ToList();
+
             IQueryable<Print> printQuery;
-            // if a userId is provided, filter by 
+            // if a userId is provided, filter by
             if (userId.HasValue && userId != currentUserId)
             {
                 // Get the user's public prints
@@ -116,16 +119,15 @@ namespace PrintLogApi.Services
             }
 
             // Filter by an of the selected printer ids.
-            if (filterByPrinterIds != null && filterByPrinterIds.Any())
+            if (printerIdList != null && printerIdList.Any())
             {
-                printQuery = printQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
+                printQuery = printQuery.Where(p => printerIdList.Contains(p.PrinterId));
             }
 
             // Filter by any of the selected filament ids.
-            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            if (filamentIdList != null && filamentIdList.Any())
             {
-                var lookup = filterByFilamentIds.ToList();
-                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
+                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             if (filterByProjectId.HasValue)
@@ -215,8 +217,9 @@ namespace PrintLogApi.Services
                 .ToList();
 
             // **Restore original sort order**
+            var dtoById = dtos.ToDictionary(d => d.Id);
             var orderedDtos = printIds
-                .Select(id => dtos.First(d => d.Id == id))
+                .Select(id => dtoById[id])
                 .ToList();
 
             return new PagedList<PrintSummaryDTO>(
@@ -327,20 +330,17 @@ namespace PrintLogApi.Services
 
             foreach (var filament in newPrint.FilamentUsage)
             {
-                // Set the empty guid to null
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
-                {
                     filament.FilamentId = null;
-                }
+            }
 
-                if (filament.FilamentId.HasValue)
-                {
-                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
-                    if (!canAccessFilament)
-                    {
-                        throw new UserCannotAccessFilamentException();
-                    }
-                }
+            var filamentIdsToCheck = newPrint.FilamentUsage
+                .Where(f => f.FilamentId.HasValue)
+                .Select(f => f.FilamentId.Value);
+
+            if (!await _filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
+            {
+                throw new UserCannotAccessFilamentException();
             }
 
             var newLoadedFilamentIds = newPrint.FilamentUsage
@@ -406,20 +406,17 @@ namespace PrintLogApi.Services
 
             foreach (var filament in updatedPrint.FilamentUsage)
             {
-                // Set the empty guid to null
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
-                {
                     filament.FilamentId = null;
-                }
+            }
 
-                if (filament.FilamentId.HasValue)
-                {
-                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
-                    if (!canAccessFilament)
-                    {
-                        throw new UserCannotAccessFilamentException();
-                    }
-                }
+            var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage
+                .Where(f => f.FilamentId.HasValue)
+                .Select(f => f.FilamentId.Value);
+
+            if (!await _filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
+            {
+                throw new UserCannotAccessFilamentException();
             }
 
             await UpdateFilamentUsageWeights(updatedPrint);
@@ -481,25 +478,42 @@ namespace PrintLogApi.Services
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
+            var filamentIds = print.FilamentUsage
+                .Where(pf => pf.FilamentId.HasValue && pf.FilamentId != default(Guid))
+                .Select(pf => pf.FilamentId.Value)
+                .Distinct()
+                .ToList();
+
+            if (filamentIds.Count == 0) return;
+
+            var filamentMap = await _context.Filaments
+                .Where(f => filamentIds.Contains(f.Id))
+                .Include(f => f.MaterialCategory)
+                .AsNoTracking()
+                .ToDictionaryAsync(f => f.Id);
+
             foreach (var pf in print.FilamentUsage)
             {
                 if (!pf.FilamentId.HasValue || pf.FilamentId == default(Guid))
                 {
-                    // We can't do anything for filament lengths not tied to a filament
                     continue;
                 }
 
-                var filament = await _filamentService.GetFilamentById(pf.FilamentId.Value);
-
-                if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+                if (!filamentMap.TryGetValue(pf.FilamentId.Value, out var filament))
                 {
-                    // Skip any filament that doesn't have the required properties to compute.
+                    continue;
+                }
+
+                bool hasDiameter = filament.MaterialCategory?.HasDiameter == true;
+
+                if (filament.MaterialDensityGramPerCubicCm <= 0
+                    || (hasDiameter && (!filament.DiameterMm.HasValue || filament.DiameterMm <= 0)))
+                {
                     continue;
                 }
 
                 if (pf.Source == PrintFilament.SourceMeasurement.Length)
                 {
-
                     if (pf.LengthInM.HasValue)
                     {
                         pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
@@ -512,21 +526,19 @@ namespace PrintLogApi.Services
                     {
                         pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (filament.MaterialCategory.HasDiameter)
+                        if (hasDiameter)
                         {
                             pf.LengthInM = GetLengthInMetersFromVolume(pf.VolumeMl.Value, filament.DiameterMm.Value);
                         }
                     }
-
                 }
                 else
                 {
-
                     if (pf.AmountMg.HasValue)
                     {
                         pf.VolumeMl = GetVolumeInMlFromAmount(pf.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (filament.MaterialCategory.HasDiameter)
+                        if (hasDiameter)
                         {
                             pf.LengthInM = GetLengthInMetersFromAmount(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                         }
@@ -535,7 +547,6 @@ namespace PrintLogApi.Services
 
                 if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Length)
                 {
-
                     if (pf.EstimatedLengthInM.HasValue)
                     {
                         pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
@@ -548,7 +559,7 @@ namespace PrintLogApi.Services
                     {
                         pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (filament.MaterialCategory.HasDiameter)
+                        if (hasDiameter)
                         {
                             pf.EstimatedLengthInM = GetLengthInMetersFromVolume(pf.EstimatedVolumeMl.Value, filament.DiameterMm.Value);
                         }
@@ -556,12 +567,11 @@ namespace PrintLogApi.Services
                 }
                 else
                 {
-
                     if (pf.EstimatedAmountMg.HasValue)
                     {
                         pf.EstimatedVolumeMl = GetVolumeInMlFromAmount(pf.EstimatedAmountMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (filament.MaterialCategory.HasDiameter)
+                        if (hasDiameter)
                         {
                             pf.EstimatedLengthInM = GetLengthInMetersFromAmount(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
                         }
@@ -720,21 +730,7 @@ namespace PrintLogApi.Services
             var commenter = await _context.Users.FindAsync(userId);
             var commenterDisplayName = commenter?.DisplayName ?? "Someone";
 
-            // Send notification to print owner if commenter is not the owner
-            if (print.CreatedById != userId)
-            {
-                await _notificationService.CreateCommentNotification(
-                    print.CreatedById,
-                    print.Id,
-                    print.Title,
-                    comment.Id,
-                    userId,
-                    commenterDisplayName,
-                    isRecipientPrintOwner: true);
-            }
-
-            // Send notifications to all previous commenters on this print
-            // (excluding the current commenter and the print owner who already got notified)
+            // Build recipient list: print owner (if not the commenter) + previous unique commenters
             var previousCommenterIds = await _context.PrintComments
                 .Where(pc => pc.PrintId == print.Id && pc.CommentId != comment.Id)
                 .Select(pc => pc.Comment.CreatedById)
@@ -742,17 +738,18 @@ namespace PrintLogApi.Services
                 .Where(id => id != userId && id != print.CreatedById)
                 .ToListAsync();
 
-            foreach (var previousCommenterId in previousCommenterIds)
-            {
-                await _notificationService.CreateCommentNotification(
-                    previousCommenterId,
-                    print.Id,
-                    print.Title,
-                    comment.Id,
-                    userId,
-                    commenterDisplayName,
-                    isRecipientPrintOwner: false);
-            }
+            var recipients = new List<(long RecipientUserId, bool IsRecipientPrintOwner)>();
+            if (print.CreatedById != userId)
+                recipients.Add((print.CreatedById, true));
+            recipients.AddRange(previousCommenterIds.Select(id => (id, false)));
+
+            await _notificationService.CreateCommentNotifications(
+                recipients,
+                print.Id,
+                print.Title,
+                comment.Id,
+                userId,
+                commenterDisplayName);
 
             return comment;
         }
@@ -761,10 +758,13 @@ namespace PrintLogApi.Services
             return _context.Prints.Any(e => e.Id == id);
         }
 
+        private enum FeedItemType { Print, Project }
+
         private sealed class FeedSortItem
         {
-            public string Id { get; init; }
-            public string Type { get; init; }
+            public FeedItemType Type { get; init; }
+            public long? PrintId { get; init; }
+            public Guid? ProjectId { get; init; }
             public DateTimeOffset SortDate { get; init; }
             public string SortTitle { get; init; }
             public long TotalFilamentWeightMg { get; init; }
@@ -796,10 +796,13 @@ namespace PrintLogApi.Services
             Print.PrintStatus? filterByStatus = null,
             SortRequest<PrintSummarySortColumn> sortRequest = null)
         {
+            var printerIdList = filterByPrinterIds?.ToList();
+            var filamentIdList = filterByFilamentIds?.ToList();
+
             bool hasFilters = !string.IsNullOrWhiteSpace(searchText)
                 || filterByStatus.HasValue
-                || (filterByPrinterIds != null && filterByPrinterIds.Any())
-                || (filterByFilamentIds != null && filterByFilamentIds.Any());
+                || (printerIdList != null && printerIdList.Any())
+                || (filamentIdList != null && filamentIdList.Any());
 
             // ── Phase 1: Build the filtered print query ───────────────────────────────
             IQueryable<Print> filteredPrintQuery = _context.Prints
@@ -819,14 +822,13 @@ namespace PrintLogApi.Services
             if (filterByStatus.HasValue)
                 filteredPrintQuery = filteredPrintQuery.Where(p => p.Status == filterByStatus.Value);
 
-            if (filterByPrinterIds != null && filterByPrinterIds.Any())
-                filteredPrintQuery = filteredPrintQuery.Where(p => filterByPrinterIds.Contains(p.PrinterId));
+            if (printerIdList != null && printerIdList.Any())
+                filteredPrintQuery = filteredPrintQuery.Where(p => printerIdList.Contains(p.PrinterId));
 
-            if (filterByFilamentIds != null && filterByFilamentIds.Any())
+            if (filamentIdList != null && filamentIdList.Any())
             {
-                var lookup = filterByFilamentIds.ToList();
                 filteredPrintQuery = filteredPrintQuery.Where(p =>
-                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && lookup.Contains((Guid)pf.FilamentId)));
+                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
@@ -879,8 +881,8 @@ namespace PrintLogApi.Services
 
             var projectSortKeys = projectList.Select(p => new FeedSortItem
             {
-                Id = p.Id.ToString(),
-                Type = "project",
+                Type = FeedItemType.Project,
+                ProjectId = p.Id,
                 SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Name,
                 TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var pw) ? pw : 0L
@@ -915,8 +917,8 @@ namespace PrintLogApi.Services
 
             var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
             {
-                Id = p.Id.ToString(),
-                Type = "print",
+                Type = FeedItemType.Print,
+                PrintId = p.Id,
                 SortDate = p.StartDate
                     ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Title,
@@ -955,13 +957,13 @@ namespace PrintLogApi.Services
 
             // ── Phase 5: Load full detail only for the current page's items ───────────
             var pageProjectGuids = pagedKeys
-                .Where(x => x.Type == "project")
-                .Select(x => Guid.Parse(x.Id))
+                .Where(x => x.Type == FeedItemType.Project)
+                .Select(x => x.ProjectId!.Value)
                 .ToList();
 
             var pagePrintIds = pagedKeys
-                .Where(x => x.Type == "print")
-                .Select(x => long.Parse(x.Id))
+                .Where(x => x.Type == FeedItemType.Print)
+                .Select(x => x.PrintId!.Value)
                 .ToList();
 
             // — Project detail via targeted projections (avoids loading all prints per project) —
@@ -1133,9 +1135,9 @@ namespace PrintLogApi.Services
 
             var pagedItems = pagedKeys.Select(key =>
             {
-                if (key.Type == "project")
+                if (key.Type == FeedItemType.Project)
                 {
-                    if (!projectEntityLookup.TryGetValue(Guid.Parse(key.Id), out var p))
+                    if (!projectEntityLookup.TryGetValue(key.ProjectId!.Value, out var p))
                         return null;
 
                     projectPrintStats.TryGetValue(p.Id, out var stats);
@@ -1161,7 +1163,7 @@ namespace PrintLogApi.Services
                 }
                 else
                 {
-                    if (!printLookup.TryGetValue(long.Parse(key.Id), out var p))
+                    if (!printLookup.TryGetValue(key.PrintId!.Value, out var p))
                         return null;
                     var sortDate = p.StartDate ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc));
                     return new GroupedFeedItemDto

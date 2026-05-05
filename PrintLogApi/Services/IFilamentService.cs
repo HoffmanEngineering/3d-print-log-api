@@ -11,6 +11,7 @@ namespace PrintLogApi.Services
     {
         Task<Filament> AddFilament(AddFilamentDto filament, long userId);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
+        Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);
         bool FilamentExists(Guid id);
         Task<string[]> GetFilamentBrands(long userId);
