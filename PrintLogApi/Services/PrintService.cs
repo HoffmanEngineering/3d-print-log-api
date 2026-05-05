@@ -758,10 +758,13 @@ namespace PrintLogApi.Services
             return _context.Prints.Any(e => e.Id == id);
         }
 
+        private enum FeedItemType { Print, Project }
+
         private sealed class FeedSortItem
         {
-            public string Id { get; init; }
-            public string Type { get; init; }
+            public FeedItemType Type { get; init; }
+            public long? PrintId { get; init; }
+            public Guid? ProjectId { get; init; }
             public DateTimeOffset SortDate { get; init; }
             public string SortTitle { get; init; }
             public long TotalFilamentWeightMg { get; init; }
@@ -878,8 +881,8 @@ namespace PrintLogApi.Services
 
             var projectSortKeys = projectList.Select(p => new FeedSortItem
             {
-                Id = p.Id.ToString(),
-                Type = "project",
+                Type = FeedItemType.Project,
+                ProjectId = p.Id,
                 SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Name,
                 TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var pw) ? pw : 0L
@@ -914,8 +917,8 @@ namespace PrintLogApi.Services
 
             var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
             {
-                Id = p.Id.ToString(),
-                Type = "print",
+                Type = FeedItemType.Print,
+                PrintId = p.Id,
                 SortDate = p.StartDate
                     ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
                 SortTitle = p.Title,
@@ -954,13 +957,13 @@ namespace PrintLogApi.Services
 
             // ── Phase 5: Load full detail only for the current page's items ───────────
             var pageProjectGuids = pagedKeys
-                .Where(x => x.Type == "project")
-                .Select(x => Guid.Parse(x.Id))
+                .Where(x => x.Type == FeedItemType.Project)
+                .Select(x => x.ProjectId!.Value)
                 .ToList();
 
             var pagePrintIds = pagedKeys
-                .Where(x => x.Type == "print")
-                .Select(x => long.Parse(x.Id))
+                .Where(x => x.Type == FeedItemType.Print)
+                .Select(x => x.PrintId!.Value)
                 .ToList();
 
             // — Project detail via targeted projections (avoids loading all prints per project) —
@@ -1132,9 +1135,9 @@ namespace PrintLogApi.Services
 
             var pagedItems = pagedKeys.Select(key =>
             {
-                if (key.Type == "project")
+                if (key.Type == FeedItemType.Project)
                 {
-                    if (!projectEntityLookup.TryGetValue(Guid.Parse(key.Id), out var p))
+                    if (!projectEntityLookup.TryGetValue(key.ProjectId!.Value, out var p))
                         return null;
 
                     projectPrintStats.TryGetValue(p.Id, out var stats);
@@ -1160,7 +1163,7 @@ namespace PrintLogApi.Services
                 }
                 else
                 {
-                    if (!printLookup.TryGetValue(long.Parse(key.Id), out var p))
+                    if (!printLookup.TryGetValue(key.PrintId!.Value, out var p))
                         return null;
                     var sortDate = p.StartDate ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc));
                     return new GroupedFeedItemDto
