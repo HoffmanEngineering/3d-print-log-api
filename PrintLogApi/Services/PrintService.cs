@@ -22,7 +22,7 @@ using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services
 {
-    public class PrintService : IPrintService
+    public sealed class PrintService : IPrintService
     {
 
         private readonly PrintLogContext _context;
