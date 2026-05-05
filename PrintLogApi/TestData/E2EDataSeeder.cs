@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.TestData
@@ -42,7 +41,7 @@ namespace PrintLogApi.TestData
 
         private static void SeedPrints(PrintLogContext context, long userId, long printerId)
         {
-            var now = DateTime.UtcNow;
+            var now = DateTimeOffset.UtcNow;
 
             for (int i = 1; i <= 3; i++)
             {
@@ -50,15 +49,15 @@ namespace PrintLogApi.TestData
                 {
                     Title = $"Test Successful Print {i}",
                     Notes = $"E2E test print {i}",
-                    StartDate = DateTimeOffset.UtcNow.AddDays(-i),
+                    StartDate = now.AddDays(-i),
                     Status = Print.PrintStatus.Success,
                     ViewStatus = Print.PrintViewStatus.Public,
                     AllowComments = true,
                     PrinterId = printerId,
                     CreatedById = userId,
-                    CreatedDate = now,
+                    CreatedDate = now.UtcDateTime,
                     UpdatedById = userId,
-                    UpdatedDate = now,
+                    UpdatedDate = now.UtcDateTime,
                     EstimatedPrintTimeInSeconds = 3600,
                 });
             }
