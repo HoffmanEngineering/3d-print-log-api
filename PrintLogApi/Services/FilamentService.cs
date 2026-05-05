@@ -427,6 +427,17 @@ namespace PrintLogApi.Services
             return filament.CreatedById == userId;
         }
 
+        public async Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds)
+        {
+            var ids = filamentIds.ToList();
+            if (ids.Count == 0) return true;
+
+            var accessibleCount = await _context.Filaments
+                .CountAsync(f => ids.Contains(f.Id) && f.CreatedById == userId);
+
+            return accessibleCount == ids.Count;
+        }
+
         /// <summary>
         /// Delete a Filament if that filament isn't in use by a print.
         /// </summary>

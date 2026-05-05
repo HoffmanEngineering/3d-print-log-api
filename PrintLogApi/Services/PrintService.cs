@@ -330,20 +330,17 @@ namespace PrintLogApi.Services
 
             foreach (var filament in newPrint.FilamentUsage)
             {
-                // Set the empty guid to null
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
-                {
                     filament.FilamentId = null;
-                }
+            }
 
-                if (filament.FilamentId.HasValue)
-                {
-                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
-                    if (!canAccessFilament)
-                    {
-                        throw new UserCannotAccessFilamentException();
-                    }
-                }
+            var filamentIdsToCheck = newPrint.FilamentUsage
+                .Where(f => f.FilamentId.HasValue)
+                .Select(f => f.FilamentId.Value);
+
+            if (!await _filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
+            {
+                throw new UserCannotAccessFilamentException();
             }
 
             var newLoadedFilamentIds = newPrint.FilamentUsage
@@ -409,20 +406,17 @@ namespace PrintLogApi.Services
 
             foreach (var filament in updatedPrint.FilamentUsage)
             {
-                // Set the empty guid to null
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
-                {
                     filament.FilamentId = null;
-                }
+            }
 
-                if (filament.FilamentId.HasValue)
-                {
-                    var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId, filament.FilamentId.Value);
-                    if (!canAccessFilament)
-                    {
-                        throw new UserCannotAccessFilamentException();
-                    }
-                }
+            var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage
+                .Where(f => f.FilamentId.HasValue)
+                .Select(f => f.FilamentId.Value);
+
+            if (!await _filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
+            {
+                throw new UserCannotAccessFilamentException();
             }
 
             await UpdateFilamentUsageWeights(updatedPrint);

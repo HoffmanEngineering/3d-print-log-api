@@ -484,6 +484,46 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.True(f2.VolumeMl > f1.VolumeMl);
         }
 
+        [Fact]
+        public async Task CreatePrint_WithInaccessibleFilamentAmongMultiple_ReturnsBadRequest()
+        {
+            // One valid filament + one that doesn't exist in the DB — the batch access check
+            // must reject the whole request even when the bad ID is not first in the list.
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Print With Bad Filament",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Printing,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto>
+                {
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId1 },
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 10000
+                    },
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = Guid.NewGuid() }, // non-existent filament
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 5000
+                    }
+                }
+            };
+            request.Content = JsonContent.Create(newPrint);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
         #endregion
 
         #region PUT Print (Update)
