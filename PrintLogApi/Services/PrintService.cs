@@ -730,21 +730,7 @@ namespace PrintLogApi.Services
             var commenter = await _context.Users.FindAsync(userId);
             var commenterDisplayName = commenter?.DisplayName ?? "Someone";
 
-            // Send notification to print owner if commenter is not the owner
-            if (print.CreatedById != userId)
-            {
-                await _notificationService.CreateCommentNotification(
-                    print.CreatedById,
-                    print.Id,
-                    print.Title,
-                    comment.Id,
-                    userId,
-                    commenterDisplayName,
-                    isRecipientPrintOwner: true);
-            }
-
-            // Send notifications to all previous commenters on this print
-            // (excluding the current commenter and the print owner who already got notified)
+            // Build recipient list: print owner (if not the commenter) + previous unique commenters
             var previousCommenterIds = await _context.PrintComments
                 .Where(pc => pc.PrintId == print.Id && pc.CommentId != comment.Id)
                 .Select(pc => pc.Comment.CreatedById)
@@ -752,17 +738,18 @@ namespace PrintLogApi.Services
                 .Where(id => id != userId && id != print.CreatedById)
                 .ToListAsync();
 
-            foreach (var previousCommenterId in previousCommenterIds)
-            {
-                await _notificationService.CreateCommentNotification(
-                    previousCommenterId,
-                    print.Id,
-                    print.Title,
-                    comment.Id,
-                    userId,
-                    commenterDisplayName,
-                    isRecipientPrintOwner: false);
-            }
+            var recipients = new List<(long RecipientUserId, bool IsRecipientPrintOwner)>();
+            if (print.CreatedById != userId)
+                recipients.Add((print.CreatedById, true));
+            recipients.AddRange(previousCommenterIds.Select(id => (id, false)));
+
+            await _notificationService.CreateCommentNotifications(
+                recipients,
+                print.Id,
+                print.Title,
+                comment.Id,
+                userId,
+                commenterDisplayName);
 
             return comment;
         }
