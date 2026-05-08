@@ -429,7 +429,7 @@ namespace PrintLogApi.Services
 
         public async Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds)
         {
-            var ids = filamentIds.ToList();
+            var ids = filamentIds.Distinct().ToList();
             if (ids.Count == 0) return true;
 
             var accessibleCount = await _context.Filaments
