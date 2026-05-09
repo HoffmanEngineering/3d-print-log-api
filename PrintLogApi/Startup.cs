@@ -192,7 +192,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            if (Environment.IsDevelopment())
+            if (Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting"))
             {
                 services.AddAuthentication(options =>
                 {
@@ -253,7 +253,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             if (env.IsEnvironment("E2ETesting"))
             {
-                DataSeeder.Seed(context);
+                E2EDataSeeder.Seed(context);
             }
 
             if (env.IsDevelopment())
