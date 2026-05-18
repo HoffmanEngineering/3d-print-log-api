@@ -7,6 +7,7 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -188,6 +189,22 @@ namespace PrintLogApi.Services
         /// <returns></returns>
         public async Task<Filament> AddFilament(AddFilamentDto filament, long userId)
         {
+            // Backward-compat: old clients send ColorHex only — normalize to Colors array
+            if ((filament.Colors == null || filament.Colors.Count == 0) && !string.IsNullOrWhiteSpace(filament.ColorHex))
+            {
+                filament.Colors = new List<string> { filament.ColorHex };
+                filament.ColorPattern ??= ColorPatternType.Solid;
+                filament.FinishType ??= FilamentFinishType.Standard;
+            }
+
+            // Always keep ColorHex in sync with Colors[0]
+            if (filament.Colors != null && filament.Colors.Count > 0)
+            {
+                filament.ColorHex = filament.Colors[0];
+                filament.ColorPattern ??= ColorPatternType.Solid;
+                filament.FinishType ??= FilamentFinishType.Standard;
+            }
+
             var newFilament = _mapper.Map<Filament>(filament);
 
             var materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == newFilament.MaterialCategoryNickname);
@@ -325,6 +342,18 @@ namespace PrintLogApi.Services
 
         public async Task<Filament> UpdateFilament(Guid id, FilamentDetailDto dto, long userId)
         {
+            // Backward-compat: old clients send ColorHex only — normalize to Colors array
+            if ((dto.Colors == null || dto.Colors.Count == 0) && !string.IsNullOrWhiteSpace(dto.ColorHex))
+            {
+                dto.Colors = new List<string> { dto.ColorHex };
+            }
+
+            // Always keep ColorHex in sync with Colors[0]
+            if (dto.Colors != null && dto.Colors.Count > 0)
+            {
+                dto.ColorHex = dto.Colors[0];
+            }
+
             var existingFilament = await GetFilamentById(id);
 
             if (existingFilament == null)

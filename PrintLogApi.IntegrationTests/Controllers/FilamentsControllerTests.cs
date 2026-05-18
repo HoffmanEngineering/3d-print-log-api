@@ -339,6 +339,39 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
+        [Fact]
+        public async Task CreateFilament_OldClientSendsColorHexOnly_NormalizesToColorsArray()
+        {
+            // Old client sends ColorHex but no Colors
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Old Client Filament",
+                Brand = "LegacyBrand",
+                MaterialType = "PLA",
+                ColorHex = "e05c5c",
+                Colors = new List<string>(),   // old client does not send Colors
+                ColorPattern = null,
+                FinishType = null,
+                Effects = new List<FilamentEffect>(),
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            request.Content = JsonContent.Create(newFilament);
+
+            var response = await _httpClient.SendAsync(request);
+            var created = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.NotNull(created);
+            Assert.Equal(new List<string> { "e05c5c" }, created.Colors);
+            Assert.Equal("e05c5c", created.ColorHex);
+            Assert.Equal(ColorPatternType.Solid, created.ColorPattern);
+            Assert.Equal(FilamentFinishType.Standard, created.FinishType);
+        }
+
         #endregion
 
         #region PUT Filament (Update)
