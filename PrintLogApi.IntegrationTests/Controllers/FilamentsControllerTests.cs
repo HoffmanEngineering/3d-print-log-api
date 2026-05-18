@@ -613,6 +613,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(new List<string> { "0000FF" }, updated.Colors);
             Assert.Equal("0000FF", updated.ColorHex);
             Assert.Equal(ColorPatternType.Solid, updated.ColorPattern);
+            Assert.Equal(FilamentFinishType.Standard, updated.FinishType);
         }
 
         #endregion

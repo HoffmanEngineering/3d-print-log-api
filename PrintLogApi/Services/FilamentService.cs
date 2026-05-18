@@ -354,8 +354,6 @@ namespace PrintLogApi.Services
             if (dto.Colors != null && dto.Colors.Count > 0)
             {
                 dto.ColorHex = dto.Colors[0];
-                dto.ColorPattern = ColorPatternType.Solid;
-                dto.FinishType = FilamentFinishType.Standard;
             }
 
             var existingFilament = await GetFilamentById(id);
