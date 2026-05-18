@@ -56,8 +56,8 @@ namespace PrintLogApi.Models
         public string ColorHex { get; set; }
         public ColorPatternType? ColorPattern { get; set; }
         public FilamentFinishType? FinishType { get; set; }
-        public List<string> Colors { get; set; } = new();
-        public List<FilamentEffect> Effects { get; set; } = new();
+        public List<string> Colors { get; set; }
+        public List<FilamentEffect> Effects { get; set; }
 
         /// <summary>
         /// Which measurement is the source. Ie, should measurements be based on weight, volume, etc?
