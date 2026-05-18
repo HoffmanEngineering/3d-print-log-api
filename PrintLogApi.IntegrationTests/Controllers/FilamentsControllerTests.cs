@@ -158,6 +158,73 @@ namespace PrintLogApi.IntegrationTests.Controllers
             });
         }
 
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByColorPattern_ReturnsMatchingOnly()
+        {
+            // Seed a Rainbow filament so we have something to filter on
+            var rainbowFilament = new AddFilamentDto
+            {
+                DisplayName = "Rainbow Filter Test",
+                Brand = "FilterTestBrand",
+                MaterialType = "PLA",
+                ColorHex = "FF0000",
+                Colors = new List<string> { "FF0000", "00FF00", "0000FF" },
+                ColorPattern = ColorPatternType.Rainbow,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createReq.Content = JsonContent.Create(rainbowFilament);
+            await _httpClient.SendAsync(createReq);
+
+            // Filter to Rainbow only
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments?colorPatterns=4&includeInactive=true");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Paging.TotalCount >= 1);
+            Assert.All(model.Items, f => Assert.Equal(ColorPatternType.Rainbow, f.ColorPattern));
+        }
+
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByEffect_ReturnsMatchingOnly()
+        {
+            // Seed a filament with Sparkle effect
+            var sparkleFilament = new AddFilamentDto
+            {
+                DisplayName = "Sparkle Filter Test",
+                Brand = "FilterTestBrand",
+                MaterialType = "PLA",
+                ColorHex = "FFD700",
+                Colors = new List<string> { "FFD700" },
+                ColorPattern = ColorPatternType.Solid,
+                Effects = new List<FilamentEffect> { FilamentEffect.Sparkle },
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createReq.Content = JsonContent.Create(sparkleFilament);
+            await _httpClient.SendAsync(createReq);
+
+            // Filter to Sparkle effect (value = 1)
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments?effects=1&includeInactive=true");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Paging.TotalCount >= 1);
+            Assert.All(model.Items, f => Assert.Contains(FilamentEffect.Sparkle, f.Effects));
+        }
+
         #endregion
 
         #region GET Single Filament (Read)

@@ -40,7 +40,10 @@ namespace PrintLogApi.Services
             string filterByStorageLocation,
             bool? includeInactive,
             bool? showFavoritesOnly,
-            bool? showLoadedFilamentOnly)
+            bool? showLoadedFilamentOnly,
+            List<ColorPatternType>? colorPatterns = null,
+            List<FilamentFinishType>? finishTypes = null,
+            List<FilamentEffect>? effects = null)
         {
             var filament = _context.Filaments
                 .Include(f => f.MaterialCategory)
@@ -63,6 +66,24 @@ namespace PrintLogApi.Services
                     filament = filament.Where(f => f.StorageLocation == null || f.StorageLocation == "");
                 else
                     filament = filament.Where(f => f.StorageLocation == filterByStorageLocation);
+            }
+
+            if (colorPatterns is { Count: > 0 })
+            {
+                filament = filament.Where(f =>
+                    f.ColorPattern != null && colorPatterns.Contains(f.ColorPattern.Value));
+            }
+
+            if (finishTypes is { Count: > 0 })
+            {
+                filament = filament.Where(f =>
+                    f.FinishType != null && finishTypes.Contains(f.FinishType.Value));
+            }
+
+            if (effects is { Count: > 0 })
+            {
+                // Any-match: filament has at least one of the requested effects
+                filament = filament.Where(f => f.Effects.Any(e => effects.Contains(e)));
             }
 
             var filamentsBase = filament
