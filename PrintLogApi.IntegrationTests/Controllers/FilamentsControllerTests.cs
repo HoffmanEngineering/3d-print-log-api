@@ -137,6 +137,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
+        [Fact]
+        public async Task GetFilamentSummaries_LegacyRecord_ColorsDefaultsToColorHex()
+        {
+            // The seeded filaments have no Colors set (legacy rows) — the summary DTO
+            // should fall back to Colors=[ColorHex] for each
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.All(model.Items, f =>
+            {
+                Assert.NotNull(f.Colors);
+                Assert.NotEmpty(f.Colors);
+                Assert.Equal(f.ColorHex, f.Colors[0]);
+            });
+        }
+
         #endregion
 
         #region GET Single Filament (Read)
