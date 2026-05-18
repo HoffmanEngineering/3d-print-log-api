@@ -1,8 +1,9 @@
-namespace PrintLogApi.Enums;
-
-public enum FilamentFinishType
+namespace PrintLogApi.Enums
 {
-    Standard = 1,
-    Silk     = 2,
-    Matte    = 3,
+    public enum FilamentFinishType
+    {
+        Standard = 1,
+        Silk     = 2,
+        Matte    = 3,
+    }
 }

@@ -1,9 +1,10 @@
-namespace PrintLogApi.Enums;
-
-public enum ColorPatternType
+namespace PrintLogApi.Enums
 {
-    Solid    = 1,
-    Multi    = 2,
-    Gradient = 3,
-    Rainbow  = 4,
+    public enum ColorPatternType
+    {
+        Solid    = 1,
+        Multi    = 2,
+        Gradient = 3,
+        Rainbow  = 4,
+    }
 }
