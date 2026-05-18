@@ -83,7 +83,7 @@ namespace PrintLogApi.Services
             if (effects is { Count: > 0 })
             {
                 // Any-match: filament has at least one of the requested effects
-                filament = filament.Where(f => f.Effects.Any(e => effects.Contains(e)));
+                filament = filament.Where(f => f.Effects != null && f.Effects.Any(e => effects.Contains(e)));
             }
 
             var filamentsBase = filament

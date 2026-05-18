@@ -179,7 +179,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(createReq);
 
             // Filter to Rainbow only
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments?colorPatterns=4&includeInactive=true");
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments?colorPatterns={(int)ColorPatternType.Rainbow}&includeInactive=true");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
@@ -212,8 +212,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createReq.Content = JsonContent.Create(sparkleFilament);
             await _httpClient.SendAsync(createReq);
 
-            // Filter to Sparkle effect (value = 1)
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments?effects=1&includeInactive=true");
+            // Filter to Sparkle effect
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments?effects={(int)FilamentEffect.Sparkle}&includeInactive=true");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
@@ -223,6 +223,40 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(model);
             Assert.True(model.Paging.TotalCount >= 1);
             Assert.All(model.Items, f => Assert.Contains(FilamentEffect.Sparkle, f.Effects));
+        }
+
+        [Fact]
+        public async Task GetFilamentSummaries_FilterByFinishType_ReturnsMatchingOnly()
+        {
+            // Seed a Silk finish filament
+            var silkFilament = new AddFilamentDto
+            {
+                DisplayName = "Silk Filter Test",
+                Brand = "FilterTestBrand",
+                MaterialType = "PLA",
+                ColorHex = "C0C0C0",
+                Colors = new List<string> { "C0C0C0" },
+                ColorPattern = ColorPatternType.Solid,
+                FinishType = FilamentFinishType.Silk,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createReq.Content = JsonContent.Create(silkFilament);
+            await _httpClient.SendAsync(createReq);
+
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Filaments?finishTypes={(int)FilamentFinishType.Silk}&includeInactive=true");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(model);
+            Assert.True(model.Paging.TotalCount >= 1);
+            Assert.All(model.Items, f => Assert.Equal(FilamentFinishType.Silk, f.FinishType));
         }
 
         #endregion
