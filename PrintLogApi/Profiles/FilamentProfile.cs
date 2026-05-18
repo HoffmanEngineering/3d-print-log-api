@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using AutoMapper;
+using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 
@@ -32,21 +34,44 @@ namespace PrintLogApi.Profiles
                                                                                                                     p.VolumeMl :
                                                                                                                     p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ?
                                                                                                                     p.EstimatedVolumeMl : 0)
-                                                                                    + src.FilamentAdjustments.Sum(adj => adj.VolumeMl) ?? 0)));
+                                                                                    + src.FilamentAdjustments.Sum(adj => adj.VolumeMl) ?? 0)))
+                .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
+                .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
+                .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
+                    src.Colors != null && src.Colors.Count > 0 ? src.Colors : new List<string> { src.ColorHex }))
+                .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects ?? new List<FilamentEffect>()))
+                .ForMember(dest => dest.ColorHex, src => src.MapFrom(src =>
+                    src.Colors != null && src.Colors.Count > 0 ? src.Colors[0] : src.ColorHex));
 
             CreateMap<FilamentSummaryDto, Filament>();
 
             CreateMap<AddFilamentDto, Filament>()
                 .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament" ))
-                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight));
+                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight))
+                .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
+                .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))
+                .ForMember(dest => dest.Colors, src => src.MapFrom(src => src.Colors))
+                .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
 
             CreateMap<EditFilamentDto, Filament>()
                 .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))
                 .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight)); ;
 
             CreateMap<FilamentDetailDto, Filament>()
-                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight));
-            CreateMap<Filament, FilamentDetailDto>();
+                .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight))
+                .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
+                .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))
+                .ForMember(dest => dest.Colors, src => src.MapFrom(src => src.Colors))
+                .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
+
+            CreateMap<Filament, FilamentDetailDto>()
+                .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
+                .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
+                .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
+                    src.Colors != null && src.Colors.Count > 0 ? src.Colors : new List<string> { src.ColorHex }))
+                .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects ?? new List<FilamentEffect>()))
+                .ForMember(dest => dest.ColorHex, src => src.MapFrom(src =>
+                    src.Colors != null && src.Colors.Count > 0 ? src.Colors[0] : src.ColorHex));
 
             CreateMap<FilamentAdjustment, FilamentAdjustmentDto>();
 

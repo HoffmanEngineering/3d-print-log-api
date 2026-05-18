@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using Xunit;
@@ -700,6 +702,65 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(model);
             Assert.True(model.Paging.TotalCount >= 3,
                 "All seeded filaments should be returned when no filter is applied");
+        }
+
+        #endregion
+
+        #region Multi-Color Filament Fields
+
+        [Fact]
+        public async Task GetFilamentById_LegacyRecord_ColorsDefaultsToColorHex()
+        {
+            // The seeded Hatchbox filament has ColorHex="FF0000" but no Colors set (legacy)
+            // Reading it should return Colors=["FF0000"] and ColorPattern=Solid
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/api/Filaments/{IntegrationTestSeeder.TestFilamentId1}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.NotNull(filament);
+            Assert.Equal(new List<string> { "FF0000" }, filament.Colors);
+            Assert.Equal("FF0000", filament.ColorHex);
+            Assert.Equal(ColorPatternType.Solid, filament.ColorPattern);
+            Assert.Equal(FilamentFinishType.Standard, filament.FinishType);
+            Assert.Empty(filament.Effects);
+        }
+
+        [Fact]
+        public async Task CreateFilament_WithMultiColor_StoresAndReturnsColors()
+        {
+            // Create a new filament with multi-color data
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Multi-Color Test Filament",
+                Brand = "TestBrand",
+                MaterialType = "PLA",
+                ColorHex = "FF0000",
+                Colors = new List<string> { "FF0000", "0000FF" },
+                ColorPattern = ColorPatternType.Multi,
+                FinishType = FilamentFinishType.Silk,
+                Effects = new List<FilamentEffect> { FilamentEffect.Sparkle },
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+
+            var response = await _httpClient.SendAsync(createRequest);
+            var created = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.NotNull(created);
+            Assert.Equal(new List<string> { "FF0000", "0000FF" }, created.Colors);
+            Assert.Equal("FF0000", created.ColorHex);
+            Assert.Equal(ColorPatternType.Multi, created.ColorPattern);
+            Assert.Equal(FilamentFinishType.Silk, created.FinishType);
+            Assert.Equal(new List<FilamentEffect> { FilamentEffect.Sparkle }, created.Effects);
         }
 
         #endregion

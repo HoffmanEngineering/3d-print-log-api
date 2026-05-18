@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Enums;
 using PrintLogApi.Models.DTOs.MaterialCategory;
 using PrintLogApi.Models.DTOs.Printer;
 
@@ -73,5 +74,10 @@ namespace PrintLogApi.Models.DTOs.Filament
         public string StorageLocation { get; set; }
 
         public bool IsFavorite { get; set; }
+
+        public ColorPatternType ColorPattern { get; set; } = ColorPatternType.Solid;
+        public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;
+        public List<string> Colors { get; set; } = new();
+        public List<FilamentEffect> Effects { get; set; } = new();
     }
 }

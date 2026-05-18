@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Enums;
 using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament
@@ -141,5 +142,10 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double? MaterialRefreshRatio { get; set; }
 
         public ICollection<FilamentAdjustmentDto> FilamentAdjustments { get; set; }
+
+        public ColorPatternType ColorPattern { get; set; } = ColorPatternType.Solid;
+        public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;
+        public List<string> Colors { get; set; } = new();
+        public List<FilamentEffect> Effects { get; set; } = new();
     }
 }
