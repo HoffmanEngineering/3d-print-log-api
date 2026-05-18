@@ -346,12 +346,16 @@ namespace PrintLogApi.Services
             if ((dto.Colors == null || dto.Colors.Count == 0) && !string.IsNullOrWhiteSpace(dto.ColorHex))
             {
                 dto.Colors = new List<string> { dto.ColorHex };
+                dto.ColorPattern = ColorPatternType.Solid;
+                dto.FinishType = FilamentFinishType.Standard;
             }
 
             // Always keep ColorHex in sync with Colors[0]
             if (dto.Colors != null && dto.Colors.Count > 0)
             {
                 dto.ColorHex = dto.Colors[0];
+                dto.ColorPattern = ColorPatternType.Solid;
+                dto.FinishType = FilamentFinishType.Standard;
             }
 
             var existingFilament = await GetFilamentById(id);

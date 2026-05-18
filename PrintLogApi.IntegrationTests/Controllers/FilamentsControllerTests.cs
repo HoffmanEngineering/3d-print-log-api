@@ -567,6 +567,54 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
+        [Fact]
+        public async Task UpdateFilament_OldClientSendsColorHexOnly_NormalizesToColorsArray()
+        {
+            // Create a filament first
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Filament For Update Normalization Test",
+                Brand = "TestBrand",
+                MaterialType = "PLA",
+                ColorHex = "FF0000",
+                Colors = new List<string> { "FF0000" },
+                ColorPattern = ColorPatternType.Solid,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Old client sends update with only ColorHex (no Colors)
+            var updateDto = new FilamentDetailDto
+            {
+                Id = created.Id,
+                DisplayName = created.DisplayName,
+                Brand = created.Brand,
+                MaterialType = created.MaterialType,
+                ColorHex = "0000FF",        // old client changes color via ColorHex
+                Colors = new List<string>(), // old client sends empty Colors
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
+            updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            updateRequest.Content = JsonContent.Create(updateDto);
+
+            var updateResponse = await _httpClient.SendAsync(updateRequest);
+            var updated = await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+            Assert.NotNull(updated);
+            Assert.Equal(new List<string> { "0000FF" }, updated.Colors);
+            Assert.Equal("0000FF", updated.ColorHex);
+            Assert.Equal(ColorPatternType.Solid, updated.ColorPattern);
+        }
+
         #endregion
 
         #region DELETE Filament
