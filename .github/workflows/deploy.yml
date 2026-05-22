@@ -39,7 +39,7 @@ jobs:
         run: |
           dotnet tool install --global dotnet-ef
           MIGRATIONS_JSON=$(dotnet ef migrations list --project PrintLogApi \
-            --connection "$DB_CONNECTION_STRING" \
+            --connection "$DB_CONNECTION_STRING_MIGRATIONS_READER" \
             --json --no-build 2>&1)
           echo "Raw migrations output: $MIGRATIONS_JSON"
           LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
@@ -54,7 +54,7 @@ jobs:
           dotnet ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
             --output migrations.sql --idempotent --no-build
         env:
-          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+          DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
 
       - name: Upload migration script artifact
         uses: actions/upload-artifact@v4
