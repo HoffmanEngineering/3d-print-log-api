@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -52,7 +54,10 @@ namespace PrintLogApi.Controllers
             [FromQuery] string filterByStorageLocation,
             [FromQuery] bool? includeInactive,
             [FromQuery] bool? showFavoritesOnly,
-            [FromQuery] bool? showLoadedFilamentOnly)
+            [FromQuery] bool? showLoadedFilamentOnly,
+            [FromQuery] List<ColorPatternType>? colorPatterns = null,
+            [FromQuery] List<FilamentFinishType>? finishTypes = null,
+            [FromQuery] List<FilamentEffect>? effects = null)
         {
             long? currentUserId = User.GetUserId();
             if (!currentUserId.HasValue)
@@ -60,17 +65,20 @@ namespace PrintLogApi.Controllers
                 return Unauthorized("Please login before requesting filaments.");
             }
 
-            return await _filamentService.GetFilamentSummaryForUser(currentUserId.Value, 
-                sortRequest.SortDirection, 
-                sortRequest.SortColumn, 
-                pagingRequest.PageNumber, 
+            return await _filamentService.GetFilamentSummaryForUser(currentUserId.Value,
+                sortRequest.SortDirection,
+                sortRequest.SortColumn,
+                pagingRequest.PageNumber,
                 pagingRequest.PageSize,
                 searchText,
                 filterByMaterialCategoryNickname,
                 filterByStorageLocation,
                 includeInactive,
                 showFavoritesOnly,
-                showLoadedFilamentOnly);
+                showLoadedFilamentOnly,
+                colorPatterns,
+                finishTypes,
+                effects);
         }
 
 

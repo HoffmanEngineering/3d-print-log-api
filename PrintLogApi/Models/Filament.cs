@@ -4,6 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Threading.Tasks;
+using PrintLogApi.Enums;
 
 namespace PrintLogApi.Models
 {
@@ -53,6 +54,10 @@ namespace PrintLogApi.Models
         public string ColorName { get; set; }
         [StringLength(6)]
         public string ColorHex { get; set; }
+        public ColorPatternType? ColorPattern { get; set; }
+        public FilamentFinishType? FinishType { get; set; }
+        public List<string> Colors { get; set; }
+        public List<FilamentEffect> Effects { get; set; }
 
         /// <summary>
         /// Which measurement is the source. Ie, should measurements be based on weight, volume, etc?
