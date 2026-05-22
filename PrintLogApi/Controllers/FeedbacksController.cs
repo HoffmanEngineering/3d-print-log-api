@@ -71,11 +71,13 @@ namespace PrintLogApi.Controllers
             if (!string.IsNullOrWhiteSpace(_feedbackEmail))
             {
                 var user = await _context.Users.Where(u => u.Id == newFeedback.CreatedById).FirstOrDefaultAsync();
+                var tokenEmail = User.FindFirst("email")?.Value;
 
                 var subject = "New 3D Print Log Feedback";
                 var body = $@"
 By: {System.Security.SecurityElement.Escape(user.DisplayName)} (User ID: {System.Security.SecurityElement.Escape(user.Id.ToString())}) <br>
-Email: {System.Security.SecurityElement.Escape(newFeedback.Email)} <br>
+Email (from token): {System.Security.SecurityElement.Escape(tokenEmail ?? "(not present)")} <br>
+Email (entered by user): {System.Security.SecurityElement.Escape(newFeedback.Email)} <br>
 Type: {Enum.GetName(typeof(Feedback.FeedbackType), newFeedback.Type)} <br>
 Feedback ID: {newFeedback.Id} <br>
 <br>
