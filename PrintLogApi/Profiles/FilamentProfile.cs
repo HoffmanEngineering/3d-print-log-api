@@ -13,7 +13,12 @@ namespace PrintLogApi.Profiles
         public FilamentProfile()
         {
             // Lightweight mapping for printer summary views - avoids expensive calculations
-            CreateMap<Filament, FilamentSummaryForPrinterDto>();
+            CreateMap<Filament, FilamentSummaryForPrinterDto>()
+                .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
+                .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
+                .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
+                    src.Colors != null && src.Colors.Count > 0 ? src.Colors : new List<string> { src.ColorHex }))
+                .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects ?? new List<FilamentEffect>()));
 
             CreateMap<Filament, FilamentSummaryDto>()
                 .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
