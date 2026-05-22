@@ -40,7 +40,7 @@ jobs:
           dotnet tool install --global dotnet-ef
           MIGRATIONS_JSON=$(dotnet ef migrations list --project PrintLogApi \
             --connection "$DB_CONNECTION_STRING_MIGRATIONS_READER" \
-            --json --no-build 2>&1)
+            --json --no-build --configuration Release 2>&1) || true
           echo "Raw migrations output: $MIGRATIONS_JSON"
           LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
             | sed -n '/^\[/,$p' \
@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
           dotnet ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
-            --output migrations.sql --idempotent --no-build
+            --output migrations.sql --idempotent --no-build --configuration Release
         env:
           DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
 
