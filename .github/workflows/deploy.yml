@@ -38,13 +38,20 @@ jobs:
       - name: Generate migration SQL script
         run: |
           dotnet tool install --global dotnet-ef
-          LAST_MIGRATION=$(dotnet ef migrations list --project PrintLogApi \
+          MIGRATIONS_JSON=$(dotnet ef migrations list --project PrintLogApi \
             --connection "$DB_CONNECTION_STRING" \
-            --prefix-output 2>/dev/null \
-            | grep '^data:' | sed 's/^data: //' | grep -v '(Pending)' | tail -1 | xargs)
+            --json --no-build 2>&1)
+          echo "Raw migrations output: $MIGRATIONS_JSON"
+          LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
+            | grep '^\[' -A 9999 \
+            | jq -r '[.[] | select(.applied == true)] | last | .id // empty')
           echo "Last applied migration: $LAST_MIGRATION"
+          if [ -z "$LAST_MIGRATION" ]; then
+            echo "ERROR: Could not determine last applied migration" >&2
+            exit 1
+          fi
           dotnet ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
-            --output migrations.sql --idempotent
+            --output migrations.sql --idempotent --no-build
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 
