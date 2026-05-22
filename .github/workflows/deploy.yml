@@ -43,8 +43,9 @@ jobs:
             --json --no-build 2>&1)
           echo "Raw migrations output: $MIGRATIONS_JSON"
           LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
-            | grep '^\[' -A 9999 \
-            | jq -r '[.[] | select(.applied == true)] | last | .id // empty')
+            | sed -n '/^\[/,$p' \
+            | jq -r '[.[] | select(.applied == true)] | last | .id // empty' \
+            2>/dev/null || true)
           echo "Last applied migration: $LAST_MIGRATION"
           if [ -z "$LAST_MIGRATION" ]; then
             echo "ERROR: Could not determine last applied migration" >&2
