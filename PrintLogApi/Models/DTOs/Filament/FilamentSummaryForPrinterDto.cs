@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using PrintLogApi.Enums;
 
 namespace PrintLogApi.Models.DTOs.Filament
 {
@@ -32,5 +34,13 @@ namespace PrintLogApi.Models.DTOs.Filament
 
         [StringLength(6)]
         public string ColorHex { get; set; }
+
+        public ColorPatternType ColorPattern { get; set; }
+
+        public List<string> Colors { get; set; }
+
+        public FilamentFinishType FinishType { get; set; }
+
+        public List<FilamentEffect> Effects { get; set; }
     }
 }
