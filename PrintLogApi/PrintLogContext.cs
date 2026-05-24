@@ -79,7 +79,8 @@ namespace PrintLogApi
                 new UserSettingType() { Id = 8, Name = "Filaments_DefaultPrice", Description = "The default price of filament, for when pricing wasn't added." },
                 new UserSettingType() { Id = 9, Name = "Prints_LastSelectedResinMeasureType", Description = "The last selected resin measure type on the print." },
                 new UserSettingType() { Id = 10, Name = "Prints_LastSelectedPowderMeasureType", Description = "The last selected powder measure type on the print." },
-                new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." }
+                new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." },
+                new UserSettingType() { Id = 14, Name = "Prints_PreferredFilamentDisplayUnit", Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume)." }
                 );
 
             var filamentCategory = new MaterialCategory()
