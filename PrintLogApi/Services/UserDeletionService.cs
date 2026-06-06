@@ -215,6 +215,61 @@ namespace PrintLogApi.Services
                     .Where(p => p.CreatedById == userId)
                     .ExecuteDeleteAsync();
 
+                // Delete Projects and their images
+                var projectIds = await _context.Projects
+                    .Where(p => p.CreatedById == userId)
+                    .Select(p => p.Id)
+                    .ToListAsync();
+
+                if (projectIds.Count > 0)
+                {
+                    // Nullify ProjectId on prints by other users that reference this user's projects
+                    await _context.Prints
+                        .Where(p => p.ProjectId.HasValue && projectIds.Contains(p.ProjectId.Value))
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.ProjectId, (Guid?)null));
+
+                    var projectImageData = await _context.ProjectImages
+                        .Where(pi => projectIds.Contains(pi.ProjectId))
+                        .Select(pi => new { pi.FileId, pi.File.Path })
+                        .AsNoTracking()
+                        .ToListAsync();
+
+                    foreach (var f in projectImageData)
+                    {
+                        if (!string.IsNullOrEmpty(f.Path))
+                        {
+                            var parts = f.Path.Split('/', 2);
+                            if (parts.Length == 2)
+                            {
+                                try
+                                {
+                                    await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to delete blob {BlobPath} during user deletion; continuing", f.Path);
+                                }
+                            }
+                        }
+                    }
+
+                    await _context.ProjectImages
+                        .Where(pi => projectIds.Contains(pi.ProjectId))
+                        .ExecuteDeleteAsync();
+
+                    var projectImageFileIds = projectImageData.Select(f => f.FileId).ToList();
+                    if (projectImageFileIds.Count > 0)
+                    {
+                        await _context.Files
+                            .Where(f => projectImageFileIds.Contains(f.Id))
+                            .ExecuteDeleteAsync();
+                    }
+
+                    await _context.Projects
+                        .Where(p => p.CreatedById == userId)
+                        .ExecuteDeleteAsync();
+                }
+
                 // Delete PrinterFilament (loaded filaments) for user's printers
                 await _context.PrinterFilament
                     .Where(pf => pf.Printer.UserId == userId)
