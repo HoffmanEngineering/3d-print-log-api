@@ -71,6 +71,13 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// The weight of the spool in milligrams.
         /// </summary>
         public long? SpoolWeightMg { get; set; }
+
+        /// <summary>
+        /// Server-computed remaining filament weight in milligrams
+        /// (InitialNominalWeightMg minus print usage plus weight adjustments).
+        /// Null when nominal weight is not set. Read-only: ignored on write.
+        /// </summary>
+        public long? FilamentRemaining { get; set; }
         public double? TempRangeStart { get; set; }
         public double? TempRangeEnd { get; set; }
         /// <summary>

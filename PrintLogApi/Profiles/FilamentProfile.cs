@@ -74,6 +74,14 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
 
             CreateMap<Filament, FilamentDetailDto>()
+                .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg.HasValue
+                                                                                    ? (long?)(src.InitialNominalWeightMg.Value
+                                                                                    - src.PrintFilaments.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
+                                                                                                                    (long)p.AmountMg :
+                                                                                                                    p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
+                                                                                                                    (long)p.EstimatedAmountMg : (long)0)
+                                                                                    + src.FilamentAdjustments.Sum(adj => adj.AmountMg))
+                                                                                    : (long?)null))
                 .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
                 .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
                 .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
