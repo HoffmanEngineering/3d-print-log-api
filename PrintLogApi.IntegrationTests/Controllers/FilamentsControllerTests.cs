@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.Print;
 using Xunit;
+using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.IntegrationTests.Controllers
 {
@@ -1032,6 +1034,247 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        #endregion
+
+        #region GET Detail - FilamentRemaining
+
+        [Fact]
+        public async Task GetFilamentById_ReturnsFilamentRemaining_WhenNominalWeightPresent()
+        {
+            // Arrange - create a filament with a known nominal weight and no prints/adjustments
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Remaining Test Filament",
+                Brand = "Test Brand",
+                MaterialType = "PLA",
+                ColorName = "Green",
+                ColorHex = "00FF00",
+                DiameterMm = 1.75,
+                InitialNominalWeightMg = 1000000,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Act
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Assert
+            Assert.NotNull(filament);
+            Assert.Equal(1000000, filament.FilamentRemaining);
+        }
+
+        [Fact]
+        public async Task GetFilamentById_FilamentRemaining_NullWhenNominalWeightMissing()
+        {
+            // Arrange - create a filament WITHOUT a nominal weight
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "No Nominal Weight Filament",
+                Brand = "Test Brand",
+                MaterialType = "PLA",
+                ColorName = "Blue",
+                ColorHex = "0000FF",
+                DiameterMm = 1.75,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Act
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Assert
+            Assert.NotNull(filament);
+            Assert.Null(filament.FilamentRemaining);
+        }
+
+        [Fact]
+        public async Task GetFilamentById_FilamentRemaining_ReflectsWeightAdjustments()
+        {
+            // Arrange - create a filament, then add a -200,000 mg weight adjustment via PUT
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Adjustment Remaining Filament",
+                Brand = "Test Brand",
+                MaterialType = "PLA",
+                ColorName = "Red",
+                ColorHex = "FF0000",
+                DiameterMm = 1.75,
+                InitialNominalWeightMg = 1000000,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            var updateDto = new FilamentDetailDto
+            {
+                Id = created.Id,
+                DisplayName = created.DisplayName,
+                Brand = created.Brand,
+                MaterialType = created.MaterialType,
+                MaterialCategoryNickname = created.MaterialCategoryNickname,
+                ColorName = created.ColorName,
+                ColorHex = created.ColorHex,
+                DiameterMm = created.DiameterMm,
+                InitialNominalWeightMg = created.InitialNominalWeightMg,
+                MaterialDensityGramPerCubicCm = created.MaterialDensityGramPerCubicCm,
+                IsActive = created.IsActive,
+                FilamentAdjustments = new List<FilamentAdjustmentDto>
+                {
+                    new FilamentAdjustmentDto
+                    {
+                        FilamentId = created.Id,
+                        Source = FilamentAdjustment.SourceMeasurement.Weight,
+                        AmountMg = -200000,
+                        Notes = "Measured adjustment"
+                    }
+                }
+            };
+            var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
+            putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            putRequest.Content = JsonContent.Create(updateDto);
+            await _httpClient.SendAsync(putRequest);
+
+            // Act
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Assert
+            Assert.NotNull(filament);
+            Assert.Equal(800000, filament.FilamentRemaining);
+        }
+
+        [Fact]
+        public async Task GetFilamentById_FilamentRemaining_SubtractsPrintUsage()
+        {
+            // Arrange - create a filament with a known nominal weight
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Print Usage Remaining Filament",
+                Brand = "Test Brand",
+                MaterialType = "PLA",
+                ColorName = "Teal",
+                ColorHex = "008080",
+                DiameterMm = 1.75,
+                InitialNominalWeightMg = 1000000,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Create a print that uses 200,000 mg (actual weight) of that filament
+            var newPrint = new AddPrintDTO
+            {
+                Title = "Filament Remaining Print",
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                Status = PrintStatus.Success,
+                ViewStatus = PrintViewStatus.Public,
+                AllowComments = true,
+                FilamentUsage = new List<PrintFilamentSummaryDto>
+                {
+                    new PrintFilamentSummaryDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Filament = new FilamentSummaryDto { Id = created.Id },
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        AmountMg = 200000
+                    }
+                }
+            };
+            var printRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+            printRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            printRequest.Content = JsonContent.Create(newPrint);
+            await _httpClient.SendAsync(printRequest);
+
+            // Act
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Assert - 1,000,000 nominal - 200,000 used = 800,000
+            Assert.NotNull(filament);
+            Assert.Equal(800000, filament.FilamentRemaining);
+        }
+
+        [Fact]
+        public async Task PutFilament_IgnoresProvidedFilamentRemaining()
+        {
+            // Arrange - create a filament with a known nominal weight
+            var newFilament = new AddFilamentDto
+            {
+                DisplayName = "Ignore Remaining Filament",
+                Brand = "Test Brand",
+                MaterialType = "PLA",
+                ColorName = "Cyan",
+                ColorHex = "00FFFF",
+                DiameterMm = 1.75,
+                InitialNominalWeightMg = 1000000,
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true
+            };
+            var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+            createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            createRequest.Content = JsonContent.Create(newFilament);
+            var createResponse = await _httpClient.SendAsync(createRequest);
+            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            // Act - PUT a bogus FilamentRemaining that the server must ignore
+            var updateDto = new FilamentDetailDto
+            {
+                Id = created.Id,
+                DisplayName = created.DisplayName,
+                Brand = created.Brand,
+                MaterialType = created.MaterialType,
+                MaterialCategoryNickname = created.MaterialCategoryNickname,
+                ColorName = created.ColorName,
+                ColorHex = created.ColorHex,
+                DiameterMm = created.DiameterMm,
+                InitialNominalWeightMg = created.InitialNominalWeightMg,
+                MaterialDensityGramPerCubicCm = created.MaterialDensityGramPerCubicCm,
+                IsActive = created.IsActive,
+                FilamentRemaining = 123456
+            };
+            var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
+            putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            putRequest.Content = JsonContent.Create(updateDto);
+            await _httpClient.SendAsync(putRequest);
+
+            // Assert - GET still computes remaining from nominal, not the provided value
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await _httpClient.SendAsync(request);
+            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+
+            Assert.NotNull(filament);
+            Assert.Equal(1000000, filament.FilamentRemaining);
         }
 
         #endregion
