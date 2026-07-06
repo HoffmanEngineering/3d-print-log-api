@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -62,6 +63,13 @@ namespace PrintLogApi.IntegrationTests
                 }
                 services.AddSingleton<IBlobStorageService, InMemoryBlobStorageService>();
 
+                var auth0Descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IAuth0Service));
+                if (auth0Descriptor != null)
+                {
+                    services.Remove(auth0Descriptor);
+                }
+                services.AddSingleton<IAuth0Service, TestAuth0Service>();
+
                 // Add test authentication scheme
                 services.AddAuthentication(options =>
                 {
@@ -99,6 +107,24 @@ namespace PrintLogApi.IntegrationTests
             {
                 _connection?.Close();
                 _connection?.Dispose();
+            }
+        }
+
+        private class TestAuth0Service : IAuth0Service
+        {
+            public Task DeleteUser(string oauthUserId)
+            {
+                return Task.CompletedTask;
+            }
+
+            public Task<string> GetManagementApiBearerToken()
+            {
+                return Task.FromResult("test-token");
+            }
+
+            public Task GetUser(string oauthUserId)
+            {
+                return Task.CompletedTask;
             }
         }
     }
