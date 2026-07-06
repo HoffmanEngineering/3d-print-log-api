@@ -99,6 +99,13 @@ namespace PrintLogApi.Services
                 // Delete in order to respect foreign key constraints
                 // Child tables first, then parent tables
 
+                // Delete notifications owned by this user or linked to records that are being removed.
+                await _context.Notifications
+                    .Where(n => n.UserId == userId
+                        || (n.PrintId.HasValue && printIds.Contains(n.PrintId.Value))
+                        || (n.CommentId.HasValue && commentIds.Contains(n.CommentId.Value)))
+                    .ExecuteDeleteAsync();
+
                 // Delete PrintComments for user's prints
                 if (printIds.Count > 0)
                 {
@@ -313,11 +320,6 @@ namespace PrintLogApi.Services
                 // Delete User Settings
                 await _context.UserSettings
                     .Where(us => us.UserId == userId)
-                    .ExecuteDeleteAsync();
-
-                // Delete Notifications for this user
-                await _context.Notifications
-                    .Where(n => n.UserId == userId)
                     .ExecuteDeleteAsync();
 
                 // Set TriggeredByUserId to null for notifications this user triggered

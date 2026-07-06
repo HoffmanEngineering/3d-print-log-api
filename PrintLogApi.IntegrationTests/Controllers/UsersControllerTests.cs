@@ -392,6 +392,86 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
+        [Fact]
+        public async Task ProcessPendingDeactivations_DeletesNotificationsReferencingDeletedPrints()
+        {
+            Guid notificationId;
+            long userId;
+            long printId;
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var now = DateTime.UtcNow;
+                var deactivatedUser = new User
+                {
+                    OAuthUserId = $"auth0|pending-delete-{Guid.NewGuid()}",
+                    DeactivationDateTime = DateTimeOffset.UtcNow.AddDays(-2),
+                    ViewStatus = ProfileViewStatus.Public
+                };
+                var recipientUser = new User
+                {
+                    OAuthUserId = $"auth0|notification-recipient-{Guid.NewGuid()}",
+                    ViewStatus = ProfileViewStatus.Public
+                };
+                db.Users.AddRange(deactivatedUser, recipientUser);
+                await db.SaveChangesAsync();
+
+                var printer = new Printer
+                {
+                    Name = "Pending Delete Printer",
+                    UserId = deactivatedUser.Id,
+                    IsActive = true
+                };
+                db.Printers.Add(printer);
+                await db.SaveChangesAsync();
+
+                var print = new Print
+                {
+                    Title = "Pending Delete Print",
+                    Status = Print.PrintStatus.Success,
+                    ViewStatus = Print.PrintViewStatus.Public,
+                    PrinterId = printer.Id,
+                    CreatedById = deactivatedUser.Id,
+                    UpdatedById = deactivatedUser.Id,
+                    CreatedDate = now,
+                    UpdatedDate = now
+                };
+                db.Prints.Add(print);
+                await db.SaveChangesAsync();
+
+                var notification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = recipientUser.Id,
+                    Type = NotificationType.PrintCompleted,
+                    Title = "Print Completed",
+                    Message = "A followed print completed.",
+                    IsRead = false,
+                    CreatedDate = now,
+                    PrintId = print.Id
+                };
+                db.Notifications.Add(notification);
+                await db.SaveChangesAsync();
+
+                userId = deactivatedUser.Id;
+                printId = print.Id;
+                notificationId = notification.Id;
+            }
+
+            var response = await _httpClient.DeleteAsync("/api/Users/pending-deactivation");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                Assert.False(await db.Users.AnyAsync(u => u.Id == userId));
+                Assert.False(await db.Prints.AnyAsync(p => p.Id == printId));
+                Assert.False(await db.Notifications.AnyAsync(n => n.Id == notificationId));
+            }
+        }
+
         #endregion
 
         #region POST Profile Image
