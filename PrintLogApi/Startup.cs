@@ -195,12 +195,12 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         private void ConfigureAuthentication(IServiceCollection services)
         {
             // E2ETesting always uses the stub DevAuth scheme (its tests send an X-Dev-User-Id
-            // header instead of a real token). In Development, Auth0Management:DevAuthBypass
-            // controls it: true → DevAuth stub, false → real Auth0 JWT validation (lets you log
-            // in with real dev-tenant credentials locally). All other environments validate for real.
+            // header instead of a real token). In Development the DevAuth stub is used by default;
+            // set Auth0Management:DevAuthBypass=false to opt into real Auth0 JWT validation locally
+            // (e.g. to log in with real dev-tenant credentials). All other environments validate for real.
             var bypassAuth = Environment.IsEnvironment("E2ETesting")
                 || (Environment.IsDevelopment()
-                    && Configuration.GetValue<bool>("Auth0Management:DevAuthBypass"));
+                    && Configuration.GetValue<bool>("Auth0Management:DevAuthBypass", true));
 
             if (bypassAuth)
             {
