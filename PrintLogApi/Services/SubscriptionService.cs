@@ -10,6 +10,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Subscription;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.Services.Billing;
 using Stripe;
 using Stripe.Checkout;
 
@@ -22,19 +23,22 @@ namespace PrintLogApi.Services
         private readonly TelemetryClient _telemetry;
         private readonly StripeOptions _stripeOptions;
         private readonly INotificationService _notificationService;
+        private readonly IStripeGateway _stripe;
 
         public SubscriptionService(
             PrintLogContext context,
             IMapper mapper,
             TelemetryClient telemetry,
             IOptions<StripeOptions> stripeOptions,
-            INotificationService notificationService)
+            INotificationService notificationService,
+            IStripeGateway stripe)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _stripeOptions = stripeOptions.Value;
             _notificationService = notificationService;
+            _stripe = stripe;
         }
 
         public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -90,15 +94,7 @@ namespace PrintLogApi.Services
 
             if (string.IsNullOrEmpty(customerId))
             {
-                var customerService = new CustomerService();
-                var customer = await customerService.CreateAsync(new CustomerCreateOptions
-                {
-                    Metadata = new Dictionary<string, string>
-                    {
-                        { "userId", userId.ToString() }
-                    }
-                });
-                customerId = customer.Id;
+                customerId = await _stripe.CreateCustomerAsync(userId, $"customer-{userId}");
 
                 if (subscription == null)
                 {
@@ -122,34 +118,16 @@ namespace PrintLogApi.Services
                 await _context.SaveChangesAsync();
             }
 
-            var sessionService = new SessionService();
-            var session = await sessionService.CreateAsync(new SessionCreateOptions
-            {
-                Customer = customerId,
-                PaymentMethodTypes = new List<string> { "card" },
-                LineItems = new List<SessionLineItemOptions>
+            var sessionResult = await _stripe.CreateCheckoutSessionAsync(
+                new StripeCheckoutSessionRequest
                 {
-                    new SessionLineItemOptions
-                    {
-                        Price = priceId,
-                        Quantity = 1
-                    }
+                    UserId = userId,
+                    CustomerId = customerId,
+                    PriceId = priceId,
+                    SuccessUrl = successUrl,
+                    CancelUrl = cancelUrl
                 },
-                Mode = "subscription",
-                SuccessUrl = successUrl,
-                CancelUrl = cancelUrl,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "userId", userId.ToString() }
-                },
-                SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    Metadata = new Dictionary<string, string>
-                    {
-                        { "userId", userId.ToString() }
-                    }
-                }
-            });
+                Guid.NewGuid().ToString());
 
             _telemetry.TrackEvent("Subscription_CheckoutSessionCreated", new Dictionary<string, string>
             {
@@ -157,7 +135,7 @@ namespace PrintLogApi.Services
                 { "planId", planId }
             });
 
-            return session.Url;
+            return sessionResult.Url;
         }
 
         public async Task<string> CreateCustomerPortalSession(long userId, string returnUrl)
@@ -170,19 +148,12 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeCustomerId))
                 throw new SubscriptionException("No Stripe customer found for this user.");
 
-            var sessionService = new Stripe.BillingPortal.SessionService();
-            var session = await sessionService.CreateAsync(new Stripe.BillingPortal.SessionCreateOptions
-            {
-                Customer = subscription.StripeCustomerId,
-                ReturnUrl = returnUrl
-            });
-
-            return session.Url;
+            return await _stripe.CreateBillingPortalSessionAsync(subscription.StripeCustomerId, returnUrl);
         }
 
         public async Task HandleStripeWebhook(string json, string signature)
         {
-            var stripeEvent = EventUtility.ConstructEvent(json, signature, _stripeOptions.WebhookSecret);
+            var stripeEvent = _stripe.ConstructWebhookEvent(json, signature);
 
             switch (stripeEvent.Type)
             {
@@ -210,11 +181,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
-            {
-                CancelAtPeriodEnd = true
-            });
+            await _stripe.SetSubscriptionCancelAtPeriodEndAsync(subscription.StripeSubscriptionId, true);
 
             subscription.CancelAtPeriodEnd = true;
             await _context.SaveChangesAsync();
@@ -234,8 +201,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.CancelAsync(subscription.StripeSubscriptionId);
+            await _stripe.CancelSubscriptionAsync(subscription.StripeSubscriptionId);
 
             subscription.Status = SubscriptionStatus.Canceled;
             subscription.CanceledAt = DateTimeOffset.UtcNow;
@@ -256,11 +222,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
-            {
-                CancelAtPeriodEnd = false
-            });
+            await _stripe.SetSubscriptionCancelAtPeriodEndAsync(subscription.StripeSubscriptionId, false);
 
             subscription.CancelAtPeriodEnd = false;
             subscription.CanceledAt = null;
@@ -280,8 +242,7 @@ namespace PrintLogApi.Services
             var stripeSubscriptionId = session.SubscriptionId;
             var customerId = session.CustomerId;
 
-            var subscriptionService = new Stripe.SubscriptionService();
-            var stripeSubscription = await subscriptionService.GetAsync(stripeSubscriptionId);
+            var stripeSubscription = await _stripe.GetSubscriptionAsync(stripeSubscriptionId);
 
             var subscription = await _context.Subscriptions
                 .Where(s => s.StripeCustomerId == customerId)
@@ -313,15 +274,14 @@ namespace PrintLogApi.Services
                 }
             }
 
-            var stripeItem = stripeSubscription.Items.Data.FirstOrDefault();
-            var priceId = stripeItem?.Price.Id;
+            var priceId = stripeSubscription.PriceId;
 
             subscription.StripeSubscriptionId = stripeSubscriptionId;
             subscription.StripePriceId = priceId;
             subscription.Status = SubscriptionStatus.Active;
             subscription.Plan = MapPriceIdToPlan(priceId);
-            subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
-            subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
+            subscription.CurrentPeriodStart = stripeSubscription.CurrentPeriodStart;
+            subscription.CurrentPeriodEnd = stripeSubscription.CurrentPeriodEnd;
             subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
 
             await _context.SaveChangesAsync();
@@ -350,7 +310,7 @@ namespace PrintLogApi.Services
 
         private async Task HandleSubscriptionUpdated(Event stripeEvent)
         {
-            var stripeSubscription = stripeEvent.Data.Object as Stripe.Subscription;
+            var stripeSubscription = stripeEvent.Data.Object as global::Stripe.Subscription;
             if (stripeSubscription == null) return;
 
             var subscription = await _context.Subscriptions
@@ -384,7 +344,7 @@ namespace PrintLogApi.Services
 
         private async Task HandleSubscriptionDeleted(Event stripeEvent)
         {
-            var stripeSubscription = stripeEvent.Data.Object as Stripe.Subscription;
+            var stripeSubscription = stripeEvent.Data.Object as global::Stripe.Subscription;
             if (stripeSubscription == null) return;
 
             var subscription = await _context.Subscriptions
