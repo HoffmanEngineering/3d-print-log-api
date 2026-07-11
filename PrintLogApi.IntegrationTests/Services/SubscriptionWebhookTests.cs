@@ -210,5 +210,48 @@ namespace PrintLogApi.IntegrationTests.Services
                 factory.TelemetryChannel.Items.OfType<EventTelemetry>(),
                 e => e.Name == "Subscription_DuplicateActiveDetected");
         }
+
+        // A delayed/replayed completion for a subscription that is no longer active records the
+        // truthful status but must NOT announce an activation.
+        [Fact]
+        public async Task Completion_WithNonActiveStripeStatus_DoesNotAnnounceActivation()
+        {
+            var fake = new FakeStripeGateway();
+            fake.SubscriptionsById["sub_canceled"] = new StripeSubscriptionInfo { Id = "sub_canceled", Status = "canceled", PriceId = "price_x" };
+            fake.QueuedWebhookEvent = CompletedEvent("cs_x", "sub_canceled", "cus_1", IntegrationTestSeeder.TestUserId);
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_1",
+                    Status = SubscriptionStatus.None,
+                    Plan = SubscriptionPlan.Free,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var svc = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+                await svc.HandleStripeWebhook("{}", "sig");
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var sub = db.Subscriptions.Single(s => s.UserId == IntegrationTestSeeder.TestUserId);
+                Assert.Equal(SubscriptionStatus.Canceled, sub.Status); // truthful status recorded
+            }
+
+            Assert.DoesNotContain(
+                factory.TelemetryChannel.Items.OfType<EventTelemetry>(),
+                e => e.Name == "Subscription_Activated");
+        }
     }
 }

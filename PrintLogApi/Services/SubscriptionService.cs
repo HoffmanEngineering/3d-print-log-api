@@ -48,7 +48,12 @@ namespace PrintLogApi.Services
                 .AsNoTracking()
                 .SingleOrDefaultAsync();
 
-            bool isPro = subscription?.Status == SubscriptionStatus.Active;
+            // Entitlement requires BOTH an active status AND a recognized paid plan. A Stripe
+            // subscription with an unknown/missing price maps to Plan=Free; without this guard an
+            // active-but-Free row would wrongly grant Pro.
+            bool isPro = subscription != null
+                && subscription.Status == SubscriptionStatus.Active
+                && subscription.Plan != SubscriptionPlan.Free;
 
             SubscriptionDto dto;
             if (subscription == null)
@@ -66,6 +71,10 @@ namespace PrintLogApi.Services
             {
                 dto = _mapper.Map<SubscriptionDto>(subscription);
             }
+
+            // Single source of truth for entitlement: override whatever the mapper produced so
+            // IsPro and the limits below can never disagree (e.g. active-but-unknown-price).
+            dto.IsPro = isPro;
 
             dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
             dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
@@ -104,12 +113,29 @@ namespace PrintLogApi.Services
                 && !string.IsNullOrEmpty(subscription.StripeCustomerId))
             {
                 var stripeSubs = await _stripe.ListSubscriptionsAsync(subscription.StripeCustomerId);
-                var live = stripeSubs.FirstOrDefault(s =>
-                {
-                    var mapped = MapStripeStatus(s.Status);
-                    return mapped == SubscriptionStatus.Active || mapped == SubscriptionStatus.PastDue;
-                });
+                var liveSubs = stripeSubs
+                    .Where(s =>
+                    {
+                        var mapped = MapStripeStatus(s.Status);
+                        return mapped == SubscriptionStatus.Active || mapped == SubscriptionStatus.PastDue;
+                    })
+                    .OrderByDescending(s => s.CurrentPeriodStart) // deterministic: adopt the most recent
+                    .ToList();
 
+                if (liveSubs.Count > 1)
+                {
+                    // The customer has multiple live subscriptions at Stripe — a billing anomaly
+                    // needing manual reconciliation. Surface every id; still adopt one below so the
+                    // local row is at least consistent with a real subscription.
+                    _telemetry.TrackEvent("Subscription_DuplicateActiveDetected", new Dictionary<string, string>
+                    {
+                        { "userId", userId.ToString() },
+                        { "source", "reconciliation" },
+                        { "subscriptionIds", string.Join(",", liveSubs.Select(s => s.Id)) }
+                    });
+                }
+
+                var live = liveSubs.FirstOrDefault();
                 if (live != null)
                 {
                     subscription.StripeSubscriptionId = live.Id;
@@ -195,11 +221,16 @@ namespace PrintLogApi.Services
             // (~24h) expiry is written only once a session exists.
             var attemptKey = Guid.NewGuid().ToString();
             var leaseExpiry = now.AddMinutes(10);
+            // The predicate also requires the row NOT be live at the instant of the claim:
+            // a webhook completing an earlier checkout could flip the row to Active between
+            // Guard 1 and here. Folding liveness into the atomic claim closes that TOCTOU.
             var claimed = await _context.Subscriptions
                 .Where(s => s.UserId == userId
                     && (s.PendingCheckoutIdempotencyKey == null
                         || s.PendingCheckoutExpiresAt == null
-                        || s.PendingCheckoutExpiresAt <= now))
+                        || s.PendingCheckoutExpiresAt <= now)
+                    && !((s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.PastDue)
+                        && s.StripeSubscriptionId != null))
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(s => s.PendingCheckoutIdempotencyKey, attemptKey)
                     .SetProperty(s => s.PendingCheckoutPlanId, planId)
@@ -211,11 +242,18 @@ namespace PrintLogApi.Services
 
             if (claimed == 0)
             {
-                // Another attempt is already open. Reload and reuse if same plan, else reject.
+                // We didn't claim. Either the row went live (webhook won the race) or another
+                // attempt is already open. Reload and distinguish.
                 var current = await _context.Subscriptions
                     .Where(s => s.UserId == userId)
                     .AsNoTracking()
                     .SingleAsync();
+
+                if ((current.Status == SubscriptionStatus.Active || current.Status == SubscriptionStatus.PastDue)
+                    && !string.IsNullOrEmpty(current.StripeSubscriptionId))
+                {
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+                }
 
                 if (current.PendingCheckoutPlanId == planId
                     && !string.IsNullOrEmpty(current.PendingCheckoutSessionUrl))
@@ -228,7 +266,10 @@ namespace PrintLogApi.Services
 
             // We own the lease. Create the Stripe session with the per-attempt key.
             // On ANY failure, release the lease (only if we still own it) so the user can
-            // retry immediately instead of waiting out the lease.
+            // retry immediately instead of waiting out the lease. This is double-charge-safe:
+            // if Stripe actually created a session before an ambiguous failure (timeout), that
+            // session's URL was never returned to the caller, so the user cannot complete it —
+            // it simply expires unused. The retry mints a fresh session with a new key.
             StripeCheckoutSessionResult sessionResult;
             try
             {
@@ -256,9 +297,7 @@ namespace PrintLogApi.Services
                 throw;
             }
 
-            // Persist the session onto the attempt we own. If the lease was taken over
-            // (webhook completed it, or it expired and was reclaimed) while Stripe worked,
-            // this affects 0 rows — still return the valid URL, but flag it for reconciliation.
+            // Persist the session onto the attempt we own.
             var stored = await _context.Subscriptions
                 .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
                 .ExecuteUpdateAsync(setters => setters
@@ -270,11 +309,34 @@ namespace PrintLogApi.Services
 
             if (stored == 0)
             {
+                // The lease was taken over (a webhook completed it, or it expired and another
+                // attempt reclaimed it) while Stripe was working. The session we just created is
+                // now an orphan — do NOT return its URL, or the caller would hold a second usable
+                // checkout alongside whatever now owns the row. Let the orphan expire unused.
                 _telemetry.TrackEvent("Subscription_CheckoutAttemptLostDuringCreate", new Dictionary<string, string>
                 {
                     { "userId", userId.ToString() },
                     { "sessionId", sessionResult.Id }
                 });
+
+                var current = await _context.Subscriptions
+                    .Where(s => s.UserId == userId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                if ((current.Status == SubscriptionStatus.Active || current.Status == SubscriptionStatus.PastDue)
+                    && !string.IsNullOrEmpty(current.StripeSubscriptionId))
+                {
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+                }
+
+                if (current.PendingCheckoutPlanId == planId
+                    && !string.IsNullOrEmpty(current.PendingCheckoutSessionUrl))
+                {
+                    return current.PendingCheckoutSessionUrl;
+                }
+
+                throw new SubscriptionException("Your checkout could not be completed. Please try again.");
             }
 
             _telemetry.TrackEvent("Subscription_CheckoutSessionCreated", new Dictionary<string, string>
@@ -414,7 +476,24 @@ namespace PrintLogApi.Services
                             UpdatedById = userId
                         };
                         _context.Subscriptions.Add(subscription);
-                        await _context.SaveChangesAsync(); // persist before the CAS below (ExecuteUpdate hits the DB)
+                        try
+                        {
+                            await _context.SaveChangesAsync(); // persist before the CAS below (ExecuteUpdate hits the DB)
+                        }
+                        catch (DbUpdateException)
+                        {
+                            // Two first-time completions for the same user race on the unique
+                            // UserId index; one insert loses. Reload the winner and continue so
+                            // this webhook is idempotent instead of surfacing a 500.
+                            _context.Entry(subscription).State = EntityState.Detached;
+                            subscription = await _context.Subscriptions
+                                .Where(s => s.UserId == userId)
+                                .SingleOrDefaultAsync();
+                            if (subscription == null)
+                            {
+                                throw;
+                            }
+                        }
                     }
                 }
                 else
@@ -485,6 +564,20 @@ namespace PrintLogApi.Services
                 .Where(s => s.UserId == subscription.UserId)
                 .AsNoTracking()
                 .SingleAsync();
+
+            // A delayed/replayed completion can arrive after the Stripe subscription is no longer
+            // active (e.g. canceled). We still record the truthful status above, but only announce
+            // an activation for a genuinely active subscription — otherwise we would tell the user
+            // "activated" about a canceled/incomplete one.
+            if (mappedStatus != SubscriptionStatus.Active)
+            {
+                _telemetry.TrackEvent("Subscription_CheckoutCompletedNonActive", new Dictionary<string, string>
+                {
+                    { "userId", subscription.UserId.ToString() },
+                    { "status", mappedStatus.ToString() }
+                });
+                return;
+            }
 
             _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
             {

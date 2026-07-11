@@ -71,6 +71,11 @@ namespace PrintLogApi.Controllers
             {
                 return BadRequest(ex.Message);
             }
+            catch (Stripe.StripeException ex)
+            {
+                _telemetry.TrackException(ex);
+                return StatusCode(503, "The billing service is temporarily unavailable. Please try again.");
+            }
         }
 
         /// <summary>
@@ -96,6 +101,11 @@ namespace PrintLogApi.Controllers
             catch (SubscriptionException ex)
             {
                 return BadRequest(ex.Message);
+            }
+            catch (Stripe.StripeException ex)
+            {
+                _telemetry.TrackException(ex);
+                return StatusCode(503, "The billing service is temporarily unavailable. Please try again.");
             }
         }
 

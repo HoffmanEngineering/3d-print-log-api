@@ -71,12 +71,21 @@ namespace PrintLogApi.Services.Billing
         public async Task<IReadOnlyList<StripeSubscriptionInfo>> ListSubscriptionsAsync(string customerId)
         {
             var subscriptionService = new global::Stripe.SubscriptionService();
-            var list = await subscriptionService.ListAsync(new SubscriptionListOptions
+            var options = new SubscriptionListOptions
             {
                 Customer = customerId,
-                Status = "all"
-            });
-            return list.Data.Select(Map).ToList();
+                Status = "all",
+                Limit = 100
+            };
+
+            // Auto-page so a customer with many historical subscriptions cannot hide a live
+            // subscription beyond the first page.
+            var results = new List<StripeSubscriptionInfo>();
+            await foreach (var sub in subscriptionService.ListAutoPagingAsync(options))
+            {
+                results.Add(Map(sub));
+            }
+            return results;
         }
 
         public async Task SetSubscriptionCancelAtPeriodEndAsync(string subscriptionId, bool cancelAtPeriodEnd)
@@ -118,11 +127,20 @@ namespace PrintLogApi.Services.Billing
                 Id = sub.Id,
                 Status = sub.Status,
                 PriceId = item?.Price?.Id,
-                CurrentPeriodStart = item?.CurrentPeriodStart,
-                CurrentPeriodEnd = item?.CurrentPeriodEnd,
+                CurrentPeriodStart = AsUtc(item?.CurrentPeriodStart),
+                CurrentPeriodEnd = AsUtc(item?.CurrentPeriodEnd),
                 CancelAtPeriodEnd = sub.CancelAtPeriodEnd,
-                CanceledAt = sub.CanceledAt
+                CanceledAt = AsUtc(sub.CanceledAt)
             };
+        }
+
+        // Stripe.NET returns UTC timestamps, but be explicit so a downstream
+        // DateTime->DateTimeOffset conversion never reinterprets an Unspecified Kind as local.
+        private static DateTime? AsUtc(DateTime? value)
+        {
+            return value.HasValue
+                ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                : (DateTime?)null;
         }
     }
 }

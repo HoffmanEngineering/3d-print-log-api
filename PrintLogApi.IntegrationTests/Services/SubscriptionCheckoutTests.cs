@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Controllers;
@@ -133,9 +134,10 @@ namespace PrintLogApi.IntegrationTests.Services
             await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
             var client = factory.CreateClient();
 
-            // The controller does not catch StripeException; the TestServer surfaces the
-            // unhandled exception to the caller. The service's catch still released the lease.
-            await Assert.ThrowsAsync<Stripe.StripeException>(() => client.SendAsync(Checkout("pro_monthly")));
+            // The controller maps StripeException to a controlled 503. The service's catch
+            // still released the lease, so an immediate retry succeeds.
+            var failed = await client.SendAsync(Checkout("pro_monthly"));
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, failed.StatusCode);
 
             var retry = await client.SendAsync(Checkout("pro_monthly")); // claim must have been released
             Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
@@ -202,6 +204,82 @@ namespace PrintLogApi.IntegrationTests.Services
 
             Assert.Equal(1, firstClaim);
             Assert.Equal(0, secondClaim); // lease held -> second claim wins nothing
+        }
+
+        [Fact]
+        public async Task Checkout_WhenStripeHasMultipleLiveSubs_EmitsDuplicateTelemetry()
+        {
+            var fake = new FakeStripeGateway();
+            fake.SubscriptionsByCustomer["cus_multi"] = new()
+            {
+                new StripeSubscriptionInfo { Id = "sub_a", Status = "active", PriceId = "price_monthly" },
+                new StripeSubscriptionInfo { Id = "sub_b", Status = "active", PriceId = "price_monthly" }
+            };
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+            var client = factory.CreateClient();
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_multi",
+                    Status = SubscriptionStatus.None,
+                    Plan = SubscriptionPlan.Free,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var response = await client.SendAsync(Checkout("pro_monthly"));
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var dup = factory.TelemetryChannel.Items.OfType<EventTelemetry>()
+                .SingleOrDefault(e => e.Name == "Subscription_DuplicateActiveDetected");
+            Assert.NotNull(dup);
+            Assert.Equal("reconciliation", dup.Properties["source"]);
+            Assert.Contains("sub_a", dup.Properties["subscriptionIds"]);
+            Assert.Contains("sub_b", dup.Properties["subscriptionIds"]);
+        }
+
+        [Fact]
+        public async Task GetSubscription_ActiveButFreePlan_IsNotPro()
+        {
+            var fake = new FakeStripeGateway();
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+            var client = factory.CreateClient();
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_x",
+                    StripeSubscriptionId = "sub_x",
+                    Status = SubscriptionStatus.Active, // active...
+                    Plan = SubscriptionPlan.Free,       // ...but not a recognized paid plan
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var req = new HttpRequestMessage(HttpMethod.Get, "/api/Subscription/me");
+            req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+            var response = await client.SendAsync(req);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var dto = await response.Content.ReadFromJsonAsync<SubscriptionEntitlementProbe>();
+            Assert.False(dto.IsPro); // active + Free plan must NOT grant Pro
+        }
+
+        // Minimal shape to read the IsPro flag from the /me response.
+        private class SubscriptionEntitlementProbe
+        {
+            public bool IsPro { get; set; }
         }
     }
 }
