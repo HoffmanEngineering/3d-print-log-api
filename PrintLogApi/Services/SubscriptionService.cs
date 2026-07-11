@@ -90,6 +90,42 @@ namespace PrintLogApi.Services
                 .Where(s => s.UserId == userId)
                 .SingleOrDefaultAsync();
 
+            // Guard 1: a locally-live subscription blocks a new checkout.
+            if (subscription != null
+                && (subscription.Status == SubscriptionStatus.Active || subscription.Status == SubscriptionStatus.PastDue)
+                && !string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            {
+                throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+            }
+
+            // Guard 2: reconcile against Stripe when local state may be stale (a webhook
+            // may have been delayed/lost, leaving a live Stripe subscription unrecorded).
+            if (subscription != null
+                && !string.IsNullOrEmpty(subscription.StripeCustomerId))
+            {
+                var stripeSubs = await _stripe.ListSubscriptionsAsync(subscription.StripeCustomerId);
+                var live = stripeSubs.FirstOrDefault(s =>
+                {
+                    var mapped = MapStripeStatus(s.Status);
+                    return mapped == SubscriptionStatus.Active || mapped == SubscriptionStatus.PastDue;
+                });
+
+                if (live != null)
+                {
+                    subscription.StripeSubscriptionId = live.Id;
+                    subscription.StripePriceId = live.PriceId;
+                    subscription.Status = MapStripeStatus(live.Status);
+                    subscription.Plan = MapPriceIdToPlan(live.PriceId);
+                    subscription.CurrentPeriodStart = live.CurrentPeriodStart;
+                    subscription.CurrentPeriodEnd = live.CurrentPeriodEnd;
+                    subscription.CancelAtPeriodEnd = live.CancelAtPeriodEnd;
+                    subscription.UpdatedById = userId;
+                    await _context.SaveChangesAsync();
+
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+                }
+            }
+
             string customerId = subscription?.StripeCustomerId;
 
             if (string.IsNullOrEmpty(customerId))
