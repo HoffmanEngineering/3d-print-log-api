@@ -414,6 +414,7 @@ namespace PrintLogApi.Services
                             UpdatedById = userId
                         };
                         _context.Subscriptions.Add(subscription);
+                        await _context.SaveChangesAsync(); // persist before the CAS below (ExecuteUpdate hits the DB)
                     }
                 }
                 else
@@ -423,16 +424,67 @@ namespace PrintLogApi.Services
             }
 
             var priceId = stripeSubscription.PriceId;
+            var mappedStatus = MapStripeStatus(stripeSubscription.Status);
 
-            subscription.StripeSubscriptionId = stripeSubscriptionId;
-            subscription.StripePriceId = priceId;
-            subscription.Status = SubscriptionStatus.Active;
-            subscription.Plan = MapPriceIdToPlan(priceId);
-            subscription.CurrentPeriodStart = stripeSubscription.CurrentPeriodStart;
-            subscription.CurrentPeriodEnd = stripeSubscription.CurrentPeriodEnd;
-            subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
+            // Atomic non-overwrite claim. Take ownership if the row has no subscription id
+            // yet, OR already points at this same subscription, OR the stored status is NOT
+            // live. The non-live clause is essential: cancellation handlers leave the old
+            // StripeSubscriptionId in place with Status=Canceled, and a Canceled user may
+            // re-subscribe, so a canceled row must be replaceable.
+            var claimed = await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId
+                    && (s.StripeSubscriptionId == null
+                        || s.StripeSubscriptionId == stripeSubscriptionId
+                        || (s.Status != SubscriptionStatus.Active && s.Status != SubscriptionStatus.PastDue)))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.StripeSubscriptionId, stripeSubscriptionId)
+                    .SetProperty(s => s.StripePriceId, priceId)
+                    .SetProperty(s => s.Status, mappedStatus)
+                    .SetProperty(s => s.Plan, MapPriceIdToPlan(priceId))
+                    .SetProperty(s => s.CurrentPeriodStart, (DateTimeOffset?)stripeSubscription.CurrentPeriodStart)
+                    .SetProperty(s => s.CurrentPeriodEnd, (DateTimeOffset?)stripeSubscription.CurrentPeriodEnd)
+                    .SetProperty(s => s.CancelAtPeriodEnd, stripeSubscription.CancelAtPeriodEnd)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, subscription.UserId));
 
-            await _context.SaveChangesAsync();
+            if (claimed == 0)
+            {
+                // A different LIVE subscription already owns the row. Do not overwrite.
+                // Re-read from the DB: ExecuteUpdate does not refresh the tracked entity, so
+                // under a race the tracked value may be stale/null. The DB value is authoritative.
+                var currentOwner = await _context.Subscriptions
+                    .Where(s => s.UserId == subscription.UserId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                _telemetry.TrackEvent("Subscription_DuplicateActiveDetected", new Dictionary<string, string>
+                {
+                    { "userId", subscription.UserId.ToString() },
+                    { "existingSubscriptionId", currentOwner.StripeSubscriptionId ?? string.Empty },
+                    { "incomingSubscriptionId", stripeSubscriptionId }
+                });
+                return;
+            }
+
+            // Clear the pending attempt only if this completion is that attempt.
+            await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId && s.PendingCheckoutSessionId == session.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutSessionId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, (string)null)
+                    .SetProperty(s => s.PendingCheckoutIdempotencyKey, (string)null)
+                    .SetProperty(s => s.PendingCheckoutPlanId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, subscription.UserId));
+
+            // Reload for the notification/telemetry below. AsNoTracking so we get the DB
+            // values written by the CAS, not the stale tracked instance (identity map would
+            // otherwise return the pre-CAS entity on a tracking query).
+            subscription = await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId)
+                .AsNoTracking()
+                .SingleAsync();
 
             _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
             {
