@@ -91,9 +91,9 @@ git commit -m "feat: add pending-checkout tracking columns to Subscription"
 
 ---
 
-## Task 2: Introduce IStripeGateway seam (pure refactor, no behavior change)
+## Task 2: Introduce IStripeGateway seam (behavior-preserving extraction + customer idempotency key)
 
-Route every Stripe.net call in `SubscriptionService` through an injectable gateway so tests can substitute a fake. Behavior must be identical; the existing test suite is the regression gate.
+Route every Stripe.net call in `SubscriptionService` through an injectable gateway so tests can substitute a fake. The extraction is behavior-preserving and the existing test suite is its regression gate. **One intentional external-behavior change ships in this task (review finding 11):** customer creation gains a stable per-user idempotency key `customer-{userId}`. This is idempotent for sequential callers (no semantic change) and dedupes concurrent first-time creation; it is called out explicitly here rather than hidden as a "no-op". It has no dedicated test at this layer (Stripe idempotency is Stripe's behavior); the concurrency benefit is covered indirectly by Task 5's claim tests.
 
 **Files:**
 - Create: `PrintLogApi/Services/Stripe/IStripeGateway.cs`
@@ -306,7 +306,7 @@ In `PrintLogApi/Services/SubscriptionService.cs`:
 1. Add `using PrintLogApi.Services.Stripe;`.
 2. Add a field `private readonly IStripeGateway _stripe;` and add `IStripeGateway stripe` to the constructor, assigning `_stripe = stripe;`.
 3. Replace inline Stripe usages with gateway calls, preserving current behavior exactly:
-   - In `CreateCheckoutSession`, replace the `new CustomerService()...CreateAsync(...)` block with `customerId = await _stripe.CreateCustomerAsync(userId, $"customer-{userId}");` (the per-user idempotency key is safe here and is a no-op behavior change).
+   - In `CreateCheckoutSession`, replace the `new CustomerService()...CreateAsync(...)` block with `customerId = await _stripe.CreateCustomerAsync(userId, $"customer-{userId}");` (this adds the stable per-user idempotency key described in the task header — an intentional, safe external-behavior change).
    - Replace the `new SessionService()...CreateAsync(...)` block with:
      ```csharp
      var sessionResult = await _stripe.CreateCheckoutSessionAsync(
@@ -400,6 +400,9 @@ namespace PrintLogApi.IntegrationTests.Services
 
         public global::Stripe.Event QueuedWebhookEvent { get; set; }
 
+        // Set to make the next CreateCheckoutSessionAsync throw (failure-boundary test).
+        public Exception CheckoutFailure { get; set; }
+
         public Task<string> CreateCustomerAsync(long userId, string idempotencyKey)
         {
             Interlocked.Increment(ref CreateCustomerCallCount);
@@ -410,6 +413,12 @@ namespace PrintLogApi.IntegrationTests.Services
         {
             Interlocked.Increment(ref CreateCheckoutSessionCallCount);
             LastCheckoutIdempotencyKey = idempotencyKey;
+            if (CheckoutFailure != null)
+            {
+                var ex = CheckoutFailure;
+                CheckoutFailure = null; // fail once, then allow retry to succeed
+                throw ex;
+            }
             return Task.FromResult(new StripeCheckoutSessionResult
             {
                 Id = NextSessionId(),
@@ -475,16 +484,59 @@ Add `using PrintLogApi.Services.Stripe;` at the top of the file.
 
 > Note: `WithStripeGateway` must be called before the first `CreateClient()`/`CreateHost()` for the override to take effect. Tests that need the fake create a fresh `CustomWebApplicationFactory` per test (do not share the `IClassFixture` instance for these), because the fake records call counts.
 
-- [ ] **Step 3: Build**
+- [ ] **Step 3: Add an in-memory telemetry sink so tests can assert emitted events**
+
+`TelemetryClient` writes to its configured `ITelemetryChannel`. Register a capturing channel so tests can observe events like `Subscription_DuplicateActiveDetected` (review findings 5, 6).
+
+Create `PrintLogApi.IntegrationTests/Services/TestTelemetryChannel.cs`:
+
+```csharp
+using System.Collections.Concurrent;
+using Microsoft.ApplicationInsights.Channel;
+
+namespace PrintLogApi.IntegrationTests.Services
+{
+    public class TestTelemetryChannel : ITelemetryChannel
+    {
+        public ConcurrentQueue<ITelemetry> Items { get; } = new();
+        public bool? DeveloperMode { get; set; }
+        public string EndpointAddress { get; set; }
+        public void Send(ITelemetry item) => Items.Enqueue(item);
+        public void Flush() { }
+        public void Dispose() { }
+    }
+}
+```
+
+In `CustomWebApplicationFactory.cs`, add a field, expose it, and register the channel in `ConfigureServices` (after the Stripe override block):
+
+```csharp
+        public TestTelemetryChannel TelemetryChannel { get; } = new();
+```
+
+```csharp
+                var channelDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ITelemetryChannel));
+                if (channelDescriptor != null)
+                {
+                    services.Remove(channelDescriptor);
+                }
+                services.AddSingleton<ITelemetryChannel>(TelemetryChannel);
+```
+
+Add `using Microsoft.ApplicationInsights.Channel;` at the top.
+
+> Note for the implementer: Application Insights sampling can drop items. If asserting on a captured event proves flaky, disable adaptive sampling for the test host (e.g. `services.Configure<TelemetryConfiguration>(c => c.DefaultTelemetrySink.TelemetryProcessorChainBuilder...)` or set `EnableAdaptiveSampling = false` on the AI options) so every `TrackEvent` reaches the channel. Verify a captured event appears before relying on it in Task 6.
+
+- [ ] **Step 4: Build**
 
 Run: `dotnet build --configuration Release`
-Expected: build succeeds (the fake and hook compile; no behavior asserted yet).
+Expected: build succeeds (the fake, hook, and channel compile; no behavior asserted yet).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add PrintLogApi.IntegrationTests/Services/FakeStripeGateway.cs PrintLogApi.IntegrationTests/CustomWebApplicationFactory.cs
-git commit -m "test: add FakeStripeGateway and factory injection hook"
+git add PrintLogApi.IntegrationTests/Services/FakeStripeGateway.cs PrintLogApi.IntegrationTests/Services/TestTelemetryChannel.cs PrintLogApi.IntegrationTests/CustomWebApplicationFactory.cs
+git commit -m "test: add FakeStripeGateway, telemetry sink, and factory injection hooks"
 ```
 
 ---
@@ -675,7 +727,7 @@ git commit -m "feat: reject checkout when a live subscription exists (local or r
 Serialize checkout creation per user via a database compare-and-swap, reuse an open same-plan attempt, and use a per-attempt idempotency key.
 
 **Files:**
-- Modify: `PrintLogApi/Services/SubscriptionService.cs` (`CreateCheckoutSession`, plus a private helper)
+- Modify: `PrintLogApi/Services/SubscriptionService.cs` (`CreateCheckoutSession`)
 - Extend: `PrintLogApi.IntegrationTests/Services/SubscriptionCheckoutTests.cs`
 
 **Interfaces:**
@@ -684,11 +736,11 @@ Serialize checkout creation per user via a database compare-and-swap, reuse an o
 
 - [ ] **Step 1: Write failing tests**
 
-Append to `SubscriptionCheckoutTests.cs`:
+Append to `SubscriptionCheckoutTests.cs`. Note the reuse test now asserts the **returned URL is actually the reused one** (review finding 8), and there is a deterministic CAS-level serialization test (review findings 3, 4) and a failure-boundary test (review findings 2, 9). Add `using System.Linq;`, `using PrintLogApi.Controllers;` (for `CheckoutSessionResponseDto`), and `using PrintLogApi.Services;` to the file's usings.
 
 ```csharp
         [Fact]
-        public async Task Checkout_SecondSamePlanSubmit_ReusesSessionUrl()
+        public async Task Checkout_SecondSamePlanSubmit_ReusesSameSessionUrl()
         {
             var fake = new FakeStripeGateway { NextSessionUrl = () => "https://checkout.stripe.test/first" };
             await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
@@ -700,6 +752,11 @@ Append to `SubscriptionCheckoutTests.cs`:
             Assert.Equal(HttpStatusCode.OK, first.StatusCode);
             Assert.Equal(HttpStatusCode.OK, second.StatusCode);
             Assert.Equal(1, fake.CreateCheckoutSessionCallCount); // second reused, no new Stripe session
+
+            var firstBody = await first.Content.ReadFromJsonAsync<CheckoutSessionResponseDto>();
+            var secondBody = await second.Content.ReadFromJsonAsync<CheckoutSessionResponseDto>();
+            Assert.Equal("https://checkout.stripe.test/first", firstBody.Url);
+            Assert.Equal("https://checkout.stripe.test/first", secondBody.Url); // actually reused, not empty/stale
         }
 
         [Fact]
@@ -716,12 +773,95 @@ Append to `SubscriptionCheckoutTests.cs`:
             Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
             Assert.Equal(1, fake.CreateCheckoutSessionCallCount);
         }
+
+        [Fact]
+        public async Task Checkout_StripeFailure_ReleasesClaimSoRetrySucceeds()
+        {
+            var fake = new FakeStripeGateway
+            {
+                CheckoutFailure = new Stripe.StripeException("boom"),
+                NextSessionUrl = () => "https://checkout.stripe.test/after-retry"
+            };
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+            var client = factory.CreateClient();
+
+            var failed = await client.SendAsync(Checkout("pro_monthly")); // throws inside; controller does not catch StripeException
+            var retry = await client.SendAsync(Checkout("pro_monthly"));  // claim must have been released
+
+            Assert.NotEqual(HttpStatusCode.OK, failed.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var body = await retry.Content.ReadFromJsonAsync<CheckoutSessionResponseDto>();
+            Assert.Equal("https://checkout.stripe.test/after-retry", body.Url);
+        }
+
+        // Deterministic CAS serialization test: the claim predicate lets exactly one
+        // claim win while a lease is held (review findings 3, 4). This asserts the
+        // 1-vs-0 affected-row invariant without relying on real thread parallelism,
+        // which the shared-connection SQLite harness cannot reproduce faithfully.
+        [Fact]
+        public async Task CheckoutClaim_SecondClaimWhileLeaseHeld_AffectsZeroRows()
+        {
+            var fake = new FakeStripeGateway();
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_claim",
+                    Status = SubscriptionStatus.None,
+                    Plan = SubscriptionPlan.Free,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var lease = now.AddMinutes(10);
+            int firstClaim, secondClaim;
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                firstClaim = await db.Subscriptions
+                    .Where(s => s.UserId == IntegrationTestSeeder.TestUserId
+                        && (s.PendingCheckoutIdempotencyKey == null || s.PendingCheckoutExpiresAt == null || s.PendingCheckoutExpiresAt <= now))
+                    .ExecuteUpdateAsync(set => set
+                        .SetProperty(s => s.PendingCheckoutIdempotencyKey, "attempt-1")
+                        .SetProperty(s => s.PendingCheckoutPlanId, "pro_monthly")
+                        .SetProperty(s => s.PendingCheckoutExpiresAt, lease)
+                        .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                        .SetProperty(s => s.UpdatedById, IntegrationTestSeeder.TestUserId));
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                secondClaim = await db.Subscriptions
+                    .Where(s => s.UserId == IntegrationTestSeeder.TestUserId
+                        && (s.PendingCheckoutIdempotencyKey == null || s.PendingCheckoutExpiresAt == null || s.PendingCheckoutExpiresAt <= now))
+                    .ExecuteUpdateAsync(set => set
+                        .SetProperty(s => s.PendingCheckoutIdempotencyKey, "attempt-2")
+                        .SetProperty(s => s.PendingCheckoutPlanId, "pro_annual")
+                        .SetProperty(s => s.PendingCheckoutExpiresAt, lease)
+                        .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                        .SetProperty(s => s.UpdatedById, IntegrationTestSeeder.TestUserId));
+            }
+
+            Assert.Equal(1, firstClaim);
+            Assert.Equal(0, secondClaim); // lease held -> second claim wins nothing
+        }
 ```
+
+> The `Stripe.StripeException` used above surfaces from the controller as a non-2xx (the checkout action only catches `SubscriptionException`, so a `StripeException` propagates to a 500). The test asserts `NotEqual(OK)` rather than a specific code to stay robust to the host's exception handling.
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `dotnet test PrintLogApi.IntegrationTests --filter "FullyQualifiedName~SubscriptionCheckoutTests" --verbosity quiet`
-Expected: the two new tests FAIL (today every submit creates a new session).
+Expected: `ReusesSameSessionUrl`, `SecondDifferentPlanWhilePending_IsRejected`, and `StripeFailure_ReleasesClaimSoRetrySucceeds` FAIL (today every submit creates a new session and nothing releases a claim). `CheckoutClaim_SecondClaimWhileLeaseHeld_AffectsZeroRows` should already PASS once Task 1's columns exist (it tests the DB predicate directly, not the service) — that is expected; keep it as a regression guard.
 
 - [ ] **Step 3: Implement the claim + reuse**
 
@@ -745,9 +885,12 @@ In `CreateCheckoutSession`, after `customerId` is resolved and the customer row 
                 return subscription.PendingCheckoutSessionUrl;
             }
 
-            // Atomic single-attempt claim (compare-and-swap).
+            // Atomic single-attempt claim (compare-and-swap) with a SHORT lease.
+            // The short lease bounds the lockout if this request dies before it stores
+            // a session (review finding 2): a crashed pre-session claim frees in ~10 min,
+            // not 24h. The real (~24h) expiry is written only once a session exists.
             var attemptKey = Guid.NewGuid().ToString();
-            var provisionalExpiry = now.AddHours(24);
+            var leaseExpiry = now.AddMinutes(10);
             var claimed = await _context.Subscriptions
                 .Where(s => s.UserId == userId
                     && (s.PendingCheckoutIdempotencyKey == null
@@ -758,7 +901,7 @@ In `CreateCheckoutSession`, after `customerId` is resolved and the customer row 
                     .SetProperty(s => s.PendingCheckoutPlanId, planId)
                     .SetProperty(s => s.PendingCheckoutSessionId, (string)null)
                     .SetProperty(s => s.PendingCheckoutSessionUrl, (string)null)
-                    .SetProperty(s => s.PendingCheckoutExpiresAt, provisionalExpiry)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, leaseExpiry)
                     .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
                     .SetProperty(s => s.UpdatedById, userId));
 
@@ -779,19 +922,41 @@ In `CreateCheckoutSession`, after `customerId` is resolved and the customer row 
                 throw new SubscriptionException("A checkout is already in progress. Complete or cancel it before starting another.");
             }
 
-            // We own the attempt. Create the Stripe session with the per-attempt key.
-            var sessionResult = await _stripe.CreateCheckoutSessionAsync(
-                new StripeCheckoutSessionRequest
-                {
-                    UserId = userId,
-                    CustomerId = customerId,
-                    PriceId = priceId,
-                    SuccessUrl = successUrl,
-                    CancelUrl = cancelUrl
-                },
-                attemptKey);
+            // We own the lease. Create the Stripe session with the per-attempt key.
+            // On ANY failure, release the lease (only if we still own it) so the user can
+            // retry immediately instead of waiting out the lease (review findings 2, 9).
+            StripeCheckoutSessionResult sessionResult;
+            try
+            {
+                sessionResult = await _stripe.CreateCheckoutSessionAsync(
+                    new StripeCheckoutSessionRequest
+                    {
+                        UserId = userId,
+                        CustomerId = customerId,
+                        PriceId = priceId,
+                        SuccessUrl = successUrl,
+                        CancelUrl = cancelUrl
+                    },
+                    attemptKey);
+            }
+            catch
+            {
+                await _context.Subscriptions
+                    .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(s => s.PendingCheckoutIdempotencyKey, (string)null)
+                        .SetProperty(s => s.PendingCheckoutPlanId, (string)null)
+                        .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset?)null)
+                        .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                        .SetProperty(s => s.UpdatedById, userId));
+                throw;
+            }
 
-            await _context.Subscriptions
+            // Persist the session onto the attempt we own. If the lease was taken over
+            // (webhook completed it, or it expired and was reclaimed) while Stripe worked,
+            // this affects 0 rows — still return the valid URL to the user, but flag it
+            // for reconciliation rather than reporting clean success (review finding 12).
+            var stored = await _context.Subscriptions
                 .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(s => s.PendingCheckoutSessionId, sessionResult.Id)
@@ -799,6 +964,15 @@ In `CreateCheckoutSession`, after `customerId` is resolved and the customer row 
                     .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset)sessionResult.ExpiresAt)
                     .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
                     .SetProperty(s => s.UpdatedById, userId));
+
+            if (stored == 0)
+            {
+                _telemetry.TrackEvent("Subscription_CheckoutAttemptLostDuringCreate", new Dictionary<string, string>
+                {
+                    { "userId", userId.ToString() },
+                    { "sessionId", sessionResult.Id }
+                });
+            }
 
             _telemetry.TrackEvent("Subscription_CheckoutSessionCreated", new Dictionary<string, string>
             {
@@ -809,11 +983,11 @@ In `CreateCheckoutSession`, after `customerId` is resolved and the customer row 
             return sessionResult.Url;
 ```
 
-> Concurrency note for the reviewer: the `ExecuteUpdateAsync` CAS is the serialization primitive. On SQL Server two racing requests issue `UPDATE ... WHERE <no open attempt>`; exactly one affects a row. The loser (`claimed == 0`) reuses or is rejected. This holds without a `rowversion` column. On SQLite (tests) writes serialize on the shared connection, which still exercises the 0-vs-1 logic deterministically.
+> Concurrency note: the `ExecuteUpdateAsync` CAS is the serialization primitive. On SQL Server two racing requests issue `UPDATE ... WHERE <no open attempt>`; exactly one affects a row. The loser (`claimed == 0`) reuses or is rejected. This holds without a `rowversion` column. **SQLite harness limitation (review findings 3, 4):** the integration tests share one open `SqliteConnection`, so they cannot faithfully reproduce a true-parallel connection race; `CheckoutClaim_SecondClaimWhileLeaseHeld_AffectsZeroRows` asserts the 1-vs-0 predicate logic directly instead. Production connection-level concurrency would need a SQL Server-backed test, which is out of scope for this harness.
 
 - [ ] **Step 4: Handle the brand-new-user insert race**
 
-Concurrent first-time checkouts can both try to insert the `Subscription` row (unique `UserId`), and one `SaveChangesAsync` throws. In the existing customer-creation block, wrap the `await _context.SaveChangesAsync();` that persists the new row:
+Concurrent first-time checkouts can both try to insert the `Subscription` row (unique `UserId`), and one `SaveChangesAsync` throws. In the existing customer-creation block, wrap the `await _context.SaveChangesAsync();` that persists the new row. Only treat it as the uniqueness race if a row actually exists afterward; otherwise rethrow so unrelated DB failures are not masked (review finding 10):
 
 ```csharp
                 try
@@ -822,21 +996,27 @@ Concurrent first-time checkouts can both try to insert the `Subscription` row (u
                 }
                 catch (DbUpdateException)
                 {
-                    // Concurrent first-time request already inserted the row; reload and continue.
+                    // Only swallow this if a row now exists (concurrent first-time insert won).
+                    // Any other failure must surface, not be masked by a later SingleAsync.
                     _context.Entry(subscription).State = EntityState.Detached;
-                    subscription = await _context.Subscriptions
+                    var existing = await _context.Subscriptions
                         .Where(s => s.UserId == userId)
-                        .SingleAsync();
+                        .SingleOrDefaultAsync();
+                    if (existing == null)
+                    {
+                        throw;
+                    }
+                    subscription = existing;
                     customerId = subscription.StripeCustomerId;
                 }
 ```
 
-Add `using Microsoft.EntityFrameworkCore;` is already present; ensure `using System.Data;`/`EntityState` resolves via `Microsoft.EntityFrameworkCore`.
+`DbUpdateException` and `EntityState` resolve via the already-present `using Microsoft.EntityFrameworkCore;`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `dotnet test PrintLogApi.IntegrationTests --filter "FullyQualifiedName~SubscriptionCheckoutTests" --verbosity quiet`
-Expected: all four checkout tests PASS.
+Expected: all `SubscriptionCheckoutTests` PASS (the two guard/reconciliation tests from Task 4 plus the reuse, different-plan-reject, failure-release, and CAS-serialization tests added here).
 
 - [ ] **Step 6: Run the full suite**
 
@@ -871,6 +1051,7 @@ Create `PrintLogApi.IntegrationTests/Services/SubscriptionWebhookTests.cs`. Buil
 ```csharp
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
@@ -899,12 +1080,14 @@ namespace PrintLogApi.IntegrationTests.Services
             };
         }
 
+        // Genuine red-green: the CURRENT handler never touches pending fields, so a
+        // MATCHING completion leaves them set -> this assertion fails before Task 6.
         [Fact]
-        public async Task Completion_WithDifferentLiveSubscription_DoesNotOverwrite()
+        public async Task Completion_MatchingPendingSession_ClearsPendingFields()
         {
             var fake = new FakeStripeGateway();
-            fake.SubscriptionsById["sub_new"] = new StripeSubscriptionInfo { Id = "sub_new", Status = "active", PriceId = "price_x" };
-            fake.QueuedWebhookEvent = CompletedEvent("cs_new", "sub_new", "cus_1", IntegrationTestSeeder.TestUserId);
+            fake.SubscriptionsById["sub_ok"] = new StripeSubscriptionInfo { Id = "sub_ok", Status = "active", PriceId = "price_x" };
+            fake.QueuedWebhookEvent = CompletedEvent("cs_match", "sub_ok", "cus_1", IntegrationTestSeeder.TestUserId);
             await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
 
             using (var scope = factory.Services.CreateScope())
@@ -914,9 +1097,13 @@ namespace PrintLogApi.IntegrationTests.Services
                 {
                     UserId = IntegrationTestSeeder.TestUserId,
                     StripeCustomerId = "cus_1",
-                    StripeSubscriptionId = "sub_original",
-                    Status = SubscriptionStatus.Active,
-                    Plan = SubscriptionPlan.ProMonthly,
+                    Status = SubscriptionStatus.None,
+                    Plan = SubscriptionPlan.Free,
+                    PendingCheckoutSessionId = "cs_match",
+                    PendingCheckoutSessionUrl = "https://checkout.stripe.test/match",
+                    PendingCheckoutIdempotencyKey = "attempt-match",
+                    PendingCheckoutPlanId = "pro_monthly",
+                    PendingCheckoutExpiresAt = System.DateTimeOffset.UtcNow.AddMinutes(9),
                     CreatedById = IntegrationTestSeeder.TestUserId,
                     UpdatedById = IntegrationTestSeeder.TestUserId
                 });
@@ -933,10 +1120,14 @@ namespace PrintLogApi.IntegrationTests.Services
             {
                 var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
                 var sub = db.Subscriptions.Single(s => s.UserId == IntegrationTestSeeder.TestUserId);
-                Assert.Equal("sub_original", sub.StripeSubscriptionId); // not overwritten
+                Assert.Equal("sub_ok", sub.StripeSubscriptionId);
+                Assert.Null(sub.PendingCheckoutSessionId);         // cleared
+                Assert.Null(sub.PendingCheckoutIdempotencyKey);    // cleared
             }
         }
 
+        // Regression guard (may already pass pre-Task 6, since the current handler
+        // ignores pending fields): a NON-matching completion must not wipe a newer attempt.
         [Fact]
         public async Task Completion_ForNonCurrentPendingSession_DoesNotClearNewerAttempt()
         {
@@ -978,6 +1169,97 @@ namespace PrintLogApi.IntegrationTests.Services
                 Assert.Equal("cs_newer", sub.PendingCheckoutSessionId); // newer attempt preserved
             }
         }
+
+        [Fact]
+        public async Task Completion_WithDifferentLiveSubscription_DoesNotOverwrite_AndEmitsDuplicateTelemetry()
+        {
+            var fake = new FakeStripeGateway();
+            fake.SubscriptionsById["sub_new"] = new StripeSubscriptionInfo { Id = "sub_new", Status = "active", PriceId = "price_x" };
+            fake.QueuedWebhookEvent = CompletedEvent("cs_new", "sub_new", "cus_1", IntegrationTestSeeder.TestUserId);
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_1",
+                    StripeSubscriptionId = "sub_original",
+                    Status = SubscriptionStatus.Active, // live -> genuinely a different subscription
+                    Plan = SubscriptionPlan.ProMonthly,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var svc = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+                await svc.HandleStripeWebhook("{}", "sig");
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var sub = db.Subscriptions.Single(s => s.UserId == IntegrationTestSeeder.TestUserId);
+                Assert.Equal("sub_original", sub.StripeSubscriptionId); // not overwritten
+            }
+
+            var dup = factory.TelemetryChannel.Items.OfType<EventTelemetry>()
+                .SingleOrDefault(e => e.Name == "Subscription_DuplicateActiveDetected");
+            Assert.NotNull(dup);
+            Assert.Equal("sub_original", dup.Properties["existingSubscriptionId"]); // reloaded from DB, not null
+            Assert.Equal("sub_new", dup.Properties["incomingSubscriptionId"]);
+        }
+
+        // Review finding 1 regression guard: a CANCELED row still holds sub_old; a
+        // completion for sub_new must ACTIVATE (the non-live clause permits replacement)
+        // and NOT log a false duplicate. A naive `id==null || id==incoming` predicate
+        // would fail this.
+        [Fact]
+        public async Task Completion_ReSubscribeAfterCancellation_Activates()
+        {
+            var fake = new FakeStripeGateway();
+            fake.SubscriptionsById["sub_new"] = new StripeSubscriptionInfo { Id = "sub_new", Status = "active", PriceId = "price_x" };
+            fake.QueuedWebhookEvent = CompletedEvent("cs_new", "sub_new", "cus_1", IntegrationTestSeeder.TestUserId);
+            await using var factory = new CustomWebApplicationFactory().WithStripeGateway(fake);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                db.Subscriptions.Add(new Subscription
+                {
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    StripeCustomerId = "cus_1",
+                    StripeSubscriptionId = "sub_old", // retained after cancellation
+                    Status = SubscriptionStatus.Canceled,
+                    Plan = SubscriptionPlan.Free,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedById = IntegrationTestSeeder.TestUserId
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var svc = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+                await svc.HandleStripeWebhook("{}", "sig");
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var sub = db.Subscriptions.Single(s => s.UserId == IntegrationTestSeeder.TestUserId);
+                Assert.Equal("sub_new", sub.StripeSubscriptionId);      // activated, not blocked
+                Assert.Equal(SubscriptionStatus.Active, sub.Status);
+            }
+
+            Assert.DoesNotContain(
+                factory.TelemetryChannel.Items.OfType<EventTelemetry>(),
+                e => e.Name == "Subscription_DuplicateActiveDetected");
+        }
     }
 }
 ```
@@ -985,7 +1267,7 @@ namespace PrintLogApi.IntegrationTests.Services
 - [ ] **Step 2: Run to verify failure**
 
 Run: `dotnet test PrintLogApi.IntegrationTests --filter "FullyQualifiedName~SubscriptionWebhookTests" --verbosity quiet`
-Expected: both FAIL — the current handler overwrites `sub_original` and clears any pending fields.
+Expected: `Completion_MatchingPendingSession_ClearsPendingFields` and `Completion_WithDifferentLiveSubscription_DoesNotOverwrite_AndEmitsDuplicateTelemetry` FAIL (the current handler ignores pending fields and blindly overwrites/emits no duplicate telemetry). `Completion_ForNonCurrentPendingSession_DoesNotClearNewerAttempt` and `Completion_ReSubscribeAfterCancellation_Activates` may already PASS against the current blind-overwrite handler — they are regression guards for the attempt-scoping and the non-live CAS clause; keep them.
 
 - [ ] **Step 3: Implement attempt-scoped, atomically-claimed activation**
 
@@ -995,11 +1277,16 @@ Rewrite the tail of `HandleCheckoutSessionCompleted` (after `subscription` is re
             var priceId = stripeSubscription.PriceId;
             var mappedStatus = MapStripeStatus(stripeSubscription.Status);
 
-            // Atomic non-overwrite claim: only take ownership if the row has no
-            // subscription id yet, or already points at this same subscription.
+            // Atomic non-overwrite claim. Take ownership if the row has no subscription
+            // id yet, OR already points at this same subscription, OR the stored status
+            // is NOT live. The non-live clause is essential (review finding 1): cancellation
+            // handlers leave the old StripeSubscriptionId in place with Status=Canceled, and
+            // Task 4 lets Canceled users re-subscribe — so a canceled row must be replaceable.
             var claimed = await _context.Subscriptions
                 .Where(s => s.UserId == subscription.UserId
-                    && (s.StripeSubscriptionId == null || s.StripeSubscriptionId == stripeSubscriptionId))
+                    && (s.StripeSubscriptionId == null
+                        || s.StripeSubscriptionId == stripeSubscriptionId
+                        || (s.Status != SubscriptionStatus.Active && s.Status != SubscriptionStatus.PastDue)))
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(s => s.StripeSubscriptionId, stripeSubscriptionId)
                     .SetProperty(s => s.StripePriceId, priceId)
@@ -1013,11 +1300,19 @@ Rewrite the tail of `HandleCheckoutSessionCompleted` (after `subscription` is re
 
             if (claimed == 0)
             {
-                // A different live subscription already owns the row. Do not overwrite.
+                // A different LIVE subscription already owns the row. Do not overwrite.
+                // Re-read from the DB (review finding 6): ExecuteUpdate does not refresh the
+                // tracked entity, so under a race `subscription.StripeSubscriptionId` may be
+                // stale/null. The DB value is the authoritative existing id to report.
+                var currentOwner = await _context.Subscriptions
+                    .Where(s => s.UserId == subscription.UserId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
                 _telemetry.TrackEvent("Subscription_DuplicateActiveDetected", new Dictionary<string, string>
                 {
                     { "userId", subscription.UserId.ToString() },
-                    { "existingSubscriptionId", subscription.StripeSubscriptionId },
+                    { "existingSubscriptionId", currentOwner.StripeSubscriptionId ?? string.Empty },
                     { "incomingSubscriptionId", stripeSubscriptionId }
                 });
                 return;
@@ -1047,9 +1342,42 @@ Rewrite the tail of `HandleCheckoutSessionCompleted` (after `subscription` is re
             });
 ```
 
-Keep the existing notification `try/catch` block that follows. Remove the old `subscription.StripeSubscriptionId = ...; await _context.SaveChangesAsync();` assignments that this replaces. The upfront `subscription` lookup (by `StripeCustomerId`, then by `userId` metadata, creating the row if absent) is unchanged and still runs before this block, so a row exists for the `ExecuteUpdateAsync` to match. If the row was newly `Add`ed in that block, call `await _context.SaveChangesAsync();` to persist it before the CAS (the CAS operates on the database, not the tracked-but-unsaved entity).
+Keep the existing notification `try/catch` block that follows. Remove the old `subscription.StripeSubscriptionId = ...; await _context.SaveChangesAsync();` assignments that this replaces.
 
-> Reviewer note: the "duplicate detected" telemetry reads `subscription.StripeSubscriptionId` from the row loaded before the CAS. When `claimed == 0`, that field holds the *existing different* id (the CAS didn't change the tracked entity), which is what we want to report.
+**The row must exist in the database before the CAS runs**, because `ExecuteUpdateAsync` operates on the DB, not the tracked-but-unsaved entity (review finding 13). The upfront lookup creates a new row only in the `userId`-metadata branch when no row is found. Make that branch persist immediately. Change the existing creation block:
+
+```csharp
+                    if (subscription == null)
+                    {
+                        subscription = new Models.Subscription
+                        {
+                            UserId = userId,
+                            StripeCustomerId = customerId,
+                            CreatedById = userId,
+                            UpdatedById = userId
+                        };
+                        _context.Subscriptions.Add(subscription);
+                    }
+```
+
+to add a save right after the `Add`:
+
+```csharp
+                    if (subscription == null)
+                    {
+                        subscription = new Models.Subscription
+                        {
+                            UserId = userId,
+                            StripeCustomerId = customerId,
+                            CreatedById = userId,
+                            UpdatedById = userId
+                        };
+                        _context.Subscriptions.Add(subscription);
+                        await _context.SaveChangesAsync(); // persist before the CAS below
+                    }
+```
+
+(The `customerId`/`userId` locals here come from the existing handler's early code: `session.CustomerId` and the parsed `session.Metadata["userId"]`.) Add a webhook test where neither the `StripeCustomerId` lookup nor an existing row is present, so this branch creates and activates the row, to guard against a CAS that silently affects zero rows on a brand-new subscription.
 
 - [ ] **Step 4: Run the webhook tests to verify they pass**
 
@@ -1102,10 +1430,25 @@ gh pr create --title "Prevent overlapping Stripe checkouts from double-charging"
 
 ## Spec Coverage Check
 
-- Spec §1 live-subscription guard → Task 4 (guard). Reconciliation (finding 5) → Task 4 (Guard 2).
+- Spec §1 live-subscription guard + reconciliation → Task 4.
 - Spec §2 customer reuse + idempotent creation → Task 2 (`CreateCustomerAsync` with `customer-{userId}` key).
-- Spec §3 single-attempt claim, per-attempt key, plan-matched reuse, atomic CAS → Task 1 (columns) + Task 5.
-- Spec §4 atomic non-overwrite, alert-only telemetry, attempt-scoped clear, real status mapping → Task 6.
-- Spec §5 testing (reject, same-plan reuse, different-plan reject, reconciliation, webhook non-overwrite, attempt-scoping, separate contexts) → Tasks 4–6 tests; seam via Tasks 2–3.
+- Spec §3 single-attempt claim (short lease), per-attempt key, plan-matched reuse, atomic CAS, release-on-failure, zero-row handling → Task 1 (columns) + Task 5.
+- Spec §4 atomic non-overwrite with non-live clause, reloaded duplicate telemetry, attempt-scoped clear, real status mapping → Task 6.
+- Spec §5 tests a–h → Task 4 (a live reject, c reconciliation), Task 5 (b reuse + different-plan reject, d CAS serialization, h failure boundary), Task 6 (e re-subscribe-after-cancel, f duplicate + telemetry, g matching/non-matching attempt-scoping). Seam + telemetry sink via Tasks 2–3.
 - Spec migration/deployment notes → Task 1 + Task 7.
-- Out-of-scope items (event-ID dedup, ordering-independent updated/deleted, unique constraints, auto-cancel/refund) → intentionally not implemented.
+- Out-of-scope items (event-ID dedup, ordering-independent updated/deleted, unique constraints, auto-cancel/refund, same-key server-side takeover) → intentionally not implemented.
+
+## Review Incorporated
+
+This plan was revised after an antagonistic review (Codex, 2026-07-10) of the first draft. All 13 findings were validated and applied:
+
+- **Critical 1** (webhook CAS blocked re-subscribe after cancellation — also a defect in the spec): fixed the CAS predicate with a non-live clause; added `Completion_ReSubscribeAfterCancellation_Activates`. Spec §4 corrected too.
+- **Critical 2 / Medium 9** (crash/failure stranded the claim 24h): short 10-minute lease + release-on-failure `try/catch`; dropped the false "same-key crash recovery" claim; added `Checkout_StripeFailure_ReleasesClaimSoRetrySucceeds`.
+- **High 3/4** (no real concurrency test; SQLite not faithful): added a deterministic CAS-level serialization test and documented the SQL Server gap instead of overclaiming.
+- **High 5/6** (webhook concurrency/telemetry untested; stale-entity id): added a telemetry sink (Task 3), assert `Subscription_DuplicateActiveDetected`, and reload `AsNoTracking` before logging.
+- **Medium 7** (false red-green): replaced with a genuinely-failing matching-clears test; relabeled the non-matching one a regression guard.
+- **Medium 8** (reuse test didn't check URL): now asserts both response URLs equal the reused one.
+- **Medium 10** (catch-all `DbUpdateException`): reload-or-rethrow so unrelated failures surface.
+- **Medium 11** (mislabeled "pure refactor"): Task 2 renamed; customer idempotency key called out as an intentional behavior change.
+- **Medium 12** (ignored zero-row session write): capture rows; emit `Subscription_CheckoutAttemptLostDuringCreate` and still return the valid URL.
+- **Low 13** (prose, not code): concrete `SaveChangesAsync` in the metadata-create branch.
