@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.ApplicationInsights.Channel;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -8,7 +9,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PrintLogApi.IntegrationTests.Services;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Billing;
 
 namespace PrintLogApi.IntegrationTests
 {
@@ -20,6 +23,22 @@ namespace PrintLogApi.IntegrationTests
     {
         private SqliteConnection _connection;
         private bool _seeded = false;
+        private IStripeGateway _stripeGatewayOverride;
+
+        /// <summary>
+        /// Captures telemetry emitted during a test so assertions can observe events
+        /// such as Subscription_DuplicateActiveDetected.
+        /// </summary>
+        public TestTelemetryChannel TelemetryChannel { get; } = new();
+
+        /// <summary>
+        /// Swaps in a fake Stripe gateway. Must be called before the first CreateClient()/CreateHost().
+        /// </summary>
+        public CustomWebApplicationFactory WithStripeGateway(IStripeGateway gateway)
+        {
+            _stripeGatewayOverride = gateway;
+            return this;
+        }
 
         public CustomWebApplicationFactory()
         {
@@ -69,6 +88,23 @@ namespace PrintLogApi.IntegrationTests
                     services.Remove(auth0Descriptor);
                 }
                 services.AddSingleton<IAuth0Service, TestAuth0Service>();
+
+                if (_stripeGatewayOverride != null)
+                {
+                    var stripeDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IStripeGateway));
+                    if (stripeDescriptor != null)
+                    {
+                        services.Remove(stripeDescriptor);
+                    }
+                    services.AddSingleton(_stripeGatewayOverride);
+                }
+
+                var channelDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ITelemetryChannel));
+                if (channelDescriptor != null)
+                {
+                    services.Remove(channelDescriptor);
+                }
+                services.AddSingleton<ITelemetryChannel>(TelemetryChannel);
 
                 // Add test authentication scheme
                 services.AddAuthentication(options =>
