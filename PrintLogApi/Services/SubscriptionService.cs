@@ -10,6 +10,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Subscription;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.Services.Billing;
 using Stripe;
 using Stripe.Checkout;
 
@@ -22,19 +23,22 @@ namespace PrintLogApi.Services
         private readonly TelemetryClient _telemetry;
         private readonly StripeOptions _stripeOptions;
         private readonly INotificationService _notificationService;
+        private readonly IStripeGateway _stripe;
 
         public SubscriptionService(
             PrintLogContext context,
             IMapper mapper,
             TelemetryClient telemetry,
             IOptions<StripeOptions> stripeOptions,
-            INotificationService notificationService)
+            INotificationService notificationService,
+            IStripeGateway stripe)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
             _stripeOptions = stripeOptions.Value;
             _notificationService = notificationService;
+            _stripe = stripe;
         }
 
         public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -44,7 +48,12 @@ namespace PrintLogApi.Services
                 .AsNoTracking()
                 .SingleOrDefaultAsync();
 
-            bool isPro = subscription?.Status == SubscriptionStatus.Active;
+            // Entitlement requires BOTH an active status AND a recognized paid plan. A Stripe
+            // subscription with an unknown/missing price maps to Plan=Free; without this guard an
+            // active-but-Free row would wrongly grant Pro.
+            bool isPro = subscription != null
+                && subscription.Status == SubscriptionStatus.Active
+                && subscription.Plan != SubscriptionPlan.Free;
 
             SubscriptionDto dto;
             if (subscription == null)
@@ -62,6 +71,10 @@ namespace PrintLogApi.Services
             {
                 dto = _mapper.Map<SubscriptionDto>(subscription);
             }
+
+            // Single source of truth for entitlement: override whatever the mapper produced so
+            // IsPro and the limits below can never disagree (e.g. active-but-unknown-price).
+            dto.IsPro = isPro;
 
             dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
             dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
@@ -86,19 +99,64 @@ namespace PrintLogApi.Services
                 .Where(s => s.UserId == userId)
                 .SingleOrDefaultAsync();
 
+            // Guard 1: a locally-live subscription blocks a new checkout.
+            if (subscription != null
+                && (subscription.Status == SubscriptionStatus.Active || subscription.Status == SubscriptionStatus.PastDue)
+                && !string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            {
+                throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+            }
+
+            // Guard 2: reconcile against Stripe when local state may be stale (a webhook
+            // may have been delayed/lost, leaving a live Stripe subscription unrecorded).
+            if (subscription != null
+                && !string.IsNullOrEmpty(subscription.StripeCustomerId))
+            {
+                var stripeSubs = await _stripe.ListSubscriptionsAsync(subscription.StripeCustomerId);
+                var liveSubs = stripeSubs
+                    .Where(s =>
+                    {
+                        var mapped = MapStripeStatus(s.Status);
+                        return mapped == SubscriptionStatus.Active || mapped == SubscriptionStatus.PastDue;
+                    })
+                    .OrderByDescending(s => s.CurrentPeriodStart) // deterministic: adopt the most recent
+                    .ToList();
+
+                if (liveSubs.Count > 1)
+                {
+                    // The customer has multiple live subscriptions at Stripe — a billing anomaly
+                    // needing manual reconciliation. Surface every id; still adopt one below so the
+                    // local row is at least consistent with a real subscription.
+                    _telemetry.TrackEvent("Subscription_DuplicateActiveDetected", new Dictionary<string, string>
+                    {
+                        { "userId", userId.ToString() },
+                        { "source", "reconciliation" },
+                        { "subscriptionIds", string.Join(",", liveSubs.Select(s => s.Id)) }
+                    });
+                }
+
+                var live = liveSubs.FirstOrDefault();
+                if (live != null)
+                {
+                    subscription.StripeSubscriptionId = live.Id;
+                    subscription.StripePriceId = live.PriceId;
+                    subscription.Status = MapStripeStatus(live.Status);
+                    subscription.Plan = MapPriceIdToPlan(live.PriceId);
+                    subscription.CurrentPeriodStart = live.CurrentPeriodStart;
+                    subscription.CurrentPeriodEnd = live.CurrentPeriodEnd;
+                    subscription.CancelAtPeriodEnd = live.CancelAtPeriodEnd;
+                    subscription.UpdatedById = userId;
+                    await _context.SaveChangesAsync();
+
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+                }
+            }
+
             string customerId = subscription?.StripeCustomerId;
 
             if (string.IsNullOrEmpty(customerId))
             {
-                var customerService = new CustomerService();
-                var customer = await customerService.CreateAsync(new CustomerCreateOptions
-                {
-                    Metadata = new Dictionary<string, string>
-                    {
-                        { "userId", userId.ToString() }
-                    }
-                });
-                customerId = customer.Id;
+                customerId = await _stripe.CreateCustomerAsync(userId, $"customer-{userId}");
 
                 if (subscription == null)
                 {
@@ -119,37 +177,167 @@ namespace PrintLogApi.Services
                     subscription.UpdatedById = userId;
                 }
 
-                await _context.SaveChangesAsync();
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    // Only swallow this if a row now exists (a concurrent first-time insert won
+                    // the unique UserId index). Any other failure must surface, not be masked.
+                    _context.Entry(subscription).State = EntityState.Detached;
+                    var existing = await _context.Subscriptions
+                        .Where(s => s.UserId == userId)
+                        .SingleOrDefaultAsync();
+                    if (existing == null)
+                    {
+                        throw;
+                    }
+                    subscription = existing;
+                    customerId = subscription.StripeCustomerId;
+                }
             }
 
-            var sessionService = new SessionService();
-            var session = await sessionService.CreateAsync(new SessionCreateOptions
+            // Reload the row (the customer step guarantees it exists).
+            subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId)
+                .SingleAsync();
+
+            var now = DateTimeOffset.UtcNow;
+
+            // Reuse an open attempt for the SAME plan (cheap: no Stripe call).
+            if (!string.IsNullOrEmpty(subscription.PendingCheckoutIdempotencyKey)
+                && subscription.PendingCheckoutExpiresAt.HasValue
+                && subscription.PendingCheckoutExpiresAt.Value > now
+                && subscription.PendingCheckoutPlanId == planId
+                && !string.IsNullOrEmpty(subscription.PendingCheckoutSessionUrl))
             {
-                Customer = customerId,
-                PaymentMethodTypes = new List<string> { "card" },
-                LineItems = new List<SessionLineItemOptions>
+                return subscription.PendingCheckoutSessionUrl;
+            }
+
+            // Atomic single-attempt claim (compare-and-swap) with a SHORT lease.
+            // The short lease bounds the lockout if this request dies before it stores
+            // a session: a crashed pre-session claim frees in ~10 min, not 24h. The real
+            // (~24h) expiry is written only once a session exists.
+            var attemptKey = Guid.NewGuid().ToString();
+            var leaseExpiry = now.AddMinutes(10);
+            // The predicate also requires the row NOT be live at the instant of the claim:
+            // a webhook completing an earlier checkout could flip the row to Active between
+            // Guard 1 and here. Folding liveness into the atomic claim closes that TOCTOU.
+            var claimed = await _context.Subscriptions
+                .Where(s => s.UserId == userId
+                    && (s.PendingCheckoutIdempotencyKey == null
+                        || s.PendingCheckoutExpiresAt == null
+                        || s.PendingCheckoutExpiresAt <= now)
+                    && !((s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.PastDue)
+                        && s.StripeSubscriptionId != null))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutIdempotencyKey, attemptKey)
+                    .SetProperty(s => s.PendingCheckoutPlanId, planId)
+                    .SetProperty(s => s.PendingCheckoutSessionId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, (string)null)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, leaseExpiry)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, userId));
+
+            if (claimed == 0)
+            {
+                // We didn't claim. Either the row went live (webhook won the race) or another
+                // attempt is already open. Reload and distinguish.
+                var current = await _context.Subscriptions
+                    .Where(s => s.UserId == userId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                if ((current.Status == SubscriptionStatus.Active || current.Status == SubscriptionStatus.PastDue)
+                    && !string.IsNullOrEmpty(current.StripeSubscriptionId))
                 {
-                    new SessionLineItemOptions
-                    {
-                        Price = priceId,
-                        Quantity = 1
-                    }
-                },
-                Mode = "subscription",
-                SuccessUrl = successUrl,
-                CancelUrl = cancelUrl,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "userId", userId.ToString() }
-                },
-                SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    Metadata = new Dictionary<string, string>
-                    {
-                        { "userId", userId.ToString() }
-                    }
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
                 }
-            });
+
+                if (current.PendingCheckoutPlanId == planId
+                    && !string.IsNullOrEmpty(current.PendingCheckoutSessionUrl))
+                {
+                    return current.PendingCheckoutSessionUrl;
+                }
+
+                throw new SubscriptionException("A checkout is already in progress. Complete or cancel it before starting another.");
+            }
+
+            // We own the lease. Create the Stripe session with the per-attempt key.
+            // On ANY failure, release the lease (only if we still own it) so the user can
+            // retry immediately instead of waiting out the lease. This is double-charge-safe:
+            // if Stripe actually created a session before an ambiguous failure (timeout), that
+            // session's URL was never returned to the caller, so the user cannot complete it —
+            // it simply expires unused. The retry mints a fresh session with a new key.
+            StripeCheckoutSessionResult sessionResult;
+            try
+            {
+                sessionResult = await _stripe.CreateCheckoutSessionAsync(
+                    new StripeCheckoutSessionRequest
+                    {
+                        UserId = userId,
+                        CustomerId = customerId,
+                        PriceId = priceId,
+                        SuccessUrl = successUrl,
+                        CancelUrl = cancelUrl
+                    },
+                    attemptKey);
+            }
+            catch
+            {
+                await _context.Subscriptions
+                    .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(s => s.PendingCheckoutIdempotencyKey, (string)null)
+                        .SetProperty(s => s.PendingCheckoutPlanId, (string)null)
+                        .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset?)null)
+                        .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                        .SetProperty(s => s.UpdatedById, userId));
+                throw;
+            }
+
+            // Persist the session onto the attempt we own.
+            var stored = await _context.Subscriptions
+                .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutSessionId, sessionResult.Id)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, sessionResult.Url)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset)sessionResult.ExpiresAt)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, userId));
+
+            if (stored == 0)
+            {
+                // The lease was taken over (a webhook completed it, or it expired and another
+                // attempt reclaimed it) while Stripe was working. The session we just created is
+                // now an orphan — do NOT return its URL, or the caller would hold a second usable
+                // checkout alongside whatever now owns the row. Let the orphan expire unused.
+                _telemetry.TrackEvent("Subscription_CheckoutAttemptLostDuringCreate", new Dictionary<string, string>
+                {
+                    { "userId", userId.ToString() },
+                    { "sessionId", sessionResult.Id }
+                });
+
+                var current = await _context.Subscriptions
+                    .Where(s => s.UserId == userId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                if ((current.Status == SubscriptionStatus.Active || current.Status == SubscriptionStatus.PastDue)
+                    && !string.IsNullOrEmpty(current.StripeSubscriptionId))
+                {
+                    throw new SubscriptionException("You already have an active subscription. Manage it from the billing portal.");
+                }
+
+                if (current.PendingCheckoutPlanId == planId
+                    && !string.IsNullOrEmpty(current.PendingCheckoutSessionUrl))
+                {
+                    return current.PendingCheckoutSessionUrl;
+                }
+
+                throw new SubscriptionException("Your checkout could not be completed. Please try again.");
+            }
 
             _telemetry.TrackEvent("Subscription_CheckoutSessionCreated", new Dictionary<string, string>
             {
@@ -157,7 +345,7 @@ namespace PrintLogApi.Services
                 { "planId", planId }
             });
 
-            return session.Url;
+            return sessionResult.Url;
         }
 
         public async Task<string> CreateCustomerPortalSession(long userId, string returnUrl)
@@ -170,19 +358,12 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeCustomerId))
                 throw new SubscriptionException("No Stripe customer found for this user.");
 
-            var sessionService = new Stripe.BillingPortal.SessionService();
-            var session = await sessionService.CreateAsync(new Stripe.BillingPortal.SessionCreateOptions
-            {
-                Customer = subscription.StripeCustomerId,
-                ReturnUrl = returnUrl
-            });
-
-            return session.Url;
+            return await _stripe.CreateBillingPortalSessionAsync(subscription.StripeCustomerId, returnUrl);
         }
 
         public async Task HandleStripeWebhook(string json, string signature)
         {
-            var stripeEvent = EventUtility.ConstructEvent(json, signature, _stripeOptions.WebhookSecret);
+            var stripeEvent = _stripe.ConstructWebhookEvent(json, signature);
 
             switch (stripeEvent.Type)
             {
@@ -210,11 +391,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
-            {
-                CancelAtPeriodEnd = true
-            });
+            await _stripe.SetSubscriptionCancelAtPeriodEndAsync(subscription.StripeSubscriptionId, true);
 
             subscription.CancelAtPeriodEnd = true;
             await _context.SaveChangesAsync();
@@ -234,8 +411,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.CancelAsync(subscription.StripeSubscriptionId);
+            await _stripe.CancelSubscriptionAsync(subscription.StripeSubscriptionId);
 
             subscription.Status = SubscriptionStatus.Canceled;
             subscription.CanceledAt = DateTimeOffset.UtcNow;
@@ -256,11 +432,7 @@ namespace PrintLogApi.Services
             if (subscription == null || string.IsNullOrEmpty(subscription.StripeSubscriptionId))
                 return;
 
-            var stripeService = new Stripe.SubscriptionService();
-            await stripeService.UpdateAsync(subscription.StripeSubscriptionId, new SubscriptionUpdateOptions
-            {
-                CancelAtPeriodEnd = false
-            });
+            await _stripe.SetSubscriptionCancelAtPeriodEndAsync(subscription.StripeSubscriptionId, false);
 
             subscription.CancelAtPeriodEnd = false;
             subscription.CanceledAt = null;
@@ -280,8 +452,7 @@ namespace PrintLogApi.Services
             var stripeSubscriptionId = session.SubscriptionId;
             var customerId = session.CustomerId;
 
-            var subscriptionService = new Stripe.SubscriptionService();
-            var stripeSubscription = await subscriptionService.GetAsync(stripeSubscriptionId);
+            var stripeSubscription = await _stripe.GetSubscriptionAsync(stripeSubscriptionId);
 
             var subscription = await _context.Subscriptions
                 .Where(s => s.StripeCustomerId == customerId)
@@ -305,6 +476,24 @@ namespace PrintLogApi.Services
                             UpdatedById = userId
                         };
                         _context.Subscriptions.Add(subscription);
+                        try
+                        {
+                            await _context.SaveChangesAsync(); // persist before the CAS below (ExecuteUpdate hits the DB)
+                        }
+                        catch (DbUpdateException)
+                        {
+                            // Two first-time completions for the same user race on the unique
+                            // UserId index; one insert loses. Reload the winner and continue so
+                            // this webhook is idempotent instead of surfacing a 500.
+                            _context.Entry(subscription).State = EntityState.Detached;
+                            subscription = await _context.Subscriptions
+                                .Where(s => s.UserId == userId)
+                                .SingleOrDefaultAsync();
+                            if (subscription == null)
+                            {
+                                throw;
+                            }
+                        }
                     }
                 }
                 else
@@ -313,18 +502,82 @@ namespace PrintLogApi.Services
                 }
             }
 
-            var stripeItem = stripeSubscription.Items.Data.FirstOrDefault();
-            var priceId = stripeItem?.Price.Id;
+            var priceId = stripeSubscription.PriceId;
+            var mappedStatus = MapStripeStatus(stripeSubscription.Status);
 
-            subscription.StripeSubscriptionId = stripeSubscriptionId;
-            subscription.StripePriceId = priceId;
-            subscription.Status = SubscriptionStatus.Active;
-            subscription.Plan = MapPriceIdToPlan(priceId);
-            subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
-            subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
-            subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
+            // Atomic non-overwrite claim. Take ownership if the row has no subscription id
+            // yet, OR already points at this same subscription, OR the stored status is NOT
+            // live. The non-live clause is essential: cancellation handlers leave the old
+            // StripeSubscriptionId in place with Status=Canceled, and a Canceled user may
+            // re-subscribe, so a canceled row must be replaceable.
+            var claimed = await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId
+                    && (s.StripeSubscriptionId == null
+                        || s.StripeSubscriptionId == stripeSubscriptionId
+                        || (s.Status != SubscriptionStatus.Active && s.Status != SubscriptionStatus.PastDue)))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.StripeSubscriptionId, stripeSubscriptionId)
+                    .SetProperty(s => s.StripePriceId, priceId)
+                    .SetProperty(s => s.Status, mappedStatus)
+                    .SetProperty(s => s.Plan, MapPriceIdToPlan(priceId))
+                    .SetProperty(s => s.CurrentPeriodStart, (DateTimeOffset?)stripeSubscription.CurrentPeriodStart)
+                    .SetProperty(s => s.CurrentPeriodEnd, (DateTimeOffset?)stripeSubscription.CurrentPeriodEnd)
+                    .SetProperty(s => s.CancelAtPeriodEnd, stripeSubscription.CancelAtPeriodEnd)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, subscription.UserId));
 
-            await _context.SaveChangesAsync();
+            if (claimed == 0)
+            {
+                // A different LIVE subscription already owns the row. Do not overwrite.
+                // Re-read from the DB: ExecuteUpdate does not refresh the tracked entity, so
+                // under a race the tracked value may be stale/null. The DB value is authoritative.
+                var currentOwner = await _context.Subscriptions
+                    .Where(s => s.UserId == subscription.UserId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                _telemetry.TrackEvent("Subscription_DuplicateActiveDetected", new Dictionary<string, string>
+                {
+                    { "userId", subscription.UserId.ToString() },
+                    { "existingSubscriptionId", currentOwner.StripeSubscriptionId ?? string.Empty },
+                    { "incomingSubscriptionId", stripeSubscriptionId }
+                });
+                return;
+            }
+
+            // Clear the pending attempt only if this completion is that attempt.
+            await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId && s.PendingCheckoutSessionId == session.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutSessionId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, (string)null)
+                    .SetProperty(s => s.PendingCheckoutIdempotencyKey, (string)null)
+                    .SetProperty(s => s.PendingCheckoutPlanId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, subscription.UserId));
+
+            // Reload for the notification/telemetry below. AsNoTracking so we get the DB
+            // values written by the CAS, not the stale tracked instance (identity map would
+            // otherwise return the pre-CAS entity on a tracking query).
+            subscription = await _context.Subscriptions
+                .Where(s => s.UserId == subscription.UserId)
+                .AsNoTracking()
+                .SingleAsync();
+
+            // A delayed/replayed completion can arrive after the Stripe subscription is no longer
+            // active (e.g. canceled). We still record the truthful status above, but only announce
+            // an activation for a genuinely active subscription — otherwise we would tell the user
+            // "activated" about a canceled/incomplete one.
+            if (mappedStatus != SubscriptionStatus.Active)
+            {
+                _telemetry.TrackEvent("Subscription_CheckoutCompletedNonActive", new Dictionary<string, string>
+                {
+                    { "userId", subscription.UserId.ToString() },
+                    { "status", mappedStatus.ToString() }
+                });
+                return;
+            }
 
             _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
             {
@@ -350,7 +603,7 @@ namespace PrintLogApi.Services
 
         private async Task HandleSubscriptionUpdated(Event stripeEvent)
         {
-            var stripeSubscription = stripeEvent.Data.Object as Stripe.Subscription;
+            var stripeSubscription = stripeEvent.Data.Object as global::Stripe.Subscription;
             if (stripeSubscription == null) return;
 
             var subscription = await _context.Subscriptions
@@ -384,7 +637,7 @@ namespace PrintLogApi.Services
 
         private async Task HandleSubscriptionDeleted(Event stripeEvent)
         {
-            var stripeSubscription = stripeEvent.Data.Object as Stripe.Subscription;
+            var stripeSubscription = stripeEvent.Data.Object as global::Stripe.Subscription;
             if (stripeSubscription == null) return;
 
             var subscription = await _context.Subscriptions

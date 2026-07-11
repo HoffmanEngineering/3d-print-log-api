@@ -28,5 +28,19 @@ namespace PrintLogApi.Models
         public DateTimeOffset? CurrentPeriodEnd { get; set; }
         public bool CancelAtPeriodEnd { get; set; }
         public DateTimeOffset? CanceledAt { get; set; }
+
+        [StringLength(255)]
+        public string PendingCheckoutSessionId { get; set; }
+
+        [StringLength(2048)]
+        public string PendingCheckoutSessionUrl { get; set; }
+
+        public DateTimeOffset? PendingCheckoutExpiresAt { get; set; }
+
+        [StringLength(255)]
+        public string PendingCheckoutIdempotencyKey { get; set; }
+
+        [StringLength(64)]
+        public string PendingCheckoutPlanId { get; set; }
     }
 }

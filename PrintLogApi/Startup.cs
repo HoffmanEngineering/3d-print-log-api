@@ -24,6 +24,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Billing;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -165,6 +166,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
             services.AddTransient<INotificationService, NotificationService>();
             services.AddTransient<ISubscriptionService, SubscriptionService>();
+            services.AddTransient<IStripeGateway, StripeGateway>();
             services.AddTransient<IFileAttachmentService, FileAttachmentService>();
             services.AddTransient<IProjectService, ProjectService>();
 
@@ -192,7 +194,15 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            if (Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting"))
+            // E2ETesting always uses the stub DevAuth scheme (its tests send an X-Dev-User-Id
+            // header instead of a real token). In Development the DevAuth stub is used by default;
+            // set Auth0Management:DevAuthBypass=false to opt into real Auth0 JWT validation locally
+            // (e.g. to log in with real dev-tenant credentials). All other environments validate for real.
+            var bypassAuth = Environment.IsEnvironment("E2ETesting")
+                || (Environment.IsDevelopment()
+                    && Configuration.GetValue<bool>("Auth0Management:DevAuthBypass", true));
+
+            if (bypassAuth)
             {
                 services.AddAuthentication(options =>
                 {
@@ -215,7 +225,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
                 });
 
-                // Scope-based policy only applies outside Development (dev bypass token has no scopes)
+                // Scope-based policy only applies when validating real tokens (dev bypass token has no scopes)
                 services.AddAuthorization(options =>
                 {
                     options.AddPolicy("read:messages", policy =>
