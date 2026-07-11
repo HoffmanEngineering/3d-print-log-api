@@ -151,19 +151,131 @@ namespace PrintLogApi.Services
                     subscription.UpdatedById = userId;
                 }
 
-                await _context.SaveChangesAsync();
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    // Only swallow this if a row now exists (a concurrent first-time insert won
+                    // the unique UserId index). Any other failure must surface, not be masked.
+                    _context.Entry(subscription).State = EntityState.Detached;
+                    var existing = await _context.Subscriptions
+                        .Where(s => s.UserId == userId)
+                        .SingleOrDefaultAsync();
+                    if (existing == null)
+                    {
+                        throw;
+                    }
+                    subscription = existing;
+                    customerId = subscription.StripeCustomerId;
+                }
             }
 
-            var sessionResult = await _stripe.CreateCheckoutSessionAsync(
-                new StripeCheckoutSessionRequest
+            // Reload the row (the customer step guarantees it exists).
+            subscription = await _context.Subscriptions
+                .Where(s => s.UserId == userId)
+                .SingleAsync();
+
+            var now = DateTimeOffset.UtcNow;
+
+            // Reuse an open attempt for the SAME plan (cheap: no Stripe call).
+            if (!string.IsNullOrEmpty(subscription.PendingCheckoutIdempotencyKey)
+                && subscription.PendingCheckoutExpiresAt.HasValue
+                && subscription.PendingCheckoutExpiresAt.Value > now
+                && subscription.PendingCheckoutPlanId == planId
+                && !string.IsNullOrEmpty(subscription.PendingCheckoutSessionUrl))
+            {
+                return subscription.PendingCheckoutSessionUrl;
+            }
+
+            // Atomic single-attempt claim (compare-and-swap) with a SHORT lease.
+            // The short lease bounds the lockout if this request dies before it stores
+            // a session: a crashed pre-session claim frees in ~10 min, not 24h. The real
+            // (~24h) expiry is written only once a session exists.
+            var attemptKey = Guid.NewGuid().ToString();
+            var leaseExpiry = now.AddMinutes(10);
+            var claimed = await _context.Subscriptions
+                .Where(s => s.UserId == userId
+                    && (s.PendingCheckoutIdempotencyKey == null
+                        || s.PendingCheckoutExpiresAt == null
+                        || s.PendingCheckoutExpiresAt <= now))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutIdempotencyKey, attemptKey)
+                    .SetProperty(s => s.PendingCheckoutPlanId, planId)
+                    .SetProperty(s => s.PendingCheckoutSessionId, (string)null)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, (string)null)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, leaseExpiry)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, userId));
+
+            if (claimed == 0)
+            {
+                // Another attempt is already open. Reload and reuse if same plan, else reject.
+                var current = await _context.Subscriptions
+                    .Where(s => s.UserId == userId)
+                    .AsNoTracking()
+                    .SingleAsync();
+
+                if (current.PendingCheckoutPlanId == planId
+                    && !string.IsNullOrEmpty(current.PendingCheckoutSessionUrl))
                 {
-                    UserId = userId,
-                    CustomerId = customerId,
-                    PriceId = priceId,
-                    SuccessUrl = successUrl,
-                    CancelUrl = cancelUrl
-                },
-                Guid.NewGuid().ToString());
+                    return current.PendingCheckoutSessionUrl;
+                }
+
+                throw new SubscriptionException("A checkout is already in progress. Complete or cancel it before starting another.");
+            }
+
+            // We own the lease. Create the Stripe session with the per-attempt key.
+            // On ANY failure, release the lease (only if we still own it) so the user can
+            // retry immediately instead of waiting out the lease.
+            StripeCheckoutSessionResult sessionResult;
+            try
+            {
+                sessionResult = await _stripe.CreateCheckoutSessionAsync(
+                    new StripeCheckoutSessionRequest
+                    {
+                        UserId = userId,
+                        CustomerId = customerId,
+                        PriceId = priceId,
+                        SuccessUrl = successUrl,
+                        CancelUrl = cancelUrl
+                    },
+                    attemptKey);
+            }
+            catch
+            {
+                await _context.Subscriptions
+                    .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(s => s.PendingCheckoutIdempotencyKey, (string)null)
+                        .SetProperty(s => s.PendingCheckoutPlanId, (string)null)
+                        .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset?)null)
+                        .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                        .SetProperty(s => s.UpdatedById, userId));
+                throw;
+            }
+
+            // Persist the session onto the attempt we own. If the lease was taken over
+            // (webhook completed it, or it expired and was reclaimed) while Stripe worked,
+            // this affects 0 rows — still return the valid URL, but flag it for reconciliation.
+            var stored = await _context.Subscriptions
+                .Where(s => s.UserId == userId && s.PendingCheckoutIdempotencyKey == attemptKey)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.PendingCheckoutSessionId, sessionResult.Id)
+                    .SetProperty(s => s.PendingCheckoutSessionUrl, sessionResult.Url)
+                    .SetProperty(s => s.PendingCheckoutExpiresAt, (DateTimeOffset)sessionResult.ExpiresAt)
+                    .SetProperty(s => s.UpdatedDate, DateTime.UtcNow)
+                    .SetProperty(s => s.UpdatedById, userId));
+
+            if (stored == 0)
+            {
+                _telemetry.TrackEvent("Subscription_CheckoutAttemptLostDuringCreate", new Dictionary<string, string>
+                {
+                    { "userId", userId.ToString() },
+                    { "sessionId", sessionResult.Id }
+                });
+            }
 
             _telemetry.TrackEvent("Subscription_CheckoutSessionCreated", new Dictionary<string, string>
             {
