@@ -124,6 +124,25 @@ public class MyTests : IClassFixture<CustomWebApplicationFactory>
 - `IntegrationTestSeeder.TestUserId` - Internal user ID (populated after seeding)
 - `IntegrationTestSeeder.TestPrinterId` - Internal printer ID (populated after seeding)
 
+### Gotcha: testing JWT-protected endpoints against a local signing key
+
+When validating a real `JwtBearer`/`McpBearer` scheme against a locally-issued token (e.g. the
+MCP audience-isolation tests), you MUST null out the metadata configuration after re-pointing the
+options:
+
+```csharp
+options.Authority = null;
+options.MetadataAddress = null;
+options.ConfigurationManager = null; // <-- critical
+options.TokenValidationParameters = new() { IssuerSigningKey = TestJwt.SigningKey, /* ... */ };
+```
+
+The built-in `JwtBearerPostConfigureOptions` already created a `ConfigurationManager` from the
+original `Authority`, so setting `Authority = null` alone is not enough. If it survives, every
+request performs an OIDC-metadata fetch to a non-existent tenant that DNS-times-out (~30-40s per
+request), turning a 9-test suite into a 6-minute one and causing SDK MCP-client tests to fail on
+their init timeout. See `CustomWebApplicationFactory.ConfigureLocalJwt`.
+
 ## Code Style
 
 Per `.editorconfig`:
