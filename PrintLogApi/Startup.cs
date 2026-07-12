@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -192,6 +193,31 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
             ConfigureMcpServer(services);
+
+            // Per-user rate limiting for /mcp. The unit is HTTP requests (not tool calls); the
+            // budget is partitioned by the authenticated internal user id.
+            services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = (context, _) =>
+                {
+                    if (context.Lease.TryGetMetadata(System.Threading.RateLimiting.MetadataName.RetryAfter, out var retryAfter))
+                    {
+                        context.HttpContext.Response.Headers.RetryAfter =
+                            ((int)retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    return System.Threading.Tasks.ValueTask.CompletedTask;
+                };
+                options.AddPolicy("mcp", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: httpContext.User.GetUserId()?.ToString() ?? "anon",
+                        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = Configuration.GetValue("Mcp:RateLimitPerMinute", 60),
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }));
+            });
         }
 
         private void ConfigureMcpServer(IServiceCollection services)
@@ -362,6 +388,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseAuthentication();
             app.UseApiKeyAuthentication();
             app.UseAuthorization();
+            // After authorization so the /mcp partition key sees the authenticated MCP user and
+            // unauthenticated requests are rejected (401/403) before consuming any budget.
+            app.UseRateLimiter();
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
             JsonWebTokenHandler.DefaultMapInboundClaims = true;
             JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
@@ -387,7 +416,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
                 // Read-only MCP endpoint (Streamable HTTP, stateless). The McpAccess policy
                 // enforces the dedicated MCP bearer + read:printdata + a mapped user before dispatch.
-                endpoints.MapMcp("/mcp").RequireAuthorization("McpAccess");
+                endpoints.MapMcp("/mcp").RequireAuthorization("McpAccess").RequireRateLimiting("mcp");
             });
 
         }
