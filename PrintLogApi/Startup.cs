@@ -222,22 +222,37 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         private void ConfigureMcpServer(IServiceCollection services)
         {
+            services.AddSingleton<Mcp.IMcpToolTelemetry, Mcp.McpToolTelemetry>();
+
             services.AddMcpServer()
                 .WithHttpTransport(options => options.Stateless = true)
                 .AddAuthorizationFilters()
                 .WithTools<Mcp.PrintLogTools>()
                 .WithRequestFilters(requestFilters =>
                 {
-                    // Single choke point for tool errors: map our typed codes to safe IsError
-                    // results and replace any other exception with a generic, detail-free message.
+                    // Single choke point for tool errors AND telemetry: map our typed codes to safe
+                    // IsError results, replace any other exception with a generic detail-free message,
+                    // and record Mcp_ToolCalled with only non-sensitive fields.
                     requestFilters.AddCallToolFilter(next => async (context, cancellationToken) =>
                     {
+                        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                        var toolName = context.Params?.Name ?? "unknown";
+                        var telemetry = context.Services?.GetService<Mcp.IMcpToolTelemetry>();
+                        var http = context.Services?.GetService<IHttpContextAccessor>();
+                        var subjectHash = Mcp.McpUserContext.HashSubject(http?.HttpContext?.User);
+
+                        void Record(string outcome) =>
+                            telemetry?.ToolCalled(toolName, outcome, stopwatch.ElapsedMilliseconds, subjectHash);
+
                         try
                         {
-                            return await next(context, cancellationToken);
+                            var result = await next(context, cancellationToken);
+                            Record(result.IsError == true ? "error" : "success");
+                            return result;
                         }
                         catch (Mcp.McpToolException ex)
                         {
+                            Record("error");
                             return new ModelContextProtocol.Protocol.CallToolResult
                             {
                                 Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = $"{ex.Code}: {ex.Message}" }],
@@ -250,6 +265,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         }
                         catch (System.Exception)
                         {
+                            Record("error");
                             return new ModelContextProtocol.Protocol.CallToolResult
                             {
                                 Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = "An unexpected error occurred while processing the tool call." }],

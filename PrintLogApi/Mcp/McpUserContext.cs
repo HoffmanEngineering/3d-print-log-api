@@ -1,4 +1,7 @@
+using System;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Mcp
@@ -14,5 +17,21 @@ namespace PrintLogApi.Mcp
 
         public static bool IsCreator(long currentUserId, long recordCreatedById) =>
             currentUserId == recordCreatedById;
+
+        /// <summary>
+        /// A stable, non-reversible hash of the Auth0 subject for telemetry — never the raw
+        /// subject or the internal user id.
+        /// </summary>
+        public static string HashSubject(ClaimsPrincipal user)
+        {
+            var subject = user?.FindFirst(ClaimTypes.Upn)?.Value;
+            if (string.IsNullOrEmpty(subject))
+            {
+                return "anonymous";
+            }
+
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(subject));
+            return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
+        }
     }
 }
