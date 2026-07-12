@@ -15,6 +15,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public static long OtherUserId { get; private set; }
         public static long OtherPrinterId { get; private set; }
+        public static Guid InactiveFilamentId { get; private set; } // primary user, inactive, null initial weight
         public static long RichPrintId1 { get; private set; } // Printer2, Success, 25 g, 7200 s, Filament1
         public static long RichPrintId2 { get; private set; } // Printer2, Failed, 10 g, 3600 s, Filament2
         public static long ForeignPrintId { get; private set; } // owned by OtherUser, Public
@@ -118,6 +119,29 @@ namespace PrintLogApi.IntegrationTests.Mcp
             RichPrintId1 = richPrint1.Id;
             RichPrintId2 = richPrint2.Id;
             ForeignPrintId = foreignPrint.Id;
+
+            var inactiveFilament = new Filament
+            {
+                Id = new Guid("aaaaaaaa-0004-0000-0000-000000000000"),
+                Brand = "Overture",
+                ColorHex = "00FF00",
+                ColorName = "Green",
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                DiameterMm = 1.75,
+                DisplayName = "Overture Green TPU",
+                MaterialType = "TPU",
+                MaterialCategoryNickname = "filament",
+                MaterialDensityGramPerCubicCm = 1.21,
+                IsActive = false,
+                InitialNominalWeightMg = null, // exercises the null-remaining => 0 grams path
+                Source = Filament.SourceMeasurement.Weight,
+            };
+            context.Filaments.Add(inactiveFilament);
+            context.SaveChanges();
+            InactiveFilamentId = inactiveFilament.Id;
         }
     }
 }

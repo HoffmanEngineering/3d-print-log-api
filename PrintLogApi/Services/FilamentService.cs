@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -9,6 +10,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.SortEnums;
@@ -27,6 +29,68 @@ namespace PrintLogApi.Services
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+        }
+
+        private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
+            long userId, string material, string color, bool includeInactive)
+        {
+            var query = _context.Filaments.AsNoTracking().Where(f => f.CreatedById == userId);
+
+            if (!includeInactive)
+            {
+                query = query.Where(f => f.IsActive);
+            }
+            if (!string.IsNullOrWhiteSpace(material))
+            {
+                var normalized = material.Trim().ToLower();
+                query = query.Where(f => f.MaterialType.ToLower() == normalized);
+            }
+            if (!string.IsNullOrWhiteSpace(color))
+            {
+                var normalized = color.Trim().ToLower();
+                query = query.Where(f => f.ColorName.ToLower() == normalized);
+            }
+
+            return query.ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider);
+        }
+
+        public async Task<McpPage<MaterialInventoryItem>> GetMaterialInventoryForMcp(
+            long userId, int page, int pageSize, string material, string color,
+            bool includeInactive, CancellationToken ct)
+        {
+            var projected = OwnedInventoryForMcp(userId, material, color, includeInactive);
+
+            var totalCount = await projected.CountAsync(ct);
+
+            var rows = await projected
+                .OrderBy(f => f.DisplayName).ThenBy(f => f.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(f => new
+                {
+                    f.Id,
+                    f.DisplayName,
+                    f.Brand,
+                    f.MaterialType,
+                    f.ColorName,
+                    f.FilamentRemaining,
+                    f.IsActive,
+                })
+                .ToListAsync(ct);
+
+            var items = rows.Select(r => new MaterialInventoryItem(
+                r.Id, r.DisplayName, r.Brand, r.MaterialType, r.ColorName,
+                McpUnits.MgToGrams(r.FilamentRemaining), r.IsActive)).ToList();
+
+            var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
+            return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
+        }
+
+        public async Task<long> GetAvailableMaterialMgForMcp(
+            long userId, string material, string color, CancellationToken ct)
+        {
+            var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false);
+            return await projected.SumAsync(f => f.FilamentRemaining ?? 0, ct);
         }
 
         public async Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(

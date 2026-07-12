@@ -21,11 +21,16 @@ namespace PrintLogApi.Mcp
     {
         private readonly IHttpContextAccessor httpContextAccessor;
         private readonly IPrintService printService;
+        private readonly IFilamentService filamentService;
 
-        public PrintLogTools(IHttpContextAccessor httpContextAccessor, IPrintService printService)
+        public PrintLogTools(
+            IHttpContextAccessor httpContextAccessor,
+            IPrintService printService,
+            IFilamentService filamentService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
+            this.filamentService = filamentService;
         }
 
         private long CurrentUserId =>
@@ -75,6 +80,43 @@ namespace PrintLogApi.Mcp
             var userId = CurrentUserId;
             var result = await printService.GetOwnPrintDetailForMcp(userId, id, ct);
             return result ?? throw McpToolException.NotFound("Print not found.");
+        }
+
+        [McpServerTool, Description(
+            "List your own filament/material inventory with remaining weight in grams. Optional " +
+            "case-insensitive exact filters on material and color; inactive spools are excluded " +
+            "unless includeInactive is true. Paginated (default 25, max 100).")]
+        public Task<McpPage<MaterialInventoryItem>> GetMaterialInventory(
+            [Description("Optional material filter (e.g. PLA), case-insensitive exact match.")] string material = null,
+            [Description("Optional color filter, case-insensitive exact match.")] string color = null,
+            [Description("Include inactive/archived spools. Defaults to false.")] bool includeInactive = false,
+            [Description("1-based page number.")] int page = 1,
+            [Description("Page size (default 25, max 100).")] int? pageSize = null,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            var validPage = McpPaging.RequirePage(page);
+            var validPageSize = McpPaging.ClampPageSize(pageSize);
+            return filamentService.GetMaterialInventoryForMcp(
+                userId, validPage, validPageSize, material, color, includeInactive, ct);
+        }
+
+        [McpServerTool, Description(
+            "Check whether you have enough filament for a print. Sums the remaining grams across your " +
+            "active inventory (optionally filtered by material and/or color) and compares it to the " +
+            "required grams. Required grams must be a finite value greater than zero.")]
+        public async Task<MaterialSufficiencyResult> CheckMaterialSufficiency(
+            [Description("Required amount in grams (finite, > 0).")] double requiredGrams,
+            [Description("Optional material filter (e.g. PLA), case-insensitive exact match.")] string material = null,
+            [Description("Optional color filter, case-insensitive exact match.")] string color = null,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            McpValidation.RequirePositiveGrams(requiredGrams);
+            var availableMg = await filamentService.GetAvailableMaterialMgForMcp(userId, material, color, ct);
+            var availableGrams = McpUnits.MgToGrams(availableMg);
+            return new MaterialSufficiencyResult(
+                requiredGrams, availableGrams, availableGrams >= requiredGrams, material, color);
         }
     }
 }
