@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.SortEnums;
@@ -11,6 +13,14 @@ namespace PrintLogApi.Services
     public interface IPrintService
     {
         Task<Print> AddPrint(AddPrintDTO print, long userId);
+
+        /// <summary>
+        /// Read-only, creator-only, paginated print search for the MCP server. Filters are applied
+        /// before paging; results are ordered StartDate DESC, Id DESC. Units are grams and seconds.
+        /// </summary>
+        Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
+            long userId, int page, int pageSize, Print.PrintStatus? status, long? printerId,
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct);
         Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);

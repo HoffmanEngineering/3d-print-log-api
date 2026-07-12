@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -12,6 +13,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
@@ -45,6 +47,66 @@ namespace PrintLogApi.Services
             _filamentService = filamentService;
             _printerService = printerService;
             _notificationService = notificationService;
+        }
+
+        public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
+            long userId, int page, int pageSize, PrintStatus? status, long? printerId,
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+        {
+            var query = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
+
+            if (status.HasValue)
+            {
+                query = query.Where(p => p.Status == status.Value);
+            }
+            if (printerId.HasValue)
+            {
+                query = query.Where(p => p.PrinterId == printerId.Value);
+            }
+            if (filamentId.HasValue)
+            {
+                query = query.Where(p => p.FilamentUsage.Any(f => f.FilamentId == filamentId.Value));
+            }
+            if (from.HasValue)
+            {
+                query = query.Where(p => p.StartDate >= from.Value);
+            }
+            if (to.HasValue)
+            {
+                query = query.Where(p => p.StartDate <= to.Value);
+            }
+
+            var totalCount = await query.CountAsync(ct);
+
+            var rows = await query
+                .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Status,
+                    p.PrinterId,
+                    PrinterName = p.Printer != null ? p.Printer.Name : null,
+                    p.StartDate,
+                    p.FilamentUsageMg,
+                    p.PrintTimeInSeconds,
+                })
+                .ToListAsync(ct);
+
+            var items = rows.Select(r => new PrintListItem(
+                r.Id,
+                r.Title,
+                r.Status.ToString(),
+                r.PrinterId,
+                r.PrinterName,
+                r.StartDate,
+                McpUnits.MgToGrams(r.FilamentUsageMg),
+                r.PrintTimeInSeconds)).ToList();
+
+            var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
+            return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
         }
 
         /// <summary>
