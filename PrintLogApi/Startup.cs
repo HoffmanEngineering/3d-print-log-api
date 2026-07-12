@@ -18,6 +18,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
+using ModelContextProtocol.AspNetCore.Authentication;
+using ModelContextProtocol.Authentication;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
@@ -188,6 +190,47 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
+            ConfigureMcpServer(services);
+        }
+
+        private void ConfigureMcpServer(IServiceCollection services)
+        {
+            services.AddMcpServer()
+                .WithHttpTransport(options => options.Stateless = true)
+                .AddAuthorizationFilters()
+                .WithTools<Mcp.PrintLogTools>()
+                .WithRequestFilters(requestFilters =>
+                {
+                    // Single choke point for tool errors: map our typed codes to safe IsError
+                    // results and replace any other exception with a generic, detail-free message.
+                    requestFilters.AddCallToolFilter(next => async (context, cancellationToken) =>
+                    {
+                        try
+                        {
+                            return await next(context, cancellationToken);
+                        }
+                        catch (Mcp.McpToolException ex)
+                        {
+                            return new ModelContextProtocol.Protocol.CallToolResult
+                            {
+                                Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = $"{ex.Code}: {ex.Message}" }],
+                                IsError = true,
+                            };
+                        }
+                        catch (System.OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (System.Exception)
+                        {
+                            return new ModelContextProtocol.Protocol.CallToolResult
+                            {
+                                Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = "An unexpected error occurred while processing the tool call." }],
+                                IsError = true,
+                            };
+                        }
+                    });
+                });
         }
 
         private void ConfigureAuthentication(IServiceCollection services)
@@ -224,13 +267,24 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     jwtOptions.Authority = domain;
                     jwtOptions.Audience = Configuration["Auth0:McpIdentifier"];
                 })
-                // Policy scheme the McpAccess policy authenticates against. Task 2 repoints
-                // ForwardChallenge to the "McpChallenge" (RFC 9728) scheme.
+                // Policy scheme the McpAccess policy authenticates against. Challenges are routed
+                // to the RFC 9728 metadata-advertising scheme so 401s reference protected-resource
+                // metadata; forbids stay on McpBearer to emit a plain 403.
                 .AddPolicyScheme("Mcp", null, options =>
                 {
                     options.ForwardAuthenticate = "McpBearer";
-                    options.ForwardChallenge = "McpBearer";
+                    options.ForwardChallenge = "McpChallenge";
                     options.ForwardForbid = "McpBearer";
+                })
+                // RFC 9728 protected-resource metadata for the dedicated MCP resource.
+                .AddMcp("McpChallenge", null, options =>
+                {
+                    options.ResourceMetadata = new ProtectedResourceMetadata
+                    {
+                        Resource = Configuration["Auth0:McpIdentifier"]!,
+                        AuthorizationServers = { domain },
+                        ScopesSupported = { "read:printdata" },
+                    };
                 });
 
                 // Scope-based policy only applies outside Development (dev bypass token has no scopes)
@@ -329,6 +383,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
+
+                // Read-only MCP endpoint (Streamable HTTP, stateless). The McpAccess policy
+                // enforces the dedicated MCP bearer + read:printdata + a mapped user before dispatch.
+                endpoints.MapMcp("/mcp").RequireAuthorization("McpAccess");
             });
 
         }

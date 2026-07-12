@@ -105,6 +105,11 @@ namespace PrintLogApi.IntegrationTests
             options.Authority = null;
             options.MetadataAddress = null;
             options.RequireHttpsMetadata = false;
+            // The built-in post-configure already created a ConfigurationManager from Authority;
+            // clear it so validation uses the in-memory signing key instead of a (slow, failing)
+            // OIDC metadata fetch to a non-existent test tenant.
+            options.ConfigurationManager = null;
+            options.Configuration = null;
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
