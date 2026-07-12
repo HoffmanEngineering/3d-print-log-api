@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,15 +23,18 @@ namespace PrintLogApi.Mcp
         private readonly IHttpContextAccessor httpContextAccessor;
         private readonly IPrintService printService;
         private readonly IFilamentService filamentService;
+        private readonly IMcpStatisticsService statisticsService;
 
         public PrintLogTools(
             IHttpContextAccessor httpContextAccessor,
             IPrintService printService,
-            IFilamentService filamentService)
+            IFilamentService filamentService,
+            IMcpStatisticsService statisticsService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
             this.filamentService = filamentService;
+            this.statisticsService = statisticsService;
         }
 
         private long CurrentUserId =>
@@ -117,6 +121,34 @@ namespace PrintLogApi.Mcp
             var availableGrams = McpUnits.MgToGrams(availableMg);
             return new MaterialSufficiencyResult(
                 requiredGrams, availableGrams, availableGrams >= requiredGrams, material, color);
+        }
+
+        [McpServerTool, Description(
+            "Get per-printer statistics for your own prints over an inclusive UTC date range " +
+            "(maximum 366 days): print counts, success/failure counts, success rate percent, and " +
+            "total print time in seconds. Only printers with prints in the range are included.")]
+        public async Task<IReadOnlyList<PrinterStatsItem>> GetPrinterStats(
+            [Description("Inclusive start of the UTC range.")] DateTimeOffset from,
+            [Description("Inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset to,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            var (validFrom, validTo) = McpValidation.RequireUtcRange(from, to);
+            return await statisticsService.GetPrinterStats(userId, validFrom, validTo, ct);
+        }
+
+        [McpServerTool, Description(
+            "Summarize your own prints over an inclusive UTC date range (maximum 366 days): total, " +
+            "successful, and failed print counts, total material used in grams, and total print time " +
+            "in seconds.")]
+        public async Task<PrintSummaryResult> GetPrintSummary(
+            [Description("Inclusive start of the UTC range.")] DateTimeOffset from,
+            [Description("Inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset to,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            var (validFrom, validTo) = McpValidation.RequireUtcRange(from, to);
+            return await statisticsService.GetPrintSummaryForMcp(userId, validFrom, validTo, ct);
         }
     }
 }
