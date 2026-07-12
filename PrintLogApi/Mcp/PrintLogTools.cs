@@ -150,5 +150,19 @@ namespace PrintLogApi.Mcp
             var (validFrom, validTo) = McpValidation.RequireUtcRange(from, to);
             return await statisticsService.GetPrintSummaryForMcp(userId, validFrom, validTo, ct);
         }
+
+        [McpServerTool, Description(
+            "Estimate the cost to reprint one of your own prints. Only the print's creator can " +
+            "estimate it; any other id (including public prints owned by someone else) returns not " +
+            "found. Returns material grams, duration seconds, and your preferred currency. Note: v1 " +
+            "does not compute a monetary cost, so estimatedCost is null.")]
+        public async Task<ReprintCostResult> EstimateReprintCost(
+            [Description("The print id to estimate a reprint for.")] long printId,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            var result = await printService.EstimateReprintCostForMcp(userId, printId, ct);
+            return result ?? throw McpToolException.NotFound("Print not found.");
+        }
     }
 }

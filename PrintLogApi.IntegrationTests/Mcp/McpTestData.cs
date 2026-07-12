@@ -142,6 +142,21 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.Filaments.Add(inactiveFilament);
             context.SaveChanges();
             InactiveFilamentId = inactiveFilament.Id;
+
+            // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
+            context.UserSettings.Add(new UserSetting
+            {
+                UserId = primaryUserId,
+                UserSettingTypeId = 5,
+                Value = "GBP",
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+            });
+            context.SaveChanges();
         }
+
+        public const string PrimaryUserCurrency = "GBP";
     }
 }
