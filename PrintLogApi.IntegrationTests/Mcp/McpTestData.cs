@@ -62,7 +62,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 UpdatedById = primaryUserId,
                 UpdatedDate = now,
                 PrintTimeInSeconds = 7200,
-                FilamentUsageMg = 25000,
+                // Usage lives only in the per-filament rows (the scalar Print.FilamentUsageMg is
+                // legacy and not maintained by the app), so MCP tools must read the child rows.
                 FilamentUsage = new List<PrintFilament>
                 {
                     new()
@@ -86,7 +87,6 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 UpdatedById = primaryUserId,
                 UpdatedDate = now,
                 PrintTimeInSeconds = 3600,
-                FilamentUsageMg = 10000,
                 FilamentUsage = new List<PrintFilament>
                 {
                     new()
@@ -110,7 +110,17 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 UpdatedById = OtherUserId,
                 UpdatedDate = now,
                 PrintTimeInSeconds = 999,
-                FilamentUsageMg = 99000,
+                // Exercises the estimated-weight fallback (no actual AmountMg recorded).
+                FilamentUsage = new List<PrintFilament>
+                {
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        FilamentId = null,
+                        AmountMg = null,
+                        EstimatedAmountMg = 99000,
+                    },
+                },
             };
 
             context.Prints.AddRange(richPrint1, richPrint2, foreignPrint);

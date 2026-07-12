@@ -72,6 +72,26 @@ namespace PrintLogApi.IntegrationTests.Auth0
         }
 
         [Fact]
+        public async Task ExcludesGrantsBelongingToAnotherSubject()
+        {
+            // Defense-in-depth: even if Auth0's user_id filter misbehaves and returns a foreign
+            // subject's grant, the client-side check must drop it.
+            var handler = new StubHandler
+            {
+                Responder = request => RouteDefault(request, Auth0TestHarness.GrantsPage(
+                    start: 0, total: 2,
+                    Auth0TestHarness.Grant("mine", Auth0TestHarness.McpAudience, userId: "auth0|user"),
+                    Auth0TestHarness.Grant("theirs", Auth0TestHarness.McpAudience, userId: "auth0|someone-else"))),
+            };
+            var service = Auth0TestHarness.CreateService(handler);
+
+            var agents = await service.ListMcpGrants("auth0|user", CancellationToken.None);
+
+            Assert.Single(agents);
+            Assert.Equal("mine", agents[0].GrantId);
+        }
+
+        [Fact]
         public async Task EncodesUserIdInQuery()
         {
             var handler = new StubHandler

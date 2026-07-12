@@ -10,7 +10,7 @@ Operational record for the read-only MCP server (`/mcp`) added to `PrintLogApi`.
 | `Auth0:ApiIdentifier` | `https://dev.3dprintlog.com/api` | `https://3dprintlog.com/api` | App audience. Unchanged. |
 | `Auth0:McpIdentifier` | `https://dev.3dprintlog.com/mcp` | `https://3dprintlog.com/mcp` | **New.** Dedicated MCP audience — never accepted by the normal bearer scheme. |
 | `Auth0Management:*` | — | — | Existing M2M client; now also needs `read:grants` + `delete:grants`. |
-| `Mcp:RateLimitPerMinute` | `60` (default) | `60` (default) | Optional. Per-user HTTP request budget on `/mcp`. |
+| `Mcp:RateLimitPerMinute` | `60` (default) | `60` (default) | Optional. Per-user HTTP request budget on `/mcp`. See the rate-limiting note below. |
 
 Integration tests set `Auth0:McpIdentifier=https://test.mcp` and a high rate limit.
 
@@ -32,6 +32,19 @@ Integration tests set `Auth0:McpIdentifier=https://test.mcp` and a high rate lim
 - Unauthenticated `POST /mcp` → `401` with a `WWW-Authenticate: Bearer resource_metadata="…"` header.
 - A valid MCP token: `tools/list` returns the seven tools + `ping`; a web-audience token is
   rejected by `/mcp`, and an MCP-audience token is rejected by an ordinary `[Authorize]` endpoint.
+
+## Rate limiting (scope & scaling)
+
+`/mcp` uses an **in-process** fixed-window limiter partitioned by internal user id. It counts
+HTTP transport requests (including `initialize` and `tools/list`), not tool calls. This means:
+
+- With **N** API instances, a user's effective budget is up to `RateLimitPerMinute × N` per minute
+  because the window is per-instance; instance restarts also reset budgets.
+- It is a guardrail against accidental runaway loops, not a hard abuse quota.
+
+For horizontally scaled deployments that need a global budget, enforce the quota at the
+gateway / API-management layer (keyed by the authenticated user), or replace the in-process
+partition with a distributed limiter. This is intentionally out of scope for v1.
 
 ## Disabling `/mcp` without affecting the web API
 

@@ -90,7 +90,13 @@ namespace PrintLogApi.Services
                     p.PrinterId,
                     PrinterName = p.Printer != null ? p.Printer.Name : null,
                     p.StartDate,
-                    p.FilamentUsageMg,
+                    // Canonical material usage: sum of per-filament actual weight, falling back to
+                    // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
+                    // maintained, so it must not be used. Mirrors PrintProfile / remaining-weight.
+                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                        : 0),
                     p.PrintTimeInSeconds,
                 })
                 .ToListAsync(ct);
@@ -102,7 +108,7 @@ namespace PrintLogApi.Services
                 r.PrinterId,
                 r.PrinterName,
                 r.StartDate,
-                McpUnits.MgToGrams(r.FilamentUsageMg),
+                McpUnits.MgToGrams(r.MaterialMg),
                 r.PrintTimeInSeconds)).ToList();
 
             var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
@@ -116,7 +122,15 @@ namespace PrintLogApi.Services
         {
             var row = await _context.Prints.AsNoTracking()
                 .Where(p => p.Id == printId && p.CreatedById == userId)
-                .Select(p => new { p.Id, p.FilamentUsageMg, p.PrintTimeInSeconds })
+                .Select(p => new
+                {
+                    p.Id,
+                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                        : 0),
+                    p.PrintTimeInSeconds,
+                })
                 .FirstOrDefaultAsync(ct);
 
             if (row is null)
@@ -133,7 +147,7 @@ namespace PrintLogApi.Services
                 row.Id,
                 EstimatedCost: null,
                 string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim(),
-                McpUnits.MgToGrams(row.FilamentUsageMg),
+                McpUnits.MgToGrams(row.MaterialMg),
                 row.PrintTimeInSeconds);
         }
 
@@ -149,7 +163,10 @@ namespace PrintLogApi.Services
                     p.PrinterId,
                     PrinterName = p.Printer != null ? p.Printer.Name : null,
                     p.StartDate,
-                    p.FilamentUsageMg,
+                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                        : 0),
                     p.PrintTimeInSeconds,
                     p.Notes,
                     ProjectName = p.Project != null ? p.Project.Name : null,
@@ -163,7 +180,7 @@ namespace PrintLogApi.Services
 
             return new PrintDetailResult(
                 row.Id, row.Title, row.Status.ToString(), row.PrinterId, row.PrinterName,
-                row.StartDate, McpUnits.MgToGrams(row.FilamentUsageMg), row.PrintTimeInSeconds,
+                row.StartDate, McpUnits.MgToGrams(row.MaterialMg), row.PrintTimeInSeconds,
                 EstimatedCost: null, row.Notes, row.ProjectName);
         }
 

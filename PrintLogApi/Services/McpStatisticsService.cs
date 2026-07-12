@@ -66,7 +66,12 @@ namespace PrintLogApi.Services
             var total = await prints.CountAsync(ct);
             var successful = await prints.CountAsync(p => p.Status == Print.PrintStatus.Success, ct);
             var failed = await prints.CountAsync(p => p.Status == Print.PrintStatus.Failed, ct);
-            var materialMg = await prints.SumAsync(p => (long)(p.FilamentUsageMg ?? 0), ct);
+            // Canonical material usage from the per-filament rows (the scalar Print.FilamentUsageMg
+            // is legacy and not maintained). Actual weight with an estimated-weight fallback.
+            var materialMg = await prints.SumAsync(p => (long)p.FilamentUsage.Sum(pf =>
+                pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                : 0), ct);
             var timeSeconds = await prints.SumAsync(p => p.PrintTimeInSeconds ?? 0, ct);
 
             return new PrintSummaryResult(

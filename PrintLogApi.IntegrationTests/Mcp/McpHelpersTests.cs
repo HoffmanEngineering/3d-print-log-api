@@ -23,6 +23,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [Theory]
         [InlineData(0)]
         [InlineData(-1)]
+        [InlineData(int.MaxValue)]
         public void RequirePage_Invalid_Throws(int page) =>
             Assert.Throws<McpToolException>(() => McpPaging.RequirePage(page));
 

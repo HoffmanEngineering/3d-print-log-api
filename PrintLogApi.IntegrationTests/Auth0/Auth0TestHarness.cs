@@ -57,9 +57,11 @@ namespace PrintLogApi.IntegrationTests.Auth0
         public static HttpResponseMessage TokenResponse() =>
             Json("{\"access_token\":\"mgmt-token\",\"expires_in\":3600,\"token_type\":\"Bearer\"}");
 
-        public static string Grant(string id, string audience, string clientId = "client-1", string scope = "read:printdata") =>
+        public static string Grant(
+            string id, string audience, string clientId = "client-1",
+            string scope = "read:printdata", string userId = "auth0|user") =>
             $"{{\"id\":\"{id}\",\"clientID\":\"{clientId}\",\"audience\":\"{audience}\"," +
-            $"\"scope\":[{ScopeArray(scope)}],\"user_id\":\"auth0|user\"}}";
+            $"\"scope\":[{ScopeArray(scope)}],\"user_id\":\"{userId}\"}}";
 
         private static string ScopeArray(string scope) =>
             string.IsNullOrEmpty(scope) ? "" : $"\"{scope}\"";

@@ -122,8 +122,10 @@ namespace PrintLogApi.Services
 
                 foreach (var grant in grants)
                 {
-                    // Defense-in-depth: re-check audience and scope client-side.
-                    if (grant.Audience == mcpAudience
+                    // Defense-in-depth: re-check subject, audience, and scope client-side rather than
+                    // trusting the Auth0 query filter alone.
+                    if (grant.UserId == authUserId
+                        && grant.Audience == mcpAudience
                         && grant.Scope != null
                         && grant.Scope.Contains(ReadPrintDataScope))
                     {
