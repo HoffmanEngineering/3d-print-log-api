@@ -192,7 +192,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            if (Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting"))
+            var domain = $"https://{Configuration["Auth0:Domain"]}/";
+            var bypassAuth = Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting");
+
+            if (bypassAuth)
             {
                 services.AddAuthentication(options =>
                 {
@@ -203,16 +206,31 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             }
             else
             {
-                var domain = $"https://{Configuration["Auth0:Domain"]}/";
                 services.AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
                     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
                 })
+                // Default bearer scheme accepts ONLY the app API audience.
                 .AddJwtBearer(jwtOptions =>
                 {
                     jwtOptions.Authority = domain;
                     jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
+                })
+                // Isolated MCP bearer accepts ONLY the dedicated MCP audience. Never accept
+                // MCP-audience tokens through the default scheme, nor app tokens through this one.
+                .AddJwtBearer("McpBearer", jwtOptions =>
+                {
+                    jwtOptions.Authority = domain;
+                    jwtOptions.Audience = Configuration["Auth0:McpIdentifier"];
+                })
+                // Policy scheme the McpAccess policy authenticates against. Task 2 repoints
+                // ForwardChallenge to the "McpChallenge" (RFC 9728) scheme.
+                .AddPolicyScheme("Mcp", null, options =>
+                {
+                    options.ForwardAuthenticate = "McpBearer";
+                    options.ForwardChallenge = "McpBearer";
+                    options.ForwardForbid = "McpBearer";
                 });
 
                 // Scope-based policy only applies outside Development (dev bypass token has no scopes)
@@ -231,10 +249,20 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
                 options.AddPolicy("ViewUserProfile", policy =>
                     policy.Requirements.Add(new PublicOrUnlistedUserProfileRequirement()));
+
+                // MCP access: the dedicated MCP bearer (or dev bypass), the read:printdata
+                // scope, AND a mapped internal user. Registered in every environment.
+                options.AddPolicy("McpAccess", policy =>
+                {
+                    policy.AuthenticationSchemes.Add(bypassAuth ? "DevAuth" : "Mcp");
+                    policy.Requirements.Add(new HasScopeRequirement("read:printdata", domain));
+                    policy.Requirements.Add(new McpUserRequirement());
+                });
             });
 
             services.AddSingleton<IAuthorizationHandler, PrintViewStatusAuthorizationHandler>();
             services.AddSingleton<IAuthorizationHandler, UserProfileViewStatusAuthorizationHandler>();
+            services.AddSingleton<IAuthorizationHandler, McpUserHandler>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

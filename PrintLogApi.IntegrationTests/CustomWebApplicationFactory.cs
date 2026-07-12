@@ -1,13 +1,20 @@
+using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
+using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests
@@ -78,7 +85,65 @@ namespace PrintLogApi.IntegrationTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
                     TestAuthHandler.AuthenticationScheme, options => { });
+
+                // Validate the real Bearer / McpBearer schemes against a local signing key so
+                // MCP audience isolation can be exercised without contacting Auth0.
+                services.PostConfigure<JwtBearerOptions>(
+                    JwtBearerDefaults.AuthenticationScheme,
+                    o => ConfigureLocalJwt(o, TestJwt.ApiAudience));
+                services.PostConfigure<JwtBearerOptions>(
+                    "McpBearer",
+                    o => ConfigureLocalJwt(o, TestJwt.McpAudience));
+
+                // Map the MCP auth probe endpoint (test-only) guarded by the McpAccess policy.
+                services.AddSingleton<IStartupFilter, McpAuthProbeStartupFilter>();
             });
+        }
+
+        private static void ConfigureLocalJwt(JwtBearerOptions options, string audience)
+        {
+            options.Authority = null;
+            options.MetadataAddress = null;
+            options.RequireHttpsMetadata = false;
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = TestJwt.Issuer,
+                ValidateAudience = true,
+                ValidAudience = audience,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = TestJwt.SigningKey,
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero,
+                NameClaimType = ClaimTypes.Upn,
+            };
+        }
+
+        /// <summary>
+        /// Adds a test-only <c>/api/mcp-auth-probe</c> endpoint guarded by the McpAccess policy so
+        /// tests can assert the policy is registered and enforced without touching production Startup.
+        /// </summary>
+        private sealed class McpAuthProbeStartupFilter : IStartupFilter
+        {
+            public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+            {
+                next(app);
+
+                // A normal API-bearer probe: forces the default Bearer scheme (app audience only)
+                // so tests can prove an MCP-audience token cannot call an ordinary endpoint.
+                var webPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(
+                        JwtBearerDefaults.AuthenticationScheme)
+                    .RequireAuthenticatedUser()
+                    .Build();
+
+                app.UseEndpoints(endpoints =>
+                {
+                    endpoints.MapGet("/api/mcp-auth-probe", () => Results.Ok())
+                        .RequireAuthorization("McpAccess");
+                    endpoints.MapGet("/api/web-auth-probe", () => Results.Ok())
+                        .RequireAuthorization(webPolicy);
+                });
+            };
         }
 
         protected override IHost CreateHost(IHostBuilder builder)

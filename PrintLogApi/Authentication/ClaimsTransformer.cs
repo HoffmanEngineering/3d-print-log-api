@@ -26,6 +26,12 @@ namespace PrintLogApi.Authentication
             var authUserId = existingClaimsIdentity.Claims
                 .FirstOrDefault(c => c.Type == ClaimTypes.Upn)?.Value;
 
+            // Fail closed: a token with no subject must not resolve to (or create) a user.
+            if (string.IsNullOrWhiteSpace(authUserId))
+            {
+                return principal;
+            }
+
             var cacheKey = $"user_id:{authUserId}";
             if (!cache.TryGetValue(cacheKey, out long localUserId))
             {
