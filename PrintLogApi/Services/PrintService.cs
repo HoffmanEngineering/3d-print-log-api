@@ -109,6 +109,36 @@ namespace PrintLogApi.Services
             return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
         }
 
+        public async Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct)
+        {
+            var row = await _context.Prints.AsNoTracking()
+                .Where(p => p.Id == printId && p.CreatedById == userId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Status,
+                    p.PrinterId,
+                    PrinterName = p.Printer != null ? p.Printer.Name : null,
+                    p.StartDate,
+                    p.FilamentUsageMg,
+                    p.PrintTimeInSeconds,
+                    p.Notes,
+                    ProjectName = p.Project != null ? p.Project.Name : null,
+                })
+                .FirstOrDefaultAsync(ct);
+
+            if (row is null)
+            {
+                return null;
+            }
+
+            return new PrintDetailResult(
+                row.Id, row.Title, row.Status.ToString(), row.PrinterId, row.PrinterName,
+                row.StartDate, McpUnits.MgToGrams(row.FilamentUsageMg), row.PrintTimeInSeconds,
+                EstimatedCost: null, row.Notes, row.ProjectName);
+        }
+
         /// <summary>
         /// Returns a paged list of print summaries based on the search parameters.
         /// </summary>

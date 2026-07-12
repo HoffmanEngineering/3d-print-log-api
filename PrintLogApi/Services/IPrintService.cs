@@ -21,6 +21,13 @@ namespace PrintLogApi.Services
         Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
             long userId, int page, int pageSize, Print.PrintStatus? status, long? printerId,
             Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct);
+
+        /// <summary>
+        /// Creator-only print detail for the MCP server. Returns null when the print does not exist
+        /// OR is not owned by <paramref name="userId"/> (no existence oracle for foreign prints,
+        /// even public/unlisted ones). Excludes images, comments, files, and URLs.
+        /// </summary>
+        Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct);
         Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);

@@ -63,5 +63,18 @@ namespace PrintLogApi.Mcp
                 userId, validPage, validPageSize, status, printerId, materialId,
                 normalizedFrom, normalizedTo, ct);
         }
+
+        [McpServerTool, Description(
+            "Get the details of one of your own prints by id. Only the print's creator can read it; " +
+            "any other id (including public prints owned by someone else) returns not found. Weights " +
+            "are grams, durations are seconds.")]
+        public async Task<PrintDetailResult> GetPrint(
+            [Description("The print id.")] long id,
+            CancellationToken ct = default)
+        {
+            var userId = CurrentUserId;
+            var result = await printService.GetOwnPrintDetailForMcp(userId, id, ct);
+            return result ?? throw McpToolException.NotFound("Print not found.");
+        }
     }
 }
