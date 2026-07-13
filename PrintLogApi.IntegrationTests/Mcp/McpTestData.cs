@@ -24,6 +24,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long ProjectPrintId { get; private set; } // "Bracket", in project "Rocket Build"
         public static Guid ProjectId { get; private set; } // "Rocket Build"
         public static long SearchPrinterId { get; private set; } // holds the two undated search fixtures
+        public static long DualColorPrintId { get; private set; } // 2 spools + orphan + zero-actual row
+        public static long ForeignSpoolPrintId { get; private set; } // usage row pointing at another user's spool
 
         public static readonly DateTimeOffset RichPrint1Date = DateTimeOffset.UtcNow.AddDays(-1);
         public static readonly DateTimeOffset RichPrint2Date = DateTimeOffset.UtcNow;
@@ -278,11 +280,70 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 ProjectId = project.Id,
             };
 
-            context.Prints.AddRange(soapDish, bracket);
+            // Two colours on one print. Without a per-material breakdown, a print literally named
+            // "Dual Color" cannot report which two colours it used.
+            var dualColor = new Print
+            {
+                Title = "Dual Color 3D Benchy",
+                StartDate = null,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = searchPrinter.Id,
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                FilamentUsage = new List<PrintFilament>
+                {
+                    // Short PLA (PLA / Blue). Deliberately NOT a find_material fixture: consuming
+                    // from those would change their remaining weight and break those tests.
+                    new() { Id = Guid.NewGuid(), FilamentId = new Guid("aaaaaaaa-1001-0000-0000-000000000000"), AmountMg = 30000 },
+                    // Plus PLA (PLA+ / Navy)
+                    new() { Id = Guid.NewGuid(), FilamentId = new Guid("aaaaaaaa-1003-0000-0000-000000000000"), AmountMg = 20000 },
+                    // Orphan row: FilamentId is nullable. An inner join would drop this and the
+                    // per-material rows would stop summing to the print's total.
+                    new() { Id = Guid.NewGuid(), FilamentId = null, AmountMg = null, EstimatedAmountMg = 10000 },
+                    // Zero actual must fall through to the estimate, not be taken at face value.
+                    new() { Id = Guid.NewGuid(), FilamentId = null, AmountMg = 0, EstimatedAmountMg = 4000 },
+                },
+            };
+
+            context.Prints.AddRange(soapDish, bracket, dualColor);
             context.SaveChanges();
 
             SoapDishPrintId = soapDish.Id;
             ProjectPrintId = bracket.Id;
+            DualColorPrintId = dualColor.Id;
+
+            // Corrupt cross-owner reference: the caller's print points at ANOTHER user's spool.
+            // Guarding only on "navigation is not null" would leak that user's brand/material/colour.
+            var foreignSpool = NewTextMatchFilament(
+                "aaaaaaaa-4001-0000-0000-000000000000", "OTHER USER SPOOL", "ABS", "Secret Purple", OtherUserId, now);
+            // Inactive so it stays out of the other user's default inventory listing, keeping the
+            // owner-isolation tests meaningful. Redaction is about get_print, not inventory.
+            foreignSpool.IsActive = false;
+            context.Filaments.Add(foreignSpool);
+            context.SaveChanges();
+
+            var leaky = new Print
+            {
+                Title = "Print With Foreign Spool",
+                StartDate = null,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = searchPrinter.Id,
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                FilamentUsage = new List<PrintFilament>
+                {
+                    new() { Id = Guid.NewGuid(), FilamentId = foreignSpool.Id, AmountMg = 7000 },
+                },
+            };
+            context.Prints.Add(leaky);
+            context.SaveChanges();
+            ForeignSpoolPrintId = leaky.Id;
 
             // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
             context.UserSettings.Add(new UserSetting

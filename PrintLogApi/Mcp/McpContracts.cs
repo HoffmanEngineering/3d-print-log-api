@@ -16,10 +16,23 @@ namespace PrintLogApi.Mcp
         // otherwise the hit is uninterpretable.
         Guid? ProjectId, string? ProjectName);
 
+    /// <summary>
+    /// One filament-usage row on a print. Every field except Grams is nullable: PrintFilament's
+    /// FilamentId is itself nullable, and a spool owned by another user is redacted rather than
+    /// dropped — dropping it would break the invariant that the parts sum to MaterialUsedGrams.
+    /// </summary>
+    public sealed record MaterialUsage(
+        Guid? FilamentId, string? Name, string? Brand, string? Material, string? Color,
+        double Grams, bool IsEstimated);
+
     public sealed record PrintDetailResult(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
         DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
-        decimal? EstimatedCost, string? Notes, string? ProjectName);
+        decimal? EstimatedCost, string? Notes,
+        Guid? ProjectId, string? ProjectName,
+        IReadOnlyList<MaterialUsage> MaterialsUsed,
+        bool MaterialsUsedTruncated,
+        double ReturnedMaterialsUsedGrams);
 
     public sealed record MaterialInventoryItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
