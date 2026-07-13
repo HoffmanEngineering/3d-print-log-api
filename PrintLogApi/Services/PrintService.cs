@@ -143,42 +143,6 @@ namespace PrintLogApi.Services
             return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
         }
 
-        // UserSettingType.Id for "Currency_Name" (three-character preferred currency code).
-        private const int CurrencyNameSettingTypeId = 5;
-
-        public async Task<ReprintCostResult> EstimateReprintCostForMcp(long userId, long printId, CancellationToken ct)
-        {
-            var row = await _context.Prints.AsNoTracking()
-                .Where(p => p.Id == printId && p.CreatedById == userId)
-                .Select(p => new
-                {
-                    p.Id,
-                    MaterialMg = p.FilamentUsage.Sum(pf =>
-                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                        : 0),
-                    p.PrintTimeInSeconds,
-                })
-                .FirstOrDefaultAsync(ct);
-
-            if (row is null)
-            {
-                return null;
-            }
-
-            var currency = await _context.UserSettings.AsNoTracking()
-                .Where(s => s.UserId == userId && s.UserSettingTypeId == CurrencyNameSettingTypeId)
-                .Select(s => s.Value)
-                .FirstOrDefaultAsync(ct);
-
-            return new ReprintCostResult(
-                row.Id,
-                EstimatedCost: null,
-                string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim(),
-                McpUnits.MgToGrams(row.MaterialMg),
-                row.PrintTimeInSeconds);
-        }
-
         /// <summary>
         /// Hard cap on the per-filament rows returned by get_print. Real prints are bounded by a
         /// printer's tool/AMS slots (single digits), so truncation signals bad data.

@@ -69,6 +69,34 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Contains(tools, t => t.Name == "ping");
         }
 
+        /// <summary>
+        /// Pins the exposed surface. A tool registers itself just by carrying [McpServerTool], so
+        /// without this a new one ships unreviewed and a deleted one goes unnoticed. Registration is
+        /// also resolved at activation rather than compile time, so a tool whose service is not
+        /// registered only fails here.
+        /// </summary>
+        [Fact]
+        public async Task ListTools_ExposesExactlyTheV1Surface()
+        {
+            await using var client = await ConnectAsync(McpToken());
+            var tools = await client.ListToolsAsync();
+
+            Assert.Equal(
+                new[]
+                {
+                    "find_material",
+                    "get_material_inventory",
+                    "get_print",
+                    "get_print_summary",
+                    "get_printer",
+                    "get_printer_stats",
+                    "list_printers",
+                    "ping",
+                    "search_prints",
+                },
+                tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+        }
+
         [Fact]
         public async Task CallPing_Echoes()
         {

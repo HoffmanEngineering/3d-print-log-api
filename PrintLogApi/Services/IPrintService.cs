@@ -30,13 +30,6 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct);
 
-        /// <summary>
-        /// Creator-only reprint cost estimate for the MCP server. Returns null when the print does
-        /// not exist or is not owned by <paramref name="userId"/>. The API has no trustworthy
-        /// server-side cost calculation in v1, so EstimatedCost is null; material grams, duration,
-        /// and the user's preferred currency are still returned.
-        /// </summary>
-        Task<ReprintCostResult> EstimateReprintCostForMcp(long userId, long printId, CancellationToken ct);
         Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);

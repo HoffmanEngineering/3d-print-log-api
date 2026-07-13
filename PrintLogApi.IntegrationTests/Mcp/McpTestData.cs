@@ -429,19 +429,6 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // navigation, so seed it via Set<T>().
             context.Set<PrinterFilament>().AddRange(amsLoads);
             context.SaveChanges();
-
-            // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
-            context.UserSettings.Add(new UserSetting
-            {
-                UserId = primaryUserId,
-                UserSettingTypeId = 5,
-                Value = "GBP",
-                CreatedById = primaryUserId,
-                CreatedDate = now,
-                UpdatedById = primaryUserId,
-                UpdatedDate = now,
-            });
-            context.SaveChanges();
         }
 
         private static Filament NewTextMatchFilament(
@@ -464,7 +451,5 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 InitialNominalWeightMg = 1_000_000,
                 Source = Filament.SourceMeasurement.Weight,
             };
-
-        public const string PrimaryUserCurrency = "GBP";
     }
 }

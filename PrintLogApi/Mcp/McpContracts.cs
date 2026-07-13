@@ -92,9 +92,6 @@ namespace PrintLogApi.Mcp
         bool LoadedFilamentsTruncated,    // silently omitting a loaded spool is a WRONG answer
         int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
 
-    public sealed record ReprintCostResult(
-        long PrintId, decimal? EstimatedCost, string Currency, double MaterialGrams, int? DurationSeconds);
-
     public sealed record SummaryMetrics(
         int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
 
