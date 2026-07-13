@@ -104,8 +104,14 @@ namespace PrintLogApi.Services
         /// Grouping happens in memory (grouping free-text pairs is awkward to page in SQL), so the
         /// candidate set must be bounded in SQL first — otherwise a user with thousands of spools
         /// materializes all of them.
+        ///
+        /// Sized from production (measured 2026-07-13, 4,022 users): p50 2 spools, p95 27, p99 78,
+        /// max 571. A 500 cap truncated the largest real account; 1000 clears it with headroom while
+        /// still bounding what a single call can materialize. Truncation past this is not a wrong
+        /// answer — it surfaces as CandidatesTruncated and an indeterminate sufficiency result — so
+        /// this cap is a quality bound, not a correctness one.
         /// </summary>
-        public const int MaxCandidates = 500;
+        public const int MaxCandidates = 1000;
 
         public async Task<FindMaterialResult> FindMaterialForMcp(
             long userId, string material, string color, double? requiredGrams, CancellationToken ct)

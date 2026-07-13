@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests.Mcp
 {
@@ -29,10 +30,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static Guid ForeignProjectId { get; private set; } // owned by OtherUser
 
         public const string BulkUserOAuthId = "auth0|mcp-bulk-user";
-        public static long BulkUserId { get; private set; } // holds more spools than MaxCandidates (500)
+        public static long BulkUserId { get; private set; } // holds more spools than MaxCandidates
 
-        /// <summary>Spools owned by <see cref="BulkUserId"/> — one over FilamentService.MaxCandidates.</summary>
-        public const int BulkSpoolCount = 501;
+        /// <summary>
+        /// Spools owned by <see cref="BulkUserId"/> — deliberately ONE over the candidate cap, derived
+        /// from the constant so raising the cap cannot silently stop exercising truncation.
+        /// </summary>
+        public const int BulkSpoolCount = FilamentService.MaxCandidates + 1;
 
         /// <summary>Loaded spools on <see cref="AmsPrinterId"/> — deliberately above the get_printer cap of 10.</summary>
         public const int AmsLoadedSpoolCount = 12;
@@ -488,8 +492,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
             for (var i = 0; i < BulkSpoolCount; i++)
             {
                 var spool = NewTextMatchFilament(
-                    $"aaaaaaaa-7{i:D3}-0000-0000-000000000000",
-                    $"Bulk Spool {i:D3}", "PLA", "Bulk White", BulkUserId, now);
+                    $"aaaaaaaa-{7000 + i:D4}-0000-0000-000000000000",
+                    $"Bulk Spool {i:D4}", "PLA", "Bulk White", BulkUserId, now);
                 spool.InitialNominalWeightMg = 1_000; // 1 g each
                 bulkSpools.Add(spool);
             }

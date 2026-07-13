@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp
@@ -46,14 +47,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [Fact]
         public async Task CandidateTruncation_MakesAnUnprovableNo_Indeterminate_NotFalse()
         {
-            // The bulk user holds 501 one-gram spools; only the 500 largest survive truncation, so
-            // the visible total is 500 g. Asserting a confident "no" for a 501 g requirement would
-            // be a WRONG answer - the dropped spool closes the gap exactly.
+            // The bulk user holds one more one-gram spool than the candidate cap, so the survivors
+            // total exactly MaxCandidates grams. Asserting a confident "no" for one gram more than
+            // that would be a WRONG answer - the single dropped spool closes the gap exactly.
             await using var client = await _factory.ConnectAsync(McpTestData.BulkUserOAuthId);
             var result = await Get(client, new()
             {
                 ["material"] = "PLA",
-                ["requiredGrams"] = 501.0,
+                ["requiredGrams"] = (double)FilamentService.MaxCandidates + 1,
             });
 
             Assert.True(result.CandidatesTruncated);
@@ -70,7 +71,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var result = await Get(client, new()
             {
                 ["material"] = "PLA",
-                ["requiredGrams"] = 400.0,
+                ["requiredGrams"] = (double)FilamentService.MaxCandidates - 100,
             });
 
             Assert.True(result.CandidatesTruncated);
