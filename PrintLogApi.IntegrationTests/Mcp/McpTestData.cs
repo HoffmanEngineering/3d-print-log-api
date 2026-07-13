@@ -153,6 +153,27 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.SaveChanges();
             InactiveFilamentId = inactiveFilament.Id;
 
+            // Text-matching fixtures. These are REAL spellings taken from the production Filaments
+            // table, where the material dropdown writes "ACRONYM (Full Name)" but ~6% of rows are
+            // hand-typed. Exact matching finds only "PLA" here and misses the rest, which is the
+            // bug McpTextMatch exists to fix. "PCTG" is the negative control: a "PC" query must not
+            // match it.
+            var textMatchFilaments = new List<Filament>
+            {
+                NewTextMatchFilament(
+                    "aaaaaaaa-1001-0000-0000-000000000000", "Short PLA", "PLA", "Blue", primaryUserId, now),
+                NewTextMatchFilament(
+                    "aaaaaaaa-1002-0000-0000-000000000000", "Long PLA", "PLA (Polylactic Acid)", "Light Blue", primaryUserId, now),
+                NewTextMatchFilament(
+                    "aaaaaaaa-1003-0000-0000-000000000000", "Plus PLA", "PLA+", "Navy", primaryUserId, now),
+                NewTextMatchFilament(
+                    "aaaaaaaa-1004-0000-0000-000000000000", "Petg Roll", "PETG (Polyethylene Terephthalate Glycol)", "Red", primaryUserId, now),
+                NewTextMatchFilament(
+                    "aaaaaaaa-1005-0000-0000-000000000000", "Pctg Roll", "PCTG", "Black", primaryUserId, now),
+            };
+            context.Filaments.AddRange(textMatchFilaments);
+            context.SaveChanges();
+
             // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
             context.UserSettings.Add(new UserSetting
             {
@@ -166,6 +187,27 @@ namespace PrintLogApi.IntegrationTests.Mcp
             });
             context.SaveChanges();
         }
+
+        private static Filament NewTextMatchFilament(
+            string id, string displayName, string materialType, string colorName, long userId, DateTime now) =>
+            new()
+            {
+                Id = new Guid(id),
+                DisplayName = displayName,
+                MaterialType = materialType,
+                ColorName = colorName,
+                Brand = "Fixture Brand",
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now,
+                DiameterMm = 1.75,
+                MaterialCategoryNickname = "filament",
+                MaterialDensityGramPerCubicCm = 1.24,
+                IsActive = true,
+                InitialNominalWeightMg = 1_000_000,
+                Source = Filament.SourceMeasurement.Weight,
+            };
 
         public const string PrimaryUserCurrency = "GBP";
     }
