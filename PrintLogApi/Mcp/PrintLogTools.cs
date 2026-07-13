@@ -123,7 +123,10 @@ namespace PrintLogApi.Mcp
             "enough, which needs a filament change mid-print: present that to the user as a " +
             "suggestion to confirm, never as a guarantee, because spools in a group can still differ " +
             "in brand and diameter. combinationForRequirement lists the specific spools that reach " +
-            "the requirement. Weights are grams.")]
+            "the requirement. If candidatesTruncated is true the caller has more matching spools " +
+            "than could be examined, and a null meetsRequirementByCombiningSpools means UNKNOWN, " +
+            "not no: say the answer could not be determined rather than telling the user they lack " +
+            "the material. Weights are grams.")]
         public Task<FindMaterialResult> FindMaterial(
             [Description("Optional material filter (e.g. PLA). Matches whole words.")] string material = null,
             [Description("Optional color filter (e.g. blue). Matches whole words.")] string color = null,

@@ -25,6 +25,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static Guid ProjectId { get; private set; } // "Rocket Build"
         public static long SearchPrinterId { get; private set; } // holds the two undated search fixtures
         public static long AmsPrinterId { get; private set; } // carries more loaded spools than get_printer returns
+        public static long CrossOwnerRefPrintId { get; private set; } // caller's print, another user's project + printer
+        public static Guid ForeignProjectId { get; private set; } // owned by OtherUser
+
+        public const string BulkUserOAuthId = "auth0|mcp-bulk-user";
+        public static long BulkUserId { get; private set; } // holds more spools than MaxCandidates (500)
+
+        /// <summary>Spools owned by <see cref="BulkUserId"/> — one over FilamentService.MaxCandidates.</summary>
+        public const int BulkSpoolCount = 501;
 
         /// <summary>Loaded spools on <see cref="AmsPrinterId"/> — deliberately above the get_printer cap of 10.</summary>
         public const int AmsLoadedSpoolCount = 12;
@@ -428,6 +436,65 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // PrinterFilament has no DbSet on the context; it is reached through the Printer
             // navigation, so seed it via Set<T>().
             context.Set<PrinterFilament>().AddRange(amsLoads);
+            context.SaveChanges();
+
+            // Corrupt cross-owner references on a print the CALLER owns: its project and its printer
+            // both belong to another user. Gating only on "navigation is not null" would hand back
+            // that user's project and printer NAMES, and would let search_prints act as an existence
+            // oracle for their project names.
+            var foreignProject = new Project
+            {
+                Id = new Guid("aaaaaaaa-6001-0000-0000-000000000000"),
+                Name = "SECRET FOREIGN PROJECT",
+                CreatedById = OtherUserId,
+                CreatedDate = now,
+                UpdatedById = OtherUserId,
+                UpdatedDate = now,
+            };
+            context.Projects.Add(foreignProject);
+            context.SaveChanges();
+            ForeignProjectId = foreignProject.Id;
+
+            var crossOwner = new Print
+            {
+                Title = "Print With Foreign Project",
+                StartDate = null,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = OtherPrinterId,      // another user's printer
+                ProjectId = foreignProject.Id,   // another user's project
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+            };
+            context.Prints.Add(crossOwner);
+            context.SaveChanges();
+            CrossOwnerRefPrintId = crossOwner.Id;
+
+            // A user holding more spools than FilamentService.MaxCandidates (500). Truncation drops
+            // the SMALLEST spools, so a group total computed from the survivors understates - and a
+            // confident "you cannot combine enough" would be a wrong answer.
+            var bulkUser = new User
+            {
+                OAuthUserId = BulkUserOAuthId,
+                ViewStatus = User.ProfileViewStatus.Public,
+            };
+            context.Users.Add(bulkUser);
+            context.SaveChanges();
+            BulkUserId = bulkUser.Id;
+
+            var bulkSpools = new List<Filament>();
+            for (var i = 0; i < BulkSpoolCount; i++)
+            {
+                var spool = NewTextMatchFilament(
+                    $"aaaaaaaa-7{i:D3}-0000-0000-000000000000",
+                    $"Bulk Spool {i:D3}", "PLA", "Bulk White", BulkUserId, now);
+                spool.InitialNominalWeightMg = 1_000; // 1 g each
+                bulkSpools.Add(spool);
+            }
+
+            context.Filaments.AddRange(bulkSpools);
             context.SaveChanges();
         }
 

@@ -138,6 +138,18 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 client, ToolName, new() { ["material"] = material }));
         }
 
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        public async Task ExplicitlyEmptyFilter_IsRejected_NotTreatedAsNoFilter(string material)
+        {
+            // An explicitly supplied empty filter must NOT silently degrade to "no filter": that
+            // hands back the entire inventory to a caller who believes it filtered.
+            await using var client = await _factory.ConnectAsync();
+            Assert.True(await McpDataWebApplicationFactory.IsToolError(
+                client, ToolName, new() { ["material"] = material }));
+        }
+
         [Fact]
         public async Task PageSize_ClampsTo100()
         {

@@ -76,7 +76,12 @@ namespace PrintLogApi.Services
                 var term = searchQuery.Trim().ToLower();
                 query = query.Where(p =>
                     p.Title.ToLower().Contains(term)
-                    || (p.Project != null && p.Project.Name.ToLower().Contains(term)));
+                    // Ownership, not merely non-null: matching on a project the caller does not own
+                    // would turn search_prints into an existence oracle for another user's project
+                    // names (guess a name, see whether a hit comes back).
+                    || (p.Project != null
+                        && p.Project.CreatedById == userId
+                        && p.Project.Name.ToLower().Contains(term)));
             }
 
             if (status.HasValue)
@@ -111,8 +116,11 @@ namespace PrintLogApi.Services
                     p.Id,
                     p.Title,
                     p.Status,
-                    p.PrinterId,
-                    PrinterName = p.Printer != null ? p.Printer.Name : null,
+                    // Gate related names on ownership, not merely on non-null. A corrupt or imported
+                    // row can point at another user's printer or project, and its NAME is their data.
+                    // Same rule already applied to the filament rows below.
+                    PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
+                    PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                     p.StartDate,
                     // Canonical material usage: sum of per-filament actual weight, falling back to
                     // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
@@ -122,8 +130,8 @@ namespace PrintLogApi.Services
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
                     p.PrintTimeInSeconds,
-                    p.ProjectId,
-                    ProjectName = p.Project != null ? p.Project.Name : null,
+                    ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
+                    ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
                 })
                 .ToListAsync(ct);
 
@@ -158,8 +166,10 @@ namespace PrintLogApi.Services
                     p.Id,
                     p.Title,
                     p.Status,
-                    p.PrinterId,
-                    PrinterName = p.Printer != null ? p.Printer.Name : null,
+                    // Ownership-gated for the same reason as the filament rows below: a cross-owner
+                    // printer or project reference would leak that user's chosen names.
+                    PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
+                    PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                     p.StartDate,
                     MaterialMg = p.FilamentUsage.Sum(pf =>
                         pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
@@ -167,8 +177,8 @@ namespace PrintLogApi.Services
                         : 0),
                     p.PrintTimeInSeconds,
                     p.Notes,
-                    p.ProjectId,
-                    ProjectName = p.Project != null ? p.Project.Name : null,
+                    ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
+                    ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
 
                     // Optional navigation => EF emits a LEFT JOIN, so rows with a NULL FilamentId
                     // are preserved. An inner join would silently drop them and the per-material

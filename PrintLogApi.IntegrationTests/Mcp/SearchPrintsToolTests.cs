@@ -80,6 +80,34 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
+        public async Task ForeignProjectAndPrinter_AreNotLeaked_OnTheCallersOwnPrint()
+        {
+            // Corrupt cross-owner references on a print the caller DOES own. Gating only on
+            // "navigation is not null" would return another user's project and printer names.
+            await using var client = await _factory.ConnectAsync();
+            var (page, rawJson) = ParsePage(await Search(client, new() { ["pageSize"] = 100 }));
+
+            var item = Assert.Single(page.Items, i => i.Id == McpTestData.CrossOwnerRefPrintId);
+            Assert.Null(item.ProjectName);
+            Assert.Null(item.ProjectId);
+            Assert.Null(item.PrinterName);
+            Assert.Null(item.PrinterId);
+            Assert.DoesNotContain("SECRET FOREIGN PROJECT", rawJson);
+            Assert.DoesNotContain("Other User Printer", rawJson);
+        }
+
+        [Fact]
+        public async Task Query_DoesNotMatchAForeignProjectName_NoExistenceOracle()
+        {
+            // Matching on a project the caller does not own would let them confirm another user's
+            // project names by guessing them: search, see whether a hit comes back.
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "SECRET FOREIGN" }));
+
+            Assert.Empty(page.Items);
+        }
+
+        [Fact]
         public async Task Query_DoesNotSearchNotes()
         {
             // Notes hold pasted slicer dumps; searching them would swamp results with noise.

@@ -58,6 +58,9 @@ namespace PrintLogApi.Mcp
         bool SpoolsTruncated,
         // Populated only when requiredGrams was supplied.
         bool? SufficientOnLargestSpool,
+        // Null also means INDETERMINATE: when CandidatesTruncated dropped spools from this group,
+        // a "no" cannot be asserted, because the omitted spools might have closed the gap. A "yes"
+        // is always trustworthy (a qualifying subset was actually found).
         bool? MeetsRequirementByCombiningSpools,
         IReadOnlyList<SpoolItem>? CombinationForRequirement);
 

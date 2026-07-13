@@ -43,11 +43,15 @@ namespace PrintLogApi.Services
             // Word-boundary matching, NOT exact: users write the same material as "PLA", "PLA
             // (Polylactic Acid)" or "PLA+", and colors as "Light Blue" rather than "Blue". Exact
             // matching missed roughly a third of real inventory.
-            if (!string.IsNullOrWhiteSpace(material))
+            //
+            // Gate on null (omitted), NOT on whitespace. An explicitly supplied but empty filter is
+            // rejected by RequireFilter rather than silently ignored: treating "" or "   " as "no
+            // filter" hands back the ENTIRE inventory to a caller who believes it filtered.
+            if (material is not null)
             {
                 query = query.Where(McpTextMatch.MaterialMatches(material));
             }
-            if (!string.IsNullOrWhiteSpace(color))
+            if (color is not null)
             {
                 query = query.Where(McpTextMatch.ColorMatches(color));
             }
@@ -124,7 +128,8 @@ namespace PrintLogApi.Services
 
             var groups = spools
                 .GroupBy(s => new { s.Material, s.Color })
-                .Select(g => BuildGroup(g.Key.Material, g.Key.Color, g.ToList(), requiredGrams))
+                .Select(g => BuildGroup(
+                    g.Key.Material, g.Key.Color, g.ToList(), requiredGrams, candidatesTruncated))
                 .ToList();
 
             // When a requirement is given, rank groups that satisfy it from a SINGLE spool first.
@@ -150,7 +155,8 @@ namespace PrintLogApi.Services
         }
 
         private static MaterialGroup BuildGroup(
-            string material, string color, List<SpoolItem> spools, double? requiredGrams)
+            string material, string color, List<SpoolItem> spools, double? requiredGrams,
+            bool candidatesTruncated)
         {
             // Largest first: guarantees a spool that alone meets the requirement is never the one
             // dropped by the per-group cap.
@@ -181,6 +187,19 @@ namespace PrintLogApi.Services
                 }
             }
 
+            // Truncation drops the SMALLEST spools (candidates are ordered by remaining weight), so:
+            //  - largest >= required stays trustworthy: the biggest spools always survive.
+            //  - total >= required stays trustworthy when TRUE: a subset proving it was found.
+            //  - total >= required is UNKNOWABLE when false: the dropped spools might have closed
+            //    the gap. Reporting a confident `false` there is a wrong answer, so report null
+            //    (indeterminate) instead and let candidatesTruncated explain why.
+            bool? meetsByCombining = null;
+            if (requiredGrams is { } needed)
+            {
+                var reached = total >= needed;
+                meetsByCombining = reached || !candidatesTruncated ? reached : null;
+            }
+
             return new MaterialGroup(
                 material,
                 color,
@@ -190,7 +209,7 @@ namespace PrintLogApi.Services
                 ordered.Take(MaxSpoolsPerGroup).ToList(),
                 ordered.Count > MaxSpoolsPerGroup,
                 requiredGrams.HasValue ? largest >= requiredGrams.Value : null,
-                requiredGrams.HasValue ? total >= requiredGrams.Value : null,
+                meetsByCombining,
                 combination);
         }
 

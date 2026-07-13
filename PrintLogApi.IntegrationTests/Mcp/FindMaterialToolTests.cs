@@ -44,6 +44,41 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Parse(await client.CallToolAsync(ToolName, args));
 
         [Fact]
+        public async Task CandidateTruncation_MakesAnUnprovableNo_Indeterminate_NotFalse()
+        {
+            // The bulk user holds 501 one-gram spools; only the 500 largest survive truncation, so
+            // the visible total is 500 g. Asserting a confident "no" for a 501 g requirement would
+            // be a WRONG answer - the dropped spool closes the gap exactly.
+            await using var client = await _factory.ConnectAsync(McpTestData.BulkUserOAuthId);
+            var result = await Get(client, new()
+            {
+                ["material"] = "PLA",
+                ["requiredGrams"] = 501.0,
+            });
+
+            Assert.True(result.CandidatesTruncated);
+            var group = Assert.Single(result.Groups);
+            Assert.Null(group.MeetsRequirementByCombiningSpools); // indeterminate, NOT false
+        }
+
+        [Fact]
+        public async Task CandidateTruncation_StillReportsAProvableYes()
+        {
+            // A "yes" survives truncation: a qualifying subset was actually found, and the omitted
+            // spools could only ever add more. Only the "no" is unprovable.
+            await using var client = await _factory.ConnectAsync(McpTestData.BulkUserOAuthId);
+            var result = await Get(client, new()
+            {
+                ["material"] = "PLA",
+                ["requiredGrams"] = 400.0,
+            });
+
+            Assert.True(result.CandidatesTruncated);
+            var group = Assert.Single(result.Groups);
+            Assert.True(group.MeetsRequirementByCombiningSpools);
+        }
+
+        [Fact]
         public async Task Groups_NeverMergeDifferentMaterials()
         {
             // Crimson inventory: PLA 250 g + 150 g + (-200 g corrupt), and PLA-CF 500 g.

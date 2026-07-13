@@ -33,6 +33,24 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
+        public async Task ForeignProjectAndPrinter_AreNotLeaked_OnTheCallersOwnPrint()
+        {
+            // Same rule the filament rows already follow: gate related data on OWNERSHIP, not merely
+            // on the navigation being non-null, or a corrupt cross-owner row leaks another user's
+            // project and printer names.
+            await using var client = await _factory.ConnectAsync();
+            var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.CrossOwnerRefPrintId }));
+
+            Assert.Null(detail.ProjectName);
+            Assert.Null(detail.ProjectId);
+            Assert.Null(detail.PrinterName);
+            Assert.Null(detail.PrinterId);
+            Assert.DoesNotContain("SECRET FOREIGN PROJECT", rawJson);
+            Assert.DoesNotContain("Other User Printer", rawJson);
+        }
+
+        [Fact]
         public async Task MaterialsUsed_ReportsEachColorOfADualColorPrint()
         {
             // The motivating failure: a print named "Dual Color 3D Benchy" could not report which
