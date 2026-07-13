@@ -23,11 +23,13 @@ namespace PrintLogApi.Services
             bool includeInactive, CancellationToken ct);
 
         /// <summary>
-        /// Sums the remaining weight (mg) across the caller's active inventory, optionally filtered
-        /// by material and/or color, via a database aggregate. Used by check_material_sufficiency.
+        /// Finds the caller's active spools matching a material and/or color, grouped by their exact
+        /// (MaterialType, ColorName) pair. Replaces the old sufficiency check, which summed
+        /// incompatible materials (PLA + PLA-CF) and colors (Light Blue + Navy) into a single
+        /// boolean and so could report a print as printable when it was not.
         /// </summary>
-        Task<long> GetAvailableMaterialMgForMcp(
-            long userId, string material, string color, CancellationToken ct);
+        Task<FindMaterialResult> FindMaterialForMcp(
+            long userId, string material, string color, double? requiredGrams, CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);

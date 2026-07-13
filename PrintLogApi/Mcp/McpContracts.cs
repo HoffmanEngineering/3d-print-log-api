@@ -20,10 +20,36 @@ namespace PrintLogApi.Mcp
 
     public sealed record MaterialInventoryItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
-        double RemainingGrams, bool IsActive);
+        double RemainingGrams, bool IsActive,
+        string? StorageLocation, double? DiameterMm);
 
-    public sealed record MaterialSufficiencyResult(
-        double RequiredGrams, double AvailableGrams, bool Sufficient, string? Material, string? Color);
+    public sealed record SpoolItem(
+        Guid Id, string Name, string? Brand, string Material, string? Color,
+        double? DiameterMm, double RemainingGrams, string? StorageLocation);
+
+    /// <summary>
+    /// Spools sharing an exact (MaterialType, ColorName) pair. Grouping does NOT establish that the
+    /// spools are interchangeable — brand, diameter and pigment lot still vary — it only stops the
+    /// tool silently merging PLA with PLA-CF, or Light Blue with Navy, when deciding sufficiency.
+    /// </summary>
+    public sealed record MaterialGroup(
+        string Material,
+        string? Color,
+        int SpoolCount,
+        double TotalGrams,
+        double LargestSpoolGrams,
+        IReadOnlyList<SpoolItem> Spools,
+        bool SpoolsTruncated,
+        // Populated only when requiredGrams was supplied.
+        bool? SufficientOnLargestSpool,
+        bool? MeetsRequirementByCombiningSpools,
+        IReadOnlyList<SpoolItem>? CombinationForRequirement);
+
+    public sealed record FindMaterialResult(
+        double? RequiredGrams,
+        IReadOnlyList<MaterialGroup> Groups,
+        bool GroupsTruncated,
+        bool CandidatesTruncated);
 
     public sealed record PrinterStatsItem(
         long PrinterId, string PrinterName, int TotalPrints, int SuccessfulPrints,

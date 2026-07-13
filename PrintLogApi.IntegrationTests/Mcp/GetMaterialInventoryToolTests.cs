@@ -19,7 +19,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public GetMaterialInventoryToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
         private sealed record Item(Guid Id, string Name, string Brand, string Material,
-            string Color, double RemainingGrams, bool IsActive);
+            string Color, double RemainingGrams, bool IsActive,
+            string StorageLocation, double? DiameterMm);
 
         private sealed record PageResult(List<Item> Items, int Page, int PageSize, int TotalCount, int TotalPages);
 
@@ -47,7 +48,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var page = await Get(client, new() { ["pageSize"] = 100 });
 
             Assert.DoesNotContain(page.Items, i => i.Id == McpTestData.InactiveFilamentId);
-            Assert.Equal(3, page.Items.Count);
+            // 3 base seeds + 5 text-matching fixtures + 4 find_material fixtures.
+            Assert.Equal(12, page.Items.Count);
         }
 
         [Fact]
@@ -73,12 +75,66 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task FilterByMaterial_IsCaseInsensitiveExact()
+        public async Task FilterByMaterial_MatchesWholeWords_NotExactStrings()
         {
+            // This previously asserted EXACT matching and returned only TestFilamentId1 — which was
+            // the bug: real users store the same material as "PLA", "PLA (Polylactic Acid)" and
+            // "PLA+", and exact matching found only the first.
             await using var client = await _factory.ConnectAsync();
             var page = await Get(client, new() { ["material"] = "pla", ["pageSize"] = 100 });
 
-            Assert.Equal(new[] { IntegrationTestSeeder.TestFilamentId1 }, page.Items.Select(i => i.Id).ToArray());
+            var materials = page.Items.Select(i => i.Material).ToList();
+            Assert.Contains("PLA", materials);
+            Assert.Contains("PLA (Polylactic Acid)", materials);
+            Assert.Contains("PLA+", materials);
+
+            // ...but must not become a substring match.
+            Assert.DoesNotContain(materials, m => m.StartsWith("PETG"));
+            Assert.DoesNotContain("PCTG", materials);
+        }
+
+        [Fact]
+        public async Task FilterByMaterial_ShortAcronym_DoesNotSubstringMatch()
+        {
+            await using var client = await _factory.ConnectAsync();
+            var page = await Get(client, new() { ["material"] = "PC", ["pageSize"] = 100 });
+
+            Assert.DoesNotContain(page.Items, i => i.Material == "PCTG");
+        }
+
+        [Fact]
+        public async Task FilterByColor_MatchesQualifiedColors()
+        {
+            // "blue" must find "Light Blue". In production this doubles the hit count for blue.
+            await using var client = await _factory.ConnectAsync();
+            var page = await Get(client, new() { ["color"] = "blue", ["pageSize"] = 100 });
+
+            var colors = page.Items.Select(i => i.Color).ToList();
+            Assert.Contains("Blue", colors);
+            Assert.Contains("Light Blue", colors);
+            Assert.DoesNotContain("Navy", colors);
+        }
+
+        [Fact]
+        public async Task Items_ExposeStorageLocationAndDiameter()
+        {
+            await using var client = await _factory.ConnectAsync();
+            var page = await Get(client, new() { ["pageSize"] = 100 });
+
+            var fixture = page.Items.First(i => i.Material == "PLA+");
+            Assert.Equal(1.75, fixture.DiameterMm);
+        }
+
+        [Theory]
+        [InlineData("+++")]
+        [InlineData("---")]
+        [InlineData("()")]
+        public async Task PunctuationOnlyFilter_IsRejected_NotTreatedAsNoFilter(string material)
+        {
+            // Such a filter normalizes to empty and would otherwise match EVERY row.
+            await using var client = await _factory.ConnectAsync();
+            Assert.True(await McpDataWebApplicationFactory.IsToolError(
+                client, ToolName, new() { ["material"] = material }));
         }
 
         [Fact]

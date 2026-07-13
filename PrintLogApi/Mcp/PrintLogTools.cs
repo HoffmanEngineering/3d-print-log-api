@@ -87,12 +87,15 @@ namespace PrintLogApi.Mcp
         }
 
         [McpServerTool, Description(
-            "List your own filament/material inventory with remaining weight in grams. Optional " +
-            "case-insensitive exact filters on material and color; inactive spools are excluded " +
-            "unless includeInactive is true. Paginated (default 25, max 100).")]
+            "List your own filament/material inventory with remaining weight in grams, including " +
+            "where each spool is stored. Material and color filters match on whole words, so 'PLA' " +
+            "also finds 'PLA (Polylactic Acid)', 'PLA+' and 'Silk PLA', and 'blue' also finds " +
+            "'Light Blue'. Inactive spools are excluded unless includeInactive is true. A negative " +
+            "remainingGrams means more filament has been logged as used than the spool started " +
+            "with, which is a data problem worth reporting to the user. Paginated (default 25, max 100).")]
         public Task<McpPage<MaterialInventoryItem>> GetMaterialInventory(
-            [Description("Optional material filter (e.g. PLA), case-insensitive exact match.")] string material = null,
-            [Description("Optional color filter, case-insensitive exact match.")] string color = null,
+            [Description("Optional material filter (e.g. PLA). Matches whole words, so PLA also finds 'PLA (Polylactic Acid)' and 'PLA+'.")] string material = null,
+            [Description("Optional color filter (e.g. blue). Matches whole words, so blue also finds 'Light Blue'.")] string color = null,
             [Description("Include inactive/archived spools. Defaults to false.")] bool includeInactive = false,
             [Description("1-based page number.")] int page = 1,
             [Description("Page size (default 25, max 100).")] int? pageSize = null,
@@ -106,21 +109,27 @@ namespace PrintLogApi.Mcp
         }
 
         [McpServerTool, Description(
-            "Check whether you have enough filament for a print. Sums the remaining grams across your " +
-            "active inventory (optionally filtered by material and/or color) and compares it to the " +
-            "required grams. Required grams must be a finite value greater than zero.")]
-        public async Task<MaterialSufficiencyResult> CheckMaterialSufficiency(
-            [Description("Required amount in grams (finite, > 0).")] double requiredGrams,
-            [Description("Optional material filter (e.g. PLA), case-insensitive exact match.")] string material = null,
-            [Description("Optional color filter, case-insensitive exact match.")] string color = null,
+            "Find your own filament spools matching a material and/or color, grouped by their exact " +
+            "material and color. Filters match whole words, so 'PLA' also finds 'PLA+' and 'Silk PLA'. " +
+            "Optionally pass requiredGrams to see which groups can supply it. " +
+            "sufficientOnLargestSpool means a SINGLE spool holds enough, so the print can run " +
+            "unattended. meetsRequirementByCombiningSpools means only the SUM of several spools is " +
+            "enough, which needs a filament change mid-print: present that to the user as a " +
+            "suggestion to confirm, never as a guarantee, because spools in a group can still differ " +
+            "in brand and diameter. combinationForRequirement lists the specific spools that reach " +
+            "the requirement. Weights are grams.")]
+        public Task<FindMaterialResult> FindMaterial(
+            [Description("Optional material filter (e.g. PLA). Matches whole words.")] string material = null,
+            [Description("Optional color filter (e.g. blue). Matches whole words.")] string color = null,
+            [Description("Optional grams needed for the print (finite, > 0).")] double? requiredGrams = null,
             CancellationToken ct = default)
         {
-            var userId = CurrentUserId;
-            McpValidation.RequirePositiveGrams(requiredGrams);
-            var availableMg = await filamentService.GetAvailableMaterialMgForMcp(userId, material, color, ct);
-            var availableGrams = McpUnits.MgToGrams(availableMg);
-            return new MaterialSufficiencyResult(
-                requiredGrams, availableGrams, availableGrams >= requiredGrams, material, color);
+            if (requiredGrams.HasValue)
+            {
+                McpValidation.RequirePositiveGrams(requiredGrams.Value);
+            }
+
+            return filamentService.FindMaterialForMcp(CurrentUserId, material, color, requiredGrams, ct);
         }
 
         [McpServerTool, Description(

@@ -16,6 +16,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long OtherUserId { get; private set; }
         public static long OtherPrinterId { get; private set; }
         public static Guid InactiveFilamentId { get; private set; } // primary user, inactive, null initial weight
+        public static Guid NegativeFilamentId { get; private set; } // primary user, PLA/Crimson, remaining = -200 g
         public static long RichPrintId1 { get; private set; } // Printer2, Success, 25 g, 7200 s, Filament1
         public static long RichPrintId2 { get; private set; } // Printer2, Failed, 10 g, 3600 s, Filament2
         public static long ForeignPrintId { get; private set; } // owned by OtherUser, Public
@@ -173,6 +174,43 @@ namespace PrintLogApi.IntegrationTests.Mcp
             };
             context.Filaments.AddRange(textMatchFilaments);
             context.SaveChanges();
+
+            // find_material fixtures, all PLA-family in Red so a single query exercises grouping.
+            // Remaining weight == InitialNominalWeightMg when there is no usage or adjustment.
+            var combinationBig = NewTextMatchFilament(
+                "aaaaaaaa-2001-0000-0000-000000000000", "Crimson Big", "PLA", "Crimson", primaryUserId, now);
+            combinationBig.InitialNominalWeightMg = 250_000; // 250 g
+
+            var combinationSmall = NewTextMatchFilament(
+                "aaaaaaaa-2002-0000-0000-000000000000", "Crimson Small", "PLA", "Crimson", primaryUserId, now);
+            combinationSmall.InitialNominalWeightMg = 150_000; // 150 g
+
+            // Same colour, DIFFERENT material. Must never be summed into the PLA group: 250 + 150 +
+            // 500 would wrongly report a 600 g print as printable in plain PLA.
+            var carbonFibre = NewTextMatchFilament(
+                "aaaaaaaa-2003-0000-0000-000000000000", "Crimson CF", "PLA-CF", "Crimson", primaryUserId, now);
+            carbonFibre.InitialNominalWeightMg = 500_000; // 500 g
+
+            // Corrupt row: more logged as used than the spool ever held, so remaining goes negative.
+            var negative = NewTextMatchFilament(
+                "aaaaaaaa-2004-0000-0000-000000000000", "Crimson Corrupt", "PLA", "Crimson", primaryUserId, now);
+            negative.InitialNominalWeightMg = 100_000; // 100 g
+
+            context.Filaments.AddRange(combinationBig, combinationSmall, carbonFibre, negative);
+            context.SaveChanges();
+
+            context.FilamentAdjustments.Add(new FilamentAdjustment
+            {
+                FilamentId = negative.Id,
+                AmountMg = -300_000, // drives remaining to -200 g
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+            });
+            context.SaveChanges();
+
+            NegativeFilamentId = negative.Id;
 
             // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
             context.UserSettings.Add(new UserSetting
