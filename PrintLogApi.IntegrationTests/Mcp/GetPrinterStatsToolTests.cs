@@ -21,10 +21,20 @@ namespace PrintLogApi.IntegrationTests.Mcp
         private sealed record Stat(long PrinterId, string PrinterName, int TotalPrints,
             int SuccessfulPrints, int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds);
 
+        private sealed record PageResult(List<Stat> Items, int Page, int PageSize, int TotalCount, int TotalPages);
+
+        // The tool is now paginated: removing the date bound without bounding the result would let a
+        // user with many printers pull an unbounded list.
         private static List<Stat> Parse(CallToolResult result)
         {
             var text = result.Content.OfType<TextContentBlock>().First().Text;
-            return JsonSerializer.Deserialize<List<Stat>>(text, JsonOptions)!;
+            return JsonSerializer.Deserialize<PageResult>(text, JsonOptions)!.Items;
+        }
+
+        private static PageResult ParsePage(CallToolResult result)
+        {
+            var text = result.Content.OfType<TextContentBlock>().First().Text;
+            return JsonSerializer.Deserialize<PageResult>(text, JsonOptions)!;
         }
 
         private static readonly DateTimeOffset FullFrom = McpTestData.RichPrint2Date.AddDays(-30);
@@ -97,6 +107,51 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync();
             Assert.False(await McpDataWebApplicationFactory.IsToolError(client, ToolName,
                 new() { ["from"] = FullFrom, ["to"] = FullFrom.AddDays(366) }));
+        }
+
+        [Fact]
+        public async Task AllTime_WhenRangeOmitted()
+        {
+            // "How many prints has this printer done, ever?" previously required looping year by
+            // year because the range was mandatory and capped at 366 days.
+            await using var client = await _factory.ConnectAsync();
+            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object>()));
+
+            Assert.NotEmpty(stats);
+            // The undated search fixtures live on their own printer, so all-time sees it while any
+            // ranged query does not.
+            Assert.Contains(stats, s => s.PrinterId == McpTestData.SearchPrinterId);
+        }
+
+        [Fact]
+        public async Task FilterByPrinterId_ReturnsOnlyThatPrinter()
+        {
+            await using var client = await _factory.ConnectAsync();
+            var stats = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["printerId"] = IntegrationTestSeeder.TestPrinterId2 }));
+
+            var stat = Assert.Single(stats);
+            Assert.Equal(IntegrationTestSeeder.TestPrinterId2, stat.PrinterId);
+        }
+
+        [Fact]
+        public async Task Results_ArePaginated()
+        {
+            await using var client = await _factory.ConnectAsync();
+            var page = ParsePage(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["pageSize"] = 1 }));
+
+            Assert.Single(page.Items);
+            Assert.True(page.TotalCount > 1);
+            Assert.Equal(page.TotalCount, page.TotalPages); // pageSize 1
+        }
+
+        [Fact]
+        public async Task HalfOpenRange_IsError()
+        {
+            await using var client = await _factory.ConnectAsync();
+            Assert.True(await McpDataWebApplicationFactory.IsToolError(
+                client, ToolName, new() { ["from"] = FullFrom }));
         }
     }
 }

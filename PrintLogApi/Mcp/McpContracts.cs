@@ -74,7 +74,21 @@ namespace PrintLogApi.Mcp
     public sealed record ReprintCostResult(
         long PrintId, decimal? EstimatedCost, string Currency, double MaterialGrams, int? DurationSeconds);
 
+    public sealed record SummaryMetrics(
+        int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
+
+    /// <summary>
+    /// Nested on purpose. The status filter and the status breakdown describe DIFFERENT populations:
+    /// Filtered is scoped by the status filter, UnfilteredStatusCounts is not. Sitting them side by
+    /// side as flat fields invites an agent to compare a filtered scalar against an unfiltered map.
+    /// </summary>
     public sealed record PrintSummaryResult(
-        DateTimeOffset From, DateTimeOffset To, int TotalPrints, int SuccessfulPrints,
-        int FailedPrints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
+        DateTimeOffset? From,   // null = all-time
+        DateTimeOffset? To,
+        string? AppliedStatusFilter,
+        SummaryMetrics Filtered,
+        IReadOnlyDictionary<string, int> UnfilteredStatusCounts,
+        // Prints with no start date. They are included in all-time totals but can never appear in a
+        // date range, so without this block all-time != sum(ranges) with no way to reconcile.
+        SummaryMetrics Undated);
 }

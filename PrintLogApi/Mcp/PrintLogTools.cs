@@ -136,31 +136,66 @@ namespace PrintLogApi.Mcp
         }
 
         [McpServerTool, Description(
-            "Get per-printer statistics for your own prints over an inclusive UTC date range " +
-            "(maximum 366 days): print counts, success/failure counts, success rate percent, and " +
-            "total print time in seconds. Only printers with prints in the range are included.")]
-        public async Task<IReadOnlyList<PrinterStatsItem>> GetPrinterStats(
-            [Description("Inclusive start of the UTC range.")] DateTimeOffset from,
-            [Description("Inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset to,
+            "Get per-printer statistics for your own prints: print counts, success/failure counts, " +
+            "success rate percent, and total print time in seconds. Omit 'from' and 'to' for all-time " +
+            "statistics; an explicit range is inclusive UTC and at most 366 days, and excludes prints " +
+            "with no start date. Only printers with prints in scope are included. Paginated " +
+            "(default 25, max 100).")]
+        public Task<McpPage<PrinterStatsItem>> GetPrinterStats(
+            [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
+            [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,
+            [Description("Optional printer id filter.")] long? printerId = null,
+            [Description("1-based page number.")] int page = 1,
+            [Description("Page size (default 25, max 100).")] int? pageSize = null,
             CancellationToken ct = default)
         {
-            var userId = CurrentUserId;
-            var (validFrom, validTo) = McpValidation.RequireUtcRange(from, to);
-            return await statisticsService.GetPrinterStats(userId, validFrom, validTo, ct);
+            var validPage = McpPaging.RequirePage(page);
+            var validPageSize = McpPaging.ClampPageSize(pageSize);
+            var (validFrom, validTo) = NormalizeOptionalRange(from, to);
+
+            return statisticsService.GetPrinterStats(
+                CurrentUserId, validFrom, validTo, printerId, validPage, validPageSize, ct);
         }
 
         [McpServerTool, Description(
-            "Summarize your own prints over an inclusive UTC date range (maximum 366 days): total, " +
-            "successful, and failed print counts, total material used in grams, and total print time " +
-            "in seconds.")]
-        public async Task<PrintSummaryResult> GetPrintSummary(
-            [Description("Inclusive start of the UTC range.")] DateTimeOffset from,
-            [Description("Inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset to,
+            "Summarize your own prints. Omit 'from' and 'to' for all-time totals, which INCLUDE " +
+            "prints that have no start date (reported separately under 'undated', so that all-time " +
+            "equals the sum of any exhaustive set of date ranges plus 'undated'). An explicit range " +
+            "is inclusive UTC and at most 366 days. The optional status filter scopes the 'filtered' " +
+            "metrics only; 'unfilteredStatusCounts' always covers every status in the range and " +
+            "includes zero counts. Weights are grams, durations are seconds.")]
+        public Task<PrintSummaryResult> GetPrintSummary(
+            [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
+            [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,
+            [Description("Optional status filter, e.g. Success. Scopes the 'filtered' metrics.")] Print.PrintStatus? status = null,
             CancellationToken ct = default)
         {
-            var userId = CurrentUserId;
-            var (validFrom, validTo) = McpValidation.RequireUtcRange(from, to);
-            return await statisticsService.GetPrintSummaryForMcp(userId, validFrom, validTo, ct);
+            var (validFrom, validTo) = NormalizeOptionalRange(from, to);
+
+            return statisticsService.GetPrintSummaryForMcp(CurrentUserId, validFrom, validTo, status, ct);
+        }
+
+        /// <summary>
+        /// Validates a date range only when one is actually supplied. Supplying just one endpoint is
+        /// rejected rather than silently treated as all-time, which would quietly answer a different
+        /// question than the caller asked.
+        /// </summary>
+        private static (DateTimeOffset? From, DateTimeOffset? To) NormalizeOptionalRange(
+            DateTimeOffset? from, DateTimeOffset? to)
+        {
+            if (from.HasValue != to.HasValue)
+            {
+                throw McpToolException.InvalidArguments(
+                    "Supply both 'from' and 'to', or neither (for all-time).");
+            }
+
+            if (!from.HasValue)
+            {
+                return (null, null);
+            }
+
+            var (validFrom, validTo) = McpValidation.RequireUtcRange(from.Value, to.Value);
+            return (validFrom, validTo);
         }
 
         [McpServerTool, Description(
