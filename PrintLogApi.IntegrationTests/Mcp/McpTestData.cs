@@ -24,6 +24,10 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long ProjectPrintId { get; private set; } // "Bracket", in project "Rocket Build"
         public static Guid ProjectId { get; private set; } // "Rocket Build"
         public static long SearchPrinterId { get; private set; } // holds the two undated search fixtures
+        public static long AmsPrinterId { get; private set; } // carries more loaded spools than get_printer returns
+
+        /// <summary>Loaded spools on <see cref="AmsPrinterId"/> — deliberately above the get_printer cap of 10.</summary>
+        public const int AmsLoadedSpoolCount = 12;
         public static long DualColorPrintId { get; private set; } // 2 spools + orphan + zero-actual row
         public static long ForeignSpoolPrintId { get; private set; } // usage row pointing at another user's spool
 
@@ -344,6 +348,87 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.Prints.Add(leaky);
             context.SaveChanges();
             ForeignSpoolPrintId = leaky.Id;
+
+            // One spool currently loaded on the search printer, plus a historical row that has been
+            // unloaded. Without the UnloadedDateTime filter, get_printer would report BOTH as
+            // "loaded right now".
+            // PrinterFilament has no DbSet on the context; it is reached through the Printer
+            // navigation, so seed it via Set<T>().
+            context.Set<PrinterFilament>().AddRange(
+                new PrinterFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = searchPrinter.Id,
+                    FilamentId = new Guid("aaaaaaaa-1002-0000-0000-000000000000"), // Long PLA, Light Blue
+                    LoadedDateTime = now,
+                    UnloadedDateTime = null,
+                },
+                new PrinterFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = searchPrinter.Id,
+                    FilamentId = new Guid("aaaaaaaa-1003-0000-0000-000000000000"), // Plus PLA, Navy
+                    LoadedDateTime = now.AddDays(-10),
+                    UnloadedDateTime = now.AddDays(-5), // history, NOT loaded now
+                },
+                // Corrupt cross-owner row: another user's spool is recorded as loaded on the
+                // caller's printer. Its material/colour/remaining all live on that foreign row, so
+                // get_printer excludes it rather than emitting an entry with every field nulled -
+                // but counts it, so the omission is visible rather than silent.
+                new PrinterFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = searchPrinter.Id,
+                    FilamentId = foreignSpool.Id,
+                    LoadedDateTime = now,
+                    UnloadedDateTime = null,
+                });
+            context.SaveChanges();
+
+            // An AMS/toolchanger printer carrying more spools than get_printer returns. Silently
+            // dropping a spool from "what is loaded right now" is a WRONG answer, not merely an
+            // incomplete one, so the cap must surface a true count and a truncation flag.
+            // Material and colour are deliberately unique to these fixtures: reusing PLA or a blue
+            // would change the counts the inventory and find_material tests assert.
+            var amsPrinter = new Printer
+            {
+                Name = "AMS Fixture Printer",
+                Model = "AMS1",
+                Make = "Fixture",
+                UserId = primaryUserId,
+                IsActive = true,
+            };
+            context.Printers.Add(amsPrinter);
+            context.SaveChanges();
+            AmsPrinterId = amsPrinter.Id;
+
+            var amsSpools = new List<Filament>();
+            var amsLoads = new List<PrinterFilament>();
+            for (var i = 0; i < AmsLoadedSpoolCount; i++)
+            {
+                var spool = NewTextMatchFilament(
+                    $"aaaaaaaa-5{i:D3}-0000-0000-000000000000",
+                    $"AMS Spool {i:D2}", "Nylon", "Amber", primaryUserId, now);
+                amsSpools.Add(spool);
+
+                amsLoads.Add(new PrinterFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = amsPrinter.Id,
+                    FilamentId = spool.Id,
+                    // Distinct load times keep the "largest/most recent first" ordering
+                    // deterministic, so which spools survive truncation is stable.
+                    LoadedDateTime = now.AddMinutes(-i),
+                    UnloadedDateTime = null,
+                });
+            }
+
+            context.Filaments.AddRange(amsSpools);
+            context.SaveChanges();
+            // PrinterFilament has no DbSet on the context; it is reached through the Printer
+            // navigation, so seed it via Set<T>().
+            context.Set<PrinterFilament>().AddRange(amsLoads);
+            context.SaveChanges();
 
             // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
             context.UserSettings.Add(new UserSetting

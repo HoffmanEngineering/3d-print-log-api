@@ -24,17 +24,20 @@ namespace PrintLogApi.Mcp
         private readonly IPrintService printService;
         private readonly IFilamentService filamentService;
         private readonly IMcpStatisticsService statisticsService;
+        private readonly IPrinterService printerService;
 
         public PrintLogTools(
             IHttpContextAccessor httpContextAccessor,
             IPrintService printService,
             IFilamentService filamentService,
-            IMcpStatisticsService statisticsService)
+            IMcpStatisticsService statisticsService,
+            IPrinterService printerService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
             this.filamentService = filamentService;
             this.statisticsService = statisticsService;
+            this.printerService = printerService;
         }
 
         private long CurrentUserId =>
@@ -173,6 +176,33 @@ namespace PrintLogApi.Mcp
             var (validFrom, validTo) = NormalizeOptionalRange(from, to);
 
             return statisticsService.GetPrintSummaryForMcp(CurrentUserId, validFrom, validTo, status, ct);
+        }
+
+        [McpServerTool, Description(
+            "List your own 3D printers: id, name, make, model, nozzle diameter, and whether the " +
+            "printer is active. Use this to resolve a printer you refer to by name into the id that " +
+            "search_prints and get_printer_stats take. Paginated (default 25, max 100).")]
+        public Task<McpPage<PrinterListItem>> ListPrinters(
+            [Description("1-based page number.")] int page = 1,
+            [Description("Page size (default 25, max 100).")] int? pageSize = null,
+            CancellationToken ct = default)
+        {
+            var validPage = McpPaging.RequirePage(page);
+            var validPageSize = McpPaging.ClampPageSize(pageSize);
+
+            return printerService.ListPrintersForMcp(CurrentUserId, validPage, validPageSize, ct);
+        }
+
+        [McpServerTool, Description(
+            "Get the full details of one of your own printers by id: description, nozzle diameter, " +
+            "bed dimensions, heated bed/chamber, wattage, and the filament spools CURRENTLY loaded " +
+            "on it (spools that have been unloaded are not included). Only the printer's owner can " +
+            "read it; any other id returns not found. Weights are grams.")]
+        public Task<PrinterDetailResult> GetPrinter(
+            [Description("The printer id.")] long id,
+            CancellationToken ct = default)
+        {
+            return printerService.GetPrinterForMcp(CurrentUserId, id, ct);
         }
 
         /// <summary>

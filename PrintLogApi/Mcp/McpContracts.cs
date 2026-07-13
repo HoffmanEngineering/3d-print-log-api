@@ -71,6 +71,27 @@ namespace PrintLogApi.Mcp
         long PrinterId, string PrinterName, int TotalPrints, int SuccessfulPrints,
         int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds);
 
+    public sealed record PrinterListItem(
+        long Id, string Name, string? Make, string? Model,
+        double? NozzleDiameterMm, bool IsActive);
+
+    /// <summary>A spool currently mounted on a printer (never one that has been unloaded).</summary>
+    public sealed record LoadedFilament(
+        Guid FilamentId, string? Name, string? Brand, string? Material, string? Color,
+        double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt);
+
+    public sealed record PrinterDetailResult(
+        long Id, string Name, string? Make, string? Model, string? Description,
+        string? CategoryNickname,
+        double? NozzleDiameterMm,
+        double? BedWidthMm, double? BedDepthMm, double? BedHeightMm,
+        bool? HasHeatedBed, bool? HasHeatedChamber, double? WattageW,
+        bool IsActive,
+        IReadOnlyList<LoadedFilament> LoadedFilaments,
+        int LoadedFilamentCount,          // true count before capping
+        bool LoadedFilamentsTruncated,    // silently omitting a loaded spool is a WRONG answer
+        int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
+
     public sealed record ReprintCostResult(
         long PrintId, decimal? EstimatedCost, string Currency, double MaterialGrams, int? DurationSeconds);
 
