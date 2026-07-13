@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -12,6 +13,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
@@ -45,6 +47,201 @@ namespace PrintLogApi.Services
             _filamentService = filamentService;
             _printerService = printerService;
             _notificationService = notificationService;
+        }
+
+        /// <summary>Maximum length of the free-text search term.</summary>
+        public const int MaxSearchQueryLength = 200;
+
+        public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
+            long userId, int page, int pageSize, PrintStatus? status, long? printerId,
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string searchQuery,
+            CancellationToken ct)
+        {
+            var query = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
+
+            if (searchQuery is not null && string.IsNullOrWhiteSpace(searchQuery))
+            {
+                throw McpToolException.InvalidArguments("query must not be empty.");
+            }
+            if (searchQuery is { Length: > MaxSearchQueryLength })
+            {
+                throw McpToolException.InvalidArguments(
+                    $"query must be {MaxSearchQueryLength} characters or fewer.");
+            }
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                // Substring, not word-boundary: users type partial names, so "bench" must find
+                // "Dual Color 3D Benchy". Searching the project name too means a user who
+                // remembers the project rather than the print can still find it.
+                var term = searchQuery.Trim().ToLower();
+                query = query.Where(p =>
+                    p.Title.ToLower().Contains(term)
+                    // Ownership, not merely non-null: matching on a project the caller does not own
+                    // would turn search_prints into an existence oracle for another user's project
+                    // names (guess a name, see whether a hit comes back).
+                    || (p.Project != null
+                        && p.Project.CreatedById == userId
+                        && p.Project.Name.ToLower().Contains(term)));
+            }
+
+            if (status.HasValue)
+            {
+                query = query.Where(p => p.Status == status.Value);
+            }
+            if (printerId.HasValue)
+            {
+                query = query.Where(p => p.PrinterId == printerId.Value);
+            }
+            if (filamentId.HasValue)
+            {
+                query = query.Where(p => p.FilamentUsage.Any(f => f.FilamentId == filamentId.Value));
+            }
+            if (from.HasValue)
+            {
+                query = query.Where(p => p.StartDate >= from.Value);
+            }
+            if (to.HasValue)
+            {
+                query = query.Where(p => p.StartDate <= to.Value);
+            }
+
+            var totalCount = await query.CountAsync(ct);
+
+            var rows = await query
+                .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Status,
+                    // Gate related names on ownership, not merely on non-null. A corrupt or imported
+                    // row can point at another user's printer or project, and its NAME is their data.
+                    // Same rule already applied to the filament rows below.
+                    PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
+                    PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
+                    p.StartDate,
+                    // Canonical material usage: sum of per-filament actual weight, falling back to
+                    // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
+                    // maintained, so it must not be used. Mirrors PrintProfile / remaining-weight.
+                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                        : 0),
+                    p.PrintTimeInSeconds,
+                    ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
+                    ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
+                })
+                .ToListAsync(ct);
+
+            var items = rows.Select(r => new PrintListItem(
+                r.Id,
+                r.Title,
+                r.Status.ToString(),
+                r.PrinterId,
+                r.PrinterName,
+                r.StartDate,
+                McpUnits.MgToGrams(r.MaterialMg),
+                r.PrintTimeInSeconds,
+                r.ProjectId,
+                r.ProjectName)).ToList();
+
+            var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
+            return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
+        }
+
+        /// <summary>
+        /// Hard cap on the per-filament rows returned by get_print. Real prints are bounded by a
+        /// printer's tool/AMS slots (single digits), so truncation signals bad data.
+        /// </summary>
+        public const int MaxMaterialsUsed = 100;
+
+        public async Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct)
+        {
+            var row = await _context.Prints.AsNoTracking()
+                .Where(p => p.Id == printId && p.CreatedById == userId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Status,
+                    // Ownership-gated for the same reason as the filament rows below: a cross-owner
+                    // printer or project reference would leak that user's chosen names.
+                    PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
+                    PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
+                    p.StartDate,
+                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                        : 0),
+                    p.PrintTimeInSeconds,
+                    p.Notes,
+                    ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
+                    ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
+
+                    // Optional navigation => EF emits a LEFT JOIN, so rows with a NULL FilamentId
+                    // are preserved. An inner join would silently drop them and the per-material
+                    // rows would no longer add up to MaterialMg above.
+                    // Not capped in SQL: EF cannot translate Take() inside a nested collection
+                    // projection. That is acceptable here because this collection is bounded by one
+                    // print's filament rows (a printer's tool/AMS slots — single digits), not by how
+                    // much data the user has. MaxMaterialsUsed below is a safety net against bad
+                    // data, not a paging mechanism.
+                    Usage = p.FilamentUsage
+                        .OrderBy(pf => pf.Id)
+                        .Select(pf => new
+                        {
+                            // Guard on ownership, not merely on non-null: a corrupt row can point at
+                            // ANOTHER user's spool, and returning its brand/material/colour would
+                            // leak their data. The quantity lives on the caller's own PrintFilament
+                            // row, so it is safe to keep.
+                            Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
+                            pf.FilamentId,
+                            Name = pf.Filament.DisplayName,
+                            Brand = pf.Filament.Brand,
+                            Material = pf.Filament.MaterialType,
+                            Color = pf.Filament.ColorName,
+
+                            // Identical to MaterialMg above and to McpStatisticsService: a zero or
+                            // NEGATIVE actual falls through to the estimate. `AmountMg ?? Estimated`
+                            // would not, and the sum invariant would break.
+                            Mg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                                : 0,
+                            IsEstimated = !(pf.AmountMg.HasValue && pf.AmountMg > 0)
+                                && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0,
+                        })
+                        .ToList(),
+                })
+                .FirstOrDefaultAsync(ct);
+
+            if (row is null)
+            {
+                return null;
+            }
+
+            var truncated = row.Usage.Count > MaxMaterialsUsed;
+
+            var materialsUsed = row.Usage
+                .Take(MaxMaterialsUsed)
+                .Select(u => new MaterialUsage(
+                    u.Readable ? u.FilamentId : null,
+                    u.Readable ? u.Name : null,
+                    u.Readable ? u.Brand : null,
+                    u.Readable ? u.Material : null,
+                    u.Readable ? u.Color : null,
+                    McpUnits.MgToGrams(u.Mg),
+                    u.IsEstimated))
+                .ToList();
+
+            return new PrintDetailResult(
+                row.Id, row.Title, row.Status.ToString(), row.PrinterId, row.PrinterName,
+                row.StartDate, McpUnits.MgToGrams(row.MaterialMg), row.PrintTimeInSeconds,
+                EstimatedCost: null, row.Notes, row.ProjectId, row.ProjectName,
+                materialsUsed,
+                truncated,
+                materialsUsed.Sum(m => m.Grams));
         }
 
         /// <summary>

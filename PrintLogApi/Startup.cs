@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +19,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
+using ModelContextProtocol.AspNetCore.Authentication;
+using ModelContextProtocol.Authentication;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
@@ -167,6 +170,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<ISubscriptionService, SubscriptionService>();
             services.AddTransient<IFileAttachmentService, FileAttachmentService>();
             services.AddTransient<IProjectService, ProjectService>();
+            services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
 
             services.AddTransient<IBlobStorageService, AzureBlobStorageService>();
 
@@ -188,11 +192,96 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
+            ConfigureMcpServer(services);
+
+            // Per-user rate limiting for /mcp. The unit is HTTP requests (not tool calls); the
+            // budget is partitioned by the authenticated internal user id.
+            services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = (context, _) =>
+                {
+                    if (context.Lease.TryGetMetadata(System.Threading.RateLimiting.MetadataName.RetryAfter, out var retryAfter))
+                    {
+                        context.HttpContext.Response.Headers.RetryAfter =
+                            ((int)retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    return System.Threading.Tasks.ValueTask.CompletedTask;
+                };
+                options.AddPolicy("mcp", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: httpContext.User.GetUserId()?.ToString() ?? "anon",
+                        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = Configuration.GetValue("Mcp:RateLimitPerMinute", 60),
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }));
+            });
+        }
+
+        private void ConfigureMcpServer(IServiceCollection services)
+        {
+            services.AddSingleton<Mcp.IMcpToolTelemetry, Mcp.McpToolTelemetry>();
+
+            services.AddMcpServer()
+                .WithHttpTransport(options => options.Stateless = true)
+                .AddAuthorizationFilters()
+                .WithTools<Mcp.PrintLogTools>()
+                .WithRequestFilters(requestFilters =>
+                {
+                    // Single choke point for tool errors AND telemetry: map our typed codes to safe
+                    // IsError results, replace any other exception with a generic detail-free message,
+                    // and record Mcp_ToolCalled with only non-sensitive fields.
+                    requestFilters.AddCallToolFilter(next => async (context, cancellationToken) =>
+                    {
+                        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                        var toolName = context.Params?.Name ?? "unknown";
+                        var telemetry = context.Services?.GetService<Mcp.IMcpToolTelemetry>();
+                        var http = context.Services?.GetService<IHttpContextAccessor>();
+                        var subjectHash = Mcp.McpUserContext.HashSubject(http?.HttpContext?.User);
+
+                        void Record(string outcome) =>
+                            telemetry?.ToolCalled(toolName, outcome, stopwatch.ElapsedMilliseconds, subjectHash);
+
+                        try
+                        {
+                            var result = await next(context, cancellationToken);
+                            Record(result.IsError == true ? "error" : "success");
+                            return result;
+                        }
+                        catch (Mcp.McpToolException ex)
+                        {
+                            Record("error");
+                            return new ModelContextProtocol.Protocol.CallToolResult
+                            {
+                                Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = $"{ex.Code}: {ex.Message}" }],
+                                IsError = true,
+                            };
+                        }
+                        catch (System.OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (System.Exception)
+                        {
+                            Record("error");
+                            return new ModelContextProtocol.Protocol.CallToolResult
+                            {
+                                Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = "An unexpected error occurred while processing the tool call." }],
+                                IsError = true,
+                            };
+                        }
+                    });
+                });
         }
 
         private void ConfigureAuthentication(IServiceCollection services)
         {
-            if (Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting"))
+            var domain = $"https://{Configuration["Auth0:Domain"]}/";
+            var bypassAuth = Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting");
+
+            if (bypassAuth)
             {
                 services.AddAuthentication(options =>
                 {
@@ -203,16 +292,42 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             }
             else
             {
-                var domain = $"https://{Configuration["Auth0:Domain"]}/";
                 services.AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
                     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
                 })
+                // Default bearer scheme accepts ONLY the app API audience.
                 .AddJwtBearer(jwtOptions =>
                 {
                     jwtOptions.Authority = domain;
                     jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
+                })
+                // Isolated MCP bearer accepts ONLY the dedicated MCP audience. Never accept
+                // MCP-audience tokens through the default scheme, nor app tokens through this one.
+                .AddJwtBearer("McpBearer", jwtOptions =>
+                {
+                    jwtOptions.Authority = domain;
+                    jwtOptions.Audience = Configuration["Auth0:McpIdentifier"];
+                })
+                // Policy scheme the McpAccess policy authenticates against. Challenges are routed
+                // to the RFC 9728 metadata-advertising scheme so 401s reference protected-resource
+                // metadata; forbids stay on McpBearer to emit a plain 403.
+                .AddPolicyScheme("Mcp", null, options =>
+                {
+                    options.ForwardAuthenticate = "McpBearer";
+                    options.ForwardChallenge = "McpChallenge";
+                    options.ForwardForbid = "McpBearer";
+                })
+                // RFC 9728 protected-resource metadata for the dedicated MCP resource.
+                .AddMcp("McpChallenge", null, options =>
+                {
+                    options.ResourceMetadata = new ProtectedResourceMetadata
+                    {
+                        Resource = Configuration["Auth0:McpIdentifier"]!,
+                        AuthorizationServers = { domain },
+                        ScopesSupported = { "read:printdata" },
+                    };
                 });
 
                 // Scope-based policy only applies outside Development (dev bypass token has no scopes)
@@ -231,10 +346,20 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
                 options.AddPolicy("ViewUserProfile", policy =>
                     policy.Requirements.Add(new PublicOrUnlistedUserProfileRequirement()));
+
+                // MCP access: the dedicated MCP bearer (or dev bypass), the read:printdata
+                // scope, AND a mapped internal user. Registered in every environment.
+                options.AddPolicy("McpAccess", policy =>
+                {
+                    policy.AuthenticationSchemes.Add(bypassAuth ? "DevAuth" : "Mcp");
+                    policy.Requirements.Add(new HasScopeRequirement("read:printdata", domain));
+                    policy.Requirements.Add(new McpUserRequirement());
+                });
             });
 
             services.AddSingleton<IAuthorizationHandler, PrintViewStatusAuthorizationHandler>();
             services.AddSingleton<IAuthorizationHandler, UserProfileViewStatusAuthorizationHandler>();
+            services.AddSingleton<IAuthorizationHandler, McpUserHandler>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -279,6 +404,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseAuthentication();
             app.UseApiKeyAuthentication();
             app.UseAuthorization();
+            // After authorization so the /mcp partition key sees the authenticated MCP user and
+            // unauthenticated requests are rejected (401/403) before consuming any budget.
+            app.UseRateLimiter();
             // Map the Auth0 user id to the Upn, so we can add in our custom user ID as the NameIdentifier later.
             JsonWebTokenHandler.DefaultMapInboundClaims = true;
             JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
@@ -301,6 +429,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
+
+                // Read-only MCP endpoint (Streamable HTTP, stateless). The McpAccess policy
+                // enforces the dedicated MCP bearer + read:printdata + a mapped user before dispatch.
+                endpoints.MapMcp("/mcp").RequireAuthorization("McpAccess").RequireRateLimiting("mcp");
             });
 
         }

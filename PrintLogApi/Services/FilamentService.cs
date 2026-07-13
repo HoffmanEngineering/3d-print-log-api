@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -9,6 +10,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.SortEnums;
@@ -27,6 +29,194 @@ namespace PrintLogApi.Services
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+        }
+
+        private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
+            long userId, string material, string color, bool includeInactive)
+        {
+            var query = _context.Filaments.AsNoTracking().Where(f => f.CreatedById == userId);
+
+            if (!includeInactive)
+            {
+                query = query.Where(f => f.IsActive);
+            }
+            // Word-boundary matching, NOT exact: users write the same material as "PLA", "PLA
+            // (Polylactic Acid)" or "PLA+", and colors as "Light Blue" rather than "Blue". Exact
+            // matching missed roughly a third of real inventory.
+            //
+            // Gate on null (omitted), NOT on whitespace. An explicitly supplied but empty filter is
+            // rejected by RequireFilter rather than silently ignored: treating "" or "   " as "no
+            // filter" hands back the ENTIRE inventory to a caller who believes it filtered.
+            if (material is not null)
+            {
+                query = query.Where(McpTextMatch.MaterialMatches(material));
+            }
+            if (color is not null)
+            {
+                query = query.Where(McpTextMatch.ColorMatches(color));
+            }
+
+            return query.ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider);
+        }
+
+        public async Task<McpPage<MaterialInventoryItem>> GetMaterialInventoryForMcp(
+            long userId, int page, int pageSize, string material, string color,
+            bool includeInactive, CancellationToken ct)
+        {
+            var projected = OwnedInventoryForMcp(userId, material, color, includeInactive);
+
+            var totalCount = await projected.CountAsync(ct);
+
+            var rows = await projected
+                .OrderBy(f => f.DisplayName).ThenBy(f => f.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(f => new
+                {
+                    f.Id,
+                    f.DisplayName,
+                    f.Brand,
+                    f.MaterialType,
+                    f.ColorName,
+                    f.FilamentRemaining,
+                    f.IsActive,
+                    f.StorageLocation,
+                    f.DiameterMm,
+                })
+                .ToListAsync(ct);
+
+            // Negative RemainingGrams are reported as-is: they indicate a real data problem
+            // (usage logged beyond the spool's initial weight) that the user should be able to see
+            // and fix. Only find_material clamps them, and only when summing availability.
+            var items = rows.Select(r => new MaterialInventoryItem(
+                r.Id, r.DisplayName, r.Brand, r.MaterialType, r.ColorName,
+                McpUnits.MgToGrams(r.FilamentRemaining), r.IsActive,
+                r.StorageLocation, r.DiameterMm)).ToList();
+
+            var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
+            return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
+        }
+
+        public const int MaxGroups = 20;
+        public const int MaxSpoolsPerGroup = 25;
+
+        /// <summary>
+        /// Grouping happens in memory (grouping free-text pairs is awkward to page in SQL), so the
+        /// candidate set must be bounded in SQL first — otherwise a user with thousands of spools
+        /// materializes all of them.
+        ///
+        /// Sized from production (measured 2026-07-13, 4,022 users): p50 2 spools, p95 27, p99 78,
+        /// max 571. A 500 cap truncated the largest real account; 1000 clears it with headroom while
+        /// still bounding what a single call can materialize. Truncation past this is not a wrong
+        /// answer — it surfaces as CandidatesTruncated and an indeterminate sufficiency result — so
+        /// this cap is a quality bound, not a correctness one.
+        /// </summary>
+        public const int MaxCandidates = 1000;
+
+        public async Task<FindMaterialResult> FindMaterialForMcp(
+            long userId, string material, string color, double? requiredGrams, CancellationToken ct)
+        {
+            var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false);
+
+            // Order by remaining weight so that if the candidate set is truncated, the spools most
+            // likely to satisfy the requirement are the ones that survive.
+            var candidates = await projected
+                .OrderByDescending(f => f.FilamentRemaining ?? 0)
+                .ThenBy(f => f.Id)
+                .Take(MaxCandidates + 1) // +1 detects truncation without a second COUNT
+                .Select(f => new SpoolItem(
+                    f.Id, f.DisplayName, f.Brand, f.MaterialType, f.ColorName,
+                    f.DiameterMm, McpUnits.MgToGrams(f.FilamentRemaining), f.StorageLocation))
+                .ToListAsync(ct);
+
+            var candidatesTruncated = candidates.Count > MaxCandidates;
+            var spools = candidates.Take(MaxCandidates).ToList();
+
+            var groups = spools
+                .GroupBy(s => new { s.Material, s.Color })
+                .Select(g => BuildGroup(
+                    g.Key.Material, g.Key.Color, g.ToList(), requiredGrams, candidatesTruncated))
+                .ToList();
+
+            // When a requirement is given, rank groups that satisfy it from a SINGLE spool first.
+            // Ordering by total grams alone can truncate away the only unattended solution: twenty
+            // groups of ten 100 g spools all outrank one group holding a single 600 g spool.
+            groups = requiredGrams.HasValue
+                ? groups
+                    .OrderByDescending(g => g.SufficientOnLargestSpool == true)
+                    .ThenByDescending(g => g.LargestSpoolGrams)
+                    .ThenByDescending(g => g.TotalGrams)
+                    .ThenBy(g => g.Material)
+                    .ToList()
+                : groups
+                    .OrderByDescending(g => g.TotalGrams)
+                    .ThenBy(g => g.Material)
+                    .ToList();
+
+            return new FindMaterialResult(
+                requiredGrams,
+                groups.Take(MaxGroups).ToList(),
+                groups.Count > MaxGroups,
+                candidatesTruncated);
+        }
+
+        private static MaterialGroup BuildGroup(
+            string material, string color, List<SpoolItem> spools, double? requiredGrams,
+            bool candidatesTruncated)
+        {
+            // Largest first: guarantees a spool that alone meets the requirement is never the one
+            // dropped by the per-group cap.
+            var ordered = spools.OrderByDescending(s => s.RemainingGrams).ThenBy(s => s.Id).ToList();
+
+            // A negative remaining weight is a data error (more logged as used than the spool held).
+            // Clamp it to zero when summing so one corrupt spool cannot cancel out good ones and
+            // make a printable job look unprintable.
+            var total = ordered.Sum(s => Math.Max(0, s.RemainingGrams));
+            var largest = ordered.Count > 0 ? Math.Max(0, ordered[0].RemainingGrams) : 0;
+
+            List<SpoolItem> combination = null;
+            if (requiredGrams is { } required && total >= required)
+            {
+                // Minimal prefix that reaches the requirement — the evidence behind the claim, so
+                // the agent can say "120 g from this spool and 180 g from that one".
+                combination = new List<SpoolItem>();
+                var running = 0d;
+                foreach (var spool in ordered)
+                {
+                    if (running >= required)
+                    {
+                        break;
+                    }
+
+                    combination.Add(spool);
+                    running += Math.Max(0, spool.RemainingGrams);
+                }
+            }
+
+            // Truncation drops the SMALLEST spools (candidates are ordered by remaining weight), so:
+            //  - largest >= required stays trustworthy: the biggest spools always survive.
+            //  - total >= required stays trustworthy when TRUE: a subset proving it was found.
+            //  - total >= required is UNKNOWABLE when false: the dropped spools might have closed
+            //    the gap. Reporting a confident `false` there is a wrong answer, so report null
+            //    (indeterminate) instead and let candidatesTruncated explain why.
+            bool? meetsByCombining = null;
+            if (requiredGrams is { } needed)
+            {
+                var reached = total >= needed;
+                meetsByCombining = reached || !candidatesTruncated ? reached : null;
+            }
+
+            return new MaterialGroup(
+                material,
+                color,
+                ordered.Count,
+                total,
+                largest,
+                ordered.Take(MaxSpoolsPerGroup).ToList(),
+                ordered.Count > MaxSpoolsPerGroup,
+                requiredGrams.HasValue ? largest >= requiredGrams.Value : null,
+                meetsByCombining,
+                combination);
         }
 
         public async Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(

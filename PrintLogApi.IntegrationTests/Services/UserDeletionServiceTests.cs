@@ -163,6 +163,18 @@ namespace PrintLogApi.IntegrationTests.Services
             {
                 return Task.CompletedTask;
             }
+
+            public Task<System.Collections.Generic.IReadOnlyList<PrintLogApi.Models.DTOs.ConnectedAgentDto>> ListMcpGrants(
+                string authUserId, System.Threading.CancellationToken ct)
+            {
+                return Task.FromResult<System.Collections.Generic.IReadOnlyList<PrintLogApi.Models.DTOs.ConnectedAgentDto>>(
+                    new System.Collections.Generic.List<PrintLogApi.Models.DTOs.ConnectedAgentDto>());
+            }
+
+            public Task RevokeMcpGrant(string authUserId, string grantId, System.Threading.CancellationToken ct)
+            {
+                return Task.CompletedTask;
+            }
         }
     }
 }

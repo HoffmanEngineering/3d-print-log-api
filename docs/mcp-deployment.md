@@ -1,0 +1,74 @@
+# MCP server — deployment & rollback
+
+Operational record for the read-only MCP server (`/mcp`) added to `PrintLogApi`.
+
+## Required configuration
+
+| Key | Dev value | Prod value | Notes |
+| --- | --- | --- | --- |
+| `Auth0:Domain` | `dev-3dprintlog.auth0.com` | `3dprintlog.auth0.com` | Existing key. |
+| `Auth0:ApiIdentifier` | `https://dev.3dprintlog.com/api` | `https://3dprintlog.com/api` | App audience. Unchanged. |
+| `Auth0:McpIdentifier` | `http://localhost:5000/mcp` | `https://api.3dprintlog.com/mcp` | **New.** Must be the MCP endpoint URL *character-for-character*, not an abstract audience — it is both the JWT audience and the RFC 9728 `resource` the server advertises, and clients refuse to connect on mismatch. The API lives at `api.3dprintlog.com` and `/mcp` is mapped at the host root (no `/api` prefix). |
+| `Auth0Management:*` | — | — | Existing M2M client; now also needs `read:grants` + `delete:grants`. |
+| `Mcp:RateLimitPerMinute` | `60` (default) | `60` (default) | Optional. Per-user HTTP request budget on `/mcp`. See the rate-limiting note below. |
+
+Integration tests set `Auth0:McpIdentifier=https://test.mcp` and a high rate limit.
+
+## Auth0 tenant changes (see `docs/mcp-auth0-setup.md`)
+
+1. **MCP API** (`PrintLog MCP`) with identifier `https://api.3dprintlog.com/mcp`, scope
+   `read:printdata`, access-token lifetime **3600s**, offline access enabled, **RBAC off**.
+2. **Public PKCE client** (`PrintLog AI Connector`, native, `token_endpoint_auth_method=none`,
+   grant types `authorization_code` + `refresh_token`) with the callback URLs listed in
+   `docs/mcp-auth0-production.md`. Registration model is **shared-client** → the UI exposes a
+   single "Disconnect all AI agents" action.
+3. **Management API M2M** app authorized for `read:grants` and `delete:grants`.
+
+Full production walkthrough, including the callback-URL set and the traps that silently break
+every client: **`docs/mcp-auth0-production.md`**.
+
+## Health checks after deploy
+
+- `GET /.well-known/oauth-protected-resource` (referenced from the `/mcp` 401 challenge)
+  returns JSON whose `resource` = the MCP identifier, `authorization_servers` = the tenant,
+  and `scopes_supported` includes `read:printdata`.
+- Unauthenticated `POST /mcp` → `401` with a `WWW-Authenticate: Bearer resource_metadata="…"` header.
+- A valid MCP token: `tools/list` returns the seven tools + `ping`; a web-audience token is
+  rejected by `/mcp`, and an MCP-audience token is rejected by an ordinary `[Authorize]` endpoint.
+
+## Rate limiting (scope & scaling)
+
+`/mcp` uses an **in-process** fixed-window limiter partitioned by internal user id. It counts
+HTTP transport requests (including `initialize` and `tools/list`), not tool calls. This means:
+
+- With **N** API instances, a user's effective budget is up to `RateLimitPerMinute × N` per minute
+  because the window is per-instance; instance restarts also reset budgets.
+- It is a guardrail against accidental runaway loops, not a hard abuse quota.
+
+For horizontally scaled deployments that need a global budget, enforce the quota at the
+gateway / API-management layer (keyed by the authenticated user), or replace the in-process
+partition with a distributed limiter. This is intentionally out of scope for v1.
+
+## Disabling `/mcp` without affecting the web API
+
+The MCP endpoint is an isolated mapping (`endpoints.MapMcp("/mcp")`) with its own
+`McpBearer`/`McpChallenge` schemes and the `McpAccess` policy. To disable it, remove (or
+comment out) the `MapMcp("/mcp")…` line in `Startup.Configure` and redeploy — the normal API
+and its default bearer scheme are untouched.
+
+## Revoking access
+
+- A single user: revoke `PrintLog AI Connector` under their Auth0 **Authorized Applications**,
+  or use the in-app **Settings → Connected AI Agents → Disconnect all AI agents**
+  (calls `DELETE /api/connected-agents/{grantId}`). Already-issued access tokens remain valid
+  until expiry (≤ 1 hour).
+- All users / kill switch: disable the MCP API in Auth0 (rejects new tokens) and/or remove the
+  `/mcp` mapping as above.
+
+## Rollback
+
+The MCP work is additive: new files under `PrintLogApi/Mcp`, `PrintLogApi/Authentication`
+(`McpUser*`), the connected-agents controller/service methods, and the `MapMcp` line. To roll
+back, revert the feature commits and redeploy; no schema migrations were introduced. The Auth0
+MCP API and connector client can be left in place (they are inert without the endpoint) or
+deleted.

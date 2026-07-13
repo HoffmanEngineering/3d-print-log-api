@@ -354,3 +354,8 @@ PrintLogApi/3dprintlog.env
 
 # Local Docker Compose overrides (e.g. port remapping for dev machines)
 docker-compose.override.yml
+
+# Planning artifacts (brainstorms, specs, implementation plans) are working notes, not
+# deliverables — they should never reach main. The rest of docs/ IS tracked (deployment
+# runbooks, Auth0 setup), so this is deliberately scoped rather than ignoring all of docs/.
+docs/superpowers/
