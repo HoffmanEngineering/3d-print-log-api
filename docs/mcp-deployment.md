@@ -8,7 +8,7 @@ Operational record for the read-only MCP server (`/mcp`) added to `PrintLogApi`.
 | --- | --- | --- | --- |
 | `Auth0:Domain` | `dev-3dprintlog.auth0.com` | `3dprintlog.auth0.com` | Existing key. |
 | `Auth0:ApiIdentifier` | `https://dev.3dprintlog.com/api` | `https://3dprintlog.com/api` | App audience. Unchanged. |
-| `Auth0:McpIdentifier` | `https://dev.3dprintlog.com/mcp` | `https://3dprintlog.com/mcp` | **New.** Dedicated MCP audience — never accepted by the normal bearer scheme. |
+| `Auth0:McpIdentifier` | `http://localhost:5000/mcp` | `https://api.3dprintlog.com/mcp` | **New.** Must be the MCP endpoint URL *character-for-character*, not an abstract audience — it is both the JWT audience and the RFC 9728 `resource` the server advertises, and clients refuse to connect on mismatch. The API lives at `api.3dprintlog.com` and `/mcp` is mapped at the host root (no `/api` prefix). |
 | `Auth0Management:*` | — | — | Existing M2M client; now also needs `read:grants` + `delete:grants`. |
 | `Mcp:RateLimitPerMinute` | `60` (default) | `60` (default) | Optional. Per-user HTTP request budget on `/mcp`. See the rate-limiting note below. |
 
@@ -16,13 +16,16 @@ Integration tests set `Auth0:McpIdentifier=https://test.mcp` and a high rate lim
 
 ## Auth0 tenant changes (see `docs/mcp-auth0-setup.md`)
 
-1. **MCP API** (`PrintLog MCP`) with identifier `https://3dprintlog.com/mcp`, scope
-   `read:printdata`, access-token lifetime **3600s**, offline access enabled.
+1. **MCP API** (`PrintLog MCP`) with identifier `https://api.3dprintlog.com/mcp`, scope
+   `read:printdata`, access-token lifetime **3600s**, offline access enabled, **RBAC off**.
 2. **Public PKCE client** (`PrintLog AI Connector`, native, `token_endpoint_auth_method=none`,
-   grant types `authorization_code` + `refresh_token`) with Claude/ChatGPT callback URLs.
-   Registration model is **shared-client** → the UI exposes a single
-   "Disconnect all AI agents" action.
+   grant types `authorization_code` + `refresh_token`) with the callback URLs listed in
+   `docs/mcp-auth0-production.md`. Registration model is **shared-client** → the UI exposes a
+   single "Disconnect all AI agents" action.
 3. **Management API M2M** app authorized for `read:grants` and `delete:grants`.
+
+Full production walkthrough, including the callback-URL set and the traps that silently break
+every client: **`docs/mcp-auth0-production.md`**.
 
 ## Health checks after deploy
 
