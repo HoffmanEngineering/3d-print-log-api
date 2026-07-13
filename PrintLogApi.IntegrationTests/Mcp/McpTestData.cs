@@ -20,6 +20,10 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long RichPrintId1 { get; private set; } // Printer2, Success, 25 g, 7200 s, Filament1
         public static long RichPrintId2 { get; private set; } // Printer2, Failed, 10 g, 3600 s, Filament2
         public static long ForeignPrintId { get; private set; } // owned by OtherUser, Public
+        public static long SoapDishPrintId { get; private set; } // "Functional Soap Dish Bottom"
+        public static long ProjectPrintId { get; private set; } // "Bracket", in project "Rocket Build"
+        public static Guid ProjectId { get; private set; } // "Rocket Build"
+        public static long SearchPrinterId { get; private set; } // holds the two undated search fixtures
 
         public static readonly DateTimeOffset RichPrint1Date = DateTimeOffset.UtcNow.AddDays(-1);
         public static readonly DateTimeOffset RichPrint2Date = DateTimeOffset.UtcNow;
@@ -211,6 +215,74 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.SaveChanges();
 
             NegativeFilamentId = negative.Id;
+
+            // Text-search fixtures. "Functional Soap Dish Bottom" exercises partial-title search
+            // ("soap dish"); the project lets a user find a print by the project they remember
+            // rather than the print's own name.
+            var project = new Project
+            {
+                // Fixed id: the other fixtures do the same. A DB-generated Guid would differ
+                // between each test class's freshly seeded database, and these statics are shared.
+                Id = new Guid("aaaaaaaa-3001-0000-0000-000000000000"),
+                Name = "Rocket Build",
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+            };
+            context.Projects.Add(project);
+            context.SaveChanges();
+            ProjectId = project.Id;
+
+            // Dedicated printer, and StartDate left NULL. Both are deliberate: every ranged query
+            // (summary, printer stats) excludes undated prints, and a separate printer keeps the
+            // printer-filter and printer-stats fixtures untouched. These also double as the undated
+            // prints needed to test all-time reconciliation.
+            var searchPrinter = new Printer
+            {
+                Name = "Search Fixture Printer",
+                Model = "SF1",
+                Make = "Fixture",
+                UserId = primaryUserId,
+                IsActive = true,
+            };
+            context.Printers.Add(searchPrinter);
+            context.SaveChanges();
+            SearchPrinterId = searchPrinter.Id;
+
+            var soapDish = new Print
+            {
+                Title = "Functional Soap Dish Bottom",
+                StartDate = null,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = searchPrinter.Id,
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                PrintTimeInSeconds = 1800,
+            };
+
+            var bracket = new Print
+            {
+                Title = "Bracket",
+                StartDate = null,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = searchPrinter.Id,
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                ProjectId = project.Id,
+            };
+
+            context.Prints.AddRange(soapDish, bracket);
+            context.SaveChanges();
+
+            SoapDishPrintId = soapDish.Id;
+            ProjectPrintId = bracket.Id;
 
             // Preferred currency (UserSettingType 5 = Currency_Name) for the primary user.
             context.UserSettings.Add(new UserSetting

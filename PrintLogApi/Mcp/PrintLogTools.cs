@@ -44,10 +44,13 @@ namespace PrintLogApi.Mcp
         public string Ping([Description("Any string")] string message) => $"pong: {message}";
 
         [McpServerTool, Description(
-            "Search your own 3D prints. Optional filters: status, printer id, material id, and an " +
-            "inclusive UTC start-date range. Results are paginated (default 25, max 100 per page) " +
-            "and ordered newest first. Weights are grams, durations are seconds.")]
+            "Search your own 3D prints. Use 'query' to find a print by name — it is a " +
+            "case-insensitive substring match over the print title AND its project name, so 'bench' " +
+            "finds 'Dual Color 3D Benchy'. Other optional filters: status, printer id, material id, " +
+            "and an inclusive UTC start-date range. Results are paginated (default 25, max 100 per " +
+            "page) and ordered newest first. Weights are grams, durations are seconds.")]
         public Task<McpPage<PrintListItem>> SearchPrints(
+            [Description("Optional text search over the print title and its project name. Case-insensitive substring.")] string query = null,
             [Description("Optional print status filter.")] Print.PrintStatus? status = null,
             [Description("Optional printer id filter.")] long? printerId = null,
             [Description("Optional material (filament) id filter.")] Guid? materialId = null,
@@ -70,7 +73,7 @@ namespace PrintLogApi.Mcp
 
             return printService.SearchOwnPrintsForMcp(
                 userId, validPage, validPageSize, status, printerId, materialId,
-                normalizedFrom, normalizedTo, ct);
+                normalizedFrom, normalizedTo, query, ct);
         }
 
         [McpServerTool, Description(

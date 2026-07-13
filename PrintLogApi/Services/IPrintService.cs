@@ -20,7 +20,8 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
             long userId, int page, int pageSize, Print.PrintStatus? status, long? printerId,
-            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct);
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string query,
+            CancellationToken ct);
 
         /// <summary>
         /// Creator-only print detail for the MCP server. Returns null when the print does not exist

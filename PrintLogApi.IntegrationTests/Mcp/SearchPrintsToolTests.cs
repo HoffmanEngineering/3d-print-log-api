@@ -20,7 +20,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public SearchPrintsToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
         private sealed record Item(long Id, string Title, string Status, long? PrinterId,
-            string PrinterName, DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds);
+            string PrinterName, DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+            Guid? ProjectId, string ProjectName);
 
         private sealed record PageResult(List<Item> Items, int Page, int PageSize, int TotalCount, int TotalPages);
 
@@ -32,6 +33,79 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         private static async Task<CallToolResult> Search(McpClient client, Dictionary<string, object> args) =>
             await client.CallToolAsync(ToolName, args);
+
+        [Fact]
+        public async Task Query_FindsPrintByPartialTitle()
+        {
+            // The single biggest gap before this: with no text search, finding "the soap dish I
+            // printed" meant guessing a date window or paginating the entire history.
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "soap dish" }));
+
+            var item = Assert.Single(page.Items);
+            Assert.Equal(McpTestData.SoapDishPrintId, item.Id);
+        }
+
+        [Fact]
+        public async Task Query_MatchesPartialWord_NotJustWholeWords()
+        {
+            // Substring, not word-boundary: "bottom" and "botto" must both hit.
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "botto" }));
+
+            Assert.Contains(page.Items, i => i.Id == McpTestData.SoapDishPrintId);
+        }
+
+        [Fact]
+        public async Task Query_IsCaseInsensitive()
+        {
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "SOAP DISH" }));
+
+            Assert.Contains(page.Items, i => i.Id == McpTestData.SoapDishPrintId);
+        }
+
+        [Fact]
+        public async Task Query_MatchesProjectName_AndResultReportsTheProject()
+        {
+            // A user may remember the project rather than the print. The result must name the
+            // project, or the hit is uninterpretable.
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "rocket" }));
+
+            var item = Assert.Single(page.Items);
+            Assert.Equal(McpTestData.ProjectPrintId, item.Id);
+            Assert.Equal("Rocket Build", item.ProjectName);
+            Assert.Equal(McpTestData.ProjectId, item.ProjectId);
+        }
+
+        [Fact]
+        public async Task Query_DoesNotSearchNotes()
+        {
+            // Notes hold pasted slicer dumps; searching them would swamp results with noise.
+            // McpTestData seeds "secret notes should never be exposed by search" on Rich Print 1.
+            await using var client = await _factory.ConnectAsync();
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "secret notes" }));
+
+            Assert.Empty(page.Items);
+        }
+
+        [Fact]
+        public async Task Query_Empty_IsError()
+        {
+            await using var client = await _factory.ConnectAsync();
+            Assert.True(await McpDataWebApplicationFactory.IsToolError(
+                client, ToolName, new() { ["query"] = "   " }));
+        }
+
+        [Fact]
+        public async Task Query_OwnerIsolation_DoesNotFindForeignPrints()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.OtherUserOAuthId);
+            var (page, _) = ParsePage(await Search(client, new() { ["query"] = "soap dish" }));
+
+            Assert.Empty(page.Items);
+        }
 
         [Fact]
         public async Task CallerOnly_ExcludesForeignPrints()

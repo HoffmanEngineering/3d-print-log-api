@@ -11,7 +11,10 @@ namespace PrintLogApi.Mcp
 
     public sealed record PrintListItem(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
-        DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds);
+        DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+        // Prints are searchable by project name, so a result must say which project matched —
+        // otherwise the hit is uninterpretable.
+        Guid? ProjectId, string? ProjectName);
 
     public sealed record PrintDetailResult(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,

@@ -49,11 +49,35 @@ namespace PrintLogApi.Services
             _notificationService = notificationService;
         }
 
+        /// <summary>Maximum length of the free-text search term.</summary>
+        public const int MaxSearchQueryLength = 200;
+
         public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
             long userId, int page, int pageSize, PrintStatus? status, long? printerId,
-            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string searchQuery,
+            CancellationToken ct)
         {
             var query = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
+
+            if (searchQuery is not null && string.IsNullOrWhiteSpace(searchQuery))
+            {
+                throw McpToolException.InvalidArguments("query must not be empty.");
+            }
+            if (searchQuery is { Length: > MaxSearchQueryLength })
+            {
+                throw McpToolException.InvalidArguments(
+                    $"query must be {MaxSearchQueryLength} characters or fewer.");
+            }
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                // Substring, not word-boundary: users type partial names, so "bench" must find
+                // "Dual Color 3D Benchy". Searching the project name too means a user who
+                // remembers the project rather than the print can still find it.
+                var term = searchQuery.Trim().ToLower();
+                query = query.Where(p =>
+                    p.Title.ToLower().Contains(term)
+                    || (p.Project != null && p.Project.Name.ToLower().Contains(term)));
+            }
 
             if (status.HasValue)
             {
@@ -98,6 +122,8 @@ namespace PrintLogApi.Services
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
                     p.PrintTimeInSeconds,
+                    p.ProjectId,
+                    ProjectName = p.Project != null ? p.Project.Name : null,
                 })
                 .ToListAsync(ct);
 
@@ -109,7 +135,9 @@ namespace PrintLogApi.Services
                 r.PrinterName,
                 r.StartDate,
                 McpUnits.MgToGrams(r.MaterialMg),
-                r.PrintTimeInSeconds)).ToList();
+                r.PrintTimeInSeconds,
+                r.ProjectId,
+                r.ProjectName)).ToList();
 
             var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
             return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
