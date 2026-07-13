@@ -54,7 +54,7 @@ namespace PrintLogApi.Mcp
             "page) and ordered newest first. Weights are grams, durations are seconds.")]
         public Task<McpPage<PrintListItem>> SearchPrints(
             [Description("Optional text search over the print title and its project name. Case-insensitive substring.")] string query = null,
-            [Description("Optional print status filter.")] Print.PrintStatus? status = null,
+            [Description("Optional print status filter. A finished print is Success, or PartialSuccess if it completed with defects: when the user asks what they 'finished' or 'completed', say which of the two you counted rather than silently picking one.")] Print.PrintStatus? status = null,
             [Description("Optional printer id filter.")] long? printerId = null,
             [Description("Optional material (filament) id filter.")] Guid? materialId = null,
             [Description("Optional inclusive start of the UTC start-date range.")] DateTimeOffset? from = null,
@@ -178,7 +178,7 @@ namespace PrintLogApi.Mcp
         public Task<PrintSummaryResult> GetPrintSummary(
             [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
             [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,
-            [Description("Optional status filter, e.g. Success. Scopes the 'filtered' metrics.")] Print.PrintStatus? status = null,
+            [Description("Optional status filter, e.g. Success. Scopes the 'filtered' metrics. A finished print is Success, or PartialSuccess if it completed with defects: when the user asks how many prints they 'finished' or 'completed', say which of the two you counted rather than silently picking one.")] Print.PrintStatus? status = null,
             CancellationToken ct = default)
         {
             var (validFrom, validTo) = NormalizeOptionalRange(from, to);
