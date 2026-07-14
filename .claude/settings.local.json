@@ -11,9 +11,7 @@
       "Bash(git --no-pager diff main...HEAD)",
       "Bash(git add:*)",
       "Bash(coverage-check.sh)",
-      "Bash(bash coverage-check.sh:*)",
-      "Skill(superpowers:subagent-driven-development)",
-      "Skill(superpowers:finishing-a-development-branch)"
+      "Bash(bash coverage-check.sh:*)"
     ]
   }
 }
