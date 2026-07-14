@@ -51,7 +51,11 @@ namespace PrintLogApi.Mcp
             "case-insensitive substring match over the print title AND its project name, so 'bench' " +
             "finds 'Dual Color 3D Benchy'. Other optional filters: status, printer id, material id, " +
             "and an inclusive UTC start-date range. Results are paginated (default 25, max 100 per " +
-            "page) and ordered newest first. Weights are grams, durations are seconds.")]
+            "page) and ordered newest first. Weights are grams, durations are seconds. " +
+            "'durationIsEstimated' is true when 'durationSeconds' came from the slicer's estimate " +
+            "rather than a measured print time: say so rather than stating it as fact. A null " +
+            "'durationSeconds' means no duration was ever recorded — say that, do not report it as " +
+            "zero. 'materialIsEstimated' works the same way for filament weight.")]
         public Task<McpPage<PrintListItem>> SearchPrints(
             [Description("Optional text search over the print title and its project name. Case-insensitive substring.")] string query = null,
             [Description("Optional print status filter. A finished print is Success, or PartialSuccess if it completed with defects: when the user asks what they 'finished' or 'completed', say which of the two you counted rather than silently picking one.")] Print.PrintStatus? status = null,
@@ -87,7 +91,10 @@ namespace PrintLogApi.Mcp
             "slicer integration carry a settings summary in 'notes' (layer height, line width, " +
             "print/infill/wall speeds, nozzle and bed temperature, infill density, supports): when " +
             "the user asks what settings a print used, read 'notes' and quote it. A null field means " +
-            "the value was never recorded, not zero — say it is not recorded rather than reporting 0.")]
+            "the value was never recorded, not zero — say it is not recorded rather than reporting 0. " +
+            "'durationIsEstimated' is true when 'durationSeconds' came from the slicer's estimate " +
+            "rather than a measured print time: say so rather than stating it as fact. " +
+            "'materialIsEstimated' works the same way for filament weight.")]
         public async Task<PrintDetailResult> GetPrint(
             [Description("The print id.")] long id,
             CancellationToken ct = default)
@@ -151,7 +158,11 @@ namespace PrintLogApi.Mcp
             "success rate percent, and total print time in seconds. Omit 'from' and 'to' for all-time " +
             "statistics; an explicit range is inclusive UTC and at most 366 days, and excludes prints " +
             "with no start date. Only printers with prints in scope are included. Paginated " +
-            "(default 25, max 100).")]
+            "(default 25, max 100). " +
+            "Durations use the measured print time when one was recorded, otherwise the slicer's " +
+            "estimate. 'printsWithEstimatedDuration' says how many prints for that printer were " +
+            "estimated rather than measured: when it is non-zero, present the total as approximate " +
+            "and say how many were estimates. Never report an estimated total as a measured one.")]
         public Task<McpPage<PrinterStatsItem>> GetPrinterStats(
             [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
             [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,
@@ -174,7 +185,12 @@ namespace PrintLogApi.Mcp
             "equals the sum of any exhaustive set of date ranges plus 'undated'). An explicit range " +
             "is inclusive UTC and at most 366 days. The optional status filter scopes the 'filtered' " +
             "metrics only; 'unfilteredStatusCounts' always covers every status in the range and " +
-            "includes zero counts. Weights are grams, durations are seconds.")]
+            "includes zero counts. Weights are grams, durations are seconds. " +
+            "Durations use the measured print time when one was recorded, otherwise the slicer's " +
+            "estimate. 'printsWithEstimatedDuration' says how many prints in scope were estimated " +
+            "rather than measured: when it is non-zero, present the total as approximate and say how " +
+            "many were estimates. Never report an estimated total as a measured one. " +
+            "'printsWithEstimatedMaterial' does the same for filament weight.")]
         public Task<PrintSummaryResult> GetPrintSummary(
             [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
             [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,
