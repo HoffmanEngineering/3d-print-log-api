@@ -1,8 +1,11 @@
 using System.Linq;
+using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi;
+using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Project;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests
@@ -88,6 +91,79 @@ namespace PrintLogApi.IntegrationTests
             var viaService = page.Items.Sum(i => i.TotalPrintTimeSeconds);
 
             Assert.Equal(viaExpression, viaService);
+        }
+    }
+
+    /// <summary>
+    /// The non-MCP readers. ProjectProfile had the SAME no-fallback defect as the MCP summary, and
+    /// the UsersPrint totals carried the stored-zero hazard, so each needs its own regression: a
+    /// unit theory over Resolve would not catch a divergent copy living inside a query or a mapping.
+    /// </summary>
+    public class RemainingMetricsReadersTests : IClassFixture<Mcp.McpDataWebApplicationFactory>
+    {
+        private readonly Mcp.McpDataWebApplicationFactory _factory;
+
+        public RemainingMetricsReadersTests(Mcp.McpDataWebApplicationFactory factory) => _factory = factory;
+
+        private const string FullRange = "?fromDate=2000-01-01T00:00:00Z&toDate=2100-01-01T00:00:00Z";
+
+        [Fact]
+        public async Task TotalPrintTime_TreatsAStoredZeroAsNotRecorded()
+        {
+            // Was: PrintTimeInSeconds.HasValue ? actual : estimated. A stored 0 IS HasValue, so the
+            // webhook's coerced zero silently suppressed a perfectly good estimate.
+            var client = _factory.CreateClient();
+            var response = await client.GetAsync(
+                $"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-print-time{FullRange}");
+
+            response.EnsureSuccessStatusCode();
+            var stat = await response.Content.ReadFromJsonAsync<SinglePrintStat>();
+
+            // Exact: the metrics user owns nothing but the matrix. 6933 + 1800 + 7200 + 0.
+            Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, int.Parse(stat!.Stat));
+        }
+
+        [Fact]
+        public async Task TotalFilamentUsage_GuardsANegativeEstimate()
+        {
+            // The actual was guarded > 0 but EstimatedAmountMg was taken unguarded, so
+            // NoDurationPrint's -500 estimate would subtract from the total.
+            var client = _factory.CreateClient();
+            var response = await client.GetAsync(
+                $"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-filament-usage{FullRange}");
+
+            response.EnsureSuccessStatusCode();
+            var stat = await response.Content.ReadFromJsonAsync<SinglePrintStat>();
+
+            // 5000 + 3000 + 9000 + 4000 = 21000. The -500 must NOT be added, and the stored 0 must
+            // fall through to 3000 rather than contributing nothing.
+            Assert.Equal(Mcp.McpTestData.MaterialMatrixTotalMg, long.Parse(stat!.Stat));
+        }
+
+        [Fact]
+        public async Task ProjectTotals_FallBackToTheEstimate()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var mapper = scope.ServiceProvider.GetRequiredService<AutoMapper.IMapper>();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            // FilamentUsage must be included too: the profile also maps TotalFilamentWeightMg by
+            // walking Prints -> FilamentUsage, and an unloaded collection is null, not empty.
+            var project = await db.Projects.AsNoTracking()
+                .Include(p => p.Prints)
+                    .ThenInclude(p => p.FilamentUsage)
+                .FirstAsync(p => p.Id == Mcp.McpTestData.MetricsProjectId);
+
+            var dto = mapper.Map<ProjectSummaryDto>(project);
+
+            // Was `?? 0` with no fallback at all, so this read 7200 — only the one measured print.
+            Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, dto.TotalPrintTimeInSeconds);
+
+            // The estimate-only field keeps its OWN meaning ("what did the slicer predict?") and
+            // must NOT become a resolved value: 6933 + 1800 + 3600 + 0.
+            Assert.Equal(
+                Mcp.McpTestData.DurationMatrixEstimateOnlyTotalSeconds,
+                dto.TotalEstimatedPrintTimeInSeconds);
         }
     }
 }

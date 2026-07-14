@@ -1208,11 +1208,21 @@ namespace PrintLogApi.Services
                     {
                         ProjectId = g.Key,
                         PrintCount = g.Count(),
+                        // Already the correct fallback; the estimate just needed the same > 0 guard,
+                        // so a corrupt negative estimate cannot subtract from the total.
                         TotalPrintTime = g.Sum(pr =>
-                            pr.PrintTimeInSeconds != null && pr.PrintTimeInSeconds > 0
+                            pr.PrintTimeInSeconds.HasValue && pr.PrintTimeInSeconds > 0
                                 ? pr.PrintTimeInSeconds.Value
-                                : (pr.EstimatedPrintTimeInSeconds ?? 0)),
-                        TotalEstPrintTime = g.Sum(pr => pr.EstimatedPrintTimeInSeconds ?? 0)
+                                : pr.EstimatedPrintTimeInSeconds.HasValue && pr.EstimatedPrintTimeInSeconds > 0
+                                    ? pr.EstimatedPrintTimeInSeconds.Value
+                                    : 0),
+                        // Deliberately estimate-only: it answers "what did the slicer predict?", a
+                        // DIFFERENT question from TotalPrintTime. Do not turn this into a resolved
+                        // value. Guarded > 0 only.
+                        TotalEstPrintTime = g.Sum(pr =>
+                            pr.EstimatedPrintTimeInSeconds.HasValue && pr.EstimatedPrintTimeInSeconds > 0
+                                ? pr.EstimatedPrintTimeInSeconds.Value
+                                : 0)
                     })
                     .AsNoTracking()
                     .ToListAsync();
@@ -1283,7 +1293,12 @@ namespace PrintLogApi.Services
                     {
                         g.Key.ProjectId,
                         g.Key.PrinterId,
-                        PrintTimeInSeconds = (long)g.Sum(p => p.PrintTimeInSeconds ?? p.EstimatedPrintTimeInSeconds ?? 0)
+                        // `?? Estimated ?? 0` is defeated by a stored 0: 0.HasValue is true, so the
+                        // webhook's coerced zero would win and suppress a perfectly good estimate.
+                        PrintTimeInSeconds = (long)g.Sum(p =>
+                            p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
+                            : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
+                            : 0)
                     })
                     .AsNoTracking()
                     .ToListAsync();
