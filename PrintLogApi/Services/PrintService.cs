@@ -1295,10 +1295,14 @@ namespace PrintLogApi.Services
                         g.Key.PrinterId,
                         // `?? Estimated ?? 0` is defeated by a stored 0: 0.HasValue is true, so the
                         // webhook's coerced zero would win and suppress a perfectly good estimate.
-                        PrintTimeInSeconds = (long)g.Sum(p =>
+                        //
+                        // The cast is INSIDE the Sum, not around it: `(long)g.Sum(int)` sums in int
+                        // and only widens the result, so SQL Server's SUM(int) would overflow before
+                        // the conversion could help. Summing longs emits SUM(bigint).
+                        PrintTimeInSeconds = g.Sum(p => (long)(
                             p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
                             : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
-                            : 0)
+                            : 0))
                     })
                     .AsNoTracking()
                     .ToListAsync();

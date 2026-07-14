@@ -56,19 +56,19 @@ namespace PrintLogApi.Controllers
                     : 0)))
                 .SumAsync();
 
-            // Calculate usage of the old "other" filament.
-            var otherActualFilamentUsage = await baseQuery
-                .Where(p => p.FilamentUsageMg.HasValue && p.FilamentUsageMg.Value > 0)
-                .Select(p => (long?)p.FilamentUsageMg)
+            // Usage of the legacy "other" filament scalars, under the SAME rule. This was previously
+            // two queries whose fallback diverged from it in two ways: the estimate branch tested
+            // `!HasValue || == 0`, so a NEGATIVE actual matched neither branch and the print silently
+            // contributed nothing; and the estimate itself was unguarded, so a negative estimate
+            // subtracted from the user's total.
+            var otherFilamentUsage = await baseQuery
+                .Select(p => (long)(
+                    p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
+                    : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
+                    : 0))
                 .SumAsync();
 
-            // Calculate the estimated usage from the old "other" filament.
-            var otherEstimatedFilamentUsageWhenNoActualWasRecorded = await baseQuery
-                .Where(p => (!p.FilamentUsageMg.HasValue || p.FilamentUsageMg.Value == 0) && p.EstimatedFilamentUsageMg.HasValue)
-                .Select(p => (long?)p.EstimatedFilamentUsageMg)
-                .SumAsync();
-
-            var totalFilamentUsage = printFilamentUsage + (otherActualFilamentUsage ?? 0) + (otherEstimatedFilamentUsageWhenNoActualWasRecorded ?? 0);
+            var totalFilamentUsage = printFilamentUsage + otherFilamentUsage;
 
             return new SinglePrintStat() { Stat = totalFilamentUsage.ToString() };
         }

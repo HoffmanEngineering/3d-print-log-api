@@ -157,9 +157,19 @@ namespace PrintLogApi.Controllers
         private async Task HandlePrintStarted(OctoprintWebhookDto data, long userId)
         {
             // Computed here rather than inline below: a local cannot be declared inside an object
-            // initializer. Round FIRST, then test positivity — 0.3 is > 0 but rounds to 0, and a
-            // stored zero estimate is worse than a null, because no fallback can recover from it.
-            var octoEstimate = (int)Math.Round(data?.Job?.AveragePrintTime ?? data?.Job?.EstimatedPrintTime ?? 0.0);
+            // initializer.
+            //
+            // The two sources must be chosen between with the canonical rule, NOT with `??`.
+            // `AveragePrintTime ?? EstimatedPrintTime` picks Average whenever it is non-null — and
+            // 0.0 is non-null, so a zero average would silently discard a perfectly good
+            // EstimatedPrintTime. That is the same "a stored 0 beats a real value" defect this
+            // change exists to eliminate.
+            //
+            // Round FIRST, then test positivity: 0.3 is > 0 but rounds to 0, and a stored zero
+            // estimate is worse than a null, because no fallback can recover from it.
+            var octoAverage = (int)Math.Round(data?.Job?.AveragePrintTime ?? 0.0);
+            var octoEstimated = (int)Math.Round(data?.Job?.EstimatedPrintTime ?? 0.0);
+            var octoEstimate = PrintMetrics.Resolve(octoAverage, octoEstimated);
 
             var newPrint = new Print
             {

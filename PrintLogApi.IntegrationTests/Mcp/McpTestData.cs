@@ -88,6 +88,24 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// <summary>EstimatedOnly + ZeroActual. ActualWins measured it; NoDuration's actual is real.</summary>
         public const int MaterialMatrixEstimatedCount = 2;
 
+        /// <summary>
+        /// The LEGACY scalar material fields (Print.FilamentUsageMg / .EstimatedFilamentUsageMg).
+        /// The MCP tools never read these, but /api/Users/{id}/total-filament-usage does, and its
+        /// fallback used to diverge from the rule in two ways. Two prints carry the cases that bite:
+        ///   ActualWins  : FilamentUsageMg -1,   EstimatedFilamentUsageMg 1000 -> 1000
+        ///                 (a NEGATIVE actual must fall back; the old `!HasValue || == 0` test
+        ///                  matched neither branch, so the print contributed nothing at all)
+        ///   NoDuration  : FilamentUsageMg null, EstimatedFilamentUsageMg -500 -> 0
+        ///                 (a NEGATIVE estimate must not subtract; the old code added it)
+        /// </summary>
+        public const long LegacyMaterialMatrixTotalMg = 1_000;
+
+        /// <summary>
+        /// What /api/Users/{id}/total-filament-usage must report for the metrics user: the
+        /// PrintFilament rows PLUS the legacy scalars. The MCP tools see only the former (21000).
+        /// </summary>
+        public const long UsersEndpointMaterialTotalMg = MaterialMatrixTotalMg + LegacyMaterialMatrixTotalMg;
+
         public static void Seed(PrintLogContext context)
         {
             var now = DateTime.UtcNow;
@@ -582,7 +600,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             // Each print carries ONE usage row, so the material rule is exercised by the same fixture.
             Print MatrixPrint(
-                string title, int? actual, int? estimated, int? amountMg, int? estimatedAmountMg) => new()
+                string title, int? actual, int? estimated, int? amountMg, int? estimatedAmountMg,
+                int? legacyActualMg = null, int? legacyEstimatedMg = null) => new()
             {
                 Title = title,
                 StartDate = now,                     // dated, so ranged queries see them too
@@ -596,6 +615,9 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 UpdatedDate = now,
                 PrintTimeInSeconds = actual,
                 EstimatedPrintTimeInSeconds = estimated,
+                // Legacy scalars: read ONLY by /api/Users/{id}/total-filament-usage, never by MCP.
+                FilamentUsageMg = legacyActualMg,
+                EstimatedFilamentUsageMg = legacyEstimatedMg,
                 FilamentUsage = new List<PrintFilament>
                 {
                     new() { Id = Guid.NewGuid(), FilamentId = null, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
@@ -609,8 +631,12 @@ namespace PrintLogApi.IntegrationTests.Mcp
             //  - NoDuration carries a NEGATIVE material estimate: it must not subtract from the total.
             var estimatedOnly = MatrixPrint("Estimated Only Print", null, 6933, null, 5000);
             var zeroActual = MatrixPrint("Zero Actual Print", 0, 1800, 0, 3000);
-            var actualWins = MatrixPrint("Actual Wins Print", 7200, 3600, 9000, 1000);
-            var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500);
+            // Legacy scalars on the last two: a NEGATIVE legacy actual must fall back to its estimate
+            // (1000), and a NEGATIVE legacy estimate must not subtract (0). See LegacyMaterialMatrixTotalMg.
+            var actualWins = MatrixPrint("Actual Wins Print", 7200, 3600, 9000, 1000,
+                legacyActualMg: -1, legacyEstimatedMg: 1000);
+            var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500,
+                legacyActualMg: null, legacyEstimatedMg: -500);
 
             context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration);
             context.SaveChanges();

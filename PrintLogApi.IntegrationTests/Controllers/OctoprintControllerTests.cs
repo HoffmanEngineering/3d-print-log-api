@@ -41,7 +41,12 @@ namespace PrintLogApi.IntegrationTests.Controllers
             string fileHash = null,
             long? currentTime = null,
             OctoprintWebhookMetaAnalysisFilamentDto filamentData = null,
-            bool includeSnapshot = false)
+            bool includeSnapshot = false,
+            // AveragePrintTime normally mirrors estimatedPrintTime. Set overrideAveragePrintTime to
+            // drive the two fields apart, which is the only way to reach the case where a ZERO
+            // average must not suppress a real EstimatedPrintTime.
+            bool overrideAveragePrintTime = false,
+            double? averagePrintTime = null)
         {
             var content = new MultipartFormDataContent();
 
@@ -65,7 +70,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 {
                     File = new OctoprintWebhookJobFileDto { Name = fileName },
                     EstimatedPrintTime = estimatedPrintTime,
-                    AveragePrintTime = estimatedPrintTime,
+                    AveragePrintTime = overrideAveragePrintTime ? averagePrintTime : estimatedPrintTime,
                     Filament = filamentData
                 };
                 content.Add(new StringContent(JsonSerializer.Serialize(job)), "Job");
@@ -537,6 +542,30 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var print = FindPrintByFileNameInDb(fileName);
             Assert.NotNull(print);
             Assert.Null(print.EstimatedPrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_ZeroAveragePrintTime_DoesNotSuppressTheRealEstimate()
+        {
+            // `AveragePrintTime ?? EstimatedPrintTime` picks Average whenever it is non-null — and
+            // 0.0 IS non-null. A file OctoPrint has never printed before can report a zero average
+            // alongside a real slicer estimate, and the `??` would discard the estimate entirely.
+            // Exactly the "a stored 0 beats a real value" defect this change exists to eliminate.
+            var fileName = UniqueFileName("zero_average_real_estimate_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 3600.0,
+                overrideAveragePrintTime: true,
+                averagePrintTime: 0.0);
+
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            Assert.Equal(3600, print.EstimatedPrintTimeInSeconds);   // NOT null, and NOT 0
         }
 
         [Fact]

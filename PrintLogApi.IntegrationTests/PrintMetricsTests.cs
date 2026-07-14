@@ -124,10 +124,17 @@ namespace PrintLogApi.IntegrationTests
         }
 
         [Fact]
-        public async Task TotalFilamentUsage_GuardsANegativeEstimate()
+        public async Task TotalFilamentUsage_GuardsNegativeEstimates_OnBothTheRowsAndTheLegacyScalars()
         {
-            // The actual was guarded > 0 but EstimatedAmountMg was taken unguarded, so
-            // NoDurationPrint's -500 estimate would subtract from the total.
+            // This endpoint sums TWO populations, and the fallback used to diverge in BOTH:
+            //
+            //  PrintFilament rows: the actual was guarded > 0 but EstimatedAmountMg was not, so
+            //    NoDurationPrint's -500 estimate subtracted from the total.
+            //
+            //  Legacy Print scalars: the estimate branch tested `!HasValue || == 0`, so
+            //    ActualWinsPrint's NEGATIVE FilamentUsageMg (-1) matched neither branch and the
+            //    print contributed nothing instead of falling back to its 1000 estimate; and the
+            //    legacy estimate was itself unguarded, so NoDurationPrint's -500 subtracted too.
             var client = _factory.CreateClient();
             var response = await client.GetAsync(
                 $"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-filament-usage{FullRange}");
@@ -135,9 +142,9 @@ namespace PrintLogApi.IntegrationTests
             response.EnsureSuccessStatusCode();
             var stat = await response.Content.ReadFromJsonAsync<SinglePrintStat>();
 
-            // 5000 + 3000 + 9000 + 4000 = 21000. The -500 must NOT be added, and the stored 0 must
-            // fall through to 3000 rather than contributing nothing.
-            Assert.Equal(Mcp.McpTestData.MaterialMatrixTotalMg, long.Parse(stat!.Stat));
+            // Rows: 5000 + 3000 + 9000 + 4000 = 21000.  Legacy: 1000 + 0 = 1000.  Total 22000.
+            // The old code produced 20500: it dropped the legacy 1000 and subtracted the legacy -500.
+            Assert.Equal(Mcp.McpTestData.UsersEndpointMaterialTotalMg, long.Parse(stat!.Stat));
         }
 
         [Fact]
