@@ -130,22 +130,35 @@ namespace PrintLogApi.Services
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
                     p.PrintTimeInSeconds,
+                    p.EstimatedPrintTimeInSeconds,
+                    // Material provenance: true when ANY contributing usage row fell back to its estimate.
+                    MaterialIsEstimated = p.FilamentUsage.Any(pf =>
+                        !(pf.AmountMg.HasValue && pf.AmountMg > 0)
+                        && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0),
                     ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                     ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
                 })
                 .ToListAsync(ct);
 
-            var items = rows.Select(r => new PrintListItem(
-                r.Id,
-                r.Title,
-                r.Status.ToString(),
-                r.PrinterId,
-                r.PrinterName,
-                r.StartDate,
-                McpUnits.MgToGrams(r.MaterialMg),
-                r.PrintTimeInSeconds,
-                r.ProjectId,
-                r.ProjectName)).ToList();
+            var items = rows.Select(r =>
+            {
+                // In memory, so no EF constraint applies and the shared rule can be used directly.
+                var seconds = PrintMetrics.Resolve(r.PrintTimeInSeconds, r.EstimatedPrintTimeInSeconds);
+                return new PrintListItem(
+                    r.Id,
+                    r.Title,
+                    r.Status.ToString(),
+                    r.PrinterId,
+                    r.PrinterName,
+                    r.StartDate,
+                    McpUnits.MgToGrams(r.MaterialMg),
+                    // Null, not 0, when nothing was recorded: a 0 would claim a measured zero.
+                    seconds > 0 ? seconds : (int?)null,
+                    PrintMetrics.IsEstimated(r.PrintTimeInSeconds, r.EstimatedPrintTimeInSeconds),
+                    r.MaterialIsEstimated,
+                    r.ProjectId,
+                    r.ProjectName);
+            }).ToList();
 
             var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
             return new McpPage<PrintListItem>(items, page, pageSize, totalCount, totalPages);
@@ -176,6 +189,7 @@ namespace PrintLogApi.Services
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
                     p.PrintTimeInSeconds,
+                    p.EstimatedPrintTimeInSeconds,
                     p.Notes,
                     ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                     ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
@@ -235,9 +249,18 @@ namespace PrintLogApi.Services
                     u.IsEstimated))
                 .ToList();
 
+            var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
+
             return new PrintDetailResult(
                 row.Id, row.Title, row.Status.ToString(), row.PrinterId, row.PrinterName,
-                row.StartDate, McpUnits.MgToGrams(row.MaterialMg), row.PrintTimeInSeconds,
+                row.StartDate, McpUnits.MgToGrams(row.MaterialMg),
+                // Null, not 0, when nothing was recorded: a 0 would claim a measured zero seconds.
+                seconds > 0 ? seconds : (int?)null,
+                PrintMetrics.IsEstimated(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds),
+                // Over ALL usage rows, not just the ones that survived the MaxMaterialsUsed cap —
+                // MaterialUsedGrams is computed over all of them too, so the flag must qualify the
+                // same number.
+                row.Usage.Any(u => u.IsEstimated),
                 EstimatedCost: null, row.Notes, row.ProjectId, row.ProjectName,
                 materialsUsed,
                 truncated,
