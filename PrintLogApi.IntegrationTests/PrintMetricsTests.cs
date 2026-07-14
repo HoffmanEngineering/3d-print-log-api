@@ -1,3 +1,7 @@
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi;
 using Xunit;
 
@@ -20,6 +24,49 @@ namespace PrintLogApi.IntegrationTests
         {
             Assert.Equal(expectedValue, PrintMetrics.Resolve(actual, estimated));
             Assert.Equal(expectedIsEstimated, PrintMetrics.IsEstimated(actual, estimated));
+        }
+    }
+
+    /// <summary>
+    /// Proves the shared expressions reach SQL. Never call .Compile() on them here: compiling forces
+    /// client evaluation, so the test would pass even if translation were completely broken — which
+    /// is the only thing these tests exist to prove. Passing the expression straight to
+    /// SumAsync/CountAsync means EF must translate it or throw.
+    /// </summary>
+    public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicationFactory>
+    {
+        private readonly Mcp.McpDataWebApplicationFactory _factory;
+
+        public PrintMetricsTranslationTests(Mcp.McpDataWebApplicationFactory factory) => _factory = factory;
+
+        [Fact]
+        public async Task DurationSecondsExpr_TranslatesToSql_AndSumsByTheRule()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            // An untranslatable expression throws InvalidOperationException here rather than
+            // client-evaluating. That throw IS the assertion this test exists for.
+            var total = await db.Prints.AsNoTracking()
+                .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
+                .SumAsync(PrintMetrics.DurationSecondsExpr);
+
+            // Exact, not "> 0": the metrics user owns nothing but the matrix.
+            Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, total);
+        }
+
+        [Fact]
+        public async Task DurationIsEstimatedExpr_TranslatesToSql_AndCountsOnlyRealEstimates()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            var estimated = await db.Prints.AsNoTracking()
+                .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
+                .CountAsync(PrintMetrics.DurationIsEstimatedExpr);
+
+            // NoDuration must NOT count: it has no estimate to fall back to, so its 0 is not an estimate.
+            Assert.Equal(Mcp.McpTestData.DurationMatrixEstimatedCount, estimated);
         }
     }
 }
