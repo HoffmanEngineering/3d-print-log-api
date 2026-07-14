@@ -519,6 +519,47 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task Webhook_PrintStarted_WithNoEstimate_StoresNull_NotZero()
+        {
+            // Both AveragePrintTime and EstimatedPrintTime are null (the builder leaves them unset),
+            // and this used to coerce that to 0. A zero estimate is strictly worse than a null: it
+            // looks recorded, so no read-side fallback can recover the print's duration.
+            var fileName = UniqueFileName("no_estimate_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: null);
+
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            Assert.Null(print.EstimatedPrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task Webhook_PrintStarted_WithSubSecondEstimate_StoresNull_NotZero()
+        {
+            // 0.3 > 0 is TRUE, but Math.Round(0.3) is 0. Checking positivity BEFORE rounding would
+            // persist the very zero this change exists to eliminate.
+            var fileName = UniqueFileName("subsecond_estimate_test");
+            var content = CreateWebhookFormContent(
+                topic: "Print Started",
+                deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+                fileName: fileName,
+                estimatedPrintTime: 0.3);
+
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(fileName);
+            Assert.NotNull(print);
+            Assert.Null(print.EstimatedPrintTimeInSeconds);
+        }
+
+        [Fact]
         public async Task Webhook_PrintStarted_SetsStartDateFromCurrentTime()
         {
             // Arrange

@@ -1104,6 +1104,99 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Contains(System.IO.Path.GetFileName(filename), responseContent);
         }
 
+        [Fact]
+        public async Task Webhook_Started_StoresNullEstimate_NotZero()
+        {
+            // The start payload carries no estimate, and this used to hardcode 0. A zero estimate is
+            // strictly worse than a null: it looks recorded, so no read-side fallback can recover
+            // from it — the print's duration is then lost forever.
+            var filename = UniqueFileName("started_null_estimate_test");
+            var messageDto = new PrintEventMessageDto
+            {
+                EventName = "started",
+                Filename = filename,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                FilamentUsed = 0,
+                PrintDuration = 0,
+                TotalDuration = 0
+            };
+
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(filename);
+            Assert.NotNull(print);
+            Assert.Null(print.EstimatedPrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task Webhook_Complete_WithNoDuration_StoresNull_NotZero()
+        {
+            // PrintEventMessageDto.TotalDuration is a non-nullable double, so "no duration reported"
+            // arrives as 0.0 — exactly the value that must NOT be persisted as a measurement.
+            var filename = UniqueFileName("complete_zero_duration_test");
+            var startDto = new PrintEventMessageDto
+            {
+                EventName = "started",
+                Filename = filename,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                FilamentUsed = 0,
+                PrintDuration = 0,
+                TotalDuration = 0
+            };
+            await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto));
+
+            var completeDto = new PrintEventMessageDto
+            {
+                EventName = "complete",
+                Filename = filename,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                FilamentUsed = 5000,
+                PrintDuration = 0,
+                TotalDuration = 0
+            };
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(filename);
+            Assert.Equal(PrintStatus.Success, print.Status);
+            Assert.Null(print.PrintTimeInSeconds);
+        }
+
+        [Fact]
+        public async Task Webhook_Complete_WithSubSecondDuration_StoresNull_NotZero()
+        {
+            // 0.3 > 0 is TRUE, but Math.Round(0.3) is 0. Validating positivity BEFORE rounding would
+            // therefore persist the very zero this change exists to eliminate. This test is the only
+            // thing that distinguishes rounding-then-checking from checking-then-rounding.
+            var filename = UniqueFileName("complete_subsecond_duration_test");
+            var startDto = new PrintEventMessageDto
+            {
+                EventName = "started",
+                Filename = filename,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                FilamentUsed = 0,
+                PrintDuration = 0,
+                TotalDuration = 0
+            };
+            await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto));
+
+            var completeDto = new PrintEventMessageDto
+            {
+                EventName = "complete",
+                Filename = filename,
+                PrinterId = IntegrationTestSeeder.TestPrinterId,
+                FilamentUsed = 5000,
+                PrintDuration = 0.3,
+                TotalDuration = 0.3
+            };
+            var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var print = FindPrintByFileNameInDb(filename);
+            Assert.Null(print.PrintTimeInSeconds);
+        }
+
         #endregion
     }
 }

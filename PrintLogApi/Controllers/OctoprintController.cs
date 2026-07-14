@@ -156,13 +156,18 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintStarted(OctoprintWebhookDto data, long userId)
         {
+            // Computed here rather than inline below: a local cannot be declared inside an object
+            // initializer. Round FIRST, then test positivity — 0.3 is > 0 but rounds to 0, and a
+            // stored zero estimate is worse than a null, because no fallback can recover from it.
+            var octoEstimate = (int)Math.Round(data?.Job?.AveragePrintTime ?? data?.Job?.EstimatedPrintTime ?? 0.0);
+
             var newPrint = new Print
             {
                 Status = PrintStatus.Printing,
                 CreatedById = userId,
                 UpdatedById = userId,
                 Title = data?.Job?.File?.Name.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",
-                EstimatedPrintTimeInSeconds = (int)Math.Round(data?.Job?.AveragePrintTime ?? data?.Job?.EstimatedPrintTime ?? 0.0),
+                EstimatedPrintTimeInSeconds = octoEstimate > 0 ? octoEstimate : (int?)null,
                 FilamentUsage = new List<PrintFilament>(),
                 FileName = data?.Job?.File?.Name ?? ""
             };
@@ -412,7 +417,10 @@ namespace PrintLogApi.Controllers
 
             print.Status = PrintStatus.Failed;
 
-            print.PrintTimeInSeconds = (int)Math.Round(data.Extra.Time ?? 0.0);
+            // Round FIRST, then test positivity: 0.3 rounds to 0, and persisting that 0 would
+            // recreate the "looks recorded but isn't" row we are eliminating.
+            var failedElapsed = (int)Math.Round(data.Extra.Time ?? 0.0);
+            print.PrintTimeInSeconds = failedElapsed > 0 ? failedElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
 
@@ -521,7 +529,9 @@ namespace PrintLogApi.Controllers
 
             print.Status = PrintStatus.Success;
 
-            print.PrintTimeInSeconds = (int)Math.Round(data.Extra.Time ?? 0.0);
+            // Round FIRST, then test positivity — see HandlePrintFailed.
+            var successElapsed = (int)Math.Round(data.Extra.Time ?? 0.0);
+            print.PrintTimeInSeconds = successElapsed > 0 ? successElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
 
