@@ -70,9 +70,14 @@ namespace PrintLogApi.Mcp
         bool GroupsTruncated,
         bool CandidatesTruncated);
 
+    /// <summary>
+    /// Duration provenance only: this record carries no material figure, so a material-provenance
+    /// count here would qualify a number that does not exist.
+    /// </summary>
     public sealed record PrinterStatsItem(
         long PrinterId, string PrinterName, int TotalPrints, int SuccessfulPrints,
-        int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds);
+        int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds,
+        int PrintsWithEstimatedDuration);
 
     public sealed record PrinterListItem(
         long Id, string Name, string? Make, string? Model,
@@ -96,7 +101,12 @@ namespace PrintLogApi.Mcp
         int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
 
     public sealed record SummaryMetrics(
-        int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
+        int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,
+        // A summary spans many prints, so a single bool would be meaningless. These counts let an
+        // agent say "about 40 hours, but 9 of the 13 are estimates" instead of passing off a blended
+        // figure as measured.
+        int PrintsWithEstimatedDuration,
+        int PrintsWithEstimatedMaterial);
 
     /// <summary>
     /// Nested on purpose. The status filter and the status breakdown describe DIFFERENT populations:

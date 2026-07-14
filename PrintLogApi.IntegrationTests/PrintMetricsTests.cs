@@ -68,5 +68,26 @@ namespace PrintLogApi.IntegrationTests
             // NoDuration must NOT count: it has no estimate to fall back to, so its 0 is not an estimate.
             Assert.Equal(Mcp.McpTestData.DurationMatrixEstimatedCount, estimated);
         }
+
+        [Fact]
+        public async Task InlinedRule_InPrinterStats_MatchesTheSharedExpression()
+        {
+            // McpStatisticsService inlines the ternary because EF cannot take the shared expression
+            // in a group projection. If that copy ever drifts from PrintMetrics, this fails. A unit
+            // theory over Resolve alone would NOT catch a divergent copy living inside a query.
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var stats = scope.ServiceProvider.GetRequiredService<PrintLogApi.Services.IMcpStatisticsService>();
+
+            var viaExpression = await db.Prints.AsNoTracking()
+                .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
+                .SumAsync(PrintMetrics.DurationSecondsExpr);
+
+            var page = await stats.GetPrinterStats(
+                Mcp.McpTestData.MetricsUserId, null, null, null, 1, 100, default);
+            var viaService = page.Items.Sum(i => i.TotalPrintTimeSeconds);
+
+            Assert.Equal(viaExpression, viaService);
+        }
     }
 }

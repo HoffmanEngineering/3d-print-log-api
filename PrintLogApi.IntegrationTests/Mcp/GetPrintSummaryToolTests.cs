@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.Mcp;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp
@@ -18,7 +19,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public GetPrintSummaryToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
-        private sealed record Metrics(int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
+        private sealed record Metrics(int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,
+            int PrintsWithEstimatedDuration, int PrintsWithEstimatedMaterial);
 
         private sealed record Summary(DateTimeOffset? From, DateTimeOffset? To,
             string AppliedStatusFilter, Metrics Filtered,
@@ -44,7 +46,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.Equal(7, s.Filtered.Prints);                  // 5 base + 2 rich
             Assert.Equal(35.0, s.Filtered.MaterialUsedGrams);    // 25 g + 10 g
-            Assert.Equal(10800, s.Filtered.TotalPrintTimeSeconds); // 7200 + 3600
+
+            // 64800 = 10800 measured (rich 7200 + 3600) + 54000 estimated. The 5 base prints carry
+            // EstimatedPrintTimeInSeconds = 3600*i and no actual (3600*15 = 54000) — the same shape
+            // as a never-completed production print. This assertion previously read 10800: it
+            // encoded the bug, silently discarding every estimate-only print.
+            Assert.Equal(64800, s.Filtered.TotalPrintTimeSeconds);
+            Assert.Equal(5, s.Filtered.PrintsWithEstimatedDuration);
         }
 
         [Fact]
@@ -165,6 +173,35 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync();
             Assert.True(await McpDataWebApplicationFactory.IsToolError(
                 client, ToolName, new() { ["from"] = FullFrom }));
+        }
+
+        [Fact]
+        public async Task Duration_FallsBackToTheEstimate_AndCountsWhatWasEstimated()
+        {
+            // The production bug: 13 prints that all had estimates reported totalPrintTimeSeconds: 0.
+            // The metrics user owns nothing but the matrix, so this can be an EXACT assertion — a
+            // `> 0` assertion against the primary user would pass even with the bug present.
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var s = await Get(client, new());   // all-time
+
+            // Exact: 6933 + 1800 + 7200 + 0. A `?? 0` reader yields 7200 and fails here.
+            Assert.Equal(McpTestData.DurationMatrixTotalSeconds, s.Filtered.TotalPrintTimeSeconds);
+            Assert.Equal(McpTestData.DurationMatrixEstimatedCount, s.Filtered.PrintsWithEstimatedDuration);
+        }
+
+        [Fact]
+        public async Task Material_AppliesTheSameRule_AndCountsWhatWasEstimated()
+        {
+            // 5000 + 3000 + 9000 + 4000 = 21000 mg. A reader that let the stored 0 win would give
+            // 18000; one that added NoDuration's -500 estimate would give 20500.
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var s = await Get(client, new());
+
+            Assert.Equal(
+                McpUnits.MgToGrams(McpTestData.MaterialMatrixTotalMg),
+                s.Filtered.MaterialUsedGrams,
+                precision: 3);
+            Assert.Equal(McpTestData.MaterialMatrixEstimatedCount, s.Filtered.PrintsWithEstimatedMaterial);
         }
     }
 }
