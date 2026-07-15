@@ -37,6 +37,17 @@ namespace PrintLogApi.Services
         /// nominal weight or does not belong to <paramref name="userId"/>.
         /// </summary>
         Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
+
+        /// <summary>
+        /// Creates a material for the MCP write surface. The category must exist (no silent fallback
+        /// to the default), density must be positive, and diameter is required for diameter-tracking
+        /// categories. Reuses the existing measurement-fill logic. Invalidates the user cache.
+        /// </summary>
+        Task<MaterialInventoryItem> AddMaterialForMcp(
+            long userId, string displayName, string materialType, string materialCategoryNickname,
+            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
+            double initialAmount, string brand, string colorName, string colorHex,
+            string storageLocation, bool isActive, CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);

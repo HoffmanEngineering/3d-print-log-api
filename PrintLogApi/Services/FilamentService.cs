@@ -109,6 +109,67 @@ namespace PrintLogApi.Services
             return McpUnits.MgToGrams(remainingMg);
         }
 
+        public async Task<MaterialInventoryItem> AddMaterialForMcp(
+            long userId, string displayName, string materialType, string materialCategoryNickname,
+            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
+            double initialAmount, string brand, string colorName, string colorHex,
+            string storageLocation, bool isActive, CancellationToken ct)
+        {
+            var category = await _context.MaterialCategories
+                .FirstOrDefaultAsync(c => c.Nickname == materialCategoryNickname, ct);
+            if (category == null)
+            {
+                throw McpToolException.InvalidArguments($"Unknown material category '{materialCategoryNickname}'.");
+            }
+            if (category.HasDiameter && (!diameterMm.HasValue || diameterMm <= 0))
+            {
+                throw McpToolException.InvalidArguments("This material category requires a positive diameterMm.");
+            }
+            McpWriteValidation.RequirePositiveDensity(densityGramPerCubicCm);
+            McpWriteValidation.RequirePositiveAmount(initialAmount);
+            if (colorHex != null && colorHex.Length != 6)
+            {
+                throw McpToolException.InvalidArguments("colorHex must be 6 hex digits with no leading '#'.");
+            }
+
+            var dto = new AddFilamentDto
+            {
+                DisplayName = displayName,
+                Brand = brand,
+                MaterialType = materialType,
+                MaterialCategoryNickname = materialCategoryNickname,
+                MaterialDensityGramPerCubicCm = densityGramPerCubicCm,
+                DiameterMm = diameterMm,
+                ColorName = colorName,
+                ColorHex = colorHex,
+                Colors = colorHex != null ? new List<string> { colorHex } : new List<string>(),
+                Source = (Filament.SourceMeasurement)(int)source,
+                IsActive = isActive,
+                StorageLocation = storageLocation,
+                FilamentAdjustments = new List<FilamentAdjustmentDto>(),
+            };
+            switch (source)
+            {
+                case McpMeasurementSource.Weight:
+                    dto.InitialNominalWeightMg = checked((long)Math.Round(initialAmount * 1000.0)); // g -> mg
+                    break;
+                case McpMeasurementSource.Length:
+                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
+                    break;
+                case McpMeasurementSource.Volume:
+                    dto.InitialNominalVolumeMl = initialAmount; // ml
+                    break;
+            }
+
+            var created = await AddFilament(dto, userId);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
+            return new MaterialInventoryItem(
+                created.Id, created.DisplayName, created.Brand, created.MaterialType, created.ColorName,
+                remaining, created.IsActive, created.StorageLocation, created.DiameterMm);
+        }
+
         public const int MaxGroups = 20;
         public const int MaxSpoolsPerGroup = 25;
 

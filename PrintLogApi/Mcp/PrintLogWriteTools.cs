@@ -134,5 +134,38 @@ namespace PrintLogApi.Mcp
                 projectProvided, effectiveProjectId,
                 materialsProvided: materials != null, materials ?? Array.Empty<MaterialUsageInput>(), ct);
         }
+
+        [McpServerTool, Description(
+            "Add a new material to your inventory (filament, resin, powder, etc.). 'source' is how the " +
+            "initial amount is measured: Weight (grams), Length (mm), or Volume (ml). " +
+            "'materialCategoryNickname' must be one of your existing categories (e.g. 'filament', " +
+            "'resin'); an unknown category is rejected. Categories that track a filament diameter " +
+            "require diameterMm. colorHex is 6 hex digits with no leading '#'. Creates a single-color material.")]
+        public async Task<MaterialInventoryItem> AddMaterial(
+            [Description("Display name.")] string displayName,
+            [Description("Material type, e.g. PLA, ABS, Resin.")] string materialType,
+            [Description("Category nickname, e.g. filament or resin.")] string materialCategoryNickname,
+            [Description("Density in g/cm^3 (> 0).")] double densityGramPerCubicCm,
+            [Description("How the initial amount is measured.")] McpMeasurementSource source,
+            [Description("Initial amount in the source's unit (g / mm / ml).")] double initialAmount,
+            [Description("Diameter in mm. Required for diameter-tracking categories.")] double? diameterMm = null,
+            [Description("Optional brand.")] string brand = null,
+            [Description("Optional color name.")] string colorName = null,
+            [Description("Optional color as 6 hex digits, no '#', e.g. 1188FF.")] string colorHex = null,
+            [Description("Optional storage location.")] string storageLocation = null,
+            [Description("Whether the material is active. Defaults to true.")] bool isActive = true,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                throw McpToolException.InvalidArguments("displayName is required.");
+            }
+            McpWriteValidation.RequireMaxLength(displayName, 255, "displayName");
+            McpWriteValidation.RequireDefinedEnum(source, "source");
+
+            return await filamentService.AddMaterialForMcp(
+                CurrentUserId, displayName, materialType, materialCategoryNickname, densityGramPerCubicCm,
+                diameterMm, source, initialAmount, brand, colorName, colorHex, storageLocation, isActive, ct);
+        }
     }
 }
