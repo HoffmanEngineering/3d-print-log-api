@@ -63,6 +63,8 @@ namespace PrintLogApi
 
         public DbSet<Subscription> Subscriptions { get; set; }
 
+        public DbSet<McpIdempotencyRecord> McpIdempotencyRecords { get; set; }
+
         public static int fnNaturalSort(string sortKey)
             => throw new NotSupportedException();
 
@@ -553,6 +555,13 @@ namespace PrintLogApi
             modelBuilder.Entity<Print>()
                 .HasIndex(p => p.ProjectId)
                 .HasDatabaseName("IX_Prints_ProjectId");
+
+            // MCP write idempotency: one created entity per (user, tool, key). The unique index is
+            // the concurrency guard — a racing duplicate call fails here and is replayed.
+            modelBuilder.Entity<McpIdempotencyRecord>()
+                .HasIndex(r => new { r.UserId, r.ToolName, r.IdempotencyKey })
+                .IsUnique()
+                .HasDatabaseName("IX_McpIdempotencyRecords_User_Tool_Key");
 
             modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 
