@@ -130,6 +130,57 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
+        public async Task LogPrint_TooManyMaterialRows_IsRejected()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+
+            var rows = Enumerable.Range(0, 51).Select(_ => new Dictionary<string, object>
+            {
+                ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
+                ["source"] = "Weight",
+                ["amount"] = 1.0,
+            }).ToArray();
+
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+                new Dictionary<string, object>
+                {
+                    ["title"] = "too-many-rows",
+                    ["printerId"] = McpTestData.SearchPrinterId,
+                    ["status"] = "Success",
+                    ["idempotencyKey"] = "harden-rowcap",
+                    ["materials"] = rows,
+                });
+
+            Assert.True(isError);
+        }
+
+        [Fact]
+        public async Task LogPrint_HugeMaterialAmount_IsRejected()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+                new Dictionary<string, object>
+                {
+                    ["title"] = "huge-amount",
+                    ["printerId"] = McpTestData.SearchPrinterId,
+                    ["status"] = "Success",
+                    ["idempotencyKey"] = "harden-huge",
+                    ["materials"] = new[]
+                    {
+                        new Dictionary<string, object>
+                        {
+                            ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
+                            ["source"] = "Length",
+                            ["amount"] = 5_000_000.0, // over the magnitude cap
+                        },
+                    },
+                });
+
+            Assert.True(isError);
+        }
+
+        [Fact]
         public async Task LogPrint_DuplicateMaterial_IsRejected()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);

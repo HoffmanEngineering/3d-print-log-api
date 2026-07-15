@@ -19,6 +19,17 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public void RequirePositiveAmount_AllowsPositiveFinite() =>
             Assert.Equal(12.5, McpWriteValidation.RequirePositiveAmount(12.5));
 
+        [Theory]
+        [InlineData(2_000_000.5)]      // just over the positive cap
+        [InlineData(-2_000_000.5)]     // just under the negative cap
+        public void RequireFiniteAmount_RejectsOverMagnitudeCap(double value) =>
+            Assert.Throws<McpToolException>(() => McpWriteValidation.RequireFiniteAmount(value));
+
+        [Fact]
+        public void RequireFiniteAmount_AllowsAtCap() =>
+            Assert.Equal(McpWriteValidation.MaxAmountMagnitude,
+                McpWriteValidation.RequireFiniteAmount(McpWriteValidation.MaxAmountMagnitude));
+
         [Fact]
         public void RequirePositiveDuration_RejectsZeroAndNegative()
         {

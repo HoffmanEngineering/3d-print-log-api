@@ -41,6 +41,10 @@ namespace PrintLogApi.Mcp
         private long CurrentUserId =>
             McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User);
 
+        /// <summary>Upper bound on material-usage rows in one print write, so a single rate-limited
+        /// call cannot submit an unbounded array. Far above any realistic multi-material print.</summary>
+        private const int MaxMaterialRows = 50;
+
         [McpServerTool(Name = "whoami"), Description("Confirms write access is granted. Returns your internal user id.")]
         public long WhoAmI() => CurrentUserId;
 
@@ -83,6 +87,10 @@ namespace PrintLogApi.Mcp
             }
 
             var rows = materials ?? Array.Empty<MaterialUsageInput>();
+            if (rows.Length > MaxMaterialRows)
+            {
+                throw McpToolException.InvalidArguments($"At most {MaxMaterialRows} material rows are allowed.");
+            }
             foreach (var row in rows)
             {
                 McpWriteValidation.RequireDefinedEnum(row.Source, "materials.source");
@@ -119,6 +127,10 @@ namespace PrintLogApi.Mcp
             }
             if (materials != null)
             {
+                if (materials.Length > MaxMaterialRows)
+                {
+                    throw McpToolException.InvalidArguments($"At most {MaxMaterialRows} material rows are allowed.");
+                }
                 foreach (var row in materials)
                 {
                     McpWriteValidation.RequireDefinedEnum(row.Source, "materials.source");

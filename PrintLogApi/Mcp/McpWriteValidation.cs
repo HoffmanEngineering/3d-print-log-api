@@ -9,11 +9,23 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public static class McpWriteValidation
     {
+        /// <summary>
+        /// Sanity bound on any single amount (grams / mm / ml). Well below the point where a converted
+        /// milligram value could overflow the int column, so extreme agent input is rejected with a
+        /// clear error rather than silently overflowing or corrupting inventory.
+        /// </summary>
+        public const double MaxAmountMagnitude = 2_000_000d;
+
         public static double RequireFiniteAmount(double amount)
         {
             if (double.IsNaN(amount) || double.IsInfinity(amount))
             {
                 throw McpToolException.InvalidArguments("amount must be a finite number.");
+            }
+            if (System.Math.Abs(amount) > MaxAmountMagnitude)
+            {
+                throw McpToolException.InvalidArguments(
+                    $"amount magnitude must not exceed {MaxAmountMagnitude:N0} (g / mm / ml).");
             }
             return amount;
         }

@@ -679,8 +679,11 @@ namespace PrintLogApi.Services
             }
             catch (DbUpdateException)
             {
-                // Possible unique-index race: another identical call created the print first. Look it
-                // up and replay its result; if there is no such record the failure was something else.
+                // Possible unique-index race: another identical call created the print first. The
+                // transaction has rolled back but the failed Added entities are still tracked; clear
+                // them so the recovery query reads only committed state, then replay the winner's
+                // result. If there is no such record the failure was something else, so rethrow.
+                _context.ChangeTracker.Clear();
                 var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
                 if (concurrent != null)
                 {
@@ -746,10 +749,22 @@ namespace PrintLogApi.Services
         {
             foreach (var pf in print.FilamentUsage)
             {
-                if (pf.FilamentId.HasValue && pf.AmountMg is null)
+                if (!pf.FilamentId.HasValue)
+                {
+                    continue;
+                }
+                if (pf.AmountMg is null)
                 {
                     throw McpToolException.InvalidArguments(
                         "A material is missing the density/diameter needed to record its usage by weight.");
+                }
+                // A non-positive weight after conversion means the amount was too small to record or,
+                // for a Length/Volume source, overflowed the int milligram column (see
+                // UpdateFilamentUsageWeights, which casts unchecked). Reject rather than store corruption.
+                if (pf.AmountMg <= 0)
+                {
+                    throw McpToolException.InvalidArguments(
+                        "A material usage amount is out of the recordable range.");
                 }
             }
         }
