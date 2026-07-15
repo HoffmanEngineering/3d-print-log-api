@@ -264,6 +264,20 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         {
                             throw;
                         }
+                        catch (System.Exception ex) when (ex is System.ArgumentException or System.Text.Json.JsonException)
+                        {
+                            // Argument binding/shape failures from the MCP SDK (missing required
+                            // parameter, wrong type, unknown property). Our own validation always
+                            // throws McpToolException, so a raw ArgumentException/JsonException here
+                            // describes the caller's payload, not an internal fault. Surface a fixed,
+                            // detail-free hint so the caller corrects the call instead of retrying.
+                            Record("error");
+                            return new ModelContextProtocol.Protocol.CallToolResult
+                            {
+                                Content = [new ModelContextProtocol.Protocol.TextContentBlock { Text = "invalid_arguments: One or more arguments were invalid — check the tool's parameter names and types." }],
+                                IsError = true,
+                            };
+                        }
                         catch (System.Exception)
                         {
                             Record("error");
