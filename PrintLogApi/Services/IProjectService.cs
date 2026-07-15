@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using System.Threading;
 using Microsoft.AspNetCore.Http;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 
@@ -10,6 +12,23 @@ namespace PrintLogApi.Services
 {
     public interface IProjectService
     {
+        /// <summary>Paginated list of the caller's projects for the MCP read surface (name/reference search).</summary>
+        Task<McpPage<ProjectListItem>> ListProjectsForMcp(
+            long userId, int page, int pageSize, string search, Project.ProjectStatus? status, CancellationToken ct);
+
+        /// <summary>Creates a project for the MCP write surface. Invalidates the user cache.</summary>
+        Task<ProjectWriteResult> CreateProjectForMcp(
+            long userId, string name, string reference, string description, string url,
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, CancellationToken ct);
+
+        /// <summary>
+        /// Creator-only edit of a project for the MCP write surface. Only supplied fields change;
+        /// a missing/foreign project surfaces NotFound. Invalidates the user cache.
+        /// </summary>
+        Task<ProjectWriteResult> UpdateProjectForMcp(
+            long userId, Guid id, string name, string reference, string description, string url,
+            Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, CancellationToken ct);
+
         Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId, string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate");
         Task<Project> GetProjectByIdAsync(Guid id);
         Task<Project> CreateProjectAsync(AddProjectDto dto, long userId);

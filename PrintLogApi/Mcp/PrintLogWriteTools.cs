@@ -196,5 +196,61 @@ namespace PrintLogApi.Mcp
         {
             return await filamentService.SetMaterialActiveForMcp(CurrentUserId, materialId, isActive, ct);
         }
+
+        [McpServerTool, Description(
+            "Create a new project to group prints under. Name is required (max 100 chars). viewStatus " +
+            "controls visibility (Private, Unlisted, Public) and defaults to Private; the result echoes " +
+            "the resulting visibility.")]
+        public async Task<ProjectWriteResult> CreateProject(
+            [Description("Project name (max 100 chars).")] string name,
+            [Description("Optional external reference (max 100 chars).")] string reference = null,
+            [Description("Optional description (max 5000 chars).")] string description = null,
+            [Description("Optional URL (max 1000 chars).")] string url = null,
+            [Description("Status, default InProgress.")] Project.ProjectStatus status = Project.ProjectStatus.InProgress,
+            [Description("Visibility, default Private.")] Project.ProjectViewStatus viewStatus = Project.ProjectViewStatus.Private,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw McpToolException.InvalidArguments("name is required.");
+            }
+            ValidateProjectFields(name, reference, description, url, status, viewStatus);
+            return await projectService.CreateProjectForMcp(CurrentUserId, name, reference, description, url, status, viewStatus, ct);
+        }
+
+        [McpServerTool, Description(
+            "Edit one of your own projects. Only fields you pass are changed. viewStatus changes " +
+            "visibility; the result echoes the resulting visibility. Foreign projects are 'not found'.")]
+        public async Task<ProjectWriteResult> UpdateProject(
+            [Description("The project id.")] Guid id,
+            [Description("Optional new name (max 100 chars).")] string name = null,
+            [Description("Optional new reference (max 100 chars).")] string reference = null,
+            [Description("Optional new description (max 5000 chars).")] string description = null,
+            [Description("Optional new URL (max 1000 chars).")] string url = null,
+            [Description("Optional new status.")] Project.ProjectStatus? status = null,
+            [Description("Optional new visibility.")] Project.ProjectViewStatus? viewStatus = null,
+            CancellationToken ct = default)
+        {
+            ValidateProjectFields(name, reference, description, url, status, viewStatus);
+            return await projectService.UpdateProjectForMcp(CurrentUserId, id, name, reference, description, url, status, viewStatus, ct);
+        }
+
+        private static void ValidateProjectFields(
+            string name, string reference, string description, string url,
+            Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus)
+        {
+            McpWriteValidation.RequireMaxLength(name, 100, "name");
+            McpWriteValidation.RequireMaxLength(reference, 100, "reference");
+            McpWriteValidation.RequireMaxLength(description, 5000, "description");
+            McpWriteValidation.RequireMaxLength(url, 1000, "url");
+            if (status.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(status.Value, "status");
+            }
+            if (viewStatus.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
+            }
+        }
     }
 }

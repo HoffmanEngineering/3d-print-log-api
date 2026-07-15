@@ -233,6 +233,22 @@ namespace PrintLogApi.Mcp
             return printerService.GetPrinterForMcp(CurrentUserId, id, ct);
         }
 
+        [McpServerTool, Description(
+            "List your own projects: id, name, reference, status, and visibility. Use this to resolve " +
+            "a project name into the id that log_print and update_print take. Search matches name or " +
+            "reference. Paginated (default 25, max 100), most-recently-updated first.")]
+        public Task<McpPage<ProjectListItem>> ListProjects(
+            [Description("Optional case-insensitive search over name and reference.")] string search = null,
+            [Description("Optional status filter.")] Project.ProjectStatus? status = null,
+            [Description("1-based page number.")] int page = 1,
+            [Description("Page size (default 25, max 100).")] int? pageSize = null,
+            CancellationToken ct = default)
+        {
+            var validPage = McpPaging.RequirePage(page);
+            var validPageSize = McpPaging.ClampPageSize(pageSize);
+            return projectService.ListProjectsForMcp(CurrentUserId, validPage, validPageSize, search, status, ct);
+        }
+
         /// <summary>
         /// Validates a date range only when one is actually supplied. Supplying just one endpoint is
         /// rejected rather than silently treated as all-time, which would quietly answer a different

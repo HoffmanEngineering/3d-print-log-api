@@ -81,6 +81,9 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await ConnectAsync(McpToken());
             var tools = await client.ListToolsAsync();
 
+            // A read-only token sees ONLY the read surface: the SDK's authorization filter hides the
+            // write tools (which require write:printdata) from tools/list. See McpWriteSurfaceTests
+            // for the write-token view.
             Assert.Equal(
                 new[]
                 {
@@ -91,6 +94,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                     "get_printer",
                     "get_printer_stats",
                     "list_printers",
+                    "list_projects",
                     "ping",
                     "search_prints",
                 },
