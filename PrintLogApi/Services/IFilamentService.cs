@@ -30,6 +30,13 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<FindMaterialResult> FindMaterialForMcp(
             long userId, string material, string color, double? requiredGrams, CancellationToken ct);
+
+        /// <summary>
+        /// Remaining weight (grams) for one of the caller's materials, using the same remaining
+        /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns 0 when the material has no
+        /// nominal weight or does not belong to <paramref name="userId"/>.
+        /// </summary>
+        Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);

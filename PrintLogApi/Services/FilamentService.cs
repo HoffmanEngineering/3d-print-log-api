@@ -23,12 +23,14 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly ICacheVersionService _cacheVersionService;
 
-        public FilamentService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public FilamentService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _cacheVersionService = cacheVersionService;
         }
 
         private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
@@ -95,6 +97,16 @@ namespace PrintLogApi.Services
 
             var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
             return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
+        }
+
+        public async Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
+        {
+            var remainingMg = await _context.Filaments.AsNoTracking()
+                .Where(f => f.CreatedById == userId && f.Id == materialId)
+                .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
+                .Select(f => f.FilamentRemaining)
+                .FirstOrDefaultAsync(ct);
+            return McpUnits.MgToGrams(remainingMg);
         }
 
         public const int MaxGroups = 20;

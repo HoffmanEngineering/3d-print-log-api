@@ -15,6 +15,18 @@ namespace PrintLogApi.Services
         Task<Print> AddPrint(AddPrintDTO print, long userId);
 
         /// <summary>
+        /// Creates a print and its PrintFilament usage rows for the MCP write surface, in one
+        /// transaction keyed by <paramref name="idempotencyKey"/>. Printer, project and every material
+        /// must belong to <paramref name="userId"/> (else NotFound). Does NOT mutate printer
+        /// loaded-state. Invalidates the user cache after commit. On replay (same user+tool+key)
+        /// returns the existing print with WasReplayed = true.
+        /// </summary>
+        Task<LogPrintResult> LogPrintForMcp(
+            long userId, string title, long printerId, Print.PrintStatus status,
+            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);
+
+        /// <summary>
         /// Read-only, creator-only, paginated print search for the MCP server. Filters are applied
         /// before paging; results are ordered StartDate DESC, Id DESC. Units are grams and seconds.
         /// </summary>
