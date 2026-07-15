@@ -167,5 +167,23 @@ namespace PrintLogApi.Mcp
                 CurrentUserId, displayName, materialType, materialCategoryNickname, densityGramPerCubicCm,
                 diameterMm, source, initialAmount, brand, colorName, colorHex, storageLocation, isActive, ct);
         }
+
+        [McpServerTool, Description(
+            "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
+            "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +
+            "cannot go below zero or above the material's original capacity — an out-of-range " +
+            "adjustment is rejected. Returns the before/after remaining in grams. Foreign materials " +
+            "are 'not found'.")]
+        public async Task<MaterialWriteResult> AdjustMaterialRemaining(
+            [Description("The material id.")] Guid materialId,
+            [Description("Unit of the delta.")] McpMeasurementSource source,
+            [Description("Signed delta in the unit (g / mm / ml). Negative removes.")] double delta,
+            [Description("Optional note explaining the adjustment.")] string notes = null,
+            CancellationToken ct = default)
+        {
+            McpWriteValidation.RequireDefinedEnum(source, "source");
+            McpWriteValidation.RequireMaxLength(notes, 1000, "notes");
+            return await filamentService.AdjustMaterialRemainingForMcp(CurrentUserId, materialId, source, delta, notes, ct);
+        }
     }
 }

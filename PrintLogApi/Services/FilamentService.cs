@@ -170,6 +170,75 @@ namespace PrintLogApi.Services
                 remaining, created.IsActive, created.StorageLocation, created.DiameterMm);
         }
 
+        public async Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            CancellationToken ct)
+        {
+            McpWriteValidation.RequireFiniteAmount(delta);
+            if (delta == 0)
+            {
+                throw McpToolException.InvalidArguments("delta must be non-zero.");
+            }
+
+            var material = await _context.Filaments
+                .Include(f => f.MaterialCategory)
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            // Record the adjustment in the caller's source unit; the existing helper derives the rest,
+            // including AmountMg — the weight the remaining calculation actually sums.
+            var adjustment = new FilamentAdjustment
+            {
+                FilamentId = materialId,
+                Source = (FilamentAdjustment.SourceMeasurement)(int)source,
+                Notes = notes,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            switch (source)
+            {
+                case McpMeasurementSource.Weight:
+                    adjustment.AmountMg = checked((long)Math.Round(delta * 1000.0)); // g -> mg
+                    break;
+                case McpMeasurementSource.Length:
+                    adjustment.LengthInM = delta / 1000.0; // mm -> m
+                    break;
+                case McpMeasurementSource.Volume:
+                    adjustment.VolumeMl = delta; // ml
+                    break;
+            }
+            UpdateFilamentAdjustmentMeasurements(adjustment, material);
+
+            if (adjustment.AmountMg is null)
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material is missing the density/diameter needed to convert the adjustment to a weight.");
+            }
+
+            var deltaGrams = McpUnits.MgToGrams(adjustment.AmountMg);
+            var beforeGrams = await GetRemainingGramsForMcp(userId, materialId, ct);
+            var afterGrams = Math.Round(beforeGrams + deltaGrams, 3, MidpointRounding.AwayFromZero);
+            var capacityGrams = McpUnits.MgToGrams(material.InitialNominalWeightMg);
+
+            if (afterGrams < 0)
+            {
+                throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.");
+            }
+            if (capacityGrams > 0 && afterGrams > capacityGrams)
+            {
+                throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.");
+            }
+
+            _context.FilamentAdjustments.Add(adjustment);
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            return new MaterialWriteResult(materialId, beforeGrams, afterGrams, "g");
+        }
+
         public const int MaxGroups = 20;
         public const int MaxSpoolsPerGroup = 25;
 

@@ -48,6 +48,16 @@ namespace PrintLogApi.Services
             double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
             double initialAmount, string brand, string colorName, string colorHex,
             string storageLocation, bool isActive, CancellationToken ct);
+
+        /// <summary>
+        /// Applies a signed adjustment to a material's remaining amount, expressed in the caller's
+        /// source unit (Weight g / Length mm / Volume ml) and converted to the weight the inventory
+        /// accounting uses. Rejects a result that would go below zero or above the material's original
+        /// capacity. Before/after remaining are returned in grams (the canonical inventory unit).
+        /// </summary>
+        Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);
