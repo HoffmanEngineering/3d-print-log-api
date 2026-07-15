@@ -227,7 +227,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddMcpServer()
                 .WithHttpTransport(options => options.Stateless = true)
                 .AddAuthorizationFilters()
-                .WithTools<Mcp.PrintLogTools>()
+                .WithTools<Mcp.PrintLogReadTools>()
+                .WithTools<Mcp.PrintLogWriteTools>()
                 .WithRequestFilters(requestFilters =>
                 {
                     // Single choke point for tool errors AND telemetry: map our typed codes to safe
@@ -326,7 +327,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     {
                         Resource = Configuration["Auth0:McpIdentifier"]!,
                         AuthorizationServers = { domain },
-                        ScopesSupported = { "read:printdata" },
+                        ScopesSupported = { "read:printdata", "write:printdata" },
                     };
                 });
 
@@ -347,12 +348,40 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 options.AddPolicy("ViewUserProfile", policy =>
                     policy.Requirements.Add(new PublicOrUnlistedUserProfileRequirement()));
 
-                // MCP access: the dedicated MCP bearer (or dev bypass), the read:printdata
-                // scope, AND a mapped internal user. Registered in every environment.
-                options.AddPolicy("McpAccess", policy =>
+                // MCP endpoint baseline: the dedicated MCP bearer (or dev bypass), a mapped internal
+                // user, AND at least one MCP data scope (read OR write). The specific read/write gate
+                // is applied per tool class (McpRead / McpWrite), so a write-only agent still reaches
+                // the endpoint but a completely unscoped token cannot even list tools.
+                options.AddPolicy("Mcp", policy =>
+                {
+                    policy.AuthenticationSchemes.Add(bypassAuth ? "DevAuth" : "Mcp");
+                    policy.Requirements.Add(new McpUserRequirement());
+                    policy.RequireAssertion(ctx =>
+                    {
+                        if (bypassAuth)
+                        {
+                            return true; // dev bypass token carries no scopes
+                        }
+
+                        var scopes = (ctx.User.FindFirst("scope")?.Value ?? string.Empty).Split(' ');
+                        return scopes.Contains("read:printdata") || scopes.Contains("write:printdata");
+                    });
+                });
+
+                // Read tools: baseline + the read:printdata scope.
+                options.AddPolicy("McpRead", policy =>
                 {
                     policy.AuthenticationSchemes.Add(bypassAuth ? "DevAuth" : "Mcp");
                     policy.Requirements.Add(new HasScopeRequirement("read:printdata", domain));
+                    policy.Requirements.Add(new McpUserRequirement());
+                });
+
+                // Write tools: baseline + the write:printdata scope. A write agent SHOULD also
+                // request read:printdata to use the read tools, but is not required to for writes.
+                options.AddPolicy("McpWrite", policy =>
+                {
+                    policy.AuthenticationSchemes.Add(bypassAuth ? "DevAuth" : "Mcp");
+                    policy.Requirements.Add(new HasScopeRequirement("write:printdata", domain));
                     policy.Requirements.Add(new McpUserRequirement());
                 });
             });
@@ -430,9 +459,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             {
                 endpoints.MapControllers();
 
-                // Read-only MCP endpoint (Streamable HTTP, stateless). The McpAccess policy
-                // enforces the dedicated MCP bearer + read:printdata + a mapped user before dispatch.
-                endpoints.MapMcp("/mcp").RequireAuthorization("McpAccess").RequireRateLimiting("mcp");
+                // MCP endpoint (Streamable HTTP, stateless). The endpoint-level "Mcp" policy
+                // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
+                // scope gate is applied per tool class (McpRead / McpWrite).
+                endpoints.MapMcp("/mcp").RequireAuthorization("Mcp").RequireRateLimiting("mcp");
             });
 
         }

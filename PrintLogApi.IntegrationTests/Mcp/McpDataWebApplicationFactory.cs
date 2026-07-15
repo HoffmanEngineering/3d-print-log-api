@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
@@ -29,7 +30,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// <summary>Connects an MCP client authenticated as the given Auth0 subject (default: primary seeded user).</summary>
         public async Task<McpClient> ConnectAsync(string subject = IntegrationTestSeeder.TestUserOAuthId)
         {
-            var token = TestJwt.Create(TestJwt.McpAudience, subject: subject, scopes: new[] { "read:printdata" });
+            return await ConnectAsync(subject, new[] { "read:printdata" });
+        }
+
+        /// <summary>Connects an MCP client with an explicit scope set (e.g. read + write for write tools).</summary>
+        public async Task<McpClient> ConnectAsync(string subject, string[] scopes)
+        {
+            var token = TestJwt.Create(TestJwt.McpAudience, subject: subject, scopes: scopes);
             var httpClient = CreateClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             var transport = new HttpClientTransport(
@@ -53,6 +60,37 @@ namespace PrintLogApi.IntegrationTests.Mcp
             catch (McpException)
             {
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Returns the tool error code ("forbidden"/"not_found"/"error") or null when the call
+        /// succeeded. Authorization failures surface as an <see cref="McpException"/> ("forbidden").
+        /// </summary>
+        public static async Task<string> ToolErrorCode(McpClient client, string tool, Dictionary<string, object> arguments)
+        {
+            try
+            {
+                var result = await client.CallToolAsync(tool, arguments);
+                if (result.IsError != true)
+                {
+                    return null;
+                }
+
+                var text = result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text ?? "";
+                if (text.Contains("not found", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "not_found";
+                }
+                if (text.Contains("denied", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "forbidden";
+                }
+                return "error";
+            }
+            catch (McpException)
+            {
+                return "forbidden";
             }
         }
     }
