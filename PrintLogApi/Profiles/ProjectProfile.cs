@@ -19,10 +19,20 @@ namespace PrintLogApi.Profiles
                     opt => opt.MapFrom(src => (DateTimeOffset)DateTime.SpecifyKind(src.CreatedDate, DateTimeKind.Utc)))
                 .ForMember(dest => dest.PrintCount,
                     opt => opt.MapFrom(src => src.Prints.Count()))
+                // `?? 0` had NO fallback at all: a never-completed print contributed 0 even when it
+                // carried a real slicer estimate. Same defect the MCP summary had.
                 .ForMember(dest => dest.TotalPrintTimeInSeconds,
-                    opt => opt.MapFrom(src => src.Prints.Sum(p => p.PrintTimeInSeconds ?? 0)))
+                    opt => opt.MapFrom(src => src.Prints.Sum(p =>
+                        p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
+                        : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
+                        : 0)))
+                // Deliberately estimate-only — a DIFFERENT question ("what did the slicer predict?").
+                // Do not turn this into a resolved value. Guarded > 0 only.
                 .ForMember(dest => dest.TotalEstimatedPrintTimeInSeconds,
-                    opt => opt.MapFrom(src => src.Prints.Sum(p => p.EstimatedPrintTimeInSeconds ?? 0)))
+                    opt => opt.MapFrom(src => src.Prints.Sum(p =>
+                        p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
+                            ? p.EstimatedPrintTimeInSeconds.Value
+                            : 0)))
                 .ForMember(dest => dest.TotalFilamentWeightMg,
                     opt => opt.MapFrom(src => src.Prints
                         .SelectMany(p => p.FilamentUsage)
@@ -43,10 +53,20 @@ namespace PrintLogApi.Profiles
                     opt => opt.MapFrom(src => src.CreatedById))
                 .ForMember(dest => dest.PrintCount,
                     opt => opt.MapFrom(src => src.Prints.Count()))
+                // `?? 0` had NO fallback at all: a never-completed print contributed 0 even when it
+                // carried a real slicer estimate. Same defect the MCP summary had.
                 .ForMember(dest => dest.TotalPrintTimeInSeconds,
-                    opt => opt.MapFrom(src => src.Prints.Sum(p => p.PrintTimeInSeconds ?? 0)))
+                    opt => opt.MapFrom(src => src.Prints.Sum(p =>
+                        p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
+                        : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
+                        : 0)))
+                // Deliberately estimate-only — a DIFFERENT question ("what did the slicer predict?").
+                // Do not turn this into a resolved value. Guarded > 0 only.
                 .ForMember(dest => dest.TotalEstimatedPrintTimeInSeconds,
-                    opt => opt.MapFrom(src => src.Prints.Sum(p => p.EstimatedPrintTimeInSeconds ?? 0)))
+                    opt => opt.MapFrom(src => src.Prints.Sum(p =>
+                        p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
+                            ? p.EstimatedPrintTimeInSeconds.Value
+                            : 0)))
                 .ForMember(dest => dest.TotalFilamentWeightMg,
                     opt => opt.MapFrom(src => src.Prints
                         .SelectMany(p => p.FilamentUsage)

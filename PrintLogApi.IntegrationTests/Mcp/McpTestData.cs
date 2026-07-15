@@ -46,6 +46,66 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static readonly DateTimeOffset RichPrint1Date = DateTimeOffset.UtcNow.AddDays(-1);
         public static readonly DateTimeOffset RichPrint2Date = DateTimeOffset.UtcNow;
 
+        public const string MetricsUserOAuthId = "auth0|mcp-metrics-user";
+
+        /// <summary>
+        /// A user whose ONLY prints are the duration matrix, so tests can assert exact totals. Do not
+        /// add prints to this user: the exact assertions in PrintMetricsTests and the MCP tool tests
+        /// depend on its isolation. An assertion like Assert.True(total > 0) against the primary user
+        /// would pass even with the fallback bug present, because RichPrint1 has a real 7200 s actual.
+        /// </summary>
+        public static long MetricsUserId { get; private set; }
+        public static long MetricsPrinterId { get; private set; }
+        public static Guid MetricsProjectId { get; private set; }
+
+        public static long EstimatedOnlyPrintId { get; private set; } // actual null, estimate 6933 (prod case)
+        public static long ZeroActualPrintId { get; private set; }    // actual 0 (webhook coercion), estimate 1800
+        public static long ActualWinsPrintId { get; private set; }    // actual 7200 beats estimate 3600
+        public static long NoDurationPrintId { get; private set; }    // neither recorded
+
+        /// <summary>6933 (est) + 1800 (est; stored actual was 0) + 7200 (actual) + 0 (neither).</summary>
+        public const int DurationMatrixTotalSeconds = 15933;
+
+        /// <summary>EstimatedOnly + ZeroActual. NoDuration has no estimate, so it is NOT estimated.</summary>
+        public const int DurationMatrixEstimatedCount = 2;
+
+        /// <summary>
+        /// The estimate-only total, which is a DIFFERENT question ("what did the slicer predict?")
+        /// and must not become a resolved value: 6933 + 1800 + 3600 + 0.
+        /// </summary>
+        public const int DurationMatrixEstimateOnlyTotalSeconds = 12333;
+
+        /// <summary>
+        /// Material for the same four prints, mirroring the duration matrix so the material rule can
+        /// be asserted in isolation too:
+        ///   EstimatedOnly : AmountMg null,  EstimatedAmountMg 5000  -> 5000 (estimated)
+        ///   ZeroActual    : AmountMg 0,     EstimatedAmountMg 3000  -> 3000 (estimated; a stored 0 loses)
+        ///   ActualWins    : AmountMg 9000,  EstimatedAmountMg 1000  -> 9000 (measured)
+        ///   NoDuration    : AmountMg 4000,  EstimatedAmountMg -500  -> 4000 (a NEGATIVE estimate must not subtract)
+        /// </summary>
+        public const long MaterialMatrixTotalMg = 21_000;
+
+        /// <summary>EstimatedOnly + ZeroActual. ActualWins measured it; NoDuration's actual is real.</summary>
+        public const int MaterialMatrixEstimatedCount = 2;
+
+        /// <summary>
+        /// The LEGACY scalar material fields (Print.FilamentUsageMg / .EstimatedFilamentUsageMg).
+        /// The MCP tools never read these, but /api/Users/{id}/total-filament-usage does, and its
+        /// fallback used to diverge from the rule in two ways. Two prints carry the cases that bite:
+        ///   ActualWins  : FilamentUsageMg -1,   EstimatedFilamentUsageMg 1000 -> 1000
+        ///                 (a NEGATIVE actual must fall back; the old `!HasValue || == 0` test
+        ///                  matched neither branch, so the print contributed nothing at all)
+        ///   NoDuration  : FilamentUsageMg null, EstimatedFilamentUsageMg -500 -> 0
+        ///                 (a NEGATIVE estimate must not subtract; the old code added it)
+        /// </summary>
+        public const long LegacyMaterialMatrixTotalMg = 1_000;
+
+        /// <summary>
+        /// What /api/Users/{id}/total-filament-usage must report for the metrics user: the
+        /// PrintFilament rows PLUS the legacy scalars. The MCP tools see only the former (21000).
+        /// </summary>
+        public const long UsersEndpointMaterialTotalMg = MaterialMatrixTotalMg + LegacyMaterialMatrixTotalMg;
+
         public static void Seed(PrintLogContext context)
         {
             var now = DateTime.UtcNow;
@@ -500,6 +560,91 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             context.Filaments.AddRange(bulkSpools);
             context.SaveChanges();
+
+            // Isolated metrics user: its prints are the ONLY ones it owns, so totals can be asserted
+            // EXACTLY. This isolation is the point — see MetricsUserId.
+            var metricsUser = new User
+            {
+                OAuthUserId = MetricsUserOAuthId,
+                ViewStatus = User.ProfileViewStatus.Public,
+            };
+            context.Users.Add(metricsUser);
+            context.SaveChanges();
+            MetricsUserId = metricsUser.Id;
+
+            var metricsPrinter = new Printer
+            {
+                Name = "Metrics Fixture Printer",
+                Model = "MF1",
+                Make = "Fixture",
+                UserId = MetricsUserId,
+                IsActive = true,
+            };
+            context.Printers.Add(metricsPrinter);
+            context.SaveChanges();
+            MetricsPrinterId = metricsPrinter.Id;
+
+            // The matrix prints belong to a project so ProjectProfile's totals can be asserted too.
+            var metricsProject = new Project
+            {
+                Id = new Guid("aaaaaaaa-8001-0000-0000-000000000000"),
+                Name = "Metrics Fixture Project",
+                CreatedById = MetricsUserId,
+                CreatedDate = now,
+                UpdatedById = MetricsUserId,
+                UpdatedDate = now,
+            };
+            context.Projects.Add(metricsProject);
+            context.SaveChanges();
+            MetricsProjectId = metricsProject.Id;
+
+            // Each print carries ONE usage row, so the material rule is exercised by the same fixture.
+            Print MatrixPrint(
+                string title, int? actual, int? estimated, int? amountMg, int? estimatedAmountMg,
+                int? legacyActualMg = null, int? legacyEstimatedMg = null) => new()
+            {
+                Title = title,
+                StartDate = now,                     // dated, so ranged queries see them too
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = metricsPrinter.Id,
+                ProjectId = metricsProject.Id,
+                CreatedById = MetricsUserId,
+                CreatedDate = now,
+                UpdatedById = MetricsUserId,
+                UpdatedDate = now,
+                PrintTimeInSeconds = actual,
+                EstimatedPrintTimeInSeconds = estimated,
+                // Legacy scalars: read ONLY by /api/Users/{id}/total-filament-usage, never by MCP.
+                FilamentUsageMg = legacyActualMg,
+                EstimatedFilamentUsageMg = legacyEstimatedMg,
+                FilamentUsage = new List<PrintFilament>
+                {
+                    new() { Id = Guid.NewGuid(), FilamentId = null, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
+                },
+            };
+
+            // Mirrors real production states, not invented ones:
+            //  - EstimatedOnly: production print 402378 (OrcaSlicer uploader) — never completed, so the
+            //    actual is null while a genuine estimate exists. This is the row that made MCP report 0.
+            //  - ZeroActual: what the completion webhooks write when the device reports no duration.
+            //  - NoDuration carries a NEGATIVE material estimate: it must not subtract from the total.
+            var estimatedOnly = MatrixPrint("Estimated Only Print", null, 6933, null, 5000);
+            var zeroActual = MatrixPrint("Zero Actual Print", 0, 1800, 0, 3000);
+            // Legacy scalars on the last two: a NEGATIVE legacy actual must fall back to its estimate
+            // (1000), and a NEGATIVE legacy estimate must not subtract (0). See LegacyMaterialMatrixTotalMg.
+            var actualWins = MatrixPrint("Actual Wins Print", 7200, 3600, 9000, 1000,
+                legacyActualMg: -1, legacyEstimatedMg: 1000);
+            var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500,
+                legacyActualMg: null, legacyEstimatedMg: -500);
+
+            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration);
+            context.SaveChanges();
+
+            EstimatedOnlyPrintId = estimatedOnly.Id;
+            ZeroActualPrintId = zeroActual.Id;
+            ActualWinsPrintId = actualWins.Id;
+            NoDurationPrintId = noDuration.Id;
         }
 
         private static Filament NewTextMatchFilament(

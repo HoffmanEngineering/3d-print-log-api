@@ -48,7 +48,16 @@ namespace PrintLogApi.Services
                     TotalPrints = g.Count(),
                     SuccessfulPrints = g.Count(p => p.Status == Print.PrintStatus.Success),
                     FailedPrints = g.Count(p => p.Status == Print.PrintStatus.Failed),
-                    TotalPrintTimeSeconds = g.Sum(p => p.PrintTimeInSeconds ?? 0),
+                    // Inlined rather than PrintMetrics.DurationSecondsExpr: g.Sum takes a Func, not
+                    // an Expression, so passing the shared expression here is a compile error.
+                    // PrintMetricsTranslationTests pins this copy to the shared rule.
+                    TotalPrintTimeSeconds = g.Sum(p =>
+                        p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
+                        : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
+                        : 0),
+                    PrintsWithEstimatedDuration = g.Count(p =>
+                        !(p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0)
+                        && p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0),
                 })
                 .OrderBy(g => g.Name)
                 .ThenBy(g => g.PrinterId);
@@ -68,7 +77,8 @@ namespace PrintLogApi.Services
                     g.SuccessfulPrints,
                     g.FailedPrints,
                     McpUnits.SuccessRatePercent(g.SuccessfulPrints, g.TotalPrints),
-                    g.TotalPrintTimeSeconds))
+                    g.TotalPrintTimeSeconds,
+                    g.PrintsWithEstimatedDuration))
                 .ToList();
 
             var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
@@ -85,9 +95,18 @@ namespace PrintLogApi.Services
                 pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                 : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                 : 0), ct);
-            var timeSeconds = await prints.SumAsync(p => p.PrintTimeInSeconds ?? 0, ct);
+            // Top-level sums, so the shared expression translates. `?? 0` here was the live defect:
+            // a never-completed print has a null actual and a real estimate, and reported 0.
+            var timeSeconds = await prints.SumAsync(PrintMetrics.DurationSecondsExpr, ct);
+            var estimatedDuration = await prints.CountAsync(PrintMetrics.DurationIsEstimatedExpr, ct);
 
-            return new SummaryMetrics(count, McpUnits.MgToGrams(materialMg), timeSeconds);
+            // A print's material is "estimated" when ANY contributing usage row fell back to its estimate.
+            var estimatedMaterial = await prints.CountAsync(p => p.FilamentUsage.Any(pf =>
+                !(pf.AmountMg.HasValue && pf.AmountMg > 0)
+                && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0), ct);
+
+            return new SummaryMetrics(
+                count, McpUnits.MgToGrams(materialMg), timeSeconds, estimatedDuration, estimatedMaterial);
         }
 
         public async Task<PrintSummaryResult> GetPrintSummaryForMcp(

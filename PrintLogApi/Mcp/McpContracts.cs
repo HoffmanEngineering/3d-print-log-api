@@ -12,6 +12,10 @@ namespace PrintLogApi.Mcp
     public sealed record PrintListItem(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
         DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+        // Provenance. A number with no provenance forces an assistant to state an estimate as
+        // measured fact. DurationSeconds is null when NOTHING was recorded — never 0, which would
+        // claim a measurement of zero seconds.
+        bool DurationIsEstimated, bool MaterialIsEstimated,
         // Prints are searchable by project name, so a result must say which project matched —
         // otherwise the hit is uninterpretable.
         Guid? ProjectId, string? ProjectName);
@@ -28,6 +32,9 @@ namespace PrintLogApi.Mcp
     public sealed record PrintDetailResult(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
         DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+        // MaterialsUsed[] already carries a per-row IsEstimated; these lift the same idea to the
+        // print level. DurationSeconds is null when nothing was recorded, never 0.
+        bool DurationIsEstimated, bool MaterialIsEstimated,
         decimal? EstimatedCost, string? Notes,
         Guid? ProjectId, string? ProjectName,
         IReadOnlyList<MaterialUsage> MaterialsUsed,
@@ -70,9 +77,14 @@ namespace PrintLogApi.Mcp
         bool GroupsTruncated,
         bool CandidatesTruncated);
 
+    /// <summary>
+    /// Duration provenance only: this record carries no material figure, so a material-provenance
+    /// count here would qualify a number that does not exist.
+    /// </summary>
     public sealed record PrinterStatsItem(
         long PrinterId, string PrinterName, int TotalPrints, int SuccessfulPrints,
-        int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds);
+        int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds,
+        int PrintsWithEstimatedDuration);
 
     public sealed record PrinterListItem(
         long Id, string Name, string? Make, string? Model,
@@ -96,7 +108,12 @@ namespace PrintLogApi.Mcp
         int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
 
     public sealed record SummaryMetrics(
-        int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds);
+        int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,
+        // A summary spans many prints, so a single bool would be meaningless. These counts let an
+        // agent say "about 40 hours, but 9 of the 13 are estimates" instead of passing off a blended
+        // figure as measured.
+        int PrintsWithEstimatedDuration,
+        int PrintsWithEstimatedMaterial);
 
     /// <summary>
     /// Nested on purpose. The status filter and the status breakdown describe DIFFERENT populations:

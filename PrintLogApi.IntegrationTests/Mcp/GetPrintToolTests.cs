@@ -23,6 +23,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         private sealed record Detail(long Id, string Title, string Status, long? PrinterId,
             string PrinterName, DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+            bool DurationIsEstimated, bool MaterialIsEstimated,
             decimal? EstimatedCost, string Notes, Guid? ProjectId, string ProjectName,
             List<Usage> MaterialsUsed, bool MaterialsUsedTruncated, double ReturnedMaterialsUsedGrams);
 
@@ -171,6 +172,73 @@ namespace PrintLogApi.IntegrationTests.Mcp
             {
                 Assert.DoesNotContain(forbidden, rawJson, StringComparison.OrdinalIgnoreCase);
             }
+        }
+
+        [Fact]
+        public async Task Duration_UsesTheEstimate_AndFlagsIt()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+
+            Assert.Equal(6933, detail.DurationSeconds);
+            Assert.True(detail.DurationIsEstimated);
+        }
+
+        [Fact]
+        public async Task Duration_StoredZero_FallsBackToTheEstimate()
+        {
+            // A stored 0 IS HasValue, so a ??-coalescing reader reports 0 and suppresses the estimate.
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.ZeroActualPrintId }));
+
+            Assert.Equal(1800, detail.DurationSeconds);   // NOT 0
+            Assert.True(detail.DurationIsEstimated);
+        }
+
+        [Fact]
+        public async Task Duration_ActualWins_AndIsNotFlagged()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.ActualWinsPrintId }));
+
+            Assert.Equal(7200, detail.DurationSeconds);
+            Assert.False(detail.DurationIsEstimated);
+        }
+
+        [Fact]
+        public async Task Duration_NeitherRecorded_IsNull_AndNotFlaggedEstimated()
+        {
+            // Null, not 0: reporting 0 would assert a measurement of zero seconds.
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.NoDurationPrintId }));
+
+            Assert.Null(detail.DurationSeconds);
+            Assert.False(detail.DurationIsEstimated);
+        }
+
+        [Fact]
+        public async Task MaterialIsEstimated_IsTrue_WhenTheUsageRowFellBack()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+
+            Assert.True(detail.MaterialIsEstimated);
+            Assert.Contains(detail.MaterialsUsed, m => m.IsEstimated);
+        }
+
+        [Fact]
+        public async Task MaterialIsEstimated_IsFalse_WhenTheActualWasMeasured()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (detail, _) = Parse(await client.CallToolAsync(ToolName,
+                new Dictionary<string, object> { ["id"] = McpTestData.ActualWinsPrintId }));
+
+            Assert.False(detail.MaterialIsEstimated);
         }
     }
 }

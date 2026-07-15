@@ -147,7 +147,9 @@ namespace PrintLogApi.Controllers
                 CreatedById = userId,
                 UpdatedById = userId,
                 Title = title[..Math.Min(title.Length, 100)] ?? "",
-                EstimatedPrintTimeInSeconds = 0,
+                // The start payload carries no estimate. Record its ABSENCE, not a fake zero: a 0
+                // looks recorded, so no read-side fallback can ever recover from it.
+                EstimatedPrintTimeInSeconds = null,
                 FilamentUsage = new List<PrintFilament>(),
                 FileName = filenameWithExtension ?? ""
             };
@@ -287,7 +289,10 @@ namespace PrintLogApi.Controllers
 
             print.Status = PrintStatus.Failed;
 
-            print.PrintTimeInSeconds = (int)Math.Round(data?.PrintDuration ?? 0.0);
+            // Round FIRST, then test positivity: 0.3 is > 0 but rounds to 0, and persisting that 0
+            // would recreate the very "looks recorded but isn't" row we are eliminating.
+            var failedDuration = (int)Math.Round(data?.PrintDuration ?? 0.0);
+            print.PrintTimeInSeconds = failedDuration > 0 ? failedDuration : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
 
@@ -368,7 +373,9 @@ namespace PrintLogApi.Controllers
 
             print.Status = PrintStatus.Success;
 
-            print.PrintTimeInSeconds = (int)Math.Round(data?.TotalDuration ?? 0.0);
+            // Round FIRST, then test positivity — see HandlePrintFailed.
+            var totalDuration = (int)Math.Round(data?.TotalDuration ?? 0.0);
+            print.PrintTimeInSeconds = totalDuration > 0 ? totalDuration : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
 

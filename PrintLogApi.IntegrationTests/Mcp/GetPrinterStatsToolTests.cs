@@ -19,7 +19,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public GetPrinterStatsToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
         private sealed record Stat(long PrinterId, string PrinterName, int TotalPrints,
-            int SuccessfulPrints, int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds);
+            int SuccessfulPrints, int FailedPrints, double SuccessRatePercent, int TotalPrintTimeSeconds,
+            int PrintsWithEstimatedDuration);
 
         private sealed record PageResult(List<Stat> Items, int Page, int PageSize, int TotalCount, int TotalPages);
 
@@ -56,14 +57,19 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal(2, printer1.SuccessfulPrints);
             Assert.Equal(0, printer1.FailedPrints);
             Assert.Equal(40.0, printer1.SuccessRatePercent);
-            Assert.Equal(0, printer1.TotalPrintTimeSeconds);
+            // Was 0: all 5 base prints are estimate-only (EstimatedPrintTimeInSeconds = 3600*i, no
+            // actual), so 3600*15 = 54000. Asserting 0 here was asserting the bug.
+            Assert.Equal(54000, printer1.TotalPrintTimeSeconds);
+            Assert.Equal(5, printer1.PrintsWithEstimatedDuration);
 
             var printer2 = stats.Single(s => s.PrinterId == IntegrationTestSeeder.TestPrinterId2);
             Assert.Equal(2, printer2.TotalPrints);
             Assert.Equal(1, printer2.SuccessfulPrints);
             Assert.Equal(1, printer2.FailedPrints);
             Assert.Equal(50.0, printer2.SuccessRatePercent);
+            // Both rich prints have real actuals, so this total is unchanged and nothing is estimated.
             Assert.Equal(10800, printer2.TotalPrintTimeSeconds);
+            Assert.Equal(0, printer2.PrintsWithEstimatedDuration);
         }
 
         [Fact]
@@ -152,6 +158,17 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync();
             Assert.True(await McpDataWebApplicationFactory.IsToolError(
                 client, ToolName, new() { ["from"] = FullFrom }));
+        }
+
+        [Fact]
+        public async Task PrinterStats_Duration_UsesTheEstimate_AndCountsIt()
+        {
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object>()));
+
+            var printer = Assert.Single(stats);   // the metrics user owns exactly one printer
+            Assert.Equal(McpTestData.DurationMatrixTotalSeconds, printer.TotalPrintTimeSeconds);
+            Assert.Equal(McpTestData.DurationMatrixEstimatedCount, printer.PrintsWithEstimatedDuration);
         }
     }
 }

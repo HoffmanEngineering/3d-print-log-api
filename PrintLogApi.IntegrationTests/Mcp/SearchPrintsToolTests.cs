@@ -21,6 +21,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         private sealed record Item(long Id, string Title, string Status, long? PrinterId,
             string PrinterName, DateTimeOffset? StartedAt, double MaterialUsedGrams, int? DurationSeconds,
+            bool DurationIsEstimated, bool MaterialIsEstimated,
             Guid? ProjectId, string ProjectName);
 
         private sealed record PageResult(List<Item> Items, int Page, int PageSize, int TotalCount, int TotalPages);
@@ -229,6 +230,30 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var to = from.AddDays(-2);
             Assert.True(await McpDataWebApplicationFactory.IsToolError(client, ToolName,
                 new() { ["from"] = from, ["to"] = to }));
+        }
+
+        [Fact]
+        public async Task ListItems_CarryTheResolvedDuration_AndItsProvenance()
+        {
+            // search_prints shares the projection with get_print. Fixing one and not the other is
+            // exactly the drift this change exists to end, so it is asserted separately.
+            await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
+            var (page, _) = ParsePage(await Search(client, new() { ["pageSize"] = 100 }));
+
+            var estimated = page.Items.Single(i => i.Id == McpTestData.EstimatedOnlyPrintId);
+            Assert.Equal(6933, estimated.DurationSeconds);
+            Assert.True(estimated.DurationIsEstimated);
+            Assert.True(estimated.MaterialIsEstimated);
+
+            var measured = page.Items.Single(i => i.Id == McpTestData.ActualWinsPrintId);
+            Assert.Equal(7200, measured.DurationSeconds);
+            Assert.False(measured.DurationIsEstimated);
+            Assert.False(measured.MaterialIsEstimated);
+
+            // Nothing recorded => null, never 0.
+            var none = page.Items.Single(i => i.Id == McpTestData.NoDurationPrintId);
+            Assert.Null(none.DurationSeconds);
+            Assert.False(none.DurationIsEstimated);
         }
     }
 }
