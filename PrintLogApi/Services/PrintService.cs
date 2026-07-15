@@ -662,20 +662,26 @@ namespace PrintLogApi.Services
 
             try
             {
-                using var tx = await _context.Database.BeginTransactionAsync(ct);
-                _context.Prints.Add(newPrint);
-                await _context.SaveChangesAsync(ct);
-
-                _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
+                // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
+                // run inside an execution strategy, so the whole tx is the retriable unit.
+                var strategy = _context.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
                 {
-                    UserId = userId,
-                    ToolName = toolName,
-                    IdempotencyKey = idempotencyKey,
-                    CreatedPrintId = newPrint.Id,
-                    CreatedAt = DateTimeOffset.UtcNow,
+                    using var tx = await _context.Database.BeginTransactionAsync(ct);
+                    _context.Prints.Add(newPrint);
+                    await _context.SaveChangesAsync(ct);
+
+                    _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
+                    {
+                        UserId = userId,
+                        ToolName = toolName,
+                        IdempotencyKey = idempotencyKey,
+                        CreatedPrintId = newPrint.Id,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                    });
+                    await _context.SaveChangesAsync(ct);
+                    await tx.CommitAsync(ct);
                 });
-                await _context.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
             }
             catch (DbUpdateException)
             {
