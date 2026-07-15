@@ -185,5 +185,16 @@ namespace PrintLogApi.Mcp
             McpWriteValidation.RequireMaxLength(notes, 1000, "notes");
             return await filamentService.AdjustMaterialRemainingForMcp(CurrentUserId, materialId, source, delta, notes, ct);
         }
+
+        [McpServerTool, Description(
+            "Activate or retire one of your materials. Retiring hides it from default inventory " +
+            "listings but keeps its history. Foreign materials are 'not found'.")]
+        public async Task<MaterialInventoryItem> SetMaterialActive(
+            [Description("The material id.")] Guid materialId,
+            [Description("True to activate, false to retire.")] bool isActive,
+            CancellationToken ct = default)
+        {
+            return await filamentService.SetMaterialActiveForMcp(CurrentUserId, materialId, isActive, ct);
+        }
     }
 }

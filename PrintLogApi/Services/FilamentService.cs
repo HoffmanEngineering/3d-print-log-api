@@ -239,6 +239,26 @@ namespace PrintLogApi.Services
             return new MaterialWriteResult(materialId, beforeGrams, afterGrams, "g");
         }
 
+        public async Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct)
+        {
+            var material = await _context.Filaments
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            material.IsActive = isActive;
+            material.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
+            return new MaterialInventoryItem(
+                material.Id, material.DisplayName, material.Brand, material.MaterialType, material.ColorName,
+                remaining, material.IsActive, material.StorageLocation, material.DiameterMm);
+        }
+
         public const int MaxGroups = 20;
         public const int MaxSpoolsPerGroup = 25;
 

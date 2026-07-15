@@ -58,6 +58,12 @@ namespace PrintLogApi.Services
         Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
             long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
             CancellationToken ct);
+
+        /// <summary>
+        /// Activates or retires one of the caller's materials. Foreign/missing materials surface
+        /// NotFound. Invalidates the user cache.
+        /// </summary>
+        Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);
