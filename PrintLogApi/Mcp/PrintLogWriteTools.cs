@@ -93,5 +93,46 @@ namespace PrintLogApi.Mcp
                 CurrentUserId, title, printerId, status, startedAt, durationSeconds, notes, projectId,
                 rows, idempotencyKey.Trim(), ct);
         }
+
+        [McpServerTool, Description(
+            "Edit one of your own prints. Only fields you pass are changed. To move the print to a " +
+            "project pass projectId; to remove it from its project pass clearProject = true. If you " +
+            "pass 'materials' it REPLACES the print's entire material-usage list; omit it to leave " +
+            "usage as-is. Only the print's creator can edit it; any other id is 'not found'.")]
+        public async Task<PrintDetailResult> UpdatePrint(
+            [Description("The print id.")] long id,
+            [Description("Optional new status.")] Print.PrintStatus? status = null,
+            [Description("Optional new notes.")] string notes = null,
+            [Description("Optional new duration in seconds (> 0).")] int? durationSeconds = null,
+            [Description("Optional project id to file the print under.")] Guid? projectId = null,
+            [Description("Pass true to remove the print from its project. Ignored if projectId is set.")] bool clearProject = false,
+            [Description("Optional replacement material-usage list. Omit to leave usage unchanged.")] MaterialUsageInput[] materials = null,
+            CancellationToken ct = default)
+        {
+            if (status.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(status.Value, "status");
+            }
+            if (durationSeconds.HasValue)
+            {
+                McpWriteValidation.RequirePositiveDuration(durationSeconds.Value);
+            }
+            if (materials != null)
+            {
+                foreach (var row in materials)
+                {
+                    McpWriteValidation.RequireDefinedEnum(row.Source, "materials.source");
+                    McpWriteValidation.RequirePositiveAmount(row.Amount);
+                }
+            }
+
+            var projectProvided = projectId.HasValue || clearProject;
+            var effectiveProjectId = projectId.HasValue ? projectId : (Guid?)null;
+
+            return await printService.UpdateOwnPrintForMcp(
+                CurrentUserId, id, status, notes, durationSeconds,
+                projectProvided, effectiveProjectId,
+                materialsProvided: materials != null, materials ?? Array.Empty<MaterialUsageInput>(), ct);
+        }
     }
 }

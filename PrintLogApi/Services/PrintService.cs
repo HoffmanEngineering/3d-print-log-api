@@ -771,6 +771,68 @@ namespace PrintLogApi.Services
             return new LogPrintResult(printId, wasReplayed, remaining);
         }
 
+        public async Task<PrintDetailResult> UpdateOwnPrintForMcp(
+            long userId, long printId, PrintStatus? status, string notes, int? durationSeconds,
+            bool projectProvided, Guid? projectId,
+            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct)
+        {
+            var print = await _context.Prints
+                .Include(p => p.FilamentUsage)
+                .FirstOrDefaultAsync(p => p.Id == printId && p.CreatedById == userId, ct);
+            if (print == null)
+            {
+                throw McpToolException.NotFound("Print not found.");
+            }
+
+            if (status.HasValue)
+            {
+                print.Status = status.Value;
+            }
+            if (notes != null)
+            {
+                print.Notes = notes;
+            }
+            if (durationSeconds.HasValue)
+            {
+                print.PrintTimeInSeconds = durationSeconds;
+            }
+
+            if (projectProvided)
+            {
+                if (projectId.HasValue &&
+                    !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+                {
+                    throw McpToolException.NotFound("Project not found.");
+                }
+                print.ProjectId = projectId; // null clears the assignment
+            }
+
+            if (materialsProvided)
+            {
+                var ids = materials.Select(m => m.MaterialId).ToList();
+                if (ids.Count != ids.Distinct().Count())
+                {
+                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
+                }
+                if (ids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, ids))
+                {
+                    throw McpToolException.NotFound("Material not found.");
+                }
+
+                _context.PrintFilament.RemoveRange(print.FilamentUsage);
+                print.FilamentUsage = materials.Select(ToPrintFilament).ToList();
+                await UpdateFilamentUsageWeights(print);
+                RequireConvertibleUsage(print);
+            }
+
+            print.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            return await GetOwnPrintDetailForMcp(userId, printId, ct)
+                ?? throw McpToolException.NotFound("Print not found.");
+        }
+
         public async Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId)
         {
             var existingPrint = await GetPrintById(id);

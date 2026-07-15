@@ -27,6 +27,17 @@ namespace PrintLogApi.Services
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);
 
         /// <summary>
+        /// Creator-only edit of a print for the MCP write surface. Only supplied fields change; a
+        /// null return from GetOwnPrintDetailForMcp or a missing/foreign print surfaces NotFound.
+        /// When <paramref name="materialsProvided"/> is true the usage list is fully replaced. When
+        /// <paramref name="projectProvided"/> is true the project link is set (null clears it).
+        /// </summary>
+        Task<PrintDetailResult> UpdateOwnPrintForMcp(
+            long userId, long printId, Print.PrintStatus? status, string notes, int? durationSeconds,
+            bool projectProvided, Guid? projectId,
+            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct);
+
+        /// <summary>
         /// Read-only, creator-only, paginated print search for the MCP server. Filters are applied
         /// before paging; results are ordered StartDate DESC, Id DESC. Units are grams and seconds.
         /// </summary>
