@@ -16,11 +16,19 @@ namespace PrintLogApi.Mcp
     /// measured by weight, length, or volume. Source and its paired amount are always supplied
     /// together; a row must carry at least one of the two pairs.
     /// </summary>
+    /// <summary>
+    /// Every field except the id carries a default. That is not cosmetic: the SDK derives the
+    /// schema's 'required' list from constructor parameters WITHOUT a default, so omitting these
+    /// defaults advertised all six fields as required — including the nullable ones — while the
+    /// server happily accepted a row of just (materialId, source, amount). An agent reading that
+    /// schema sends "estimatedSource": null on every row to satisfy a rule that does not exist.
+    /// Keep the defaults; `ToolSchemaTests` pins the resulting required list.
+    /// </summary>
     public sealed record MaterialUsageInput(
         Guid MaterialId,
-        McpMeasurementSource? Source, double? Amount,
-        McpMeasurementSource? EstimatedSource, double? EstimatedAmount,
-        string Notes);
+        McpMeasurementSource? Source = null, double? Amount = null,
+        McpMeasurementSource? EstimatedSource = null, double? EstimatedAmount = null,
+        string Notes = null);
 
     public sealed record MaterialRemaining(Guid MaterialId, double RemainingGrams);
 
