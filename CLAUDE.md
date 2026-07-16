@@ -93,10 +93,11 @@ classes by capability:
 
 - **`PrintLogReadTools`** (`[Authorize(Policy = "McpRead")]`) — read tools, gated on the
   `read:printdata` scope.
-- **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`log_print`,
+- **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`create_print`,
   `update_print`, `add_material`, `adjust_material_remaining`, `set_material_active`,
   `create_project`, `update_project`, plus a `whoami` connectivity check), gated on the
-  `write:printdata` scope.
+  `write:printdata` scope. Each tool carries MCP annotations (`create_print` is idempotent and
+  non-destructive; `update_print` is destructive) so a client can reason about retry safety.
 
 Authorization topology:
 
@@ -112,11 +113,26 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 
 - The user is always token-derived; ownership is enforced in the query predicate. Foreign/missing
   ids surface a uniform `not_found` (no existence oracle).
-- `log_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
+- `create_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
   through unique-violation replay, and never mutates printer loaded-state (it does NOT call
-  `setLoadedFilament`).
-- Material amounts use a `{ source, amount }` pair (Weight g / Length mm / Volume ml) converted via
-  the existing measurement helpers; a usage row that cannot convert to a weight is rejected.
+  `setLoadedFilament`). Idempotency is **payload-bound**: the record stores a SHA-256
+  `RequestFingerprint` of the caller's arguments (`McpRequestFingerprint`, length-prefixed so a field
+  value cannot forge a boundary). Same key + same args replays; same key + **different** args is a
+  `conflict`. A null fingerprint (legacy row) replays without comparison.
+- `create_print` and `update_print` return the full `PrintDetailResult`, so a **write-only** agent can
+  verify what it wrote without holding the read scope.
+- `update_print` changes only the fields passed. Nullable fields are cleared by naming them in
+  `clear` (`fileName`, `url`, `notes`, `startedAt`, `durationSeconds`, `estimatedDurationSeconds`,
+  `projectId`); setting and clearing the same field is `invalid_arguments`. It validates everything
+  before mutating, so a rejected edit leaves the print untouched.
+- Material amounts use `{ source, amount }` and/or `{ estimatedSource, estimatedAmount }` pairs
+  (Weight g / Length mm / Volume ml) converted via the existing measurement helpers; a row must carry
+  at least one complete pair. Convertibility is checked on the **input rows** before persisting:
+  Length usage requires a diameter-tracking material and Volume requires density; otherwise
+  `invalid_arguments`. Amounts converting outside the recordable milligram range are rejected rather
+  than overflowing.
+- `viewStatus`/`allowComments` fall back to the user's saved settings when omitted (a malformed or
+  undefined stored value falls back to Private / false); `allowFileDownloads` defaults to false.
 - `adjust_material_remaining` rejects results below zero or above original capacity (no override).
 - No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
 
