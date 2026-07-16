@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,6 +46,45 @@ namespace PrintLogApi.Mcp
         /// call cannot submit an unbounded array. Far above any realistic multi-material print.</summary>
         private const int MaxMaterialRows = 50;
 
+        /// <summary>The nullable print fields update_print will clear on request.</summary>
+        public static readonly HashSet<string> ClearablePrintFields = new()
+        {
+            "fileName", "url", "notes", "startedAt", "estimatedDurationSeconds", "durationSeconds", "projectId",
+        };
+
+        /// <summary>
+        /// A usage row must carry an actual pair, an estimated pair, or both; a source without its
+        /// amount (or vice versa) is a half-specified measurement and is rejected rather than guessed.
+        /// </summary>
+        public static void ValidateUsageRow(MaterialUsageInput row)
+        {
+            bool hasActual = row.Source.HasValue || row.Amount.HasValue;
+            bool hasEstimated = row.EstimatedSource.HasValue || row.EstimatedAmount.HasValue;
+            if (!hasActual && !hasEstimated)
+            {
+                throw McpToolException.InvalidArguments("Each material row needs an actual and/or an estimated amount.");
+            }
+            if (row.Source.HasValue != row.Amount.HasValue)
+            {
+                throw McpToolException.InvalidArguments("A material row's source and amount must be provided together.");
+            }
+            if (row.EstimatedSource.HasValue != row.EstimatedAmount.HasValue)
+            {
+                throw McpToolException.InvalidArguments("A material row's estimatedSource and estimatedAmount must be provided together.");
+            }
+            if (row.Source.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
+                McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
+            }
+            if (row.EstimatedSource.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(row.EstimatedSource.Value, "materials.estimatedSource");
+                McpWriteValidation.RequirePositiveAmount(row.EstimatedAmount.Value);
+            }
+            McpWriteValidation.RequireMaxLength(row.Notes, 1000, "materials.notes");
+        }
+
         [McpServerTool(Name = "whoami"), Description("Confirms write access is granted. Returns your internal user id.")]
         public long WhoAmI() => CurrentUserId;
 
@@ -83,7 +123,7 @@ namespace PrintLogApi.Mcp
             McpWriteValidation.RequireDefinedEnum(status, "status");
             if (durationSeconds.HasValue)
             {
-                McpWriteValidation.RequirePositiveDuration(durationSeconds.Value);
+                McpWriteValidation.RequirePositiveDuration(durationSeconds.Value, "durationSeconds");
             }
 
             var rows = materials ?? Array.Empty<MaterialUsageInput>();
@@ -93,12 +133,7 @@ namespace PrintLogApi.Mcp
             }
             foreach (var row in rows)
             {
-                if (!row.Source.HasValue || !row.Amount.HasValue)
-                {
-                    throw McpToolException.InvalidArguments("Each material row needs a source and amount.");
-                }
-                McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
-                McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
+                ValidateUsageRow(row);
             }
 
             return await printService.CreatePrintForMcp(
@@ -127,7 +162,7 @@ namespace PrintLogApi.Mcp
             }
             if (durationSeconds.HasValue)
             {
-                McpWriteValidation.RequirePositiveDuration(durationSeconds.Value);
+                McpWriteValidation.RequirePositiveDuration(durationSeconds.Value, "durationSeconds");
             }
             if (materials != null)
             {
@@ -137,12 +172,7 @@ namespace PrintLogApi.Mcp
                 }
                 foreach (var row in materials)
                 {
-                    if (!row.Source.HasValue || !row.Amount.HasValue)
-                    {
-                        throw McpToolException.InvalidArguments("Each material row needs a source and amount.");
-                    }
-                    McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
-                    McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
+                    ValidateUsageRow(row);
                 }
             }
 
