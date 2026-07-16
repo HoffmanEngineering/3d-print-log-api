@@ -503,5 +503,119 @@ namespace PrintLogApi.Services
             return new CreatePrinterResult(
                 await GetPrinterForMcp(userId, printerId.Value, ct), WasReplayed: true);
         }
+
+        /// <summary>
+        /// Rejects a request that both sets and clears the same field. Guessing which one won would
+        /// make one of the caller's two explicit arguments silently disappear.
+        /// </summary>
+        private static void RequireNoSetAndClearCollision(PrinterAttributesInput input, ISet<string> clear)
+        {
+            void Check(string field, bool isSet)
+            {
+                if (isSet && clear.Contains(field))
+                {
+                    throw McpToolException.InvalidArguments($"{field} cannot be both set and cleared.");
+                }
+            }
+
+            Check("description", input.Description != null);
+            Check("nozzleDiameterMm", input.NozzleDiameterMm.HasValue);
+            Check("filamentDiameterMm", input.FilamentDiameterMm.HasValue);
+            Check("beamDiameterMm", input.BeamDiameterMm.HasValue);
+            Check("bedWidthMm", input.BedWidthMm.HasValue);
+            Check("bedDepthMm", input.BedDepthMm.HasValue);
+            Check("bedHeightMm", input.BedHeightMm.HasValue);
+            Check("screenResolutionXPixels", input.ScreenResolutionXPixels.HasValue);
+            Check("screenResolutionYPixels", input.ScreenResolutionYPixels.HasValue);
+            Check("hasHeatedBed", input.HasHeatedBed.HasValue);
+            Check("hasHeatedChamber", input.HasHeatedChamber.HasValue);
+            Check("wattageW", input.WattageW.HasValue);
+        }
+
+        public async Task<PrinterDetailResult> UpdatePrinterForMcp(
+            long userId, long printerId, PrinterAttributesInput input, ISet<string> clear, CancellationToken ct)
+        {
+            clear ??= new HashSet<string>();
+
+            // Canonicalize ONCE, before validation and persistence — same rule as create.
+            input = input.Canonicalize();
+            McpPrinterValidation.ValidateAttributes(input);
+            // Enforced HERE, not only in the tool wrapper: the service is the boundary every caller
+            // goes through, so this is where "make is not clearable" is actually true.
+            McpPrinterValidation.RequireClearableFields(clear);
+            RequireNoSetAndClearCollision(input, clear);
+
+            // No Include of LoadedFilaments, deliberately: what is never loaded can never be marked
+            // modified, so the loaded-state invariant does not depend on the patch code being careful.
+            var printer = await _context.Printers
+                .FirstOrDefaultAsync(p => p.Id == printerId && p.UserId == userId, ct);
+            if (printer == null)
+            {
+                throw McpToolException.NotFound("Printer not found.");
+            }
+
+            // Resolve the category BEFORE any mutation: an unknown nickname must reject the whole
+            // patch, not leave the earlier fields applied. An omitted category is left alone, legacy
+            // null included — force-repairing it would be an edit nobody asked for.
+            if (input.CategoryNickname != null)
+            {
+                var category = await RequirePrinterCategory(input.CategoryNickname, ct);
+                printer.Category = category;
+                printer.CategoryNickname = category.Nickname;
+            }
+
+            PatchString(v => printer.Make = v, input.Make);
+            PatchString(v => printer.Model = v, input.Model);
+            PatchString(v => printer.Name = v, input.Name);
+            PatchString(v => printer.Description = v, input.Description, clear.Contains("description"));
+
+            PatchValue(v => printer.NozzleDiameter = v, input.NozzleDiameterMm, clear.Contains("nozzleDiameterMm"));
+            PatchValue(v => printer.FilamentDiameter = v, input.FilamentDiameterMm, clear.Contains("filamentDiameterMm"));
+            PatchValue(v => printer.BeamDiameter = v, input.BeamDiameterMm, clear.Contains("beamDiameterMm"));
+            PatchValue(v => printer.BedWidthMm = v, input.BedWidthMm, clear.Contains("bedWidthMm"));
+            PatchValue(v => printer.BedDepthMm = v, input.BedDepthMm, clear.Contains("bedDepthMm"));
+            PatchValue(v => printer.BedHeightMm = v, input.BedHeightMm, clear.Contains("bedHeightMm"));
+            PatchValue(v => printer.ScreenResolutionXPixels = v, input.ScreenResolutionXPixels, clear.Contains("screenResolutionXPixels"));
+            PatchValue(v => printer.ScreenResolutionYPixels = v, input.ScreenResolutionYPixels, clear.Contains("screenResolutionYPixels"));
+            PatchValue(v => printer.HasHeatedBed = v, input.HasHeatedBed, clear.Contains("hasHeatedBed"));
+            PatchValue(v => printer.HasHeatedChamber = v, input.HasHeatedChamber, clear.Contains("hasHeatedChamber"));
+            PatchValue(v => printer.WattageW = v, input.WattageW, clear.Contains("wattageW"));
+
+            if (input.IsActive.HasValue)
+            {
+                printer.IsActive = input.IsActive.Value;
+            }
+
+            await _context.SaveChangesAsync(ct);
+
+            _telemetry.TrackEvent("McpPrinterEdit");
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            return await GetPrinterForMcp(userId, printer.Id, ct);
+        }
+
+        private static void PatchString(Action<string> set, string value, bool clear = false)
+        {
+            if (clear)
+            {
+                set(null);
+            }
+            else if (value != null)
+            {
+                set(value);
+            }
+        }
+
+        private static void PatchValue<T>(Action<T?> set, T? value, bool clear) where T : struct
+        {
+            if (clear)
+            {
+                set(null);
+            }
+            else if (value.HasValue)
+            {
+                set(value);
+            }
+        }
     }
 }

@@ -44,5 +44,21 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<CreatePrinterResult> CreatePrinterForMcp(
             long userId, PrinterAttributesInput input, string idempotencyKey, CancellationToken ct);
+
+        /// <summary>
+        /// Edits one of the caller's own printers through a dedicated ownership-scoped path.
+        /// <para>
+        /// Deliberately NOT the PutPrinter path: that one maps a whole AddPrinterDTO over the tracked
+        /// entity and calls setLoadedFilament, so it can add, unload and re-home PrinterFilament rows.
+        /// This method patches scalars only and never loads the loaded-filament collection at all.
+        /// </para>
+        /// <para>
+        /// Foreign or missing ids surface NotFound. Only fields present in <paramref name="input"/>
+        /// change; fields named in <paramref name="clear"/> are nulled. Everything is validated before
+        /// any mutation reaches the entity, so a rejected edit leaves the printer untouched.
+        /// </para>
+        /// </summary>
+        Task<PrinterDetailResult> UpdatePrinterForMcp(
+            long userId, long printerId, PrinterAttributesInput input, ISet<string> clear, CancellationToken ct);
     }
 }
