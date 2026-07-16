@@ -94,10 +94,11 @@ classes by capability:
 - **`PrintLogReadTools`** (`[Authorize(Policy = "McpRead")]`) — read tools, gated on the
   `read:printdata` scope.
 - **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`create_print`,
-  `update_print`, `add_material`, `adjust_material_remaining`, `set_material_active`,
-  `create_project`, `update_project`, plus a `whoami` connectivity check), gated on the
-  `write:printdata` scope. Each tool carries MCP annotations (`create_print` is idempotent and
-  non-destructive; `update_print` is destructive) so a client can reason about retry safety.
+  `update_print`, `create_material`, `update_material`, `adjust_material_remaining`,
+  `set_material_active`, `create_project`, `update_project`, plus a `whoami` connectivity check),
+  gated on the `write:printdata` scope. Each tool carries MCP annotations (`create_print` is
+  idempotent and non-destructive; `update_print` is destructive) so a client can reason about
+  retry safety.
 
 Authorization topology:
 
@@ -138,6 +139,31 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 - `viewStatus`/`allowComments` fall back to the user's saved settings when omitted (a malformed or
   undefined stored value falls back to Private / false); `allowFileDownloads` defaults to false.
 - `adjust_material_remaining` rejects results below zero or above original capacity (no override).
+- `create_material` idempotency is **optional**: with an `idempotencyKey`, same key + same args replays
+  and same key + different args is a `conflict`; **without** one, a retry creates a SECOND material.
+  That residual at-least-once risk is an accepted design choice, stated in the tool description.
+  `McpIdempotencyRecord` carries a nullable `CreatedPrintId` **or** `CreatedFilamentId` — exactly one,
+  decided by `ToolName`. Nothing enforces that; every lookup is scoped by `ToolName` and reads only
+  its own field, treating a null there as a dangling record.
+- `update_material` does **not** reuse `UpdateFilament`: that method loads via `GetFilamentById` with no
+  creator filter (a cross-user edit hole) and never invalidates the cache. The MCP path uses the
+  combined ownership predicate, validates everything before mutating, and invalidates after commit.
+  A rejected patch clears the change tracker, so half-applied mutations can never be flushed later.
+- Material capacity is **source-authoritative**, mirroring the website: `Source` names the field the
+  user entered and the fill derives weight from it. Editing density/diameter on a Length/Volume
+  material therefore recomputes its weight and its remaining-by-weight — documented in the tool
+  description, not a bug. `adjust_material_remaining` is the tool for changing quantity.
+- Every material capacity conversion goes through `McpMaterialConversion.RequireMgInRange` BEFORE the
+  `long` cast. `MeasurementUtilities` casts **unchecked**, so an unguarded huge density or amount
+  would store garbage rather than throw. The guard runs on the post-patch entity, so a density-only
+  edit that overflows is caught too, and capacity passes `minMg: 1` — a capacity rounding to 0 is a
+  material claiming a tracked capacity of nothing, not an empty one.
+- A **Length source requires a diameter**. `UpdateFilamentMeasurements` only early-returns for
+  diameter-*tracking* categories, so a resin with a Length source would reach `DiameterMm.Value` and
+  throw. Both write paths reject that combination rather than defaulting the diameter.
+- Clearing `colorHex` or `colors` clears **both**: the entity keeps `ColorHex` synced to `Colors[0]`, so
+  clearing one alone lets a stale swatch resurrect it. On create, both fields are resolved *before*
+  `AddFilament` sees them — it treats an empty `Colors` as absent and rebuilds it from `ColorHex`.
 - No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
 
 See the `adding-an-mcp-tool` skill for adding tools.
