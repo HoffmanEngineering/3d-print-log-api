@@ -27,17 +27,20 @@ namespace PrintLogApi.Mcp
         private readonly IPrintService printService;
         private readonly IFilamentService filamentService;
         private readonly IProjectService projectService;
+        private readonly IPrinterService printerService;
 
         public PrintLogWriteTools(
             IHttpContextAccessor httpContextAccessor,
             IPrintService printService,
             IFilamentService filamentService,
-            IProjectService projectService)
+            IProjectService projectService,
+            IPrinterService printerService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
             this.filamentService = filamentService;
             this.projectService = projectService;
+            this.printerService = printerService;
         }
 
         private long CurrentUserId =>
@@ -423,6 +426,120 @@ namespace PrintLogApi.Mcp
 
             return await filamentService.UpdateOwnMaterialForMcp(CurrentUserId, materialId, input, clearFields, ct);
         }
+
+        [McpServerTool(Name = "create_printer", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Add a printer to your account. 'make', 'model' and 'name' are required. " +
+            "'categoryNickname' must be one of the known printer categories (e.g. FFF, FDM, SLA, " +
+            "SLS); an unknown one is rejected, never silently replaced, and omitting it uses FFF. " +
+            "Dimensions are millimetres, wattage is watts, screen resolutions are pixels — all " +
+            "stored exactly as given, with no conversion. A new printer is active unless you pass " +
+            "isActive = false. This tool never loads or unloads filament: use the load/unload flow " +
+            "for that. 'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
+            "SAME arguments returns the same printer (wasReplayed = true) and reusing it with " +
+            "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND printer.")]
+        public async Task<CreatePrinterResult> CreatePrinter(
+            [Description("Manufacturer, e.g. Bambu Lab (max 50).")] string make,
+            [Description("Model, e.g. X1 Carbon (max 50).")] string model,
+            [Description("Your name for this printer (max 100).")] string name,
+            [Description("Optional description (max 1000).")] string description = null,
+            [Description("Optional category nickname, e.g. FFF or SLA (max 50). Defaults to FFF.")] string categoryNickname = null,
+            [Description("Optional nozzle diameter in mm (>= 0).")] double? nozzleDiameterMm = null,
+            [Description("Optional filament diameter in mm (>= 0).")] double? filamentDiameterMm = null,
+            [Description("Optional laser beam diameter in mm (>= 0).")] double? beamDiameterMm = null,
+            [Description("Optional bed width in mm (>= 0).")] double? bedWidthMm = null,
+            [Description("Optional bed depth in mm (>= 0).")] double? bedDepthMm = null,
+            [Description("Optional build height in mm (>= 0).")] double? bedHeightMm = null,
+            [Description("Optional screen width in pixels (>= 0).")] double? screenResolutionXPixels = null,
+            [Description("Optional screen height in pixels (>= 0).")] double? screenResolutionYPixels = null,
+            [Description("Optional heated-bed flag.")] bool? hasHeatedBed = null,
+            [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
+            [Description("Optional power draw in watts (>= 0).")] double? wattageW = null,
+            [Description("Whether the printer is in use. Defaults to true.")] bool? isActive = null,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
+            CancellationToken ct = default)
+        {
+            return await printerService.CreatePrinterForMcp(
+                CurrentUserId, BuildPrinterInput(
+                    make, model, name, description, categoryNickname, nozzleDiameterMm, filamentDiameterMm,
+                    beamDiameterMm, bedWidthMm, bedDepthMm, bedHeightMm, screenResolutionXPixels,
+                    screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive),
+                idempotencyKey, ct);
+        }
+
+        // Destructive = true, matching update_print: this tool overwrites fields and honours 'clear',
+        // so a retry is not free and a client must be able to reason about that.
+        [McpServerTool(Name = "update_printer", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Edit one of your own printers. Only fields you pass are changed. To clear a nullable " +
+            "field, list its name in 'clear' (description, nozzleDiameterMm, filamentDiameterMm, " +
+            "beamDiameterMm, bedWidthMm, bedDepthMm, bedHeightMm, screenResolutionXPixels, " +
+            "screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW). make, model, name, " +
+            "isActive and categoryNickname cannot be cleared. This tool never loads or unloads " +
+            "filament — the printer's loaded spools are returned but not changed. Printers belonging " +
+            "to anyone else are 'not found'.")]
+        public async Task<PrinterDetailResult> UpdatePrinter(
+            [Description("The printer id (see list_printers).")] long id,
+            [Description("Optional new manufacturer (max 50).")] string make = null,
+            [Description("Optional new model (max 50).")] string model = null,
+            [Description("Optional new name (max 100).")] string name = null,
+            [Description("Optional new description (max 1000).")] string description = null,
+            [Description("Optional new category nickname (max 50).")] string categoryNickname = null,
+            [Description("Optional new nozzle diameter in mm (>= 0).")] double? nozzleDiameterMm = null,
+            [Description("Optional new filament diameter in mm (>= 0).")] double? filamentDiameterMm = null,
+            [Description("Optional new laser beam diameter in mm (>= 0).")] double? beamDiameterMm = null,
+            [Description("Optional new bed width in mm (>= 0).")] double? bedWidthMm = null,
+            [Description("Optional new bed depth in mm (>= 0).")] double? bedDepthMm = null,
+            [Description("Optional new build height in mm (>= 0).")] double? bedHeightMm = null,
+            [Description("Optional new screen width in pixels (>= 0).")] double? screenResolutionXPixels = null,
+            [Description("Optional new screen height in pixels (>= 0).")] double? screenResolutionYPixels = null,
+            [Description("Optional heated-bed flag.")] bool? hasHeatedBed = null,
+            [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
+            [Description("Optional new power draw in watts (>= 0).")] double? wattageW = null,
+            [Description("Optional active flag.")] bool? isActive = null,
+            [Description("Optional field names to clear.")] string[] clear = null,
+            CancellationToken ct = default)
+        {
+            var clearFields = McpWriteValidation.RequireAllowedClearFields(
+                clear, new HashSet<string>(McpPrinterValidation.ClearableFields));
+
+            return await printerService.UpdatePrinterForMcp(
+                CurrentUserId, id, BuildPrinterInput(
+                    make, model, name, description, categoryNickname, nozzleDiameterMm, filamentDiameterMm,
+                    beamDiameterMm, bedWidthMm, bedDepthMm, bedHeightMm, screenResolutionXPixels,
+                    screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive),
+                clearFields, ct);
+        }
+
+        /// <summary>
+        /// Shared by create_printer and update_printer so the two parameter lists cannot drift into
+        /// mapping the same argument to different fields.
+        /// </summary>
+        private static PrinterAttributesInput BuildPrinterInput(
+            string make, string model, string name, string description, string categoryNickname,
+            double? nozzleDiameterMm, double? filamentDiameterMm, double? beamDiameterMm,
+            double? bedWidthMm, double? bedDepthMm, double? bedHeightMm,
+            double? screenResolutionXPixels, double? screenResolutionYPixels,
+            bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive) => new()
+        {
+            Make = make,
+            Model = model,
+            Name = name,
+            Description = description,
+            CategoryNickname = categoryNickname,
+            NozzleDiameterMm = nozzleDiameterMm,
+            FilamentDiameterMm = filamentDiameterMm,
+            BeamDiameterMm = beamDiameterMm,
+            BedWidthMm = bedWidthMm,
+            BedDepthMm = bedDepthMm,
+            BedHeightMm = bedHeightMm,
+            ScreenResolutionXPixels = screenResolutionXPixels,
+            ScreenResolutionYPixels = screenResolutionYPixels,
+            HasHeatedBed = hasHeatedBed,
+            HasHeatedChamber = hasHeatedChamber,
+            WattageW = wattageW,
+            IsActive = isActive,
+        };
 
         [McpServerTool, Description(
             "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
