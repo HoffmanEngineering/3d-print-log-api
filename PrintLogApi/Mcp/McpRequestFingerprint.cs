@@ -176,6 +176,32 @@ namespace PrintLogApi.Mcp
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }
 
+        /// <summary>
+        /// Fingerprint of the caller-provided create_project arguments. Same rules as
+        /// <see cref="ComputeCreatePrint"/>: fixed field order, length-prefixed strings, has-value
+        /// flags, and values hashed EXACTLY as given.
+        /// <para>
+        /// status and viewStatus are non-nullable at the tool boundary (they carry tool-level
+        /// defaults), so they are always written.
+        /// </para>
+        /// </summary>
+        public static string ComputeCreateProject(
+            string name, string reference, string description, string url,
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                WriteStr(w, name);
+                WriteStr(w, reference);
+                WriteStr(w, description);
+                WriteStr(w, url);
+                w.Write((int)status);
+                w.Write((int)viewStatus);
+            }
+            return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+        }
+
         private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v); }
         private static void WriteInt(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteEnum(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }

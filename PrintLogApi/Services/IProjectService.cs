@@ -16,10 +16,19 @@ namespace PrintLogApi.Services
         Task<McpPage<ProjectListItem>> ListProjectsForMcp(
             long userId, int page, int pageSize, string search, Project.ProjectStatus? status, CancellationToken ct);
 
-        /// <summary>Creates a project for the MCP write surface. Invalidates the user cache.</summary>
-        Task<ProjectWriteResult> CreateProjectForMcp(
+        /// <summary>
+        /// Creates a project for the MCP write surface. Invalidates the user cache.
+        /// <para>
+        /// <paramref name="idempotencyKey"/> is OPTIONAL, matching create_material/create_printer:
+        /// with a key, a retry carrying the same arguments replays the original project and a key
+        /// reused with different arguments is a conflict; without one, every call creates a new
+        /// project.
+        /// </para>
+        /// </summary>
+        Task<CreateProjectResult> CreateProjectForMcp(
             long userId, string name, string reference, string description, string url,
-            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, CancellationToken ct);
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string idempotencyKey,
+            CancellationToken ct);
 
         /// <summary>
         /// Creator-only edit of a project for the MCP write surface. Only supplied fields change;

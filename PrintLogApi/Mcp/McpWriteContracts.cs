@@ -50,8 +50,16 @@ namespace PrintLogApi.Mcp
     public sealed record MaterialWriteResult(
         Guid MaterialId, double BeforeGrams, double AfterGrams);
 
+    /// <summary>
+    /// Echoes every settable project field, not just name/status/visibility. There is no get_project
+    /// read tool, so this echo is the ONLY way a caller can confirm what it wrote — omitting the
+    /// three fields it just set made verification impossible.
+    /// </summary>
     public sealed record ProjectWriteResult(
-        Guid ProjectId, string Name, string Status, string ViewStatus);
+        Guid ProjectId, string Name, string? Reference, string? Description, string? Url,
+        string Status, string ViewStatus);
+
+    public sealed record CreateProjectResult(ProjectWriteResult Project, bool WasReplayed);
 
     public sealed record ProjectListItem(
         Guid Id, string Name, string? Reference, string Status, string ViewStatus);

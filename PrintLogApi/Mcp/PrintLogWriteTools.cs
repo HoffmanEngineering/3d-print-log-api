@@ -571,17 +571,21 @@ namespace PrintLogApi.Mcp
             return await filamentService.SetMaterialActiveForMcp(CurrentUserId, materialId, isActive, ct);
         }
 
-        [McpServerTool, Description(
+        [McpServerTool(Name = "create_project", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
             "Create a new project to group prints under. Name is required (max 100 chars). viewStatus " +
             "controls visibility (Private, Unlisted, Public) and defaults to Private; the result echoes " +
-            "the resulting visibility.")]
-        public async Task<ProjectWriteResult> CreateProject(
+            "every field it stored. 'idempotencyKey' is OPTIONAL but recommended: with one, retrying " +
+            "with the SAME arguments returns the same project (wasReplayed = true) and reusing it with " +
+            "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND project.")]
+        public async Task<CreateProjectResult> CreateProject(
             [Description("Project name (max 100 chars).")] string name,
             [Description("Optional external reference (max 100 chars).")] string reference = null,
             [Description("Optional description (max 5000 chars).")] string description = null,
             [Description("Optional URL (max 1000 chars).")] string url = null,
             [Description("Status, default InProgress.")] Project.ProjectStatus status = Project.ProjectStatus.InProgress,
             [Description("Visibility, default Private.")] Project.ProjectViewStatus viewStatus = Project.ProjectViewStatus.Private,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -589,7 +593,8 @@ namespace PrintLogApi.Mcp
                 throw McpToolException.InvalidArguments("name is required.");
             }
             ValidateProjectFields(name, reference, description, url, status, viewStatus);
-            return await projectService.CreateProjectForMcp(CurrentUserId, name, reference, description, url, status, viewStatus, ct);
+            return await projectService.CreateProjectForMcp(
+                CurrentUserId, name, reference, description, url, status, viewStatus, idempotencyKey, ct);
         }
 
         [McpServerTool, Description(

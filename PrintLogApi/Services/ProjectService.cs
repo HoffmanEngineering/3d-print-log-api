@@ -56,10 +56,26 @@ namespace PrintLogApi.Services
             return new Mcp.McpPage<Mcp.ProjectListItem>(items, page, pageSize, total, totalPages);
         }
 
-        public async Task<Mcp.ProjectWriteResult> CreateProjectForMcp(
+        public async Task<Mcp.CreateProjectResult> CreateProjectForMcp(
             long userId, string name, string reference, string description, string url,
-            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, System.Threading.CancellationToken ct)
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string idempotencyKey,
+            System.Threading.CancellationToken ct)
         {
+            const string toolName = "create_project";
+
+            idempotencyKey = RequireIdempotencyKey(idempotencyKey);
+            string fingerprint = null;
+            if (idempotencyKey != null)
+            {
+                fingerprint = Mcp.McpRequestFingerprint.ComputeCreateProject(
+                    name, reference, description, url, status, viewStatus);
+                var replay = await FindIdempotentProject(userId, toolName, idempotencyKey, fingerprint, ct);
+                if (replay != null)
+                {
+                    return replay;
+                }
+            }
+
             var project = new Project
             {
                 Id = Guid.NewGuid(),
@@ -72,11 +88,114 @@ namespace PrintLogApi.Services
                 CreatedById = userId,
                 UpdatedById = userId,
             };
-            _context.Projects.Add(project);
-            await _context.SaveChangesAsync(ct);
+
+            if (idempotencyKey == null)
+            {
+                _context.Projects.Add(project);
+                await _context.SaveChangesAsync(ct);
+            }
+            else
+            {
+                try
+                {
+                    await CreateProjectWithIdempotencyRecord(project, userId, idempotencyKey, fingerprint, ct);
+                }
+                catch (DbUpdateException)
+                {
+                    // Possible unique-index race: another identical call created the project first.
+                    // Clear the failed Added entities so the recovery query reads committed state
+                    // only, then replay the winner. No such record means the failure was something
+                    // else entirely — rethrow rather than reporting it as an idempotency problem.
+                    _context.ChangeTracker.Clear();
+                    var concurrent = await FindIdempotentProject(userId, toolName, idempotencyKey, fingerprint, ct);
+                    if (concurrent != null)
+                    {
+                        return concurrent;
+                    }
+                    throw;
+                }
+            }
+
             _cacheVersionService.InvalidateUserCache(userId);
-            return new Mcp.ProjectWriteResult(project.Id, project.Name, project.Status.ToString(), project.ViewStatus.ToString());
+            return new Mcp.CreateProjectResult(Describe(project), WasReplayed: false);
         }
+
+        /// <summary>
+        /// Creates the project and its idempotency record atomically. Lets DbUpdateException escape:
+        /// only the caller can tell a lost unique-index race (replayable) from a genuine write
+        /// failure (not), because only it knows the key and fingerprint to look the winner up with.
+        /// </summary>
+        private async Task CreateProjectWithIdempotencyRecord(
+            Project project, long userId, string key, string fingerprint, System.Threading.CancellationToken ct)
+        {
+            // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they run
+            // inside an execution strategy, so the whole tx is the retriable unit.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _context.Database.BeginTransactionAsync(ct);
+                _context.Projects.Add(project);
+                await _context.SaveChangesAsync(ct);
+
+                _context.McpIdempotencyRecords.Add(
+                    Mcp.McpIdempotencyRecordFactory.ForProject(userId, key, fingerprint, project.Id));
+                await _context.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+            });
+        }
+
+        private async Task<Mcp.CreateProjectResult> FindIdempotentProject(
+            long userId, string toolName, string key, string fingerprint, System.Threading.CancellationToken ct)
+        {
+            var record = await _context.McpIdempotencyRecords.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
+            if (record == null)
+            {
+                return null;
+            }
+
+            // A key reused with a DIFFERENT payload is a caller bug, not a retry: replaying would
+            // silently discard the new arguments. A null fingerprint is a legacy record with no
+            // stored payload to compare, so it replays unconditionally.
+            if (record.RequestFingerprint != null && record.RequestFingerprint != fingerprint)
+            {
+                throw Mcp.McpToolException.Conflict("This idempotency key was already used with different arguments.");
+            }
+
+            // Reads only its OWN target field. A record scoped to this tool with no CreatedProjectId
+            // is dangling, whatever else it may carry. Ownership is re-checked in the predicate.
+            var projectId = record.CreatedProjectId;
+            var project = projectId.HasValue
+                ? await _context.Projects.AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct)
+                : null;
+            if (project == null)
+            {
+                throw Mcp.McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
+            }
+
+            return new Mcp.CreateProjectResult(Describe(project), WasReplayed: true);
+        }
+
+        private static string RequireIdempotencyKey(string key)
+        {
+            if (key == null)
+            {
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw Mcp.McpToolException.InvalidArguments("idempotencyKey cannot be blank.");
+            }
+            // Trim BEFORE the length check: the trimmed value is what gets stored and compared, so
+            // that is the value the limit applies to.
+            var trimmed = key.Trim();
+            Mcp.McpWriteValidation.RequireMaxLength(trimmed, 200, "idempotencyKey");
+            return trimmed;
+        }
+
+        private static Mcp.ProjectWriteResult Describe(Project p) => new(
+            p.Id, p.Name, p.Reference, p.Description, p.Url, p.Status.ToString(), p.ViewStatus.ToString());
 
         public async Task<Mcp.ProjectWriteResult> UpdateProjectForMcp(
             long userId, Guid id, string name, string reference, string description, string url,
@@ -96,7 +215,7 @@ namespace PrintLogApi.Services
             project.UpdatedById = userId;
             await _context.SaveChangesAsync(ct);
             _cacheVersionService.InvalidateUserCache(userId);
-            return new Mcp.ProjectWriteResult(project.Id, project.Name, project.Status.ToString(), project.ViewStatus.ToString());
+            return Describe(project);
         }
 
         public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(

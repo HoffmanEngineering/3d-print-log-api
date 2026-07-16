@@ -46,7 +46,37 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal(id, r.CreatedFilamentId);
             Assert.Null(r.CreatedPrintId);
             Assert.Null(r.CreatedPrinterId);
+            Assert.Null(r.CreatedProjectId);
             Assert.Equal("create_material", r.ToolName);
+        }
+
+        [Fact]
+        public void ForProject_SetsOnlyTheProjectTarget()
+        {
+            var id = Guid.NewGuid();
+            var r = McpIdempotencyRecordFactory.ForProject(7, "k", "fp", id);
+
+            Assert.Equal(id, r.CreatedProjectId);
+            Assert.Null(r.CreatedPrintId);
+            Assert.Null(r.CreatedPrinterId);
+            Assert.Null(r.CreatedFilamentId);
+            Assert.Equal("create_project", r.ToolName);
+        }
+
+        // CreatedProjectId and CreatedFilamentId are both Guid?, so a target set on the wrong one
+        // would still compile and still round-trip. The count is what catches it.
+        [Fact]
+        public void RequireExactlyOneTarget_RejectsBothGuidTargets()
+        {
+            var r = new McpIdempotencyRecord
+            {
+                UserId = 1,
+                ToolName = "create_project",
+                IdempotencyKey = "k",
+                CreatedFilamentId = Guid.NewGuid(),
+                CreatedProjectId = Guid.NewGuid(),
+            };
+            Assert.Throws<InvalidOperationException>(() => McpIdempotencyRecordFactory.RequireExactlyOneTarget(r));
         }
 
         // A pairwise XOR of three operands is true for ONE or THREE non-null targets, so the guard

@@ -19,9 +19,12 @@ namespace PrintLogApi.Mcp
         public static McpIdempotencyRecord ForPrinter(long userId, string key, string fingerprint, long printerId) =>
             Build(userId, "create_printer", key, fingerprint, r => r.CreatedPrinterId = printerId);
 
+        public static McpIdempotencyRecord ForProject(long userId, string key, string fingerprint, Guid projectId) =>
+            Build(userId, "create_project", key, fingerprint, r => r.CreatedProjectId = projectId);
+
         /// <summary>
-        /// Counts the non-null targets rather than chaining XOR: a pairwise XOR of three operands is
-        /// true for one OR three non-null values, which would wave through the worst case.
+        /// Counts the non-null targets rather than chaining XOR: a pairwise XOR of several operands is
+        /// true for an ODD number of non-null values, which would wave through the worst cases.
         /// <para>
         /// Throws <see cref="InvalidOperationException"/>, not <see cref="McpToolException"/>: a
         /// record with the wrong number of targets is a bug in this server, never something a caller
@@ -32,7 +35,8 @@ namespace PrintLogApi.Mcp
         {
             var targets = (record.CreatedPrintId.HasValue ? 1 : 0)
                 + (record.CreatedFilamentId.HasValue ? 1 : 0)
-                + (record.CreatedPrinterId.HasValue ? 1 : 0);
+                + (record.CreatedPrinterId.HasValue ? 1 : 0)
+                + (record.CreatedProjectId.HasValue ? 1 : 0);
             if (targets != 1)
             {
                 throw new InvalidOperationException(

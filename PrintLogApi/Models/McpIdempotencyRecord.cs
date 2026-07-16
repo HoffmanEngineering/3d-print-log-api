@@ -37,10 +37,11 @@ namespace PrintLogApi.Models
         public string RequestFingerprint { get; set; }
 
         /// <summary>
-        /// The entity this key created. Exactly one of the three is set, decided by
+        /// The entity this key created. Exactly one of the four is set, decided by
         /// <see cref="ToolName"/>: create_print writes <see cref="CreatedPrintId"/>, create_material
         /// writes <see cref="CreatedFilamentId"/>, create_printer writes
-        /// <see cref="CreatedPrinterId"/>. All nullable because one table serves three tools.
+        /// <see cref="CreatedPrinterId"/>, create_project writes <see cref="CreatedProjectId"/>.
+        /// All nullable because one table serves four tools.
         /// <para>
         /// There is no check constraint. What makes the rule true is that every record is built by
         /// <c>McpIdempotencyRecordFactory</c>, which sets exactly one target and asserts it. What
@@ -54,6 +55,8 @@ namespace PrintLogApi.Models
         public Guid? CreatedFilamentId { get; set; }
 
         public long? CreatedPrinterId { get; set; }
+
+        public Guid? CreatedProjectId { get; set; }
 
         public DateTimeOffset CreatedAt { get; set; }
     }
