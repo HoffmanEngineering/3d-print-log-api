@@ -118,7 +118,10 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
   `setLoadedFilament`). Idempotency is **payload-bound**: the record stores a SHA-256
   `RequestFingerprint` of the caller's arguments (`McpRequestFingerprint`, length-prefixed so a field
   value cannot forge a boundary). Same key + same args replays; same key + **different** args is a
-  `conflict`. A null fingerprint (legacy row) replays without comparison.
+  `conflict`. A null fingerprint (legacy row) replays without comparison. Strings are canonicalized
+  (trimmed) **once in the service, before both hashing and persistence** — the fingerprint hashes
+  values exactly as given, so it can never assert two calls are equivalent while storing different
+  rows. Keep it that way: normalizing inside the fingerprint alone reintroduces that split.
 - `create_print` and `update_print` return the full `PrintDetailResult`, so a **write-only** agent can
   verify what it wrote without holding the read scope.
 - `update_print` changes only the fields passed. Nullable fields are cleared by naming them in
@@ -129,8 +132,9 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
   (Weight g / Length mm / Volume ml) converted via the existing measurement helpers; a row must carry
   at least one complete pair. Convertibility is checked on the **input rows** before persisting:
   Length usage requires a diameter-tracking material and Volume requires density; otherwise
-  `invalid_arguments`. Amounts converting outside the recordable milligram range are rejected rather
-  than overflowing.
+  `invalid_arguments`. Convertibility is validated using the **same rounding the persistence path
+  applies**, so an amount outside the recordable range — below 1 mg or beyond the int milligram
+  column — is rejected rather than silently stored as 0 (which reads back as "unset") or overflowing.
 - `viewStatus`/`allowComments` fall back to the user's saved settings when omitted (a malformed or
   undefined stored value falls back to Private / false); `allowFileDownloads` defaults to false.
 - `adjust_material_remaining` rejects results below zero or above original capacity (no override).

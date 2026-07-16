@@ -631,6 +631,16 @@ namespace PrintLogApi.Services
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
         {
             const string toolName = "create_print";
+
+            // Canonicalize ONCE, before both hashing and persistence. The fingerprint decides whether
+            // two calls are "the same request", so anything it normalizes away must also be normalized
+            // in what we store — otherwise the hash asserts an equivalence the stored row contradicts.
+            title = title?.Trim();
+            notes = notes?.Trim();
+            fileName = fileName?.Trim();
+            url = url?.Trim();
+            materials = materials.Select(m => m with { Notes = m.Notes?.Trim() }).ToList();
+
             var fingerprint = McpRequestFingerprint.ComputeCreatePrint(
                 title, printerId, status, startedAt, durationSeconds, estimatedDurationSeconds,
                 notes, projectId, fileName, url, viewStatus, allowComments, allowFileDownloads, materials);
@@ -862,6 +872,11 @@ namespace PrintLogApi.Services
                     "This material cannot record usage measured by length (missing diameter).");
             }
 
+            // Must apply the SAME rounding the persistence path applies, or a positive amount that
+            // rounds to 0 mg passes validation and is then stored as zero — which every read path
+            // treats as "unset" and silently replaces with the estimate. The Length/Volume helpers
+            // already round internally (matching UpdateFilamentUsageWeights); Weight is rounded here
+            // exactly as ToPrintFilament rounds it.
             double mg = source switch
             {
                 // amountInSourceUnit is mm here; GetAmountMgFromLength expects meters -> divide once.
@@ -869,10 +884,11 @@ namespace PrintLogApi.Services
                     amountInSourceUnit / 1000.0, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
                 McpMeasurementSource.Volume => GetAmountMgFromVolume(
                     amountInSourceUnit, f.MaterialDensityGramPerCubicCm),
-                _ => amountInSourceUnit * 1000.0, // g -> mg
+                _ => Math.Round(amountInSourceUnit * 1000.0), // g -> mg
             };
 
-            if (!double.IsFinite(mg) || mg <= 0 || mg > int.MaxValue)
+            // 1 mg is the smallest recordable amount: below that the column cannot represent it.
+            if (!double.IsFinite(mg) || mg < 1 || mg > int.MaxValue)
             {
                 throw McpToolException.InvalidArguments("A material usage amount is out of the recordable range.");
             }
@@ -964,6 +980,14 @@ namespace PrintLogApi.Services
                 throw McpToolException.NotFound("Print not found.");
             }
 
+            // Canonicalize to the same form create_print stores, so a field's value does not depend on
+            // which tool last wrote it. materials stays null when the caller omitted it entirely.
+            title = title?.Trim();
+            notes = notes?.Trim();
+            fileName = fileName?.Trim();
+            url = url?.Trim();
+            materials = materials?.Select(m => m with { Notes = m.Notes?.Trim() }).ToList();
+
             // ---- Validate everything first: a rejected edit must leave the print untouched. ----
             void Guard(string field, bool isSet)
             {
@@ -1031,8 +1055,8 @@ namespace PrintLogApi.Services
             }
 
             if (notes != null) { print.Notes = notes; } else if (clearFields.Contains("notes")) { print.Notes = null; }
-            if (fileName != null) { print.FileName = fileName.Trim(); } else if (clearFields.Contains("fileName")) { print.FileName = null; }
-            if (url != null) { print.Url = url.Trim(); } else if (clearFields.Contains("url")) { print.Url = null; }
+            if (fileName != null) { print.FileName = fileName; } else if (clearFields.Contains("fileName")) { print.FileName = null; }
+            if (url != null) { print.Url = url; } else if (clearFields.Contains("url")) { print.Url = null; }
             if (startedAt.HasValue) { print.StartDate = startedAt; } else if (clearFields.Contains("startedAt")) { print.StartDate = null; }
             if (durationSeconds.HasValue) { print.PrintTimeInSeconds = durationSeconds; } else if (clearFields.Contains("durationSeconds")) { print.PrintTimeInSeconds = null; }
             if (estimatedDurationSeconds.HasValue) { print.EstimatedPrintTimeInSeconds = estimatedDurationSeconds; } else if (clearFields.Contains("estimatedDurationSeconds")) { print.EstimatedPrintTimeInSeconds = null; }

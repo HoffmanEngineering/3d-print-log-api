@@ -67,6 +67,29 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
+        public async Task Update_BumpsCacheVersion_OnSuccess_NotOnRejection()
+        {
+            var cache = _factory.Services.GetRequiredService<ICacheVersionService>();
+            using var scope = _factory.Services.CreateScope();
+            var id = await Seed(scope, "u-cache");
+
+            // A rejected update mutates nothing, so it must not invalidate either.
+            var beforeRejected = cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
+            await Assert.ThrowsAsync<McpToolException>(() => Svc(scope).UpdateOwnPrintForMcp(
+                IntegrationTestSeeder.TestUserId, id, null, null, null, null, McpTestData.OtherPrinterId,
+                null, null, null, null, null, null, null, null, false, null, None, CancellationToken.None));
+            Assert.Equal(beforeRejected, cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId));
+
+            // A successful update touches summary-affecting fields, so cached summaries must be dropped.
+            var before = cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
+            await Svc(scope).UpdateOwnPrintForMcp(IntegrationTestSeeder.TestUserId, id, "cache", Print.PrintStatus.Failed,
+                null, null, null, 1200, null, null, null, null, null, null, null, true,
+                new List<MaterialUsageInput> { new(IntegrationTestSeeder.TestFilamentId1, McpMeasurementSource.Weight, 5.0, null, null, null) },
+                None, CancellationToken.None);
+            Assert.NotEqual(before, cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId));
+        }
+
+        [Fact]
         public async Task Update_SetAndClearSameField_Invalid()
         {
             using var scope = _factory.Services.CreateScope();

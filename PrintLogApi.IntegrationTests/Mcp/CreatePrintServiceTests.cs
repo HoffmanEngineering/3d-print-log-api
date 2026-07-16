@@ -263,6 +263,54 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
+        public async Task Create_SubMilligramWeight_IsRejected_NotSilentlyZero()
+        {
+            using var scope = _factory.Services.CreateScope();
+            // 0.0004 g rounds to 0 mg. Persisting it would record a usage row the read path treats as
+            // "unset" (falling back to the estimate), silently contradicting what the caller submitted.
+            var ex = await Assert.ThrowsAsync<McpToolException>(() => Svc(scope).CreatePrintForMcp(
+                IntegrationTestSeeder.TestUserId, "tiny", McpTestData.SearchPrinterId, Print.PrintStatus.Success,
+                null, null, null, null, null, null, null, null, null, null,
+                new List<MaterialUsageInput> { new(IntegrationTestSeeder.TestFilamentId1, McpMeasurementSource.Weight, 0.0004, null, null, null) },
+                "ck-tiny", CancellationToken.None));
+            Assert.Equal("invalid_arguments", ex.Code);
+        }
+
+        [Fact]
+        public async Task Create_SmallestRecordableWeight_IsAccepted()
+        {
+            using var scope = _factory.Services.CreateScope();
+            // The boundary immediately above: exactly 1 mg must still round-trip.
+            var r = await Svc(scope).CreatePrintForMcp(
+                IntegrationTestSeeder.TestUserId, "1mg", McpTestData.SearchPrinterId, Print.PrintStatus.Success,
+                null, null, null, null, null, null, null, null, null, null,
+                new List<MaterialUsageInput> { new(IntegrationTestSeeder.TestFilamentId1, McpMeasurementSource.Weight, 0.001, null, null, null) },
+                "ck-1mg", CancellationToken.None);
+            Assert.Equal(0.001, Assert.Single(r.Print.MaterialsUsed).ActualGrams);
+        }
+
+        [Fact]
+        public async Task Create_SameKeyWhitespaceOnlyTitleDifference_ReplaysConsistently()
+        {
+            using var scope = _factory.Services.CreateScope();
+            // Store the UNTRIMMED form first. The fingerprint canonicalizes whitespace away, so it has
+            // asserted these two calls are the same request — the persisted title must be the same
+            // canonical form, or the hash agrees on a value the database never held.
+            var first = await Svc(scope).CreatePrintForMcp(IntegrationTestSeeder.TestUserId, "  Widget  ",
+                McpTestData.SearchPrinterId, Print.PrintStatus.Success, null, null, null, "  a note  ", null, null, null,
+                null, null, null, new List<MaterialUsageInput>(), "ck-ws", CancellationToken.None);
+            Assert.Equal("Widget", first.Print.Title);
+            Assert.Equal("a note", first.Print.Notes);
+
+            var second = await Svc(scope).CreatePrintForMcp(IntegrationTestSeeder.TestUserId, "Widget",
+                McpTestData.SearchPrinterId, Print.PrintStatus.Success, null, null, null, "a note", null, null, null,
+                null, null, null, new List<MaterialUsageInput>(), "ck-ws", CancellationToken.None);
+
+            Assert.True(second.WasReplayed);
+            Assert.Equal(first.Print.Id, second.Print.Id);
+        }
+
+        [Fact]
         public async Task Create_OverflowingAmount_IsRejected()
         {
             using var scope = _factory.Services.CreateScope();

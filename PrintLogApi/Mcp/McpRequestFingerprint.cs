@@ -12,8 +12,13 @@ namespace PrintLogApi.Mcp
     /// Deterministic SHA-256 fingerprint of the caller-provided create_print arguments
     /// (pre-server-defaulting). Uses a BinaryWriter so every string is length-prefixed — a value
     /// cannot forge a field boundary (no delimiter injection). Fixed field order; material rows are
-    /// sorted by (materialId, source, estimatedSource) so row order is irrelevant. Strings trimmed;
-    /// null and empty are distinguished by a leading has-value flag.
+    /// sorted by (materialId, source, estimatedSource) so row order is irrelevant. Null and empty are
+    /// distinguished by a leading has-value flag.
+    /// <para>
+    /// Hashes values EXACTLY as given: it must not normalize anything the persistence path does not,
+    /// or it would report two calls as the same request while the database stored different rows.
+    /// Callers canonicalize first (see PrintService.CreatePrintForMcp).
+    /// </para>
     /// </summary>
     public static class McpRequestFingerprint
     {
@@ -60,7 +65,7 @@ namespace PrintLogApi.Mcp
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }
 
-        private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v.Trim()); }
+        private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v); }
         private static void WriteInt(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteEnum(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteBool(BinaryWriter w, bool? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
