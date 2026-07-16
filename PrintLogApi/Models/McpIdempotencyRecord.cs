@@ -5,8 +5,14 @@ namespace PrintLogApi.Models
 {
     /// <summary>
     /// Maps a client-supplied idempotency key to the entity a write tool created, so a retried
-    /// tool call returns the original result instead of creating a duplicate. Not a
-    /// <see cref="TimestampEntity"/>: <see cref="CreatedAt"/> is set explicitly.
+    /// tool call returns the originally created ENTITY instead of creating a duplicate.
+    /// <para>
+    /// Not a response snapshot: only the entity id and a request fingerprint are stored, and a
+    /// replay re-reads the entity. If it was edited after the original call, the replay returns its
+    /// CURRENT state — same entity, newer representation. Retry safety here means "no duplicate row",
+    /// not "byte-identical response".
+    /// </para>
+    /// Not a <see cref="TimestampEntity"/>: <see cref="CreatedAt"/> is set explicitly.
     /// </summary>
     public class McpIdempotencyRecord
     {

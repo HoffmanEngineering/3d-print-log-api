@@ -164,6 +164,12 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 - Clearing `colorHex` or `colors` clears **both**: the entity keeps `ColorHex` synced to `Colors[0]`, so
   clearing one alone lets a stale swatch resurrect it. On create, both fields are resolved *before*
   `AddFilament` sees them — it treats an empty `Colors` as absent and rebuilds it from `ColorHex`.
+- **Known gap:** the unique-violation *race recovery* in `create_print`/`create_material` is designed
+  for but not covered by tests. The `IX_McpIdempotencyRecords_User_Tool_Key` unique index is the real
+  guard and is verified; the `DbUpdateException` recovery branch is not reachable deterministically
+  (the pre-insert lookup intercepts a sequential duplicate first), and the integration suite shares a
+  single in-memory `SqliteConnection`, so a parallel test would hit connection contention rather than
+  a unique violation. Exercising it honestly needs a SQL Server-backed test.
 - No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
 
 See the `adding-an-mcp-tool` skill for adding tools.
