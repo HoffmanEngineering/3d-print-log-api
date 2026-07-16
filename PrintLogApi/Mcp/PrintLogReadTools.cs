@@ -130,6 +130,21 @@ namespace PrintLogApi.Mcp
                 userId, validPage, validPageSize, material, color, includeInactive, ct);
         }
 
+        [McpServerTool(Name = "get_material", ReadOnly = true, OpenWorld = false), Description(
+            "Get one of your own materials in full: category, density, diameter, colors, temperatures, " +
+            "cure times, purchase details, notes, and capacity. Weights are grams, lengths mm, volumes " +
+            "ml, temperatures °C, cure times seconds. 'sourceUnit' names the measurement the capacity " +
+            "was entered in (Weight/Length/Volume) — 'initialAmountInSourceUnit' is that authoritative " +
+            "figure; the gram values are derived from it. 'remainingGrams' is 0 both for an empty spool " +
+            "and for one with no tracked capacity: check 'hasNominalCapacity' before reporting 'none " +
+            "left'. Materials belonging to anyone else are 'not found'.")]
+        public async Task<MaterialDetail> GetMaterial(
+            [Description("The material id (see get_material_inventory or find_material).")] Guid materialId,
+            CancellationToken ct = default)
+        {
+            return await filamentService.GetOwnMaterialDetailForMcp(CurrentUserId, materialId, ct);
+        }
+
         [McpServerTool, Description(
             "Find your own filament spools matching a material and/or color, grouped by their exact " +
             "material and color. Filters match whole words, so 'PLA' also finds 'PLA+' and 'Silk PLA'. " +

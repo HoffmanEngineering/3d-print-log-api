@@ -109,6 +109,55 @@ namespace PrintLogApi.Services
             return McpUnits.MgToGrams(remainingMg);
         }
 
+        public async Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct)
+        {
+            var material = await _context.Filaments.AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            var remaining = await GetRemainingGramsForMcp(userId, materialId, ct);
+            return ToMaterialDetail(material, remaining);
+        }
+
+        /// <summary>
+        /// Projects an owned material to the MCP detail shape. The caller has ALREADY established
+        /// ownership; this method does not re-check it and must never be handed a foreign row.
+        /// </summary>
+        private static MaterialDetail ToMaterialDetail(Filament f, double remainingGrams)
+        {
+            // The authoritative amount, in the unit the user actually entered. Storage keeps length in
+            // METERS while the MCP boundary is mm.
+            double? initialInSourceUnit = f.Source switch
+            {
+                Filament.SourceMeasurement.Length => f.InitialNominalLengthM * 1000.0,
+                Filament.SourceMeasurement.Volume => f.InitialNominalVolumeMl,
+                _ => f.InitialNominalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialNominalWeightMg) : null,
+            };
+
+            return new MaterialDetail(
+                f.Id, f.DisplayName, f.Brand, f.MaterialType, f.MaterialCategoryNickname,
+                f.MaterialDensityGramPerCubicCm, f.DiameterMm,
+                f.ColorName, f.ColorHex,
+                f.Colors ?? new List<string>(),
+                f.ColorPattern?.ToString(), f.FinishType?.ToString(),
+                (f.Effects ?? new List<FilamentEffect>()).Select(e => e.ToString()).ToList(),
+                f.Source.ToString(),
+                initialInSourceUnit,
+                f.InitialNominalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialNominalWeightMg) : null,
+                f.InitialTotalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialTotalWeightMg) : null,
+                f.SpoolWeightMg.HasValue ? McpUnits.MgToGrams(f.SpoolWeightMg) : null,
+                remainingGrams, f.InitialNominalWeightMg.HasValue,
+                f.TempRangeStart, f.TempRangeEnd, f.RecommendedTemp, f.RecommendedBedTemp,
+                f.InitialLayerTimeS, f.LayerTimeS, f.MeltingTemperature,
+                f.InertGas, f.MaterialRefreshRatio,
+                f.IsActive, f.IsFavorite, f.Notes,
+                f.PurchaseDate, f.StorageLocation,
+                f.PurchaseLocation, f.PurchasePriceValue, f.PurchasePriceCurrency, f.PurchaseNotes);
+        }
+
         public async Task<MaterialInventoryItem> AddMaterialForMcp(
             long userId, string displayName, string materialType, string materialCategoryNickname,
             double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,

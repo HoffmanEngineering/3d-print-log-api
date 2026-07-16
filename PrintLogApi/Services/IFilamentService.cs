@@ -39,6 +39,12 @@ namespace PrintLogApi.Services
         Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
 
         /// <summary>
+        /// Full detail for ONE of the caller's own materials, via the combined ownership predicate.
+        /// Foreign or missing ids surface NotFound identically, so this is never an existence oracle.
+        /// </summary>
+        Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct);
+
+        /// <summary>
         /// Creates a material for the MCP write surface. The category must exist (no silent fallback
         /// to the default), density must be positive, and diameter is required for diameter-tracking
         /// categories. Reuses the existing measurement-fill logic. Invalidates the user cache.

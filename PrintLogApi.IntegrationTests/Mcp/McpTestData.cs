@@ -29,6 +29,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long AmsPrinterId { get; private set; } // carries more loaded spools than get_printer returns
         public static long CrossOwnerRefPrintId { get; private set; } // caller's print, another user's project + printer
         public static Guid ForeignProjectId { get; private set; } // owned by OtherUser
+        public static Guid ForeignMaterialId { get; private set; } // owned by OtherUser (the foreign spool)
 
         public const string BulkUserOAuthId = "auth0|mcp-bulk-user";
         public static long BulkUserId { get; private set; } // holds more spools than MaxCandidates
@@ -426,6 +427,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             foreignSpool.IsActive = false;
             context.Filaments.Add(foreignSpool);
             context.SaveChanges();
+            ForeignMaterialId = foreignSpool.Id;
 
             var leaky = new Print
             {

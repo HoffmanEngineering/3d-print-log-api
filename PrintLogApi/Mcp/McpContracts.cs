@@ -50,6 +50,37 @@ namespace PrintLogApi.Mcp
         double RemainingGrams, bool IsActive,
         string? StorageLocation, double? DiameterMm);
 
+    /// <summary>
+    /// One material in full. Units are grams / mm / ml / °C / seconds.
+    /// <para>
+    /// <see cref="SourceUnit"/> names the AUTHORITATIVE measurement (Weight | Length | Volume) — the
+    /// field the user entered; weight and everything else are derived from it. Reporting only grams
+    /// would hide which number is real.
+    /// </para>
+    /// <para>
+    /// <see cref="RemainingGrams"/> is 0 both when a spool is empty and when it never had a tracked
+    /// capacity, so <see cref="HasNominalCapacity"/> disambiguates: without it "0 g left" and "we
+    /// don't know" are the same answer.
+    /// </para>
+    /// </summary>
+    public sealed record MaterialDetail(
+        Guid Id, string? DisplayName, string? Brand, string? Material, string CategoryNickname,
+        double DensityGramPerCubicCm, double? DiameterMm,
+        string? ColorName, string? ColorHex, IReadOnlyList<string> Colors,
+        string? ColorPattern, string? FinishType, IReadOnlyList<string> Effects,
+        string SourceUnit,
+        double? InitialAmountInSourceUnit,
+        double? InitialCapacityGrams,
+        double? InitialTotalWeightGrams,
+        double? SpoolWeightGrams,
+        double RemainingGrams, bool HasNominalCapacity,
+        double? TempRangeStartC, double? TempRangeEndC, double? RecommendedTempC, double? RecommendedBedTempC,
+        double? InitialLayerTimeS, double? LayerTimeS, double? MeltingTemperatureC,
+        string? InertGas, double? MaterialRefreshRatio,
+        bool IsActive, bool IsFavorite, string? Notes,
+        DateTimeOffset? PurchaseDate, string? StorageLocation,
+        string? PurchaseLocation, string? PurchasePriceValue, string? PurchasePriceCurrency, string? PurchaseNotes);
+
     public sealed record SpoolItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
         double? DiameterMm, double RemainingGrams, string? StorageLocation);
