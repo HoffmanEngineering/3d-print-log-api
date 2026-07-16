@@ -88,25 +88,33 @@ namespace PrintLogApi.Mcp
         [McpServerTool(Name = "whoami"), Description("Confirms write access is granted. Returns your internal user id.")]
         public long WhoAmI() => CurrentUserId;
 
-        [McpServerTool(Name = "create_print"), Description(
-            "Log a finished 3D print for yourself. Records status, optional start time and duration " +
-            "(seconds), notes, an optional projectId, and per-material usage. Each usage row is " +
-            "{ materialId, source, amount } where source is Weight (grams), Length (mm), or Volume " +
-            "(ml) — report the amount in whatever unit the slicer gave. 'idempotencyKey' MUST be a " +
-            "stable id for this physical print: calling twice with the same key returns the SAME print " +
-            "(wasReplayed = true) and never creates a duplicate. This does NOT change which spools are " +
-            "loaded on the printer. A slicer integration may already have imported this print — confirm " +
-            "with the user before logging if unsure. Only your own printer/materials/project are " +
-            "accepted; anything else is 'not found'.")]
+        [McpServerTool(Name = "create_print", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Log a finished 3D print for yourself. Records status, optional start time, actual and " +
+            "estimated duration (seconds), notes, file name, url, visibility, and per-material usage. " +
+            "Each usage row is { materialId, source, amount, estimatedSource, estimatedAmount, notes } " +
+            "with a source of Weight (grams), Length (mm), or Volume (ml); provide an actual pair, an " +
+            "estimated pair, or both. viewStatus/allowComments default to your account settings when " +
+            "omitted; allowFileDownloads defaults to false. 'idempotencyKey' MUST be a stable id for " +
+            "this physical print: reusing it with the SAME arguments returns the same print " +
+            "(wasReplayed = true); reusing it with DIFFERENT arguments is a conflict. Does NOT change " +
+            "which spools are loaded. Only your own printer/materials/project are accepted; anything " +
+            "else is 'not found'.")]
         public async Task<CreatePrintResult> CreatePrint(
             [Description("Print title (max 100 chars).")] string title,
             [Description("Your printer id (see list_printers).")] long printerId,
             [Description("Print status, e.g. Success, PartialSuccess, Failed.")] Print.PrintStatus status,
-            [Description("Stable idempotency key for this print. Reusing it returns the same print.")] string idempotencyKey,
+            [Description("Stable idempotency key for this print.")] string idempotencyKey,
             [Description("Optional UTC start time.")] DateTimeOffset? startedAt = null,
             [Description("Optional measured duration in seconds (> 0).")] int? durationSeconds = null,
-            [Description("Optional notes.")] string notes = null,
+            [Description("Optional estimated duration in seconds (> 0).")] int? estimatedDurationSeconds = null,
+            [Description("Optional notes (max 50000).")] string notes = null,
             [Description("Optional project id (see list_projects).")] Guid? projectId = null,
+            [Description("Optional source file name (max 1000).")] string fileName = null,
+            [Description("Optional url (max 1000).")] string url = null,
+            [Description("Optional visibility. Defaults to your account default.")] Print.PrintViewStatus? viewStatus = null,
+            [Description("Optional. Defaults to your account default.")] bool? allowComments = null,
+            [Description("Optional. Defaults to false.")] bool? allowFileDownloads = null,
             [Description("Optional per-material usage rows.")] MaterialUsageInput[] materials = null,
             CancellationToken ct = default)
         {
@@ -121,9 +129,20 @@ namespace PrintLogApi.Mcp
             }
             McpWriteValidation.RequireMaxLength(idempotencyKey, 200, "idempotencyKey");
             McpWriteValidation.RequireDefinedEnum(status, "status");
+            if (viewStatus.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
+            }
+            McpWriteValidation.RequireMaxLength(notes, 50000, "notes");
+            McpWriteValidation.RequireMaxLength(fileName, 1000, "fileName");
+            McpWriteValidation.RequireMaxLength(url, 1000, "url");
             if (durationSeconds.HasValue)
             {
                 McpWriteValidation.RequirePositiveDuration(durationSeconds.Value, "durationSeconds");
+            }
+            if (estimatedDurationSeconds.HasValue)
+            {
+                McpWriteValidation.RequirePositiveDuration(estimatedDurationSeconds.Value, "estimatedDurationSeconds");
             }
 
             var rows = materials ?? Array.Empty<MaterialUsageInput>();
@@ -137,7 +156,8 @@ namespace PrintLogApi.Mcp
             }
 
             return await printService.CreatePrintForMcp(
-                CurrentUserId, title, printerId, status, startedAt, durationSeconds, notes, projectId,
+                CurrentUserId, title, printerId, status, startedAt, durationSeconds, estimatedDurationSeconds,
+                notes, projectId, fileName?.Trim(), url?.Trim(), viewStatus, allowComments, allowFileDownloads,
                 rows, idempotencyKey.Trim(), ct);
         }
 

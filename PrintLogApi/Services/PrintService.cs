@@ -625,12 +625,17 @@ namespace PrintLogApi.Services
 
         public async Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, PrintStatus status,
-            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
+            string notes, Guid? projectId, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
         {
             const string toolName = "create_print";
+            var fingerprint = McpRequestFingerprint.ComputeCreatePrint(
+                title, printerId, status, startedAt, durationSeconds, estimatedDurationSeconds,
+                notes, projectId, fileName, url, viewStatus, allowComments, allowFileDownloads, materials);
 
-            var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+            var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, fingerprint, ct);
             if (replay != null)
             {
                 return replay;
@@ -659,6 +664,7 @@ namespace PrintLogApi.Services
             {
                 throw McpToolException.NotFound("Material not found.");
             }
+            await RequireMcpConvertibleUsage(materials, userId, ct); // validate BEFORE building/persisting
 
             var newPrint = new Print
             {
@@ -667,15 +673,18 @@ namespace PrintLogApi.Services
                 PrinterId = printerId,
                 StartDate = startedAt,
                 PrintTimeInSeconds = durationSeconds,
+                EstimatedPrintTimeInSeconds = estimatedDurationSeconds,
                 Notes = notes,
+                FileName = fileName,
+                Url = url,
                 ProjectId = projectId,
                 CreatedById = userId,
                 UpdatedById = userId,
                 FilamentUsage = materials.Select(ToPrintFilament).ToList(),
             };
 
+            await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);
             await UpdateFilamentUsageWeights(newPrint);
-            RequireConvertibleUsage(newPrint);
 
             try
             {
@@ -693,6 +702,7 @@ namespace PrintLogApi.Services
                         UserId = userId,
                         ToolName = toolName,
                         IdempotencyKey = idempotencyKey,
+                        RequestFingerprint = fingerprint,
                         CreatedPrintId = newPrint.Id,
                         CreatedAt = DateTimeOffset.UtcNow,
                     });
@@ -707,7 +717,8 @@ namespace PrintLogApi.Services
                 // them so the recovery query reads only committed state, then replay the winner's
                 // result. If there is no such record the failure was something else, so rethrow.
                 _context.ChangeTracker.Clear();
-                var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+                // Fingerprint match -> replay the winner's result; a mismatch throws conflict inside.
+                var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, fingerprint, ct);
                 if (concurrent != null)
                 {
                     return concurrent;
@@ -720,13 +731,21 @@ namespace PrintLogApi.Services
         }
 
         private async Task<CreatePrintResult> FindIdempotentPrint(
-            long userId, string toolName, string key, CancellationToken ct)
+            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
             if (record == null)
             {
                 return null;
+            }
+
+            // A key reused with a DIFFERENT payload is a caller bug, not a retry: replaying the old
+            // print would silently discard the new arguments. A null fingerprint is a legacy record
+            // with no stored payload to compare, so it replays unconditionally.
+            if (record.RequestFingerprint != null && record.RequestFingerprint != fingerprint)
+            {
+                throw McpToolException.Conflict("This idempotency key was already used with different arguments.");
             }
 
             var exists = await _context.Prints
@@ -785,6 +804,124 @@ namespace PrintLogApi.Services
             }
 
             return pf;
+        }
+
+        /// <summary>
+        /// MCP-only pre-persist convertibility guard, validated on the INPUT rows (native units:
+        /// Weight=g, Length=mm, Volume=ml). Requirement per source: Weight=none; Volume=density;
+        /// Length=density+diameter (finite &amp; &gt; 0). Converted milligrams must be finite and in
+        /// (0, int.MaxValue]. Rejects with invalid_arguments instead of overflowing or throwing.
+        /// </summary>
+        private async Task RequireMcpConvertibleUsage(
+            IReadOnlyList<MaterialUsageInput> rows, long userId, CancellationToken ct)
+        {
+            var ids = rows.Select(r => r.MaterialId).Distinct().ToList();
+            if (ids.Count == 0)
+            {
+                return;
+            }
+
+            var map = await _context.Filaments
+                .Where(f => ids.Contains(f.Id))
+                .Include(f => f.MaterialCategory)
+                .AsNoTracking()
+                .ToDictionaryAsync(f => f.Id, ct);
+
+            foreach (var row in rows)
+            {
+                if (!map.TryGetValue(row.MaterialId, out var f))
+                {
+                    // Ownership/existence is enforced separately; a missing map entry means the row
+                    // will already have been rejected as not_found. Fail closed here regardless.
+                    throw McpToolException.NotFound("Material not found.");
+                }
+                if (row.Source.HasValue)
+                {
+                    RequireConvertible(row.Source.Value, row.Amount.Value, f);
+                }
+                if (row.EstimatedSource.HasValue)
+                {
+                    RequireConvertible(row.EstimatedSource.Value, row.EstimatedAmount.Value, f);
+                }
+            }
+        }
+
+        private static void RequireConvertible(McpMeasurementSource source, double amountInSourceUnit, Filament f)
+        {
+            bool requiresDensity = source != McpMeasurementSource.Weight;
+            bool requiresDiameter = source == McpMeasurementSource.Length;
+
+            if (requiresDensity && !(double.IsFinite(f.MaterialDensityGramPerCubicCm) && f.MaterialDensityGramPerCubicCm > 0))
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material cannot record usage measured by that unit (missing density).");
+            }
+            if (requiresDiameter && !(f.DiameterMm.HasValue && double.IsFinite(f.DiameterMm.Value) && f.DiameterMm.Value > 0))
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material cannot record usage measured by length (missing diameter).");
+            }
+
+            double mg = source switch
+            {
+                // amountInSourceUnit is mm here; GetAmountMgFromLength expects meters -> divide once.
+                McpMeasurementSource.Length => GetAmountMgFromLength(
+                    amountInSourceUnit / 1000.0, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
+                McpMeasurementSource.Volume => GetAmountMgFromVolume(
+                    amountInSourceUnit, f.MaterialDensityGramPerCubicCm),
+                _ => amountInSourceUnit * 1000.0, // g -> mg
+            };
+
+            if (!double.IsFinite(mg) || mg <= 0 || mg > int.MaxValue)
+            {
+                throw McpToolException.InvalidArguments("A material usage amount is out of the recordable range.");
+            }
+        }
+
+        /// <summary>
+        /// Applies the caller's explicit visibility/social choices, falling back to the user's saved
+        /// defaults and finally to the safe defaults (Private, no comments, no downloads). A stored
+        /// setting that is malformed — or numerically parseable but not a DEFINED enum member — falls
+        /// back rather than persisting a nonsense visibility.
+        /// </summary>
+        private async Task ApplyMcpPrintDefaults(
+            Print print, Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
+            long userId, CancellationToken ct)
+        {
+            const int defaultViewStatusTypeId = 1;   // Prints_DefaultPrintViewStatus
+            const int lastAllowCommentsTypeId = 3;   // Prints_LastSelectedAllowComments
+
+            if (viewStatus.HasValue)
+            {
+                print.ViewStatus = viewStatus.Value;
+            }
+            else
+            {
+                print.ViewStatus = Print.PrintViewStatus.Private;
+                var s = await _context.UserSettings.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatusTypeId, ct);
+                if (s?.Value is { } v && Enum.TryParse<Print.PrintViewStatus>(v, out var parsed) && Enum.IsDefined(parsed))
+                {
+                    print.ViewStatus = parsed;
+                }
+            }
+
+            if (allowComments.HasValue)
+            {
+                print.AllowComments = allowComments.Value;
+            }
+            else
+            {
+                print.AllowComments = false;
+                var s = await _context.UserSettings.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == lastAllowCommentsTypeId, ct);
+                if (s?.Value is { } v && bool.TryParse(v, out var parsed))
+                {
+                    print.AllowComments = parsed;
+                }
+            }
+
+            print.AllowFileDownloads = allowFileDownloads ?? false;
         }
 
         /// <summary>

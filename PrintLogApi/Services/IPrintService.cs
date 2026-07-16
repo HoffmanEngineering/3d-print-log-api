@@ -19,11 +19,15 @@ namespace PrintLogApi.Services
         /// transaction keyed by <paramref name="idempotencyKey"/>. Printer, project and every material
         /// must belong to <paramref name="userId"/> (else NotFound). Does NOT mutate printer
         /// loaded-state. Invalidates the user cache after commit. On replay (same user+tool+key)
-        /// returns the existing print with WasReplayed = true.
+        /// returns the existing print with WasReplayed = true, provided the arguments match the ones
+        /// the key was first used with; a different payload under the same key is a Conflict.
+        /// viewStatus/allowComments fall back to the user's saved defaults when not supplied.
         /// </summary>
         Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, Print.PrintStatus status,
-            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
+            string notes, Guid? projectId, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);
 
         /// <summary>
