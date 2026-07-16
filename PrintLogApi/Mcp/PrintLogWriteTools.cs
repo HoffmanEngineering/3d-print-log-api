@@ -327,6 +327,103 @@ namespace PrintLogApi.Mcp
             return await filamentService.CreateMaterialForMcp(CurrentUserId, input, idempotencyKey, ct);
         }
 
+        [McpServerTool(Name = "update_material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Edit one of your own materials. Only fields you pass are changed. To clear a nullable " +
+            "field, list its name in 'clear' (brand, colorName, colorHex, colors, storageLocation, " +
+            "notes, purchaseLocation, purchasePriceValue, purchasePriceCurrency, purchaseNotes, " +
+            "inertGas, purchaseDate, spoolWeightGrams, initialTotalWeightGrams, diameterMm, " +
+            "tempRangeStartC, tempRangeEndC, recommendedTempC, recommendedBedTempC, initialLayerTimeS, " +
+            "layerTimeS, meltingTemperatureC, materialRefreshRatio, colorPattern, finishType, " +
+            "effects); clearing colorHex or colors clears both. 'source' and 'initialAmount' must be " +
+            "given together and REBASE the capacity. NOTE: the source amount is authoritative and " +
+            "weight is derived from it, so editing density or diameter on a Length/Volume material " +
+            "recomputes its capacity in grams and hence how much it reports as remaining — use " +
+            "adjust_material_remaining to change quantity without rebasing capacity. Materials " +
+            "belonging to anyone else are 'not found'.")]
+        public async Task<MaterialDetail> UpdateMaterial(
+            [Description("The material id.")] Guid materialId,
+            [Description("Optional new display name (max 255).")] string displayName = null,
+            [Description("Optional new material type (max 255).")] string materialType = null,
+            [Description("Optional new category nickname (max 50).")] string materialCategoryNickname = null,
+            [Description("Optional new density in g/cm^3 (> 0).")] double? densityGramPerCubicCm = null,
+            [Description("Optional new diameter in mm (> 0).")] double? diameterMm = null,
+            [Description("Optional new source. Must accompany initialAmount.")] McpMeasurementSource? source = null,
+            [Description("Optional new initial amount in the source's unit. Must accompany source.")] double? initialAmount = null,
+            [Description("Optional new brand (max 255).")] string brand = null,
+            [Description("Optional new color name (max 255).")] string colorName = null,
+            [Description("Optional new single color, 6 hex digits, no '#'.")] string colorHex = null,
+            [Description("Optional new color swatches (max 32); colors[0] becomes the primary color.")] string[] colors = null,
+            [Description("Optional new color pattern.")] ColorPatternType? colorPattern = null,
+            [Description("Optional new finish.")] FilamentFinishType? finishType = null,
+            [Description("Optional replacement effects list.")] FilamentEffect[] effects = null,
+            [Description("Optional new storage location (max 256).")] string storageLocation = null,
+            [Description("Optional active flag.")] bool? isActive = null,
+            [Description("Optional favorite flag.")] bool? isFavorite = null,
+            [Description("Optional new notes (max 1000).")] string notes = null,
+            [Description("Optional new empty-spool weight in grams (>= 0).")] double? spoolWeightGrams = null,
+            [Description("Optional new on-scale weight in grams incl. spool (>= 0).")] double? initialTotalWeightGrams = null,
+            [Description("Optional new lower print temperature in °C.")] double? tempRangeStartC = null,
+            [Description("Optional new upper print temperature in °C.")] double? tempRangeEndC = null,
+            [Description("Optional new recommended hotend temperature in °C.")] double? recommendedTempC = null,
+            [Description("Optional new recommended bed temperature in °C.")] double? recommendedBedTempC = null,
+            [Description("Optional new resin initial-layer cure time in seconds (>= 0).")] double? initialLayerTimeS = null,
+            [Description("Optional new resin layer cure time in seconds (>= 0).")] double? layerTimeS = null,
+            [Description("Optional new melting temperature in °C.")] double? meltingTemperatureC = null,
+            [Description("Optional new inert gas (max 255).")] string inertGas = null,
+            [Description("Optional new powder refresh ratio, 0.0 to 1.0.")] double? materialRefreshRatio = null,
+            [Description("Optional new UTC purchase date.")] DateTimeOffset? purchaseDate = null,
+            [Description("Optional new purchase location or URL (max 1000).")] string purchaseLocation = null,
+            [Description("Optional new purchase price as text (max 256).")] string purchasePriceValue = null,
+            [Description("Optional new currency marker (max 256).")] string purchasePriceCurrency = null,
+            [Description("Optional new purchase notes (max 1000).")] string purchaseNotes = null,
+            [Description("Optional field names to clear.")] string[] clear = null,
+            CancellationToken ct = default)
+        {
+            var clearFields = McpWriteValidation.RequireAllowedClearFields(
+                clear, new HashSet<string>(McpMaterialValidation.ClearableFields));
+
+            var input = new MaterialAttributesInput
+            {
+                DisplayName = displayName,
+                MaterialType = materialType,
+                MaterialCategoryNickname = materialCategoryNickname,
+                DensityGramPerCubicCm = densityGramPerCubicCm,
+                DiameterMm = diameterMm,
+                Source = source,
+                InitialAmount = initialAmount,
+                Brand = brand,
+                ColorName = colorName,
+                ColorHex = colorHex,
+                Colors = colors,
+                ColorPattern = colorPattern,
+                FinishType = finishType,
+                Effects = effects,
+                StorageLocation = storageLocation,
+                IsActive = isActive,
+                IsFavorite = isFavorite,
+                Notes = notes,
+                SpoolWeightGrams = spoolWeightGrams,
+                InitialTotalWeightGrams = initialTotalWeightGrams,
+                TempRangeStartC = tempRangeStartC,
+                TempRangeEndC = tempRangeEndC,
+                RecommendedTempC = recommendedTempC,
+                RecommendedBedTempC = recommendedBedTempC,
+                InitialLayerTimeS = initialLayerTimeS,
+                LayerTimeS = layerTimeS,
+                MeltingTemperatureC = meltingTemperatureC,
+                InertGas = inertGas,
+                MaterialRefreshRatio = materialRefreshRatio,
+                PurchaseDate = purchaseDate,
+                PurchaseLocation = purchaseLocation,
+                PurchasePriceValue = purchasePriceValue,
+                PurchasePriceCurrency = purchasePriceCurrency,
+                PurchaseNotes = purchaseNotes,
+            };
+
+            return await filamentService.UpdateOwnMaterialForMcp(CurrentUserId, materialId, input, clearFields, ct);
+        }
+
         [McpServerTool, Description(
             "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
             "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +

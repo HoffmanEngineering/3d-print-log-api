@@ -58,6 +58,19 @@ namespace PrintLogApi.Services
             long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct);
 
         /// <summary>
+        /// Edits one of the caller's own materials through a dedicated ownership-scoped path.
+        /// <para>
+        /// Deliberately NOT <see cref="UpdateFilament"/>: that method loads via GetFilamentById with
+        /// no creator filter (a cross-user edit hole) and never invalidates the cache. Foreign or
+        /// missing ids surface NotFound. Only fields present in <paramref name="input"/> change;
+        /// fields named in <paramref name="clear"/> are nulled. Everything is validated before any
+        /// mutation reaches the database, so a rejected edit leaves the material untouched.
+        /// </para>
+        /// </summary>
+        Task<MaterialDetail> UpdateOwnMaterialForMcp(
+            long userId, Guid materialId, MaterialAttributesInput input, ISet<string> clear, CancellationToken ct);
+
+        /// <summary>
         /// Applies a signed adjustment to a material's remaining amount, expressed in the caller's
         /// source unit (Weight g / Length mm / Volume ml) and converted to the weight the inventory
         /// accounting uses. Rejects a result that would go below zero or above the material's original
