@@ -161,30 +161,62 @@ namespace PrintLogApi.Mcp
                 rows, idempotencyKey.Trim(), ct);
         }
 
-        [McpServerTool, Description(
-            "Edit one of your own prints. Only fields you pass are changed. To move the print to a " +
-            "project pass projectId; to remove it from its project pass clearProject = true. If you " +
-            "pass 'materials' it REPLACES the print's entire material-usage list; omit it to leave " +
-            "usage as-is. Only the print's creator can edit it; any other id is 'not found'.")]
+        [McpServerTool(Name = "update_print", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Edit one of your own prints. Only fields you pass are changed. To clear a nullable field, " +
+            "list its name in 'clear' (fileName, url, notes, startedAt, durationSeconds, " +
+            "estimatedDurationSeconds, projectId). Passing 'materials' REPLACES the entire usage list. " +
+            "Only the print's creator can edit it; any other id is 'not found'.")]
         public async Task<PrintDetailResult> UpdatePrint(
             [Description("The print id.")] long id,
+            [Description("Optional new title (max 100).")] string title = null,
             [Description("Optional new status.")] Print.PrintStatus? status = null,
-            [Description("Optional new notes.")] string notes = null,
-            [Description("Optional new duration in seconds (> 0).")] int? durationSeconds = null,
-            [Description("Optional project id to file the print under.")] Guid? projectId = null,
-            [Description("Pass true to remove the print from its project. Ignored if projectId is set.")] bool clearProject = false,
-            [Description("Optional replacement material-usage list. Omit to leave usage unchanged.")] MaterialUsageInput[] materials = null,
+            [Description("Optional new notes (max 50000).")] string notes = null,
+            [Description("Optional new UTC start time.")] DateTimeOffset? startedAt = null,
+            [Description("Optional new printer id (must be yours).")] long? printerId = null,
+            [Description("Optional new duration seconds (> 0).")] int? durationSeconds = null,
+            [Description("Optional new estimated duration seconds (> 0).")] int? estimatedDurationSeconds = null,
+            [Description("Optional new file name (max 1000).")] string fileName = null,
+            [Description("Optional new url (max 1000).")] string url = null,
+            [Description("Optional new visibility.")] Print.PrintViewStatus? viewStatus = null,
+            [Description("Optional.")] bool? allowComments = null,
+            [Description("Optional.")] bool? allowFileDownloads = null,
+            [Description("Optional project id to file under.")] Guid? projectId = null,
+            [Description("Optional field names to clear.")] string[] clear = null,
+            [Description("Optional replacement material-usage list. Omit to leave unchanged.")] MaterialUsageInput[] materials = null,
             CancellationToken ct = default)
         {
+            if (title != null)
+            {
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    throw McpToolException.InvalidArguments("title cannot be empty.");
+                }
+                McpWriteValidation.RequireMaxLength(title, 100, "title");
+            }
             if (status.HasValue)
             {
                 McpWriteValidation.RequireDefinedEnum(status.Value, "status");
             }
+            if (viewStatus.HasValue)
+            {
+                McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
+            }
+            McpWriteValidation.RequireMaxLength(notes, 50000, "notes");
+            McpWriteValidation.RequireMaxLength(fileName, 1000, "fileName");
+            McpWriteValidation.RequireMaxLength(url, 1000, "url");
             if (durationSeconds.HasValue)
             {
                 McpWriteValidation.RequirePositiveDuration(durationSeconds.Value, "durationSeconds");
             }
-            if (materials != null)
+            if (estimatedDurationSeconds.HasValue)
+            {
+                McpWriteValidation.RequirePositiveDuration(estimatedDurationSeconds.Value, "estimatedDurationSeconds");
+            }
+            var clearFields = McpWriteValidation.RequireAllowedClearFields(clear, ClearablePrintFields);
+
+            var materialsProvided = materials != null;
+            if (materialsProvided)
             {
                 if (materials.Length > MaxMaterialRows)
                 {
@@ -196,13 +228,10 @@ namespace PrintLogApi.Mcp
                 }
             }
 
-            var projectProvided = projectId.HasValue || clearProject;
-            var effectiveProjectId = projectId.HasValue ? projectId : (Guid?)null;
-
             return await printService.UpdateOwnPrintForMcp(
-                CurrentUserId, id, status, notes, durationSeconds,
-                projectProvided, effectiveProjectId,
-                materialsProvided: materials != null, materials ?? Array.Empty<MaterialUsageInput>(), ct);
+                CurrentUserId, id, title, status, notes, startedAt, printerId, durationSeconds, estimatedDurationSeconds,
+                fileName, url, viewStatus, allowComments, allowFileDownloads, projectId,
+                materialsProvided, materials ?? Array.Empty<MaterialUsageInput>(), clearFields, ct);
         }
 
         [McpServerTool, Description(

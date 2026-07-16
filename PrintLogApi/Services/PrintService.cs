@@ -924,37 +924,6 @@ namespace PrintLogApi.Services
             print.AllowFileDownloads = allowFileDownloads ?? false;
         }
 
-        /// <summary>
-        /// Shared conversion-integrity guard for the MCP log/update paths. Material remaining is
-        /// weight-based (see FilamentProfile: FilamentRemaining sums PrintFilament.AmountMg), so a
-        /// Length/Volume usage row on a material lacking the density/diameter to derive a weight would
-        /// be silently ignored by inventory accounting. UpdateFilamentUsageWeights leaves AmountMg
-        /// null in that case; for MCP we hard-fail rather than record usage that never decrements.
-        /// </summary>
-        private static void RequireConvertibleUsage(Print print)
-        {
-            foreach (var pf in print.FilamentUsage)
-            {
-                if (!pf.FilamentId.HasValue)
-                {
-                    continue;
-                }
-                if (pf.AmountMg is null)
-                {
-                    throw McpToolException.InvalidArguments(
-                        "A material is missing the density/diameter needed to record its usage by weight.");
-                }
-                // A non-positive weight after conversion means the amount was too small to record or,
-                // for a Length/Volume source, overflowed the int milligram column (see
-                // UpdateFilamentUsageWeights, which casts unchecked). Reject rather than store corruption.
-                if (pf.AmountMg <= 0)
-                {
-                    throw McpToolException.InvalidArguments(
-                        "A material usage amount is out of the recordable range.");
-                }
-            }
-        }
-
         private async Task<CreatePrintResult> BuildCreatePrintResult(
             long printId, bool wasReplayed, long userId, CancellationToken ct)
         {
@@ -981,9 +950,11 @@ namespace PrintLogApi.Services
         }
 
         public async Task<PrintDetailResult> UpdateOwnPrintForMcp(
-            long userId, long printId, PrintStatus? status, string notes, int? durationSeconds,
-            bool projectProvided, Guid? projectId,
-            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct)
+            long userId, long printId, string title, PrintStatus? status, string notes, DateTimeOffset? startedAt,
+            long? printerId, int? durationSeconds, int? estimatedDurationSeconds, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
+            Guid? projectId, bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials,
+            ISet<string> clearFields, CancellationToken ct)
         {
             var print = await _context.Prints
                 .Include(p => p.FilamentUsage)
@@ -993,45 +964,85 @@ namespace PrintLogApi.Services
                 throw McpToolException.NotFound("Print not found.");
             }
 
+            // ---- Validate everything first: a rejected edit must leave the print untouched. ----
+            void Guard(string field, bool isSet)
+            {
+                if (isSet && clearFields.Contains(field))
+                {
+                    throw McpToolException.InvalidArguments($"'{field}' cannot be both set and cleared.");
+                }
+            }
+            Guard("fileName", fileName != null);
+            Guard("url", url != null);
+            Guard("notes", notes != null);
+            Guard("startedAt", startedAt.HasValue);
+            Guard("durationSeconds", durationSeconds.HasValue);
+            Guard("estimatedDurationSeconds", estimatedDurationSeconds.HasValue);
+            Guard("projectId", projectId.HasValue);
+
+            if (printerId.HasValue &&
+                !await _context.Printers.AnyAsync(p => p.Id == printerId.Value && p.UserId == userId, ct))
+            {
+                throw McpToolException.NotFound("Printer not found.");
+            }
+            if (projectId.HasValue &&
+                !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+            {
+                throw McpToolException.NotFound("Project not found.");
+            }
+            if (materialsProvided)
+            {
+                var mids = materials.Select(m => m.MaterialId).ToList();
+                if (mids.Count != mids.Distinct().Count())
+                {
+                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
+                }
+                if (mids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, mids))
+                {
+                    throw McpToolException.NotFound("Material not found.");
+                }
+                await RequireMcpConvertibleUsage(materials, userId, ct);
+            }
+
+            // ---- Mutate. ----
+            if (title != null)
+            {
+                print.Title = title;
+            }
             if (status.HasValue)
             {
                 print.Status = status.Value;
             }
-            if (notes != null)
+            if (viewStatus.HasValue)
             {
-                print.Notes = notes;
+                print.ViewStatus = viewStatus.Value;
             }
-            if (durationSeconds.HasValue)
+            if (allowComments.HasValue)
             {
-                print.PrintTimeInSeconds = durationSeconds;
+                print.AllowComments = allowComments.Value;
+            }
+            if (allowFileDownloads.HasValue)
+            {
+                print.AllowFileDownloads = allowFileDownloads.Value;
+            }
+            if (printerId.HasValue)
+            {
+                print.PrinterId = printerId.Value;
             }
 
-            if (projectProvided)
-            {
-                if (projectId.HasValue &&
-                    !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
-                {
-                    throw McpToolException.NotFound("Project not found.");
-                }
-                print.ProjectId = projectId; // null clears the assignment
-            }
+            if (notes != null) { print.Notes = notes; } else if (clearFields.Contains("notes")) { print.Notes = null; }
+            if (fileName != null) { print.FileName = fileName.Trim(); } else if (clearFields.Contains("fileName")) { print.FileName = null; }
+            if (url != null) { print.Url = url.Trim(); } else if (clearFields.Contains("url")) { print.Url = null; }
+            if (startedAt.HasValue) { print.StartDate = startedAt; } else if (clearFields.Contains("startedAt")) { print.StartDate = null; }
+            if (durationSeconds.HasValue) { print.PrintTimeInSeconds = durationSeconds; } else if (clearFields.Contains("durationSeconds")) { print.PrintTimeInSeconds = null; }
+            if (estimatedDurationSeconds.HasValue) { print.EstimatedPrintTimeInSeconds = estimatedDurationSeconds; } else if (clearFields.Contains("estimatedDurationSeconds")) { print.EstimatedPrintTimeInSeconds = null; }
+            if (projectId.HasValue) { print.ProjectId = projectId; } else if (clearFields.Contains("projectId")) { print.ProjectId = null; }
 
             if (materialsProvided)
             {
-                var ids = materials.Select(m => m.MaterialId).ToList();
-                if (ids.Count != ids.Distinct().Count())
-                {
-                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
-                }
-                if (ids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, ids))
-                {
-                    throw McpToolException.NotFound("Material not found.");
-                }
-
                 _context.PrintFilament.RemoveRange(print.FilamentUsage);
                 print.FilamentUsage = materials.Select(ToPrintFilament).ToList();
                 await UpdateFilamentUsageWeights(print);
-                RequireConvertibleUsage(print);
             }
 
             print.UpdatedById = userId;
