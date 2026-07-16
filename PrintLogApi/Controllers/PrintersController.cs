@@ -26,7 +26,7 @@ namespace PrintLogApi.Controllers
     [Authorize]
     public class PrintersController : ControllerBase
     {
-        private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = "FFF";
+        private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
         private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
 
         private readonly PrintLogContext _context;

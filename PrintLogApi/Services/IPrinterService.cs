@@ -25,5 +25,24 @@ namespace PrintLogApi.Services
         /// it. Creator-only: a foreign id is not-found, with no existence oracle.
         /// </summary>
         Task<PrinterDetailResult> GetPrinterForMcp(long userId, long printerId, CancellationToken ct);
+
+        /// <summary>
+        /// Creates a printer for the MCP write surface. Ownership is token-derived (never an
+        /// argument). The category must exist when provided — an unknown one is rejected, never
+        /// silently replaced — and resolves to the default when omitted.
+        /// <para>
+        /// Deliberately NOT the <see cref="Models.DTOs.Printer.AddPrinterDTO"/> path: that map does
+        /// not ignore LoadedFilaments/UserId/ids, so mapping a DTO over a Printer would clobber the
+        /// loaded-filament collection. Scalars are patched directly and no PrinterFilament row is
+        /// ever touched.
+        /// </para>
+        /// <para>
+        /// <paramref name="idempotencyKey"/> is OPTIONAL: with a key, a retry carrying the same
+        /// arguments replays the original printer and a key reused with different arguments is a
+        /// conflict; without one, every call creates a new printer.
+        /// </para>
+        /// </summary>
+        Task<CreatePrinterResult> CreatePrinterForMcp(
+            long userId, PrinterAttributesInput input, string idempotencyKey, CancellationToken ct);
     }
 }
