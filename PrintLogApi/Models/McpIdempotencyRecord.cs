@@ -22,6 +22,14 @@ namespace PrintLogApi.Models
         [StringLength(200)]
         public string IdempotencyKey { get; set; }
 
+        /// <summary>
+        /// Lowercase-hex SHA-256 over the canonical serialization of the create-tool arguments that
+        /// produced <see cref="CreatedPrintId"/>. Null only for hypothetical pre-migration rows
+        /// (none exist while unreleased); a null fingerprint replays without comparison.
+        /// </summary>
+        [StringLength(64)]
+        public string RequestFingerprint { get; set; }
+
         public long CreatedPrintId { get; set; }
 
         public DateTimeOffset CreatedAt { get; set; }
