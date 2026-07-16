@@ -27,8 +27,20 @@ namespace PrintLogApi.Mcp
     public sealed record CreatePrintResult(
         PrintDetailResult Print, bool WasReplayed, IReadOnlyList<MaterialRemaining> MaterialRemaining);
 
+    /// <summary>
+    /// The remaining amount before and after an adjustment, ALWAYS in grams regardless of the unit
+    /// the caller expressed the delta in.
+    /// <para>
+    /// Deliberately not named *InSourceUnit: on the read surface <c>SourceUnit</c> means the
+    /// material's authoritative measurement (Weight | Length | Volume) and
+    /// <c>InitialAmountInSourceUnit</c> really is in that unit (see MaterialDetail). These values are
+    /// not — they are grams whatever 'source' was passed. Reusing that name here made a reader expect
+    /// the delta's unit and get a hardcoded "g", so the unit is now in the field name itself and the
+    /// constant carrying no information is gone.
+    /// </para>
+    /// </summary>
     public sealed record MaterialWriteResult(
-        Guid MaterialId, double BeforeInSourceUnit, double AfterInSourceUnit, string SourceUnit);
+        Guid MaterialId, double BeforeGrams, double AfterGrams);
 
     public sealed record ProjectWriteResult(
         Guid ProjectId, string Name, string Status, string ViewStatus);

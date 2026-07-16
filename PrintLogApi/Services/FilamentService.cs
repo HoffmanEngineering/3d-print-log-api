@@ -806,7 +806,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync(ct);
             _cacheVersionService.InvalidateUserCache(userId);
 
-            return new MaterialWriteResult(materialId, beforeGrams, afterGrams, "g");
+            return new MaterialWriteResult(materialId, beforeGrams, afterGrams);
         }
 
         public async Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct)

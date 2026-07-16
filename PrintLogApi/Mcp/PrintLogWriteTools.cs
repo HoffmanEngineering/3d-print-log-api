@@ -545,7 +545,8 @@ namespace PrintLogApi.Mcp
             "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
             "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +
             "cannot go below zero or above the material's original capacity — an out-of-range " +
-            "adjustment is rejected. Returns the before/after remaining in grams. Foreign materials " +
+            "adjustment is rejected. Returns 'beforeGrams' and 'afterGrams' — the remaining amount is " +
+            "always reported in GRAMS, whichever unit you sent the delta in. Foreign materials " +
             "are 'not found'.")]
         public async Task<MaterialWriteResult> AdjustMaterialRemaining(
             [Description("The material id.")] Guid materialId,
