@@ -193,6 +193,11 @@ namespace PrintLogApi.Services
                         : 0),
                     p.PrintTimeInSeconds,
                     p.EstimatedPrintTimeInSeconds,
+                    p.FileName,
+                    p.Url,
+                    p.ViewStatus,
+                    p.AllowComments,
+                    p.AllowFileDownloads,
                     p.Notes,
                     ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                     ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
@@ -228,6 +233,12 @@ namespace PrintLogApi.Services
                                 : 0,
                             IsEstimated = !(pf.AmountMg.HasValue && pf.AmountMg > 0)
                                 && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0,
+
+                            // The unresolved figures, so a caller can see what was actually recorded
+                            // vs. estimated. Same non-positive-means-unset rule as Mg above.
+                            ActualMg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg : (int?)null,
+                            EstimatedMg = pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg : (int?)null,
+                            pf.Notes,
                         })
                         .ToList(),
                 })
@@ -250,7 +261,9 @@ namespace PrintLogApi.Services
                     u.Readable ? u.Color : null,
                     McpUnits.MgToGrams(u.Mg),
                     u.IsEstimated,
-                    ActualGrams: null, EstimatedGrams: null, Notes: null))
+                    u.ActualMg.HasValue ? McpUnits.MgToGrams(u.ActualMg.Value) : (double?)null,
+                    u.EstimatedMg.HasValue ? McpUnits.MgToGrams(u.EstimatedMg.Value) : (double?)null,
+                    u.Notes))
                 .ToList();
 
             var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
@@ -269,8 +282,9 @@ namespace PrintLogApi.Services
                 materialsUsed,
                 truncated,
                 materialsUsed.Sum(m => m.Grams),
-                FileName: null, Url: null, ViewStatus: "Private",
-                EstimatedDurationSeconds: null, AllowComments: false, AllowFileDownloads: false);
+                FileName: row.FileName, Url: row.Url, ViewStatus: row.ViewStatus.ToString(),
+                EstimatedDurationSeconds: row.EstimatedPrintTimeInSeconds,
+                AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads);
         }
 
         /// <summary>
