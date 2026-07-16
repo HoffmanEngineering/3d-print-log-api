@@ -9,7 +9,7 @@ using PrintLogApi.Models;
 namespace PrintLogApi.Mcp
 {
     /// <summary>
-    /// Deterministic SHA-256 fingerprint of the caller-provided create_print arguments
+    /// Deterministic SHA-256 fingerprints of the caller-provided create-tool arguments
     /// (pre-server-defaulting). Uses a BinaryWriter so every string is length-prefixed — a value
     /// cannot forge a field boundary (no delimiter injection). Fixed field order; material rows are
     /// sorted by (materialId, source, estimatedSource) so row order is irrelevant. Null and empty are
@@ -136,6 +136,42 @@ namespace PrintLogApi.Mcp
                 WriteStr(w, input.PurchasePriceValue);
                 WriteStr(w, input.PurchasePriceCurrency);
                 WriteStr(w, input.PurchaseNotes);
+            }
+            return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Fingerprint of the caller-provided create_printer arguments. Same rules as
+        /// <see cref="ComputeCreatePrint"/>: fixed field order, length-prefixed strings, has-value
+        /// flags, and values hashed EXACTLY as given (the caller canonicalizes first).
+        /// <para>
+        /// Hashed BEFORE server defaulting, so an omitted categoryNickname and an explicit "FFF" are
+        /// different requests — which is right: they are different arguments, and a key reused across
+        /// them should be reported rather than silently replayed.
+        /// </para>
+        /// </summary>
+        public static string ComputeCreatePrinter(PrinterAttributesInput input)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                WriteStr(w, input.Make);
+                WriteStr(w, input.Model);
+                WriteStr(w, input.Name);
+                WriteStr(w, input.Description);
+                WriteStr(w, input.CategoryNickname);
+                WriteDbl(w, input.NozzleDiameterMm);
+                WriteDbl(w, input.FilamentDiameterMm);
+                WriteDbl(w, input.BeamDiameterMm);
+                WriteDbl(w, input.BedWidthMm);
+                WriteDbl(w, input.BedDepthMm);
+                WriteDbl(w, input.BedHeightMm);
+                WriteDbl(w, input.ScreenResolutionXPixels);
+                WriteDbl(w, input.ScreenResolutionYPixels);
+                WriteBool(w, input.HasHeatedBed);
+                WriteBool(w, input.HasHeatedChamber);
+                WriteDbl(w, input.WattageW);
+                WriteBool(w, input.IsActive);
             }
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }

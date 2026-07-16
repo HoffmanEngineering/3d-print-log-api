@@ -106,5 +106,72 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.NotEqual(
                 FpMat(new MaterialAttributesInput { DisplayName = "ab", Brand = "c" }),
                 FpMat(new MaterialAttributesInput { DisplayName = "a", Brand = "bc" }));
+
+        private static PrinterAttributesInput BasicPrinter() => new()
+        {
+            Make = "Bambu",
+            Model = "X1C",
+            Name = "Workshop X1C",
+        };
+
+        private static string FpPrn(PrinterAttributesInput input) =>
+            McpRequestFingerprint.ComputeCreatePrinter(input);
+
+        [Fact]
+        public void CreatePrinter_SameArguments_ProduceTheSameFingerprint()
+        {
+            Assert.Equal(FpPrn(BasicPrinter()), FpPrn(BasicPrinter()));
+        }
+
+        [Fact]
+        public void CreatePrinter_AnyChangedField_ChangesTheFingerprint()
+        {
+            var baseline = FpPrn(BasicPrinter());
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Make = "Prusa" }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Model = "MK4" }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Name = "Other" }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Description = "d" }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { CategoryNickname = "SLA" }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { NozzleDiameterMm = 0.4 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { FilamentDiameterMm = 1.75 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { BeamDiameterMm = 0.05 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { BedWidthMm = 256 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { BedDepthMm = 256 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { BedHeightMm = 256 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { ScreenResolutionXPixels = 3840 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { ScreenResolutionYPixels = 2160 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { HasHeatedBed = true }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { HasHeatedChamber = true }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { WattageW = 350 }));
+            Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { IsActive = true }));
+        }
+
+        // An omitted value and an explicitly-passed default are different requests: the fingerprint
+        // hashes what the CALLER sent, before any server defaulting.
+        [Fact]
+        public void CreatePrinter_OmittedAndExplicitDefault_AreDifferentRequests()
+        {
+            Assert.NotEqual(FpPrn(BasicPrinter()), FpPrn(BasicPrinter() with { IsActive = true }));
+            Assert.NotEqual(FpPrn(BasicPrinter()), FpPrn(BasicPrinter() with { CategoryNickname = "FFF" }));
+        }
+
+        // Null and empty must not collide: the BinaryWriter writes a has-value flag before the
+        // string, so "" is a value and null is its absence.
+        [Fact]
+        public void CreatePrinter_NullAndEmptyString_AreDifferentRequests()
+        {
+            Assert.NotEqual(
+                FpPrn(BasicPrinter() with { Description = null }),
+                FpPrn(BasicPrinter() with { Description = "" }));
+        }
+
+        // Length-prefixed writes mean a field's own content cannot forge a boundary between fields.
+        [Fact]
+        public void CreatePrinter_FieldContent_CannotForgeAFieldBoundary()
+        {
+            Assert.NotEqual(
+                FpPrn(BasicPrinter() with { Make = "AB", Model = "C" }),
+                FpPrn(BasicPrinter() with { Make = "A", Model = "BC" }));
+        }
     }
 }
