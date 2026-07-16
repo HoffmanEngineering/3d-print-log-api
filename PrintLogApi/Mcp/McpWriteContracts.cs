@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using PrintLogApi.Enums;
 
 namespace PrintLogApi.Mcp
 {
@@ -33,4 +35,76 @@ namespace PrintLogApi.Mcp
 
     public sealed record ProjectListItem(
         Guid Id, string Name, string? Reference, string Status, string ViewStatus);
+
+    /// <summary>
+    /// Caller-supplied material attributes for create_material / update_material. Every property is
+    /// nullable so update can distinguish "not provided" (leave alone) from a value; clearing is a
+    /// separate, explicit channel (the tool's <c>clear</c> list), never a null here.
+    /// <para>
+    /// Units at the boundary: grams / mm / ml / °C / seconds.
+    /// </para>
+    /// </summary>
+    public sealed record MaterialAttributesInput
+    {
+        public string DisplayName { get; init; }
+        public string MaterialType { get; init; }
+        public string MaterialCategoryNickname { get; init; }
+        public double? DensityGramPerCubicCm { get; init; }
+        public double? DiameterMm { get; init; }
+        public McpMeasurementSource? Source { get; init; }
+        public double? InitialAmount { get; init; }
+        public string Brand { get; init; }
+        public string ColorName { get; init; }
+        public string ColorHex { get; init; }
+        public string[] Colors { get; init; }
+        public ColorPatternType? ColorPattern { get; init; }
+        public FilamentFinishType? FinishType { get; init; }
+        public FilamentEffect[] Effects { get; init; }
+        public string StorageLocation { get; init; }
+        public bool? IsActive { get; init; }
+        public bool? IsFavorite { get; init; }
+        public string Notes { get; init; }
+        public double? SpoolWeightGrams { get; init; }
+        public double? InitialTotalWeightGrams { get; init; }
+        public double? TempRangeStartC { get; init; }
+        public double? TempRangeEndC { get; init; }
+        public double? RecommendedTempC { get; init; }
+        public double? RecommendedBedTempC { get; init; }
+        public double? InitialLayerTimeS { get; init; }
+        public double? LayerTimeS { get; init; }
+        public double? MeltingTemperatureC { get; init; }
+        public string InertGas { get; init; }
+        public double? MaterialRefreshRatio { get; init; }
+        public DateTimeOffset? PurchaseDate { get; init; }
+        public string PurchaseLocation { get; init; }
+        public string PurchasePriceValue { get; init; }
+        public string PurchasePriceCurrency { get; init; }
+        public string PurchaseNotes { get; init; }
+
+        /// <summary>
+        /// Trims every string. Call this ONCE in the service, BEFORE both fingerprinting and
+        /// persistence: the fingerprint decides whether two calls are the same request, so anything
+        /// normalized away must also be normalized in what is stored, or the hash asserts an
+        /// equivalence the database contradicts. Never normalize inside the fingerprint instead.
+        /// </summary>
+        public MaterialAttributesInput Canonicalize() => this with
+        {
+            DisplayName = DisplayName?.Trim(),
+            MaterialType = MaterialType?.Trim(),
+            MaterialCategoryNickname = MaterialCategoryNickname?.Trim(),
+            Brand = Brand?.Trim(),
+            ColorName = ColorName?.Trim(),
+            ColorHex = ColorHex?.Trim(),
+            Colors = Colors?.Select(c => c?.Trim()).ToArray(),
+            StorageLocation = StorageLocation?.Trim(),
+            Notes = Notes?.Trim(),
+            InertGas = InertGas?.Trim(),
+            PurchaseLocation = PurchaseLocation?.Trim(),
+            PurchasePriceValue = PurchasePriceValue?.Trim(),
+            PurchasePriceCurrency = PurchasePriceCurrency?.Trim(),
+            PurchaseNotes = PurchaseNotes?.Trim(),
+        };
+    }
+
+    public sealed record CreateMaterialResult(MaterialDetail Material, bool WasReplayed);
 }
