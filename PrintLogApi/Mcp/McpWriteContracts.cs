@@ -107,4 +107,51 @@ namespace PrintLogApi.Mcp
     }
 
     public sealed record CreateMaterialResult(MaterialDetail Material, bool WasReplayed);
+
+    /// <summary>
+    /// Every settable printer attribute, all nullable so create and update share one shape: on
+    /// create a null means "use the default", on update it means "leave unchanged".
+    /// <para>
+    /// No loaded-filament member, deliberately. Loaded state is managed only through the load/unload
+    /// flow; an MCP write must not be able to express a change to it, so the contract does not carry
+    /// the field at all.
+    /// </para>
+    /// </summary>
+    public sealed record PrinterAttributesInput
+    {
+        public string Make { get; init; }
+        public string Model { get; init; }
+        public string Name { get; init; }
+        public string Description { get; init; }
+        public string CategoryNickname { get; init; }
+        public double? NozzleDiameterMm { get; init; }
+        public double? FilamentDiameterMm { get; init; }
+        public double? BeamDiameterMm { get; init; }
+        public double? BedWidthMm { get; init; }
+        public double? BedDepthMm { get; init; }
+        public double? BedHeightMm { get; init; }
+        public double? ScreenResolutionXPixels { get; init; }
+        public double? ScreenResolutionYPixels { get; init; }
+        public bool? HasHeatedBed { get; init; }
+        public bool? HasHeatedChamber { get; init; }
+        public double? WattageW { get; init; }
+        public bool? IsActive { get; init; }
+
+        /// <summary>
+        /// Trims every string. Call this ONCE in the service, BEFORE both fingerprinting and
+        /// persistence: the fingerprint decides whether two calls are the same request, so anything
+        /// normalized away must also be normalized in what is stored, or the hash asserts an
+        /// equivalence the database contradicts. Never normalize inside the fingerprint instead.
+        /// </summary>
+        public PrinterAttributesInput Canonicalize() => this with
+        {
+            Make = Make?.Trim(),
+            Model = Model?.Trim(),
+            Name = Name?.Trim(),
+            Description = Description?.Trim(),
+            CategoryNickname = CategoryNickname?.Trim(),
+        };
+    }
+
+    public sealed record CreatePrinterResult(PrinterDetailResult Printer, bool WasReplayed);
 }
