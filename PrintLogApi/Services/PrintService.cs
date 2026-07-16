@@ -707,15 +707,8 @@ namespace PrintLogApi.Services
                     _context.Prints.Add(newPrint);
                     await _context.SaveChangesAsync(ct);
 
-                    _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
-                    {
-                        UserId = userId,
-                        ToolName = toolName,
-                        IdempotencyKey = idempotencyKey,
-                        RequestFingerprint = fingerprint,
-                        CreatedPrintId = newPrint.Id,
-                        CreatedAt = DateTimeOffset.UtcNow,
-                    });
+                    _context.McpIdempotencyRecords.Add(
+                        McpIdempotencyRecordFactory.ForPrint(userId, idempotencyKey, fingerprint, newPrint.Id));
                     await _context.SaveChangesAsync(ct);
                     await tx.CommitAsync(ct);
                 });

@@ -37,19 +37,23 @@ namespace PrintLogApi.Models
         public string RequestFingerprint { get; set; }
 
         /// <summary>
-        /// The entity this key created. By convention exactly one is set, decided by
+        /// The entity this key created. Exactly one of the three is set, decided by
         /// <see cref="ToolName"/>: create_print writes <see cref="CreatedPrintId"/>, create_material
-        /// writes <see cref="CreatedFilamentId"/>. Both nullable because one table serves both tools.
+        /// writes <see cref="CreatedFilamentId"/>, create_printer writes
+        /// <see cref="CreatedPrinterId"/>. All nullable because one table serves three tools.
         /// <para>
-        /// Nothing enforces the exactly-one rule — there is no check constraint and no validation
-        /// hook. What makes it safe is that every lookup is scoped by ToolName and reads only its own
-        /// field, treating a null there as a dangling record. Do not rely on the other field being
-        /// null; rely on never reading it.
+        /// There is no check constraint. What makes the rule true is that every record is built by
+        /// <c>McpIdempotencyRecordFactory</c>, which sets exactly one target and asserts it. What
+        /// makes a violation harmless is that every lookup is scoped by ToolName and reads only its
+        /// own field, treating a null there as a dangling record. Do not rely on the other fields
+        /// being null; rely on never reading them.
         /// </para>
         /// </summary>
         public long? CreatedPrintId { get; set; }
 
         public Guid? CreatedFilamentId { get; set; }
+
+        public long? CreatedPrinterId { get; set; }
 
         public DateTimeOffset CreatedAt { get; set; }
     }

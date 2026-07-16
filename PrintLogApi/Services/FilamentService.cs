@@ -349,7 +349,7 @@ namespace PrintLogApi.Services
             {
                 try
                 {
-                    created = await CreateMaterialWithIdempotencyRecord(dto, userId, toolName, idempotencyKey, fingerprint, ct);
+                    created = await CreateMaterialWithIdempotencyRecord(dto, userId, idempotencyKey, fingerprint, ct);
                 }
                 catch (DbUpdateException)
                 {
@@ -380,7 +380,7 @@ namespace PrintLogApi.Services
         /// failure (not), because only it knows the key and fingerprint to look the winner up with.
         /// </summary>
         private async Task<Filament> CreateMaterialWithIdempotencyRecord(
-            AddFilamentDto dto, long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+            AddFilamentDto dto, long userId, string key, string fingerprint, CancellationToken ct)
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
             // run inside an execution strategy, so the whole tx is the retriable unit.
@@ -391,15 +391,8 @@ namespace PrintLogApi.Services
                 using var tx = await _context.Database.BeginTransactionAsync(ct);
                 created = await AddFilament(dto, userId);
 
-                _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
-                {
-                    UserId = userId,
-                    ToolName = toolName,
-                    IdempotencyKey = key,
-                    RequestFingerprint = fingerprint,
-                    CreatedFilamentId = created.Id,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                });
+                _context.McpIdempotencyRecords.Add(
+                    McpIdempotencyRecordFactory.ForMaterial(userId, key, fingerprint, created.Id));
                 await _context.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
             });
