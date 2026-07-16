@@ -7,14 +7,30 @@ namespace PrintLogApi.Services
     /// </summary>
     public static class MeasurementUtilities
     {
+        /// <summary>
+        /// The length->milligram formula, unrounded and uncast. Callers that must reject an
+        /// out-of-range result (the MCP write surface) need the raw double: the long-returning
+        /// overload casts UNCHECKED and would wrap silently.
+        /// </summary>
+        public static double GetAmountMgFromLengthUnrounded(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
+        {
+            return 250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters;
+        }
+
         public static long GetAmountMgFromLength(double lengthInMeters, double filamentDiameterInMM, double materialDensityGramPerCubicCm)
         {
-            return (long)Math.Round(250.0 * Math.PI * materialDensityGramPerCubicCm * filamentDiameterInMM * filamentDiameterInMM * lengthInMeters);
+            return (long)Math.Round(GetAmountMgFromLengthUnrounded(lengthInMeters, filamentDiameterInMM, materialDensityGramPerCubicCm));
+        }
+
+        /// <summary>The volume->milligram formula, unrounded and uncast. See the length overload.</summary>
+        public static double GetAmountMgFromVolumeUnrounded(double VolumeInMl, double materialDensityGramPerCubicCm)
+        {
+            return VolumeInMl * materialDensityGramPerCubicCm * 1000;
         }
 
         public static long GetAmountMgFromVolume(double VolumeInMl, double materialDensityGramPerCubicCm)
         {
-            return (long)Math.Round(VolumeInMl * materialDensityGramPerCubicCm * 1000);
+            return (long)Math.Round(GetAmountMgFromVolumeUnrounded(VolumeInMl, materialDensityGramPerCubicCm));
         }
 
         /// <summary>
