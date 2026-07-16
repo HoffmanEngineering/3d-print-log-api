@@ -203,6 +203,10 @@ namespace PrintLogApi.Services
                     p.HasHeatedChamber,
                     p.WattageW,
                     p.IsActive,
+                    p.FilamentDiameter,
+                    p.BeamDiameter,
+                    p.ScreenResolutionXPixels,
+                    p.ScreenResolutionYPixels,
 
                     // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                     // without the UnloadedDateTime filter every spool ever mounted would be reported
@@ -259,14 +263,34 @@ namespace PrintLogApi.Services
                     McpUnits.MgToGrams(f.RemainingMg), f.LoadedDateTime))
                 .ToList();
 
+            // Named arguments deliberately: this record has 22 fields, many of them double? or
+            // bool?, so a positional mix-up would compile cleanly and silently return the bed depth
+            // as the bed width.
             return new PrinterDetailResult(
-                row.Id, row.Name, row.Make, row.Model, row.Description, row.CategoryNickname,
-                row.NozzleDiameter, row.BedWidthMm, row.BedDepthMm, row.BedHeightMm,
-                row.HasHeatedBed, row.HasHeatedChamber, row.WattageW, row.IsActive,
-                loaded,
-                row.LoadedCount,
-                row.LoadedCount > MaxLoadedFilaments,
-                row.ExcludedCount);
+                Id: row.Id,
+                // Name is non-null in this contract but only length-limited on the entity, so a
+                // legacy row can hold null. Normalize rather than throw.
+                Name: row.Name ?? string.Empty,
+                Make: row.Make,
+                Model: row.Model,
+                Description: row.Description,
+                CategoryNickname: row.CategoryNickname,
+                NozzleDiameterMm: row.NozzleDiameter,
+                BedWidthMm: row.BedWidthMm,
+                BedDepthMm: row.BedDepthMm,
+                BedHeightMm: row.BedHeightMm,
+                HasHeatedBed: row.HasHeatedBed,
+                HasHeatedChamber: row.HasHeatedChamber,
+                WattageW: row.WattageW,
+                IsActive: row.IsActive,
+                LoadedFilaments: loaded,
+                LoadedFilamentCount: row.LoadedCount,
+                LoadedFilamentsTruncated: row.LoadedCount > MaxLoadedFilaments,
+                ExcludedUnreadableSpools: row.ExcludedCount,
+                FilamentDiameterMm: row.FilamentDiameter,
+                BeamDiameterMm: row.BeamDiameter,
+                ScreenResolutionXPixels: row.ScreenResolutionXPixels,
+                ScreenResolutionYPixels: row.ScreenResolutionYPixels);
         }
     }
 }

@@ -140,7 +140,13 @@ namespace PrintLogApi.Mcp
         IReadOnlyList<LoadedFilament> LoadedFilaments,
         int LoadedFilamentCount,          // true count before capping
         bool LoadedFilamentsTruncated,    // silently omitting a loaded spool is a WRONG answer
-        int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
+        int ExcludedUnreadableSpools,     // corrupt rows pointing at another user's spool
+        // Appended, not interleaved: the remaining settable printer attributes, so a write-only
+        // agent can verify everything create_printer/update_printer accepted.
+        double? FilamentDiameterMm,
+        double? BeamDiameterMm,
+        double? ScreenResolutionXPixels,
+        double? ScreenResolutionYPixels);
 
     public sealed record SummaryMetrics(
         int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,
