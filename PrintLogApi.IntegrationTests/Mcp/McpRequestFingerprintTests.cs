@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PrintLogApi.Enums;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using Xunit;
@@ -51,5 +52,59 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var b = Fp("a", "xby", new List<MaterialUsageInput>());
             Assert.NotEqual(a, b);
         }
+
+        private static string FpMat(MaterialAttributesInput input) =>
+            McpRequestFingerprint.ComputeCreateMaterial(input);
+
+        [Fact]
+        public void Material_SameArguments_SameFingerprint()
+        {
+            var a = new MaterialAttributesInput { DisplayName = "Spool", DensityGramPerCubicCm = 1.24 };
+            var b = new MaterialAttributesInput { DisplayName = "Spool", DensityGramPerCubicCm = 1.24 };
+            Assert.Equal(FpMat(a), FpMat(b));
+        }
+
+        [Fact]
+        public void Material_DifferentArguments_DifferentFingerprint() =>
+            Assert.NotEqual(
+                FpMat(new MaterialAttributesInput { DisplayName = "Spool" }),
+                FpMat(new MaterialAttributesInput { DisplayName = "Other" }));
+
+        [Fact]
+        public void Material_HashesValuesExactlyAsGiven_DoesNotTrim()
+        {
+            // The fingerprint must NOT normalize: callers canonicalize first. If it trimmed here, it
+            // would report two calls as identical while the database stored different rows.
+            Assert.NotEqual(
+                FpMat(new MaterialAttributesInput { DisplayName = "Spool" }),
+                FpMat(new MaterialAttributesInput { DisplayName = "  Spool  " }));
+        }
+
+        [Fact]
+        public void Material_NullAndEmptyString_AreDistinguished() =>
+            Assert.NotEqual(
+                FpMat(new MaterialAttributesInput { Brand = null }),
+                FpMat(new MaterialAttributesInput { Brand = "" }));
+
+        [Fact]
+        public void Material_ColorOrder_IsSignificant() =>
+            // Colors[0] becomes ColorHex, so a reordered array is a genuinely different request.
+            Assert.NotEqual(
+                FpMat(new MaterialAttributesInput { Colors = new[] { "AABBCC", "112233" } }),
+                FpMat(new MaterialAttributesInput { Colors = new[] { "112233", "AABBCC" } }));
+
+        [Fact]
+        public void Material_EffectOrderAndDuplicates_AreNotSignificant() =>
+            // Effects are a set: order carries no meaning, so a reorder must still replay.
+            Assert.Equal(
+                FpMat(new MaterialAttributesInput { Effects = new[] { FilamentEffect.Sparkle, FilamentEffect.WoodFill } }),
+                FpMat(new MaterialAttributesInput { Effects = new[] { FilamentEffect.WoodFill, FilamentEffect.Sparkle, FilamentEffect.Sparkle } }));
+
+        [Fact]
+        public void Material_FieldBoundary_CannotBeForged() =>
+            // Length-prefixed writes: no concatenation of one field can impersonate the next.
+            Assert.NotEqual(
+                FpMat(new MaterialAttributesInput { DisplayName = "ab", Brand = "c" }),
+                FpMat(new MaterialAttributesInput { DisplayName = "a", Brand = "bc" }));
     }
 }

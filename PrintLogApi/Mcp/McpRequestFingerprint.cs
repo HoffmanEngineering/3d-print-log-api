@@ -65,6 +65,81 @@ namespace PrintLogApi.Mcp
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }
 
+        /// <summary>
+        /// Fingerprint of the caller-provided create_material arguments. Same rules as
+        /// <see cref="ComputeCreatePrint"/>: fixed field order, length-prefixed strings, has-value
+        /// flags, and values hashed EXACTLY as given (the caller canonicalizes first).
+        /// <para>
+        /// Colors are written in input order because order is meaningful — Colors[0] becomes ColorHex.
+        /// Effects are sorted and deduped because they are a set: a reordered list is the same request.
+        /// </para>
+        /// </summary>
+        public static string ComputeCreateMaterial(MaterialAttributesInput input)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                WriteStr(w, input.DisplayName);
+                WriteStr(w, input.MaterialType);
+                WriteStr(w, input.MaterialCategoryNickname);
+                WriteDbl(w, input.DensityGramPerCubicCm);
+                WriteDbl(w, input.DiameterMm);
+                WriteEnum(w, input.Source.HasValue ? (int?)input.Source.Value : null);
+                WriteDbl(w, input.InitialAmount);
+                WriteStr(w, input.Brand);
+                WriteStr(w, input.ColorName);
+                WriteStr(w, input.ColorHex);
+
+                var colors = input.Colors;
+                w.Write(colors != null);
+                if (colors != null)
+                {
+                    w.Write(colors.Length);
+                    foreach (var color in colors)
+                    {
+                        WriteStr(w, color);
+                    }
+                }
+
+                WriteEnum(w, input.ColorPattern.HasValue ? (int?)input.ColorPattern.Value : null);
+                WriteEnum(w, input.FinishType.HasValue ? (int?)input.FinishType.Value : null);
+
+                var effects = input.Effects;
+                w.Write(effects != null);
+                if (effects != null)
+                {
+                    var ordered = effects.Select(e => (int)e).Distinct().OrderBy(e => e).ToList();
+                    w.Write(ordered.Count);
+                    foreach (var effect in ordered)
+                    {
+                        w.Write(effect);
+                    }
+                }
+
+                WriteStr(w, input.StorageLocation);
+                WriteBool(w, input.IsActive);
+                WriteBool(w, input.IsFavorite);
+                WriteStr(w, input.Notes);
+                WriteDbl(w, input.SpoolWeightGrams);
+                WriteDbl(w, input.InitialTotalWeightGrams);
+                WriteDbl(w, input.TempRangeStartC);
+                WriteDbl(w, input.TempRangeEndC);
+                WriteDbl(w, input.RecommendedTempC);
+                WriteDbl(w, input.RecommendedBedTempC);
+                WriteDbl(w, input.InitialLayerTimeS);
+                WriteDbl(w, input.LayerTimeS);
+                WriteDbl(w, input.MeltingTemperatureC);
+                WriteStr(w, input.InertGas);
+                WriteDbl(w, input.MaterialRefreshRatio);
+                WriteDate(w, input.PurchaseDate);
+                WriteStr(w, input.PurchaseLocation);
+                WriteStr(w, input.PurchasePriceValue);
+                WriteStr(w, input.PurchasePriceCurrency);
+                WriteStr(w, input.PurchaseNotes);
+            }
+            return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+        }
+
         private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v); }
         private static void WriteInt(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteEnum(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
