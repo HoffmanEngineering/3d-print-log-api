@@ -158,65 +158,284 @@ namespace PrintLogApi.Services
                 f.PurchaseLocation, f.PurchasePriceValue, f.PurchasePriceCurrency, f.PurchaseNotes);
         }
 
-        public async Task<MaterialInventoryItem> AddMaterialForMcp(
-            long userId, string displayName, string materialType, string materialCategoryNickname,
-            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
-            double initialAmount, string brand, string colorName, string colorHex,
-            string storageLocation, bool isActive, CancellationToken ct)
+        /// <summary>
+        /// Loads the category by nickname, rejecting an unknown one instead of AddFilament's silent
+        /// fallback to "filament" — an agent must never be told its resin was created when the row
+        /// says otherwise. Also enforces the category's diameter requirement.
+        /// </summary>
+        private async Task<MaterialCategory> RequireCategory(string nickname, double? diameterMm, CancellationToken ct)
         {
             var category = await _context.MaterialCategories
-                .FirstOrDefaultAsync(c => c.Nickname == materialCategoryNickname, ct);
+                .FirstOrDefaultAsync(c => c.Nickname == nickname, ct);
             if (category == null)
             {
-                throw McpToolException.InvalidArguments($"Unknown material category '{materialCategoryNickname}'.");
+                throw McpToolException.InvalidArguments($"Unknown material category '{nickname}'.");
             }
-            if (category.HasDiameter && (!diameterMm.HasValue || diameterMm <= 0))
+            if (category.HasDiameter && !diameterMm.HasValue)
             {
                 throw McpToolException.InvalidArguments("This material category requires a positive diameterMm.");
             }
-            McpWriteValidation.RequirePositiveDensity(densityGramPerCubicCm);
-            McpWriteValidation.RequirePositiveAmount(initialAmount);
-            if (colorHex != null && colorHex.Length != 6)
+            return category;
+        }
+
+        /// <summary>
+        /// Rejects a capacity whose converted weight cannot be stored, BEFORE anything is persisted.
+        /// UpdateFilamentMeasurements derives InitialNominalWeightMg through an unchecked long cast,
+        /// so an unguarded Length/Volume amount (or a huge density) would silently store garbage
+        /// rather than fail. Mirrors the exact formula the fill will use.
+        /// <para>
+        /// A Length source with no diameter is rejected here rather than defaulted: the fill's early
+        /// return only covers diameter-TRACKING categories (see UpdateFilamentMeasurements), so a
+        /// resin with a Length source reaches DiameterMm.Value and throws. Substituting 0 would be
+        /// worse — it converts to a 0 mg capacity and looks valid.
+        /// </para>
+        /// </summary>
+        private static void RequireRepresentableCapacity(
+            McpMeasurementSource source, double initialAmount, double density, double? diameterMm)
+        {
+            if (source == McpMeasurementSource.Length && !diameterMm.HasValue)
             {
-                throw McpToolException.InvalidArguments("colorHex must be 6 hex digits with no leading '#'.");
+                throw McpToolException.InvalidArguments(
+                    "A Length source requires diameterMm, which this material category does not track.");
             }
+
+            double mg = source switch
+            {
+                McpMeasurementSource.Length =>
+                    GetAmountMgFromLengthUnrounded(initialAmount / 1000.0, diameterMm.Value, density),
+                McpMeasurementSource.Volume =>
+                    GetAmountMgFromVolumeUnrounded(initialAmount, density),
+                _ => initialAmount * 1000.0,
+            };
+            // minMg: 1 — a capacity rounding to 0 mg is not "empty", it is a material claiming a
+            // tracked capacity of nothing, which every later remaining calculation then believes.
+            McpMaterialConversion.RequireMgInRange(mg, "initialAmount", minMg: 1);
+        }
+
+        /// <summary>
+        /// The single-color/multi-color rule, resolved to the pair the entity actually stores.
+        /// An explicit (even empty) 'colors' wins over 'colorHex'; a null 'colors' falls back to the
+        /// single hex; an empty 'colors' means NO color, which must survive AddFilament's
+        /// empty-means-absent backfill — hence resolving both fields together, never one of them.
+        /// </summary>
+        private static List<string> ResolveColors(MaterialAttributesInput input) =>
+            input.Colors != null
+                ? input.Colors.ToList()
+                : (input.ColorHex != null ? new List<string> { input.ColorHex } : new List<string>());
+
+        private static string ResolveColorHex(MaterialAttributesInput input)
+        {
+            var colors = ResolveColors(input);
+            return colors.Count > 0 ? colors[0] : null;
+        }
+
+        public async Task<CreateMaterialResult> CreateMaterialForMcp(
+            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct)
+        {
+            const string toolName = "create_material";
+
+            if (string.IsNullOrWhiteSpace(input.DisplayName))
+            {
+                throw McpToolException.InvalidArguments("displayName is required.");
+            }
+            if (!input.Source.HasValue || !input.InitialAmount.HasValue)
+            {
+                throw McpToolException.InvalidArguments("source and initialAmount are required.");
+            }
+            if (!input.DensityGramPerCubicCm.HasValue)
+            {
+                throw McpToolException.InvalidArguments("densityGramPerCubicCm is required.");
+            }
+
+            // Canonicalize ONCE, before both hashing and persistence. Anything the fingerprint
+            // normalizes away must also be normalized in what we store, or the hash asserts an
+            // equivalence the database contradicts.
+            input = input.Canonicalize();
+            McpMaterialValidation.ValidateAttributes(input);
+
+            if (idempotencyKey != null)
+            {
+                if (string.IsNullOrWhiteSpace(idempotencyKey))
+                {
+                    throw McpToolException.InvalidArguments("idempotencyKey cannot be blank.");
+                }
+                // Trim BEFORE the length check: the trimmed value is what gets stored and compared, so
+                // that is the value the limit applies to.
+                idempotencyKey = idempotencyKey.Trim();
+                McpWriteValidation.RequireMaxLength(idempotencyKey, 200, "idempotencyKey");
+            }
+
+            string fingerprint = null;
+            if (idempotencyKey != null)
+            {
+                fingerprint = McpRequestFingerprint.ComputeCreateMaterial(input);
+                var replay = await FindIdempotentMaterial(userId, toolName, idempotencyKey, fingerprint, ct);
+                if (replay != null)
+                {
+                    return replay;
+                }
+            }
+
+            var category = await RequireCategory(input.MaterialCategoryNickname, input.DiameterMm, ct);
+            var source = input.Source.Value;
+            var density = input.DensityGramPerCubicCm.Value;
+            RequireRepresentableCapacity(source, input.InitialAmount.Value, density, input.DiameterMm);
 
             var dto = new AddFilamentDto
             {
-                DisplayName = displayName,
-                Brand = brand,
-                MaterialType = materialType,
-                MaterialCategoryNickname = materialCategoryNickname,
-                MaterialDensityGramPerCubicCm = densityGramPerCubicCm,
-                DiameterMm = diameterMm,
-                ColorName = colorName,
-                ColorHex = colorHex,
-                Colors = colorHex != null ? new List<string> { colorHex } : new List<string>(),
+                DisplayName = input.DisplayName,
+                Brand = input.Brand,
+                MaterialType = input.MaterialType,
+                MaterialCategoryNickname = category.Nickname,
+                MaterialDensityGramPerCubicCm = density,
+                DiameterMm = input.DiameterMm,
+                ColorName = input.ColorName,
+                // Colors is authoritative. Resolve BOTH fields here rather than handing AddFilament a
+                // disagreeing pair: it treats a null OR EMPTY Colors as "absent" and rebuilds it from
+                // ColorHex, so passing { ColorHex = "1188FF", Colors = [] } would resurrect the color
+                // instead of clearing it.
+                ColorHex = ResolveColorHex(input),
+                Colors = ResolveColors(input),
+                ColorPattern = input.ColorPattern,
+                FinishType = input.FinishType,
+                Effects = (input.Effects ?? Array.Empty<FilamentEffect>()).Distinct().ToList(),
                 Source = (Filament.SourceMeasurement)(int)source,
-                IsActive = isActive,
-                StorageLocation = storageLocation,
+                IsActive = input.IsActive ?? true,
+                IsFavorite = input.IsFavorite ?? false,
+                StorageLocation = input.StorageLocation,
+                Notes = input.Notes,
+                SpoolWeightMg = input.SpoolWeightGrams.HasValue
+                    ? McpMaterialConversion.GramsToMg(input.SpoolWeightGrams.Value, "spoolWeightGrams")
+                    : null,
+                InitialTotalWeightMg = input.InitialTotalWeightGrams.HasValue
+                    ? McpMaterialConversion.GramsToMg(input.InitialTotalWeightGrams.Value, "initialTotalWeightGrams")
+                    : null,
+                TempRangeStart = input.TempRangeStartC,
+                TempRangeEnd = input.TempRangeEndC,
+                RecommendedTemp = input.RecommendedTempC,
+                RecommendedBedTemp = input.RecommendedBedTempC,
+                InitialLayerTimeS = input.InitialLayerTimeS,
+                LayerTimeS = input.LayerTimeS,
+                MeltingTemperature = input.MeltingTemperatureC,
+                InertGas = input.InertGas,
+                MaterialRefreshRatio = input.MaterialRefreshRatio,
+                PurchaseDate = input.PurchaseDate,
+                PurchaseLocation = input.PurchaseLocation,
+                PurchasePriceValue = input.PurchasePriceValue,
+                PurchasePriceCurrency = input.PurchasePriceCurrency,
+                PurchaseNotes = input.PurchaseNotes,
                 FilamentAdjustments = new List<FilamentAdjustmentDto>(),
             };
+
             switch (source)
             {
                 case McpMeasurementSource.Weight:
-                    dto.InitialNominalWeightMg = checked((long)Math.Round(initialAmount * 1000.0)); // g -> mg
+                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
                     break;
                 case McpMeasurementSource.Length:
-                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
+                    dto.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
                     break;
                 case McpMeasurementSource.Volume:
-                    dto.InitialNominalVolumeMl = initialAmount; // ml
+                    dto.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
                     break;
             }
 
-            var created = await AddFilament(dto, userId);
-            _cacheVersionService.InvalidateUserCache(userId);
+            Filament created;
+            if (idempotencyKey == null)
+            {
+                created = await AddFilament(dto, userId);
+            }
+            else
+            {
+                try
+                {
+                    created = await CreateMaterialWithIdempotencyRecord(dto, userId, toolName, idempotencyKey, fingerprint, ct);
+                }
+                catch (DbUpdateException)
+                {
+                    // Possible unique-index race: another identical call created the material first.
+                    // The transaction rolled back but the failed Added entities are still tracked;
+                    // clear them so the recovery query reads only committed state, then replay the
+                    // winner's result. If there is NO such record the failure was something else
+                    // entirely (a column overflow, a constraint we don't know about) — rethrow it
+                    // rather than reporting every write failure as an idempotency problem.
+                    _context.ChangeTracker.Clear();
+                    var concurrent = await FindIdempotentMaterial(userId, toolName, idempotencyKey, fingerprint, ct);
+                    if (concurrent != null)
+                    {
+                        return concurrent;
+                    }
+                    throw;
+                }
+            }
 
+            _cacheVersionService.InvalidateUserCache(userId);
             var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
-            return new MaterialInventoryItem(
-                created.Id, created.DisplayName, created.Brand, created.MaterialType, created.ColorName,
-                remaining, created.IsActive, created.StorageLocation, created.DiameterMm);
+            return new CreateMaterialResult(ToMaterialDetail(created, remaining), WasReplayed: false);
+        }
+
+        /// <summary>
+        /// Creates the material and its idempotency record atomically. Lets DbUpdateException escape:
+        /// only the caller can tell a lost unique-index race (replayable) from a genuine write
+        /// failure (not), because only it knows the key and fingerprint to look the winner up with.
+        /// </summary>
+        private async Task<Filament> CreateMaterialWithIdempotencyRecord(
+            AddFilamentDto dto, long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        {
+            // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
+            // run inside an execution strategy, so the whole tx is the retriable unit.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            Filament created = null;
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _context.Database.BeginTransactionAsync(ct);
+                created = await AddFilament(dto, userId);
+
+                _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
+                {
+                    UserId = userId,
+                    ToolName = toolName,
+                    IdempotencyKey = key,
+                    RequestFingerprint = fingerprint,
+                    CreatedFilamentId = created.Id,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+                await _context.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+            });
+            return created;
+        }
+
+        private async Task<CreateMaterialResult> FindIdempotentMaterial(
+            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        {
+            var record = await _context.McpIdempotencyRecords.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
+            if (record == null)
+            {
+                return null;
+            }
+
+            // A key reused with a DIFFERENT payload is a caller bug, not a retry: replaying would
+            // silently discard the new arguments. A null fingerprint is a legacy record with no
+            // stored payload to compare, so it replays unconditionally.
+            if (record.RequestFingerprint != null && record.RequestFingerprint != fingerprint)
+            {
+                throw McpToolException.Conflict("This idempotency key was already used with different arguments.");
+            }
+
+            var materialId = record.CreatedFilamentId;
+            var material = materialId.HasValue
+                ? await _context.Filaments.AsNoTracking()
+                    .FirstOrDefaultAsync(f => f.Id == materialId.Value && f.CreatedById == userId, ct)
+                : null;
+            if (material == null)
+            {
+                throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
+            }
+
+            var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
+            return new CreateMaterialResult(ToMaterialDetail(material, remaining), WasReplayed: true);
         }
 
         public async Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(

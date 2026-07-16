@@ -28,12 +28,12 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var writeClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
             var writeNames = (await writeClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
             Assert.Contains("create_print", writeNames);
-            Assert.Contains("add_material", writeNames);
+            Assert.Contains("create_material", writeNames);
 
             await using var readClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
             var readNames = (await readClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
             Assert.DoesNotContain("create_print", readNames);
-            Assert.DoesNotContain("add_material", readNames);
+            Assert.DoesNotContain("create_material", readNames);
         }
 
         [Fact]

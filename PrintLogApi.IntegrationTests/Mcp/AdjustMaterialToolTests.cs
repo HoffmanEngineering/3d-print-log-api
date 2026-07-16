@@ -21,7 +21,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         // material rather than a shared read-fixture.
         private async Task<Guid> CreateMaterial(McpClient client, string name)
         {
-            await client.CallToolAsync("add_material", new Dictionary<string, object>
+            await client.CallToolAsync("create_material", new Dictionary<string, object>
             {
                 ["displayName"] = name,
                 ["materialType"] = "PLA",

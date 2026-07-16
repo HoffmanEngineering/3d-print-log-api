@@ -48,12 +48,14 @@ namespace PrintLogApi.Services
         /// Creates a material for the MCP write surface. The category must exist (no silent fallback
         /// to the default), density must be positive, and diameter is required for diameter-tracking
         /// categories. Reuses the existing measurement-fill logic. Invalidates the user cache.
+        /// <para>
+        /// <paramref name="idempotencyKey"/> is OPTIONAL: with a key, a retry carrying the same
+        /// arguments replays the original material and a key reused with different arguments is a
+        /// conflict; without one, every call creates a new material.
+        /// </para>
         /// </summary>
-        Task<MaterialInventoryItem> AddMaterialForMcp(
-            long userId, string displayName, string materialType, string materialCategoryNickname,
-            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
-            double initialAmount, string brand, string colorName, string colorHex,
-            string storageLocation, bool isActive, CancellationToken ct);
+        Task<CreateMaterialResult> CreateMaterialForMcp(
+            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct);
 
         /// <summary>
         /// Applies a signed adjustment to a material's remaining amount, expressed in the caller's

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
+using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 
@@ -234,37 +235,96 @@ namespace PrintLogApi.Mcp
                 materialsProvided, materials ?? Array.Empty<MaterialUsageInput>(), clearFields, ct);
         }
 
-        [McpServerTool, Description(
+        [McpServerTool(Name = "create_material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
             "Add a new material to your inventory (filament, resin, powder, etc.). 'source' is how the " +
-            "initial amount is measured: Weight (grams), Length (mm), or Volume (ml). " +
-            "'materialCategoryNickname' must be one of your existing categories (e.g. 'filament', " +
-            "'resin'); an unknown category is rejected. Categories that track a filament diameter " +
-            "require diameterMm. colorHex is 6 hex digits with no leading '#'. Creates a single-color material.")]
-        public async Task<MaterialInventoryItem> AddMaterial(
-            [Description("Display name.")] string displayName,
-            [Description("Material type, e.g. PLA, ABS, Resin.")] string materialType,
-            [Description("Category nickname, e.g. filament or resin.")] string materialCategoryNickname,
+            "initial amount is measured: Weight (grams), Length (mm), or Volume (ml) — it names the " +
+            "AUTHORITATIVE figure; everything else is derived from it. 'materialCategoryNickname' must " +
+            "be one of your existing categories (e.g. 'filament', 'resin'); an unknown category is " +
+            "rejected, never silently replaced. Categories that track a diameter require diameterMm. " +
+            "Colors are 6 hex digits with no leading '#': pass 'colorHex' for a single color OR " +
+            "'colors' for multiple (colors[0] wins if both are given; an empty colors array means no " +
+            "color). Temperatures are °C, cure times seconds, weights grams. 'idempotencyKey' is " +
+            "OPTIONAL but recommended: with one, retrying with the SAME arguments returns the same " +
+            "material (wasReplayed = true) and reusing it with DIFFERENT arguments is a conflict; " +
+            "WITHOUT one, a retried call creates a SECOND material.")]
+        public async Task<CreateMaterialResult> CreateMaterial(
+            [Description("Display name (max 255).")] string displayName,
+            [Description("Material type, e.g. PLA, ABS, Resin (max 255).")] string materialType,
+            [Description("Category nickname, e.g. filament or resin (max 50).")] string materialCategoryNickname,
             [Description("Density in g/cm^3 (> 0).")] double densityGramPerCubicCm,
             [Description("How the initial amount is measured.")] McpMeasurementSource source,
             [Description("Initial amount in the source's unit (g / mm / ml).")] double initialAmount,
-            [Description("Diameter in mm. Required for diameter-tracking categories.")] double? diameterMm = null,
-            [Description("Optional brand.")] string brand = null,
-            [Description("Optional color name.")] string colorName = null,
-            [Description("Optional color as 6 hex digits, no '#', e.g. 1188FF.")] string colorHex = null,
-            [Description("Optional storage location.")] string storageLocation = null,
-            [Description("Whether the material is active. Defaults to true.")] bool isActive = true,
+            [Description("Diameter in mm (> 0). Required for diameter-tracking categories.")] double? diameterMm = null,
+            [Description("Optional brand (max 255).")] string brand = null,
+            [Description("Optional color name (max 255).")] string colorName = null,
+            [Description("Optional single color as 6 hex digits, no '#', e.g. 1188FF.")] string colorHex = null,
+            [Description("Optional multi-color swatches (max 32); colors[0] becomes the primary color.")] string[] colors = null,
+            [Description("Optional color pattern: Solid, Multi, Gradient, Rainbow.")] ColorPatternType? colorPattern = null,
+            [Description("Optional finish: Standard, Silk, Matte.")] FilamentFinishType? finishType = null,
+            [Description("Optional effects, e.g. Sparkle, GlowInDark, CarbonFiber.")] FilamentEffect[] effects = null,
+            [Description("Optional storage location (max 256).")] string storageLocation = null,
+            [Description("Whether the material is active. Defaults to true.")] bool? isActive = null,
+            [Description("Optional favorite flag. Defaults to false.")] bool? isFavorite = null,
+            [Description("Optional notes (max 1000).")] string notes = null,
+            [Description("Optional empty-spool weight in grams (>= 0).")] double? spoolWeightGrams = null,
+            [Description("Optional on-scale weight in grams incl. spool (>= 0).")] double? initialTotalWeightGrams = null,
+            [Description("Optional lower print temperature in °C.")] double? tempRangeStartC = null,
+            [Description("Optional upper print temperature in °C (>= tempRangeStartC).")] double? tempRangeEndC = null,
+            [Description("Optional recommended hotend temperature in °C.")] double? recommendedTempC = null,
+            [Description("Optional recommended bed temperature in °C.")] double? recommendedBedTempC = null,
+            [Description("Optional resin initial-layer cure time in seconds (>= 0).")] double? initialLayerTimeS = null,
+            [Description("Optional resin layer cure time in seconds (>= 0).")] double? layerTimeS = null,
+            [Description("Optional melting temperature in °C.")] double? meltingTemperatureC = null,
+            [Description("Optional inert gas for powder processes (max 255).")] string inertGas = null,
+            [Description("Optional powder refresh ratio, 0.0 to 1.0.")] double? materialRefreshRatio = null,
+            [Description("Optional UTC purchase date.")] DateTimeOffset? purchaseDate = null,
+            [Description("Optional purchase location or URL (max 1000).")] string purchaseLocation = null,
+            [Description("Optional purchase price as text, e.g. '24.99' (max 256).")] string purchasePriceValue = null,
+            [Description("Optional currency marker, e.g. USD (max 256).")] string purchasePriceCurrency = null,
+            [Description("Optional purchase notes (max 1000).")] string purchaseNotes = null,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
             CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(displayName))
+            var input = new MaterialAttributesInput
             {
-                throw McpToolException.InvalidArguments("displayName is required.");
-            }
-            McpWriteValidation.RequireMaxLength(displayName, 255, "displayName");
-            McpWriteValidation.RequireDefinedEnum(source, "source");
+                DisplayName = displayName,
+                MaterialType = materialType,
+                MaterialCategoryNickname = materialCategoryNickname,
+                DensityGramPerCubicCm = densityGramPerCubicCm,
+                DiameterMm = diameterMm,
+                Source = source,
+                InitialAmount = initialAmount,
+                Brand = brand,
+                ColorName = colorName,
+                ColorHex = colorHex,
+                Colors = colors,
+                ColorPattern = colorPattern,
+                FinishType = finishType,
+                Effects = effects,
+                StorageLocation = storageLocation,
+                IsActive = isActive,
+                IsFavorite = isFavorite,
+                Notes = notes,
+                SpoolWeightGrams = spoolWeightGrams,
+                InitialTotalWeightGrams = initialTotalWeightGrams,
+                TempRangeStartC = tempRangeStartC,
+                TempRangeEndC = tempRangeEndC,
+                RecommendedTempC = recommendedTempC,
+                RecommendedBedTempC = recommendedBedTempC,
+                InitialLayerTimeS = initialLayerTimeS,
+                LayerTimeS = layerTimeS,
+                MeltingTemperatureC = meltingTemperatureC,
+                InertGas = inertGas,
+                MaterialRefreshRatio = materialRefreshRatio,
+                PurchaseDate = purchaseDate,
+                PurchaseLocation = purchaseLocation,
+                PurchasePriceValue = purchasePriceValue,
+                PurchasePriceCurrency = purchasePriceCurrency,
+                PurchaseNotes = purchaseNotes,
+            };
 
-            return await filamentService.AddMaterialForMcp(
-                CurrentUserId, displayName, materialType, materialCategoryNickname, densityGramPerCubicCm,
-                diameterMm, source, initialAmount, brand, colorName, colorHex, storageLocation, isActive, ct);
+            return await filamentService.CreateMaterialForMcp(CurrentUserId, input, idempotencyKey, ct);
         }
 
         [McpServerTool, Description(
