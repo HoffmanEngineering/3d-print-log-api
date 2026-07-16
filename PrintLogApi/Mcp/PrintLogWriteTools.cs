@@ -48,7 +48,7 @@ namespace PrintLogApi.Mcp
         [McpServerTool(Name = "whoami"), Description("Confirms write access is granted. Returns your internal user id.")]
         public long WhoAmI() => CurrentUserId;
 
-        [McpServerTool, Description(
+        [McpServerTool(Name = "create_print"), Description(
             "Log a finished 3D print for yourself. Records status, optional start time and duration " +
             "(seconds), notes, an optional projectId, and per-material usage. Each usage row is " +
             "{ materialId, source, amount } where source is Weight (grams), Length (mm), or Volume " +
@@ -58,7 +58,7 @@ namespace PrintLogApi.Mcp
             "loaded on the printer. A slicer integration may already have imported this print — confirm " +
             "with the user before logging if unsure. Only your own printer/materials/project are " +
             "accepted; anything else is 'not found'.")]
-        public async Task<LogPrintResult> LogPrint(
+        public async Task<CreatePrintResult> CreatePrint(
             [Description("Print title (max 100 chars).")] string title,
             [Description("Your printer id (see list_printers).")] long printerId,
             [Description("Print status, e.g. Success, PartialSuccess, Failed.")] Print.PrintStatus status,
@@ -93,11 +93,15 @@ namespace PrintLogApi.Mcp
             }
             foreach (var row in rows)
             {
-                McpWriteValidation.RequireDefinedEnum(row.Source, "materials.source");
-                McpWriteValidation.RequirePositiveAmount(row.Amount);
+                if (!row.Source.HasValue || !row.Amount.HasValue)
+                {
+                    throw McpToolException.InvalidArguments("Each material row needs a source and amount.");
+                }
+                McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
+                McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
             }
 
-            return await printService.LogPrintForMcp(
+            return await printService.CreatePrintForMcp(
                 CurrentUserId, title, printerId, status, startedAt, durationSeconds, notes, projectId,
                 rows, idempotencyKey.Trim(), ct);
         }
@@ -133,8 +137,12 @@ namespace PrintLogApi.Mcp
                 }
                 foreach (var row in materials)
                 {
-                    McpWriteValidation.RequireDefinedEnum(row.Source, "materials.source");
-                    McpWriteValidation.RequirePositiveAmount(row.Amount);
+                    if (!row.Source.HasValue || !row.Amount.HasValue)
+                    {
+                        throw McpToolException.InvalidArguments("Each material row needs a source and amount.");
+                    }
+                    McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
+                    McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
                 }
             }
 

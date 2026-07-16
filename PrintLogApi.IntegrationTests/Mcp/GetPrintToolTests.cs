@@ -168,7 +168,10 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var result = await client.CallToolAsync(ToolName, new Dictionary<string, object> { ["id"] = McpTestData.RichPrintId1 });
             var (_, rawJson) = Parse(result);
 
-            foreach (var forbidden in new[] { "image", "comment", "fileName", "\"url\"", "fileHash", "attachment" })
+            // fileName/url/allowComments/allowFileDownloads are deliberately exposed (they are the
+            // print's own metadata and visibility toggles). What must never appear is the CONTENT of
+            // the image, attachment and comment collections, or the file hash.
+            foreach (var forbidden in new[] { "image", "\"comments\"", "fileHash", "attachment" })
             {
                 Assert.DoesNotContain(forbidden, rawJson, StringComparison.OrdinalIgnoreCase);
             }

@@ -9,13 +9,21 @@ namespace PrintLogApi.Mcp
 
     public enum McpMeasurementSource { Weight = 1, Length = 2, Volume = 3 }
 
-    /// <summary>One material-consumption row on a print: an amount measured by weight, length, or volume.</summary>
-    public sealed record MaterialUsageInput(Guid MaterialId, McpMeasurementSource Source, double Amount);
+    /// <summary>
+    /// One material-consumption row on a print: an actual amount and/or an estimated amount, each
+    /// measured by weight, length, or volume. Source and its paired amount are always supplied
+    /// together; a row must carry at least one of the two pairs.
+    /// </summary>
+    public sealed record MaterialUsageInput(
+        Guid MaterialId,
+        McpMeasurementSource? Source, double? Amount,
+        McpMeasurementSource? EstimatedSource, double? EstimatedAmount,
+        string Notes);
 
     public sealed record MaterialRemaining(Guid MaterialId, double RemainingGrams);
 
-    public sealed record LogPrintResult(
-        long PrintId, bool WasReplayed, IReadOnlyList<MaterialRemaining> MaterialRemaining);
+    public sealed record CreatePrintResult(
+        PrintDetailResult Print, bool WasReplayed, IReadOnlyList<MaterialRemaining> MaterialRemaining);
 
     public sealed record MaterialWriteResult(
         Guid MaterialId, double BeforeInSourceUnit, double AfterInSourceUnit, string SourceUnit);

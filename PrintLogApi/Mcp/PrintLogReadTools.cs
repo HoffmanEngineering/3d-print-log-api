@@ -235,7 +235,7 @@ namespace PrintLogApi.Mcp
 
         [McpServerTool, Description(
             "List your own projects: id, name, reference, status, and visibility. Use this to resolve " +
-            "a project name into the id that log_print and update_print take. Search matches name or " +
+            "a project name into the id that create_print and update_print take. Search matches name or " +
             "reference. Paginated (default 25, max 100), most-recently-updated first.")]
         public Task<McpPage<ProjectListItem>> ListProjects(
             [Description("Optional case-insensitive search over name and reference.")] string search = null,

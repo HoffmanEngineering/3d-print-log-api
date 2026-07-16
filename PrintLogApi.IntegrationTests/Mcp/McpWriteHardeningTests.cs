@@ -27,22 +27,22 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var writeClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
             var writeNames = (await writeClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
-            Assert.Contains("log_print", writeNames);
+            Assert.Contains("create_print", writeNames);
             Assert.Contains("add_material", writeNames);
 
             await using var readClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
             var readNames = (await readClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
-            Assert.DoesNotContain("log_print", readNames);
+            Assert.DoesNotContain("create_print", readNames);
             Assert.DoesNotContain("add_material", readNames);
         }
 
         [Fact]
-        public async Task LogPrint_OwnPrinter_ForeignProject_ReturnsNotFound()
+        public async Task CreatePrint_OwnPrinter_ForeignProject_ReturnsNotFound()
         {
             // Confused deputy: the caller owns the printer but references another user's project.
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "log_print",
+            var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "deputy",
@@ -56,13 +56,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_BumpsUserCacheVersion()
+        public async Task CreatePrint_BumpsUserCacheVersion()
         {
             var cache = _factory.Services.GetRequiredService<ICacheVersionService>();
             var before = cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
 
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-            var result = await client.CallToolAsync("log_print", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_print", new Dictionary<string, object>
             {
                 ["title"] = "cache-bump",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -76,11 +76,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_ReplayAfterDeletion_ReturnsNotFound()
+        public async Task CreatePrint_ReplayAfterDeletion_ReturnsNotFound()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var first = await client.CallToolAsync("log_print", new Dictionary<string, object>
+            var first = await client.CallToolAsync("create_print", new Dictionary<string, object>
             {
                 ["title"] = "to-delete",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -99,7 +99,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             }
 
             // Replaying the key after its print was deleted must be rejected, never silently re-created.
-            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "to-delete",
@@ -112,11 +112,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_ZeroDuration_IsRejected()
+        public async Task CreatePrint_ZeroDuration_IsRejected()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "zero-dur",
@@ -130,7 +130,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_TooManyMaterialRows_IsRejected()
+        public async Task CreatePrint_TooManyMaterialRows_IsRejected()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
@@ -141,7 +141,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 ["amount"] = 1.0,
             }).ToArray();
 
-            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "too-many-rows",
@@ -155,11 +155,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_HugeMaterialAmount_IsRejected()
+        public async Task CreatePrint_HugeMaterialAmount_IsRejected()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "huge-amount",
@@ -181,7 +181,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_DuplicateMaterial_IsRejected()
+        public async Task CreatePrint_DuplicateMaterial_IsRejected()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
@@ -191,7 +191,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 ["source"] = "Weight",
                 ["amount"] = 5.0,
             };
-            var isError = await McpDataWebApplicationFactory.IsToolError(client, "log_print",
+            var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "dupe-mat",

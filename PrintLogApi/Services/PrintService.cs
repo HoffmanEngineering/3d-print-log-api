@@ -249,7 +249,8 @@ namespace PrintLogApi.Services
                     u.Readable ? u.Material : null,
                     u.Readable ? u.Color : null,
                     McpUnits.MgToGrams(u.Mg),
-                    u.IsEstimated))
+                    u.IsEstimated,
+                    ActualGrams: null, EstimatedGrams: null, Notes: null))
                 .ToList();
 
             var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
@@ -267,7 +268,9 @@ namespace PrintLogApi.Services
                 EstimatedCost: null, row.Notes, row.ProjectId, row.ProjectName,
                 materialsUsed,
                 truncated,
-                materialsUsed.Sum(m => m.Grams));
+                materialsUsed.Sum(m => m.Grams),
+                FileName: null, Url: null, ViewStatus: "Private",
+                EstimatedDurationSeconds: null, AllowComments: false, AllowFileDownloads: false);
         }
 
         /// <summary>
@@ -606,12 +609,12 @@ namespace PrintLogApi.Services
             return await GetPrintById(newPrint.Id); ;
         }
 
-        public async Task<LogPrintResult> LogPrintForMcp(
+        public async Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, PrintStatus status,
             DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
         {
-            const string toolName = "log_print";
+            const string toolName = "create_print";
 
             var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
             if (replay != null)
@@ -699,10 +702,10 @@ namespace PrintLogApi.Services
             }
 
             _cacheVersionService.InvalidateUserCache(userId);
-            return await BuildLogPrintResult(newPrint.Id, wasReplayed: false, userId, ct);
+            return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
         }
 
-        private async Task<LogPrintResult> FindIdempotentPrint(
+        private async Task<CreatePrintResult> FindIdempotentPrint(
             long userId, string toolName, string key, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords
@@ -719,28 +722,54 @@ namespace PrintLogApi.Services
                 throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
             }
 
-            return await BuildLogPrintResult(record.CreatedPrintId, wasReplayed: true, userId, ct);
+            return await BuildCreatePrintResult(record.CreatedPrintId, wasReplayed: true, userId, ct);
         }
 
+        /// <summary>
+        /// Builds the entity row from an input row. Source/EstimatedSource are non-nullable enums on
+        /// the entity, so each is assigned only when its input pair is present; otherwise the entity
+        /// default (0) stands and the paired amount fields stay null, which downstream code reads as
+        /// "unset". Length/Volume overflow safety is enforced on the input rows by
+        /// RequireMcpConvertibleUsage, which runs before this in the create/update flow.
+        /// </summary>
         private static PrintFilament ToPrintFilament(MaterialUsageInput m)
         {
-            var pf = new PrintFilament
+            var pf = new PrintFilament { FilamentId = m.MaterialId, Notes = m.Notes };
+
+            if (m.Source.HasValue && m.Amount.HasValue)
             {
-                FilamentId = m.MaterialId,
-                Source = (PrintFilament.SourceMeasurement)(int)m.Source,
-            };
-            switch (m.Source)
-            {
-                case McpMeasurementSource.Weight:
-                    pf.AmountMg = checked((int)Math.Round(m.Amount * 1000.0)); // g -> mg
-                    break;
-                case McpMeasurementSource.Length:
-                    pf.LengthInM = m.Amount / 1000.0; // mm -> m
-                    break;
-                case McpMeasurementSource.Volume:
-                    pf.VolumeMl = m.Amount; // ml
-                    break;
+                pf.Source = (PrintFilament.SourceMeasurement)(int)m.Source.Value;
+                switch (m.Source.Value)
+                {
+                    case McpMeasurementSource.Weight:
+                        pf.AmountMg = checked((int)Math.Round(m.Amount.Value * 1000.0)); // g -> mg
+                        break;
+                    case McpMeasurementSource.Length:
+                        pf.LengthInM = m.Amount.Value / 1000.0; // mm -> m
+                        break;
+                    case McpMeasurementSource.Volume:
+                        pf.VolumeMl = m.Amount.Value; // ml
+                        break;
+                }
             }
+
+            if (m.EstimatedSource.HasValue && m.EstimatedAmount.HasValue)
+            {
+                pf.EstimatedSource = (PrintFilament.SourceMeasurement)(int)m.EstimatedSource.Value;
+                switch (m.EstimatedSource.Value)
+                {
+                    case McpMeasurementSource.Weight:
+                        pf.EstimatedAmountMg = checked((int)Math.Round(m.EstimatedAmount.Value * 1000.0));
+                        break;
+                    case McpMeasurementSource.Length:
+                        pf.EstimatedLengthInM = m.EstimatedAmount.Value / 1000.0; // mm -> m
+                        break;
+                    case McpMeasurementSource.Volume:
+                        pf.EstimatedVolumeMl = m.EstimatedAmount.Value; // ml
+                        break;
+                }
+            }
+
             return pf;
         }
 
@@ -775,8 +804,16 @@ namespace PrintLogApi.Services
             }
         }
 
-        private async Task<LogPrintResult> BuildLogPrintResult(
+        private async Task<CreatePrintResult> BuildCreatePrintResult(
             long printId, bool wasReplayed, long userId, CancellationToken ct)
+        {
+            var detail = await GetOwnPrintDetailForMcp(userId, printId, ct)
+                ?? throw McpToolException.NotFound("Print not found.");
+            return new CreatePrintResult(detail, wasReplayed, await BuildMaterialRemaining(printId, userId, ct));
+        }
+
+        private async Task<IReadOnlyList<MaterialRemaining>> BuildMaterialRemaining(
+            long printId, long userId, CancellationToken ct)
         {
             var materialIds = await _context.PrintFilament.AsNoTracking()
                 .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
@@ -789,7 +826,7 @@ namespace PrintLogApi.Services
             {
                 remaining.Add(new MaterialRemaining(id, await _filamentService.GetRemainingGramsForMcp(userId, id, ct)));
             }
-            return new LogPrintResult(printId, wasReplayed, remaining);
+            return remaining;
         }
 
         public async Task<PrintDetailResult> UpdateOwnPrintForMcp(

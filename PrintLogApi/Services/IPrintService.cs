@@ -21,7 +21,7 @@ namespace PrintLogApi.Services
         /// loaded-state. Invalidates the user cache after commit. On replay (same user+tool+key)
         /// returns the existing print with WasReplayed = true.
         /// </summary>
-        Task<LogPrintResult> LogPrintForMcp(
+        Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, Print.PrintStatus status,
             DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);

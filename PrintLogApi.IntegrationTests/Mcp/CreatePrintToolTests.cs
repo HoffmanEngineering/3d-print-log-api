@@ -8,21 +8,21 @@ using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp
 {
-    /// <summary>End-to-end tests for the log_print tool over the /mcp endpoint.</summary>
-    public class LogPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
+    /// <summary>End-to-end tests for the create_print tool over the /mcp endpoint.</summary>
+    public class CreatePrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     {
         private readonly McpDataWebApplicationFactory _factory;
 
-        public LogPrintToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
+        public CreatePrintToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
         private static readonly string[] ReadWrite = { "read:printdata", "write:printdata" };
 
         [Fact]
-        public async Task LogPrint_ForeignPrinter_ReturnsNotFound()
+        public async Task CreatePrint_ForeignPrinter_ReturnsNotFound()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "log_print",
+            var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "create_print",
                 new Dictionary<string, object>
                 {
                     ["title"] = "x",
@@ -35,14 +35,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         [Fact]
-        public async Task LogPrint_DoesNotUnloadOtherFilaments()
+        public async Task CreatePrint_DoesNotUnloadOtherFilaments()
         {
             // The primary user's SearchPrinterId has "Long PLA" (aaaa-1002) currently loaded. Logging a
             // print that consumes a DIFFERENT material must not unload it.
             var loadedFilamentId = new Guid("aaaaaaaa-1002-0000-0000-000000000000");
 
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-            var result = await client.CallToolAsync("log_print", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_print", new Dictionary<string, object>
             {
                 ["title"] = "Side-effect check",
                 ["printerId"] = McpTestData.SearchPrinterId,

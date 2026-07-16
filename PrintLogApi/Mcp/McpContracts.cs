@@ -27,7 +27,9 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public sealed record MaterialUsage(
         Guid? FilamentId, string? Name, string? Brand, string? Material, string? Color,
-        double Grams, bool IsEstimated);
+        // Grams stays the RESOLVED figure (actual if recorded, else estimate); IsEstimated says which.
+        double Grams, bool IsEstimated,
+        double? ActualGrams, double? EstimatedGrams, string? Notes);
 
     public sealed record PrintDetailResult(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
@@ -39,7 +41,9 @@ namespace PrintLogApi.Mcp
         Guid? ProjectId, string? ProjectName,
         IReadOnlyList<MaterialUsage> MaterialsUsed,
         bool MaterialsUsedTruncated,
-        double ReturnedMaterialsUsedGrams);
+        double ReturnedMaterialsUsedGrams,
+        string? FileName, string? Url, string ViewStatus,
+        int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads);
 
     public sealed record MaterialInventoryItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
