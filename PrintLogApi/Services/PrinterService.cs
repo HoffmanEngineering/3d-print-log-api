@@ -317,7 +317,13 @@ namespace PrintLogApi.Services
                 .FirstOrDefaultAsync(c => c.Nickname == requested, ct);
             if (category == null)
             {
-                throw McpToolException.InvalidArguments($"'{requested}' is not a known printer category.");
+                // Name the valid options: nothing lists printer categories, so a bare rejection
+                // leaves an agent guessing. They are a small fixed seed shared by every user, so the
+                // extra query costs nothing on the happy path and only runs when already failing.
+                var known = await _context.PrinterCategories
+                    .Select(c => c.Nickname).OrderBy(n => n).ToListAsync(ct);
+                throw McpToolException.InvalidArguments(
+                    $"'{requested}' is not a known printer category. Valid categories: {string.Join(", ", known)}.");
             }
             return category;
         }

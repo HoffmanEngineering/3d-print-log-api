@@ -115,6 +115,21 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Contains("NOT-A-CATEGORY", ex.Message);
         }
 
+        // There is no tool that lists printer categories, so a rejection that does not name the valid
+        // options leaves an agent guessing. The set is a small fixed seed, not per-user, so the error
+        // can simply carry it.
+        [Fact]
+        public async Task Create_UnknownCategory_ErrorNamesTheValidCategories()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var ex = await Assert.ThrowsAsync<McpToolException>(
+                () => Create(scope, Basic("Enumerate Me") with { CategoryNickname = "ResinPrinter" }));
+
+            Assert.Contains("FFF", ex.Message);
+            Assert.Contains("SLA", ex.Message);
+            Assert.Contains("FDM", ex.Message);
+        }
+
         [Fact]
         public async Task Create_SetsTheCallerAsOwner()
         {

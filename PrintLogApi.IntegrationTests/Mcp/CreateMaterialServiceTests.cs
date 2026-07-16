@@ -152,6 +152,20 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal("invalid_arguments", ex.Code);
         }
 
+        // There is no tool that lists material categories, so a rejection that does not name the
+        // valid options leaves an agent guessing. The set is a small fixed seed (filament, resin,
+        // powder, wire) shared by every user, so the error can simply carry it.
+        [Fact]
+        public async Task Create_UnknownCategory_ErrorNamesTheValidCategories()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var ex = await Assert.ThrowsAsync<McpToolException>(
+                () => Create(scope, Basic() with { MaterialCategoryNickname = "unobtainium" }));
+
+            Assert.Contains("filament", ex.Message);
+            Assert.Contains("resin", ex.Message);
+        }
+
         [Fact]
         public async Task Create_DiameterCategoryWithoutDiameter_IsInvalid()
         {

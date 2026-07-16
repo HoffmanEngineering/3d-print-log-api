@@ -169,7 +169,13 @@ namespace PrintLogApi.Services
                 .FirstOrDefaultAsync(c => c.Nickname == nickname, ct);
             if (category == null)
             {
-                throw McpToolException.InvalidArguments($"Unknown material category '{nickname}'.");
+                // Name the valid options: nothing lists material categories, so a bare rejection
+                // leaves an agent guessing. They are a small fixed seed shared by every user, so the
+                // extra query costs nothing on the happy path and only runs when already failing.
+                var known = await _context.MaterialCategories
+                    .Select(c => c.Nickname).OrderBy(n => n).ToListAsync(ct);
+                throw McpToolException.InvalidArguments(
+                    $"Unknown material category '{nickname}'. Valid categories: {string.Join(", ", known)}.");
             }
             if (category.HasDiameter && !diameterMm.HasValue)
             {
