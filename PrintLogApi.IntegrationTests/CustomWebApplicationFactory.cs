@@ -144,7 +144,7 @@ namespace PrintLogApi.IntegrationTests
                 app.UseEndpoints(endpoints =>
                 {
                     endpoints.MapGet("/api/mcp-auth-probe", () => Results.Ok())
-                        .RequireAuthorization("McpAccess");
+                        .RequireAuthorization("McpRead");
                     endpoints.MapGet("/api/web-auth-probe", () => Results.Ok())
                         .RequireAuthorization(webPolicy);
                 });

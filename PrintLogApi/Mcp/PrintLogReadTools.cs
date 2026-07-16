@@ -17,8 +17,8 @@ namespace PrintLogApi.Mcp
     /// defense-in-depth on top of the endpoint's McpAccess policy.
     /// </summary>
     [McpServerToolType]
-    [Authorize(Policy = "McpAccess")]
-    public class PrintLogTools
+    [Authorize(Policy = "McpRead")]
+    public class PrintLogReadTools
     {
         private readonly IHttpContextAccessor httpContextAccessor;
         private readonly IPrintService printService;
@@ -26,18 +26,22 @@ namespace PrintLogApi.Mcp
         private readonly IMcpStatisticsService statisticsService;
         private readonly IPrinterService printerService;
 
-        public PrintLogTools(
+        private readonly IProjectService projectService;
+
+        public PrintLogReadTools(
             IHttpContextAccessor httpContextAccessor,
             IPrintService printService,
             IFilamentService filamentService,
             IMcpStatisticsService statisticsService,
-            IPrinterService printerService)
+            IPrinterService printerService,
+            IProjectService projectService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
             this.filamentService = filamentService;
             this.statisticsService = statisticsService;
             this.printerService = printerService;
+            this.projectService = projectService;
         }
 
         private long CurrentUserId =>
@@ -227,6 +231,22 @@ namespace PrintLogApi.Mcp
             CancellationToken ct = default)
         {
             return printerService.GetPrinterForMcp(CurrentUserId, id, ct);
+        }
+
+        [McpServerTool, Description(
+            "List your own projects: id, name, reference, status, and visibility. Use this to resolve " +
+            "a project name into the id that log_print and update_print take. Search matches name or " +
+            "reference. Paginated (default 25, max 100), most-recently-updated first.")]
+        public Task<McpPage<ProjectListItem>> ListProjects(
+            [Description("Optional case-insensitive search over name and reference.")] string search = null,
+            [Description("Optional status filter.")] Project.ProjectStatus? status = null,
+            [Description("1-based page number.")] int page = 1,
+            [Description("Page size (default 25, max 100).")] int? pageSize = null,
+            CancellationToken ct = default)
+        {
+            var validPage = McpPaging.RequirePage(page);
+            var validPageSize = McpPaging.ClampPageSize(pageSize);
+            return projectService.ListProjectsForMcp(CurrentUserId, validPage, validPageSize, search, status, ct);
         }
 
         /// <summary>

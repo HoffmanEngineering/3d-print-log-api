@@ -86,6 +86,42 @@ Version-based cache invalidation using `ICacheVersionService` (singleton):
 - Split queries used for complex operations (see PR 229, 235)
 - Migrations auto-applied on startup in `Development` and `E2ETesting`; Production applies migrations via the pipeline (see Deployment)
 
+## MCP Server
+
+The `/mcp` endpoint (Streamable HTTP, stateless) exposes tools to agents, split into two tool
+classes by capability:
+
+- **`PrintLogReadTools`** (`[Authorize(Policy = "McpRead")]`) — read tools, gated on the
+  `read:printdata` scope.
+- **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`log_print`,
+  `update_print`, `add_material`, `adjust_material_remaining`, `set_material_active`,
+  `create_project`, `update_project`, plus a `whoami` connectivity check), gated on the
+  `write:printdata` scope.
+
+Authorization topology:
+
+- The `/mcp` endpoint uses the `"Mcp"` policy: authenticated MCP bearer (or `DevAuth` bypass) + a
+  mapped internal user + **at least one** MCP data scope (read OR write). A completely unscoped
+  token cannot even list tools; a write-only agent still reaches the endpoint.
+- The read/write scope is enforced per tool *class* by the SDK's authorization filter, which also
+  **hides** write tools from a read-only token's `tools/list`.
+- A new write scope requires a manual Auth0 dashboard step: add `write:printdata` to the MCP API's
+  permissions in every environment.
+
+Write-tool invariants (defense against a headless/misbehaving agent, not just a well-behaved one):
+
+- The user is always token-derived; ownership is enforced in the query predicate. Foreign/missing
+  ids surface a uniform `not_found` (no existence oracle).
+- `log_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
+  through unique-violation replay, and never mutates printer loaded-state (it does NOT call
+  `setLoadedFilament`).
+- Material amounts use a `{ source, amount }` pair (Weight g / Length mm / Volume ml) converted via
+  the existing measurement helpers; a usage row that cannot convert to a weight is rejected.
+- `adjust_material_remaining` rejects results below zero or above original capacity (no override).
+- No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
+
+See the `adding-an-mcp-tool` skill for adding tools.
+
 ## Integration Testing
 
 Integration tests use `WebApplicationFactory` with SQLite in-memory database. See `PrintLogApi.IntegrationTests/README.md` for full documentation.

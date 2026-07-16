@@ -33,13 +33,15 @@ namespace PrintLogApi.Services
         private readonly IFilamentService _filamentService;
         private readonly IPrinterService _printerService;
         private readonly INotificationService _notificationService;
+        private readonly ICacheVersionService _cacheVersionService;
 
         public PrintService(PrintLogContext context,
                             IMapper mapper,
                             TelemetryClient telemetry,
                             IFilamentService filamentService,
                             IPrinterService printerService,
-                            INotificationService notificationService)
+                            INotificationService notificationService,
+                            ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
@@ -47,6 +49,7 @@ namespace PrintLogApi.Services
             _filamentService = filamentService;
             _printerService = printerService;
             _notificationService = notificationService;
+            _cacheVersionService = cacheVersionService;
         }
 
         /// <summary>Maximum length of the free-text search term.</summary>
@@ -601,6 +604,254 @@ namespace PrintLogApi.Services
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
             return await GetPrintById(newPrint.Id); ;
+        }
+
+        public async Task<LogPrintResult> LogPrintForMcp(
+            long userId, string title, long printerId, PrintStatus status,
+            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
+        {
+            const string toolName = "log_print";
+
+            var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+            if (replay != null)
+            {
+                return replay;
+            }
+
+            // Ownership checks. Foreign/missing ids all surface the same NotFound (no existence oracle).
+            var printer = await _context.Printers
+                .FirstOrDefaultAsync(p => p.Id == printerId && p.UserId == userId, ct);
+            if (printer == null)
+            {
+                throw McpToolException.NotFound("Printer not found.");
+            }
+
+            if (projectId.HasValue &&
+                !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+            {
+                throw McpToolException.NotFound("Project not found.");
+            }
+
+            var materialIds = materials.Select(m => m.MaterialId).ToList();
+            if (materialIds.Count != materialIds.Distinct().Count())
+            {
+                throw McpToolException.InvalidArguments("Each material may appear at most once in a print.");
+            }
+            if (materialIds.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, materialIds))
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            var newPrint = new Print
+            {
+                Title = title,
+                Status = status,
+                PrinterId = printerId,
+                StartDate = startedAt,
+                PrintTimeInSeconds = durationSeconds,
+                Notes = notes,
+                ProjectId = projectId,
+                CreatedById = userId,
+                UpdatedById = userId,
+                FilamentUsage = materials.Select(ToPrintFilament).ToList(),
+            };
+
+            await UpdateFilamentUsageWeights(newPrint);
+            RequireConvertibleUsage(newPrint);
+
+            try
+            {
+                // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
+                // run inside an execution strategy, so the whole tx is the retriable unit.
+                var strategy = _context.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    using var tx = await _context.Database.BeginTransactionAsync(ct);
+                    _context.Prints.Add(newPrint);
+                    await _context.SaveChangesAsync(ct);
+
+                    _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
+                    {
+                        UserId = userId,
+                        ToolName = toolName,
+                        IdempotencyKey = idempotencyKey,
+                        CreatedPrintId = newPrint.Id,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                    });
+                    await _context.SaveChangesAsync(ct);
+                    await tx.CommitAsync(ct);
+                });
+            }
+            catch (DbUpdateException)
+            {
+                // Possible unique-index race: another identical call created the print first. The
+                // transaction has rolled back but the failed Added entities are still tracked; clear
+                // them so the recovery query reads only committed state, then replay the winner's
+                // result. If there is no such record the failure was something else, so rethrow.
+                _context.ChangeTracker.Clear();
+                var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+                if (concurrent != null)
+                {
+                    return concurrent;
+                }
+                throw;
+            }
+
+            _cacheVersionService.InvalidateUserCache(userId);
+            return await BuildLogPrintResult(newPrint.Id, wasReplayed: false, userId, ct);
+        }
+
+        private async Task<LogPrintResult> FindIdempotentPrint(
+            long userId, string toolName, string key, CancellationToken ct)
+        {
+            var record = await _context.McpIdempotencyRecords
+                .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
+            if (record == null)
+            {
+                return null;
+            }
+
+            var exists = await _context.Prints
+                .AnyAsync(p => p.Id == record.CreatedPrintId && p.CreatedById == userId, ct);
+            if (!exists)
+            {
+                throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
+            }
+
+            return await BuildLogPrintResult(record.CreatedPrintId, wasReplayed: true, userId, ct);
+        }
+
+        private static PrintFilament ToPrintFilament(MaterialUsageInput m)
+        {
+            var pf = new PrintFilament
+            {
+                FilamentId = m.MaterialId,
+                Source = (PrintFilament.SourceMeasurement)(int)m.Source,
+            };
+            switch (m.Source)
+            {
+                case McpMeasurementSource.Weight:
+                    pf.AmountMg = checked((int)Math.Round(m.Amount * 1000.0)); // g -> mg
+                    break;
+                case McpMeasurementSource.Length:
+                    pf.LengthInM = m.Amount / 1000.0; // mm -> m
+                    break;
+                case McpMeasurementSource.Volume:
+                    pf.VolumeMl = m.Amount; // ml
+                    break;
+            }
+            return pf;
+        }
+
+        /// <summary>
+        /// Shared conversion-integrity guard for the MCP log/update paths. Material remaining is
+        /// weight-based (see FilamentProfile: FilamentRemaining sums PrintFilament.AmountMg), so a
+        /// Length/Volume usage row on a material lacking the density/diameter to derive a weight would
+        /// be silently ignored by inventory accounting. UpdateFilamentUsageWeights leaves AmountMg
+        /// null in that case; for MCP we hard-fail rather than record usage that never decrements.
+        /// </summary>
+        private static void RequireConvertibleUsage(Print print)
+        {
+            foreach (var pf in print.FilamentUsage)
+            {
+                if (!pf.FilamentId.HasValue)
+                {
+                    continue;
+                }
+                if (pf.AmountMg is null)
+                {
+                    throw McpToolException.InvalidArguments(
+                        "A material is missing the density/diameter needed to record its usage by weight.");
+                }
+                // A non-positive weight after conversion means the amount was too small to record or,
+                // for a Length/Volume source, overflowed the int milligram column (see
+                // UpdateFilamentUsageWeights, which casts unchecked). Reject rather than store corruption.
+                if (pf.AmountMg <= 0)
+                {
+                    throw McpToolException.InvalidArguments(
+                        "A material usage amount is out of the recordable range.");
+                }
+            }
+        }
+
+        private async Task<LogPrintResult> BuildLogPrintResult(
+            long printId, bool wasReplayed, long userId, CancellationToken ct)
+        {
+            var materialIds = await _context.PrintFilament.AsNoTracking()
+                .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
+                .Select(pf => pf.FilamentId.Value)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var remaining = new List<MaterialRemaining>();
+            foreach (var id in materialIds)
+            {
+                remaining.Add(new MaterialRemaining(id, await _filamentService.GetRemainingGramsForMcp(userId, id, ct)));
+            }
+            return new LogPrintResult(printId, wasReplayed, remaining);
+        }
+
+        public async Task<PrintDetailResult> UpdateOwnPrintForMcp(
+            long userId, long printId, PrintStatus? status, string notes, int? durationSeconds,
+            bool projectProvided, Guid? projectId,
+            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct)
+        {
+            var print = await _context.Prints
+                .Include(p => p.FilamentUsage)
+                .FirstOrDefaultAsync(p => p.Id == printId && p.CreatedById == userId, ct);
+            if (print == null)
+            {
+                throw McpToolException.NotFound("Print not found.");
+            }
+
+            if (status.HasValue)
+            {
+                print.Status = status.Value;
+            }
+            if (notes != null)
+            {
+                print.Notes = notes;
+            }
+            if (durationSeconds.HasValue)
+            {
+                print.PrintTimeInSeconds = durationSeconds;
+            }
+
+            if (projectProvided)
+            {
+                if (projectId.HasValue &&
+                    !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+                {
+                    throw McpToolException.NotFound("Project not found.");
+                }
+                print.ProjectId = projectId; // null clears the assignment
+            }
+
+            if (materialsProvided)
+            {
+                var ids = materials.Select(m => m.MaterialId).ToList();
+                if (ids.Count != ids.Distinct().Count())
+                {
+                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
+                }
+                if (ids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, ids))
+                {
+                    throw McpToolException.NotFound("Material not found.");
+                }
+
+                _context.PrintFilament.RemoveRange(print.FilamentUsage);
+                print.FilamentUsage = materials.Select(ToPrintFilament).ToList();
+                await UpdateFilamentUsageWeights(print);
+                RequireConvertibleUsage(print);
+            }
+
+            print.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            return await GetOwnPrintDetailForMcp(userId, printId, ct)
+                ?? throw McpToolException.NotFound("Print not found.");
         }
 
         public async Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId)

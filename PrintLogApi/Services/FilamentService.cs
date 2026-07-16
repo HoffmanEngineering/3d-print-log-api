@@ -23,12 +23,14 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly ICacheVersionService _cacheVersionService;
 
-        public FilamentService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry)
+        public FilamentService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _cacheVersionService = cacheVersionService;
         }
 
         private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
@@ -95,6 +97,166 @@ namespace PrintLogApi.Services
 
             var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
             return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
+        }
+
+        public async Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
+        {
+            var remainingMg = await _context.Filaments.AsNoTracking()
+                .Where(f => f.CreatedById == userId && f.Id == materialId)
+                .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
+                .Select(f => f.FilamentRemaining)
+                .FirstOrDefaultAsync(ct);
+            return McpUnits.MgToGrams(remainingMg);
+        }
+
+        public async Task<MaterialInventoryItem> AddMaterialForMcp(
+            long userId, string displayName, string materialType, string materialCategoryNickname,
+            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
+            double initialAmount, string brand, string colorName, string colorHex,
+            string storageLocation, bool isActive, CancellationToken ct)
+        {
+            var category = await _context.MaterialCategories
+                .FirstOrDefaultAsync(c => c.Nickname == materialCategoryNickname, ct);
+            if (category == null)
+            {
+                throw McpToolException.InvalidArguments($"Unknown material category '{materialCategoryNickname}'.");
+            }
+            if (category.HasDiameter && (!diameterMm.HasValue || diameterMm <= 0))
+            {
+                throw McpToolException.InvalidArguments("This material category requires a positive diameterMm.");
+            }
+            McpWriteValidation.RequirePositiveDensity(densityGramPerCubicCm);
+            McpWriteValidation.RequirePositiveAmount(initialAmount);
+            if (colorHex != null && colorHex.Length != 6)
+            {
+                throw McpToolException.InvalidArguments("colorHex must be 6 hex digits with no leading '#'.");
+            }
+
+            var dto = new AddFilamentDto
+            {
+                DisplayName = displayName,
+                Brand = brand,
+                MaterialType = materialType,
+                MaterialCategoryNickname = materialCategoryNickname,
+                MaterialDensityGramPerCubicCm = densityGramPerCubicCm,
+                DiameterMm = diameterMm,
+                ColorName = colorName,
+                ColorHex = colorHex,
+                Colors = colorHex != null ? new List<string> { colorHex } : new List<string>(),
+                Source = (Filament.SourceMeasurement)(int)source,
+                IsActive = isActive,
+                StorageLocation = storageLocation,
+                FilamentAdjustments = new List<FilamentAdjustmentDto>(),
+            };
+            switch (source)
+            {
+                case McpMeasurementSource.Weight:
+                    dto.InitialNominalWeightMg = checked((long)Math.Round(initialAmount * 1000.0)); // g -> mg
+                    break;
+                case McpMeasurementSource.Length:
+                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
+                    break;
+                case McpMeasurementSource.Volume:
+                    dto.InitialNominalVolumeMl = initialAmount; // ml
+                    break;
+            }
+
+            var created = await AddFilament(dto, userId);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
+            return new MaterialInventoryItem(
+                created.Id, created.DisplayName, created.Brand, created.MaterialType, created.ColorName,
+                remaining, created.IsActive, created.StorageLocation, created.DiameterMm);
+        }
+
+        public async Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            CancellationToken ct)
+        {
+            McpWriteValidation.RequireFiniteAmount(delta);
+            if (delta == 0)
+            {
+                throw McpToolException.InvalidArguments("delta must be non-zero.");
+            }
+
+            var material = await _context.Filaments
+                .Include(f => f.MaterialCategory)
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            // Record the adjustment in the caller's source unit; the existing helper derives the rest,
+            // including AmountMg — the weight the remaining calculation actually sums.
+            var adjustment = new FilamentAdjustment
+            {
+                FilamentId = materialId,
+                Source = (FilamentAdjustment.SourceMeasurement)(int)source,
+                Notes = notes,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            switch (source)
+            {
+                case McpMeasurementSource.Weight:
+                    adjustment.AmountMg = checked((long)Math.Round(delta * 1000.0)); // g -> mg
+                    break;
+                case McpMeasurementSource.Length:
+                    adjustment.LengthInM = delta / 1000.0; // mm -> m
+                    break;
+                case McpMeasurementSource.Volume:
+                    adjustment.VolumeMl = delta; // ml
+                    break;
+            }
+            UpdateFilamentAdjustmentMeasurements(adjustment, material);
+
+            if (adjustment.AmountMg is null)
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material is missing the density/diameter needed to convert the adjustment to a weight.");
+            }
+
+            var deltaGrams = McpUnits.MgToGrams(adjustment.AmountMg);
+            var beforeGrams = await GetRemainingGramsForMcp(userId, materialId, ct);
+            var afterGrams = Math.Round(beforeGrams + deltaGrams, 3, MidpointRounding.AwayFromZero);
+            var capacityGrams = McpUnits.MgToGrams(material.InitialNominalWeightMg);
+
+            if (afterGrams < 0)
+            {
+                throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.");
+            }
+            if (capacityGrams > 0 && afterGrams > capacityGrams)
+            {
+                throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.");
+            }
+
+            _context.FilamentAdjustments.Add(adjustment);
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            return new MaterialWriteResult(materialId, beforeGrams, afterGrams, "g");
+        }
+
+        public async Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct)
+        {
+            var material = await _context.Filaments
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            material.IsActive = isActive;
+            material.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+
+            var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
+            return new MaterialInventoryItem(
+                material.Id, material.DisplayName, material.Brand, material.MaterialType, material.ColorName,
+                remaining, material.IsActive, material.StorageLocation, material.DiameterMm);
         }
 
         public const int MaxGroups = 20;

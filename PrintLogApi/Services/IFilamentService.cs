@@ -30,6 +30,40 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<FindMaterialResult> FindMaterialForMcp(
             long userId, string material, string color, double? requiredGrams, CancellationToken ct);
+
+        /// <summary>
+        /// Remaining weight (grams) for one of the caller's materials, using the same remaining
+        /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns 0 when the material has no
+        /// nominal weight or does not belong to <paramref name="userId"/>.
+        /// </summary>
+        Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
+
+        /// <summary>
+        /// Creates a material for the MCP write surface. The category must exist (no silent fallback
+        /// to the default), density must be positive, and diameter is required for diameter-tracking
+        /// categories. Reuses the existing measurement-fill logic. Invalidates the user cache.
+        /// </summary>
+        Task<MaterialInventoryItem> AddMaterialForMcp(
+            long userId, string displayName, string materialType, string materialCategoryNickname,
+            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
+            double initialAmount, string brand, string colorName, string colorHex,
+            string storageLocation, bool isActive, CancellationToken ct);
+
+        /// <summary>
+        /// Applies a signed adjustment to a material's remaining amount, expressed in the caller's
+        /// source unit (Weight g / Length mm / Volume ml) and converted to the weight the inventory
+        /// accounting uses. Rejects a result that would go below zero or above the material's original
+        /// capacity. Before/after remaining are returned in grams (the canonical inventory unit).
+        /// </summary>
+        Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            CancellationToken ct);
+
+        /// <summary>
+        /// Activates or retires one of the caller's materials. Foreign/missing materials surface
+        /// NotFound. Invalidates the user cache.
+        /// </summary>
+        Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct);
         Task<bool> CanUserAccessFilament(long userId, Guid filamentId);
         Task<bool> CanUserAccessAllFilaments(long userId, IEnumerable<Guid> filamentIds);
         Task DeleteFilament(Guid filamentId);

@@ -32,14 +32,15 @@ namespace PrintLogApi.Authentication.Handlers
 
             var userId = userIdValues.ToString().Trim();
 
-            // Match the issuer HasScopeHandler expects so the dev bypass satisfies the
-            // read:printdata MCP scope requirement without contacting Auth0.
+            // Match the issuer HasScopeHandler expects so the dev bypass satisfies the MCP scope
+            // requirements without contacting Auth0. Both read and write scopes are granted so the
+            // full MCP tool surface (McpRead and McpWrite) is exercisable under the dev bypass.
             var issuer = $"https://{configuration["Auth0:Domain"]}/";
 
             var claims = new[]
             {
                 new Claim(ClaimTypes.Upn, $"dev|{userId}"),
-                new Claim("scope", "read:printdata", ClaimValueTypes.String, issuer),
+                new Claim("scope", "read:printdata write:printdata", ClaimValueTypes.String, issuer),
             };
 
             var identity = new ClaimsIdentity(claims, Scheme.Name);

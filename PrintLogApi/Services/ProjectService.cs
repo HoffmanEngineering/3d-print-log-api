@@ -17,12 +17,86 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly IBlobStorageService _blobStorageService;
+        private readonly ICacheVersionService _cacheVersionService;
 
-        public ProjectService(PrintLogContext context, IMapper mapper, IBlobStorageService blobStorageService)
+        public ProjectService(PrintLogContext context, IMapper mapper, IBlobStorageService blobStorageService, ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
             _blobStorageService = blobStorageService;
+            _cacheVersionService = cacheVersionService;
+        }
+
+        public async Task<Mcp.McpPage<Mcp.ProjectListItem>> ListProjectsForMcp(
+            long userId, int page, int pageSize, string search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
+        {
+            var query = _context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                query = query.Where(p =>
+                    EF.Functions.Like(p.Name, $"%{search}%") ||
+                    (p.Reference != null && EF.Functions.Like(p.Reference, $"%{search}%")));
+            }
+            if (status.HasValue)
+            {
+                query = query.Where(p => p.Status == status.Value);
+            }
+
+            var total = await query.CountAsync(ct);
+            var items = await query
+                .OrderByDescending(p => p.UpdatedDate)
+                .ThenBy(p => p.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new Mcp.ProjectListItem(
+                    p.Id, p.Name, p.Reference, p.Status.ToString(), p.ViewStatus.ToString()))
+                .ToListAsync(ct);
+
+            var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(total / (double)pageSize) : 0;
+            return new Mcp.McpPage<Mcp.ProjectListItem>(items, page, pageSize, total, totalPages);
+        }
+
+        public async Task<Mcp.ProjectWriteResult> CreateProjectForMcp(
+            long userId, string name, string reference, string description, string url,
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, System.Threading.CancellationToken ct)
+        {
+            var project = new Project
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Reference = reference,
+                Description = description,
+                Url = url,
+                Status = status,
+                ViewStatus = viewStatus,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            _context.Projects.Add(project);
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+            return new Mcp.ProjectWriteResult(project.Id, project.Name, project.Status.ToString(), project.ViewStatus.ToString());
+        }
+
+        public async Task<Mcp.ProjectWriteResult> UpdateProjectForMcp(
+            long userId, Guid id, string name, string reference, string description, string url,
+            Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, System.Threading.CancellationToken ct)
+        {
+            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
+            if (project == null)
+            {
+                throw Mcp.McpToolException.NotFound("Project not found.");
+            }
+            if (name != null) project.Name = name;
+            if (reference != null) project.Reference = reference;
+            if (description != null) project.Description = description;
+            if (url != null) project.Url = url;
+            if (status.HasValue) project.Status = status.Value;
+            if (viewStatus.HasValue) project.ViewStatus = viewStatus.Value;
+            project.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+            _cacheVersionService.InvalidateUserCache(userId);
+            return new Mcp.ProjectWriteResult(project.Id, project.Name, project.Status.ToString(), project.ViewStatus.ToString());
         }
 
         public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(
