@@ -193,18 +193,34 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 - `update_printer` validates everything and resolves the category **before** the first assignment, so
   a rejected patch cannot leave a partially-mutated entity — no `ChangeTracker.Clear()` needed, unlike
   `update_material`.
-- `McpIdempotencyRecord` carries a nullable `CreatedPrintId`, `CreatedFilamentId` **or**
-  `CreatedPrinterId` — exactly one, decided by `ToolName`. That rule is held by
+- `McpIdempotencyRecord` carries a nullable `CreatedPrintId`, `CreatedFilamentId`, `CreatedPrinterId`
+  **or** `CreatedProjectId` — exactly one, decided by `ToolName`. That rule is held by
   `McpIdempotencyRecordFactory`, the single construction path, which counts the non-null targets
-  (a chained XOR of three operands is true for one *or* three, which would wave through the worst
-  case) and throws `InvalidOperationException` — a server bug, never something a caller can provoke.
+  (a chained XOR is true for an ODD count, which would wave through the worst cases) and throws
+  `InvalidOperationException` — a server bug, never something a caller can provoke.
   There is no check constraint and the entity is still publicly constructible, so this is the
   conventional path rather than an enforced one; nothing needs the constraint, because every lookup
   is scoped by `ToolName` and reads only its own field, treating a null there as a dangling record.
-- `create_printer` idempotency is **optional**, same contract as `create_material`: with a key, same
-  args replays and different args is a `conflict`; **without** one, a retry creates a SECOND printer.
-  That residual at-least-once risk is an accepted design choice (printers are created rarely), stated
-  in the tool description and pinned by a test.
+  Note `CreatedFilamentId` and `CreatedProjectId` are both `Guid?`, so a target written to the wrong
+  one would still compile — the count is what catches it.
+- `create_printer`/`create_material`/`create_project` idempotency is **optional**: with a key, same
+  args replays and different args is a `conflict`; **without** one, a retry creates a SECOND entity.
+  That residual at-least-once risk is an accepted design choice, stated in each tool description and
+  pinned by a test. Only `create_print` requires a key.
+- **Every write tool's result must be self-sufficient.** There is no `get_project`, and a write-only
+  agent cannot call the read tools at all, so a create/update echo is the only way a caller can
+  confirm what it wrote — `ProjectWriteResult` echoes every settable field for that reason, not for
+  symmetry.
+- **Reject-with-the-valid-options.** Nothing lists printer or material categories, so
+  `RequirePrinterCategory`/`RequireCategory` name the valid nicknames in the rejection. Both sets are
+  small fixed `HasData` seeds shared by every user (printer: FFF/FDM/SLA/…; material:
+  filament/resin/powder/wire) — **not per-user** — so the error can carry them; the extra query runs
+  only on the failure path.
+- **Optional tool parameters need C# defaults, not just nullable types.** The SDK derives the
+  schema's `required` list from constructor parameters *without* a default, so a positional record
+  like `MaterialUsageInput` advertised all six fields as required while the server accepted a bare
+  `(materialId, source, amount)` row. A schema-reading agent then sends `"notes": null` on every row
+  to satisfy a rule that does not exist. `ToolSchemaTests` pins this.
 - **Known gap:** the unique-violation *race recovery* in `create_print`/`create_material`/
   `create_printer` is designed for but not covered by tests. The
   `IX_McpIdempotencyRecords_User_Tool_Key` unique index is the real guard and is verified; the
