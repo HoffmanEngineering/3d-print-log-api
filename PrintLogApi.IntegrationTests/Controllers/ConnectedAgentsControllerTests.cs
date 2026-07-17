@@ -39,7 +39,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             public Task DeleteUser(string oauthUserId) => Task.CompletedTask;
             public Task<string> GetManagementApiBearerToken() => Task.FromResult(string.Empty);
-            public Task GetUser(string oauthUserId) => Task.CompletedTask;
+            public Task<string> GetUserEmail(string oauthUserId, CancellationToken ct) => Task.FromResult<string>(null);
         }
 
         private static ConnectedAgentsController CreateController(FakeAuth0Service service, string subject)

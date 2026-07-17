@@ -9,7 +9,21 @@ namespace PrintLogApi.Services
     {
         Task DeleteUser(string oauthUserId);
         Task<string> GetManagementApiBearerToken();
-        Task GetUser(string oauthUserId);
+
+        /// <summary>
+        /// The user's email address from Auth0, or null when the account has none.
+        /// <para>
+        /// The API authenticates with an ACCESS token, and Auth0 puts <c>email</c> only in ID
+        /// tokens, so a claim lookup can never resolve it — this Management API call is the only
+        /// server-side route to the address. Requires <c>read:users</c> on the M2M application in
+        /// every environment; without it the request fails and callers degrade.
+        /// </para>
+        /// <para>
+        /// Throws <see cref="Exceptions.Auth0ApiException"/> on failure. Callers on a user-facing
+        /// write path must treat this as best-effort and never fail the write over it.
+        /// </para>
+        /// </summary>
+        Task<string> GetUserEmail(string oauthUserId, CancellationToken ct);
 
         /// <summary>
         /// Lists the user's Auth0 grants for the dedicated MCP audience that include the

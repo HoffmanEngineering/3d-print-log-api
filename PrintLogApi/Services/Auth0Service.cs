@@ -208,10 +208,31 @@ namespace PrintLogApi.Services
         /// <summary>
         ///     Gets a user's information from Auth0
         /// </summary>
-        public async Task GetUser(string oauthUserId)
+        /// <summary>
+        ///   Get a user's email address from Auth0 by their oauth id. Null when the account has no
+        ///   email, or when the id is blank.
+        /// </summary>
+        public async Task<string> GetUserEmail(string oauthUserId, CancellationToken ct)
         {
+            if (string.IsNullOrWhiteSpace(oauthUserId))
+            {
+                return null;
+            }
+
             var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}";
-            await SendManagementAsync(HttpMethod.Get, requestUrl, CancellationToken.None);
+            var json = await SendManagementAsync(HttpMethod.Get, requestUrl, ct);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            var user = JsonSerializer.Deserialize<Auth0User>(json);
+            return string.IsNullOrWhiteSpace(user?.Email) ? null : user.Email;
+        }
+
+        private sealed class Auth0User
+        {
+            [JsonPropertyName("email")] public string Email { get; set; }
         }
 
         /// <summary>

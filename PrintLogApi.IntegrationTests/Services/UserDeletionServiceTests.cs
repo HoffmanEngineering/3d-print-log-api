@@ -159,9 +159,9 @@ namespace PrintLogApi.IntegrationTests.Services
                 return Task.FromResult("test-token");
             }
 
-            public Task GetUser(string oauthUserId)
+            public Task<string> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
             {
-                return Task.CompletedTask;
+                return Task.FromResult<string>(null);
             }
 
             public Task<System.Collections.Generic.IReadOnlyList<PrintLogApi.Models.DTOs.ConnectedAgentDto>> ListMcpGrants(
