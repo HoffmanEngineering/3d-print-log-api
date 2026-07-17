@@ -4,7 +4,7 @@ using PrintLogApi.Models;
 namespace PrintLogApi.Mcp
 {
     /// <summary>
-    /// The single construction path for <see cref="McpIdempotencyRecord"/>. Three nullable target
+    /// The single construction path for <see cref="McpIdempotencyRecord"/>. Five nullable target
     /// columns share one table and exactly one must be set per record; centralizing construction is
     /// what makes that true, because there is no schema constraint behind it.
     /// </summary>
@@ -22,6 +22,9 @@ namespace PrintLogApi.Mcp
         public static McpIdempotencyRecord ForProject(long userId, string key, string fingerprint, Guid projectId) =>
             Build(userId, "create_project", key, fingerprint, r => r.CreatedProjectId = projectId);
 
+        public static McpIdempotencyRecord ForFeedback(long userId, string key, string fingerprint, Guid feedbackId) =>
+            Build(userId, "create_feedback", key, fingerprint, r => r.CreatedFeedbackId = feedbackId);
+
         /// <summary>
         /// Counts the non-null targets rather than chaining XOR: a pairwise XOR of several operands is
         /// true for an ODD number of non-null values, which would wave through the worst cases.
@@ -36,7 +39,8 @@ namespace PrintLogApi.Mcp
             var targets = (record.CreatedPrintId.HasValue ? 1 : 0)
                 + (record.CreatedFilamentId.HasValue ? 1 : 0)
                 + (record.CreatedPrinterId.HasValue ? 1 : 0)
-                + (record.CreatedProjectId.HasValue ? 1 : 0);
+                + (record.CreatedProjectId.HasValue ? 1 : 0)
+                + (record.CreatedFeedbackId.HasValue ? 1 : 0);
             if (targets != 1)
             {
                 throw new InvalidOperationException(
