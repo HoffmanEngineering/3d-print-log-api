@@ -72,6 +72,13 @@ the gotchas. `CLAUDE.md` holds the surface's invariants and the reasoning behind
 - **A config-gated side effect passes tests vacuously.** The feedback notification only sends when
   `FeedbackEmailAddress` is set, and test settings left it empty — the tests "passed" while covering
   nothing. Assert on the side effect itself (`RecordingEmailSender`), not just the row.
+- **Post-commit work must not take the caller's `CancellationToken`.** After the commit, honouring a
+  disconnect cannot un-commit anything — it only strands the side effect, reports a committed write
+  as failed, and burns the idempotency key so the retry replays and never redoes it. Omit the
+  parameter rather than documenting "don't pass it", and catch cancellation like any other failure
+  there (`HttpClient` timeouts arrive in that shape too). Test with an
+  `OperationCanceledException`-shaped failure specifically — a generic-exception test passes straight
+  through this bug.
 - **Test config: `ConfigureAppConfiguration`, not `UseSetting`.** `UseSetting` writes *host*
   configuration, which `appsettings.json` is then layered on top of, putting the old value back.
 - **Fixture fakes are singletons shared by every test in the class.** Tag each test's data with a

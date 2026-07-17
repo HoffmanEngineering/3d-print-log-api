@@ -49,7 +49,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync(ct);
             _telemetry.TrackEvent("FeedbackAdded");
 
-            await NotifyBestEffort(feedback, userId, FeedbackSource.Website, ct);
+            await NotifyBestEffort(feedback, userId, FeedbackSource.Website);
             return feedback;
         }
 
@@ -106,7 +106,7 @@ namespace PrintLogApi.Services
             _telemetry.TrackEvent("FeedbackAdded");
 
             // After commit, and only on the create path: a replay must never re-notify.
-            await NotifyBestEffort(feedback, userId, FeedbackSource.McpAgent, ct);
+            await NotifyBestEffort(feedback, userId, FeedbackSource.McpAgent);
 
             // No cache invalidation: feedback is not part of any cached response. Every other write
             // tool invalidates because it changes data the read paths cache; this one does not.
@@ -176,8 +176,17 @@ namespace PrintLogApi.Services
         /// Failing would not undo the row — it would only mislead the caller into reporting failure
         /// for feedback that was saved, and (on the MCP path) burn the idempotency key so the retry
         /// replays without ever notifying. The tracked events are the thing to alarm on.
+        /// <para>
+        /// **Takes no CancellationToken on purpose.** Everything here runs AFTER the commit, where
+        /// the caller's token is actively harmful: a client that disconnects cannot un-commit the
+        /// row, so honouring its cancellation would stall the notification, surface a committed
+        /// write as a failure, and (MCP) burn the key so the retry replays and never notifies —
+        /// precisely the outcome this method exists to prevent. Omitting the parameter is what makes
+        /// that unthreadable, rather than a comment asking the next caller not to pass it. The work
+        /// is still bounded: Auth0 by its 30s HttpClient timeout, SMTP by MailKit's own.
+        /// </para>
         /// </summary>
-        private async Task NotifyBestEffort(Feedback feedback, long userId, FeedbackSource source, CancellationToken ct)
+        private async Task NotifyBestEffort(Feedback feedback, long userId, FeedbackSource source)
         {
             if (string.IsNullOrWhiteSpace(_feedbackEmail))
             {
@@ -187,12 +196,14 @@ namespace PrintLogApi.Services
             try
             {
                 var user = await _context.Users.AsNoTracking()
-                    .FirstOrDefaultAsync(u => u.Id == userId, ct);
-                var accountEmail = await ResolveAccountEmail(user, ct);
+                    .FirstOrDefaultAsync(u => u.Id == userId, CancellationToken.None);
+                var accountEmail = await ResolveAccountEmail(user);
                 var body = BuildBody(feedback, user, userId, accountEmail, source);
                 await _emailSender.SendEmailAsync(_feedbackEmail, "New 3D Print Log Feedback", body);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            // Cancellation included: post-commit it is just another failed notification, and an
+            // HttpClient timeout arrives in this shape too.
+            catch (Exception ex)
             {
                 _telemetry.TrackEvent("FeedbackNotificationFailed");
                 _telemetry.TrackException(ex);
@@ -200,10 +211,11 @@ namespace PrintLogApi.Services
         }
 
         /// <summary>
-        /// The account email from Auth0. Degrades to null rather than throwing: an Auth0 outage or a
-        /// missing read:users grant must not cost us the notification entirely.
+        /// The account email from Auth0. Degrades to null rather than throwing: an Auth0 outage, a
+        /// missing read:users grant, or a timeout must not cost us the notification entirely. Runs
+        /// post-commit, so it takes no caller token either — see <see cref="NotifyBestEffort"/>.
         /// </summary>
-        private async Task<string> ResolveAccountEmail(User user, CancellationToken ct)
+        private async Task<string> ResolveAccountEmail(User user)
         {
             if (string.IsNullOrWhiteSpace(user?.OAuthUserId))
             {
@@ -212,9 +224,9 @@ namespace PrintLogApi.Services
 
             try
             {
-                return await _auth0Service.GetUserEmail(user.OAuthUserId, ct);
+                return await _auth0Service.GetUserEmail(user.OAuthUserId, CancellationToken.None);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 _telemetry.TrackEvent("FeedbackAccountEmailLookupFailed");
                 _telemetry.TrackException(ex);

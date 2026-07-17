@@ -252,6 +252,19 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
   instead of throwing. Throwing would not undo the committed row — it would only report failure for
   feedback that was saved and burn the idempotency key, so the retry replays and never notifies
   either. The row is the source of truth; alarm on the telemetry.
+- **"Best-effort" includes cancellation, and `NotifyBestEffort` takes no `CancellationToken` to
+  enforce it.** Everything it does runs *after* the commit, where the caller's token is actively
+  harmful: a disconnected client cannot un-commit the row, so honouring its cancellation strands the
+  notification, surfaces a committed write as a failure, and burns the key. An earlier
+  `catch (Exception ex) when (ex is not OperationCanceledException)` reintroduced exactly the bug the
+  best-effort rule exists to prevent — correct instinct ("never swallow cancellation") applied on the
+  wrong side of the commit. Omitting the parameter is what makes the token unthreadable; the catch is
+  unfiltered because post-commit a cancellation is just a failed notification, and an `HttpClient`
+  timeout arrives in that same shape. Bounded by Auth0's 30s timeout and MailKit's own.
+- **Known gap:** SMTP delivery is inline on the response path and `IEmailSender` takes no
+  `CancellationToken`, so a slow mail server delays the tool's success response (bounded by MailKit's
+  default timeout). Pre-existing and shared with the website endpoint. A transactional outbox would
+  fix both properly; deliberately not built for a path that sends a handful of emails.
 - **`Feedback.Email` means "the address the user typed into the website form" — nothing else.**
   Agents pass no email and it stays null for them. The account address in the notification body comes
   from Auth0 at compose time and is never persisted. The old `Email (from token)` line could never

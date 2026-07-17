@@ -24,6 +24,12 @@ namespace PrintLogApi.IntegrationTests
         /// <summary>When set, every send throws — for testing that a failed notification is survivable.</summary>
         public bool ThrowOnSend { get; set; }
 
+        /// <summary>
+        /// When set, every send throws <see cref="OperationCanceledException"/> — the shape a client
+        /// disconnect or an HTTP timeout arrives in, which a plain exception test does not cover.
+        /// </summary>
+        public bool ThrowCancelledOnSend { get; set; }
+
         public IReadOnlyList<SentEmail> Sent => _sent.ToArray();
 
         /// <summary>The emails whose body contains <paramref name="marker"/>.</summary>
@@ -32,6 +38,10 @@ namespace PrintLogApi.IntegrationTests
 
         public Task SendEmailAsync(string email, string subject, string message)
         {
+            if (ThrowCancelledOnSend)
+            {
+                throw new OperationCanceledException("Simulated cancellation during send.");
+            }
             if (ThrowOnSend)
             {
                 throw new InvalidOperationException("Simulated SMTP failure.");

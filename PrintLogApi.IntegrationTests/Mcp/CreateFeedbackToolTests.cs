@@ -290,6 +290,85 @@ namespace PrintLogApi.IntegrationTests.Mcp
             }
         }
 
+        // The notification runs AFTER the commit, so a cancellation-shaped failure there must be
+        // treated like any other: the row exists either way. Letting it escape would report failure
+        // for feedback that was saved AND burn the key, so the retry replays and never notifies —
+        // the notification would be unrecoverable. A generic-exception test does not cover this:
+        // OperationCanceledException is exactly what a client disconnect and an HttpClient timeout
+        // both arrive as.
+        [Fact]
+        public async Task CreateFeedback_Auth0LookupCancelled_StillRecordsAndNotifies()
+        {
+            var marker = Marker();
+            _factory.Auth0.ThrowCancelledOnGetUserEmail = true;
+            try
+            {
+                await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                {
+                    ["type"] = "Bug",
+                    ["note"] = $"auth0 cancelled {marker}",
+                    ["idempotencyKey"] = Guid.NewGuid().ToString(),
+                });
+
+                Assert.True(result.IsError != true);
+                var email = Assert.Single(_factory.EmailSender.Matching(marker));
+                Assert.Contains("(not available)", email.Body);
+
+                using var scope = _factory.Services.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+            }
+            finally
+            {
+                _factory.Auth0.ThrowCancelledOnGetUserEmail = false;
+            }
+        }
+
+        [Fact]
+        public async Task CreateFeedback_NotificationCancelled_StillRecordsAndReportsSuccess()
+        {
+            var marker = Marker();
+            var key = Guid.NewGuid().ToString();
+            _factory.EmailSender.ThrowCancelledOnSend = true;
+            try
+            {
+                await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                {
+                    ["type"] = "Other",
+                    ["note"] = $"send cancelled {marker}",
+                    ["idempotencyKey"] = key,
+                });
+
+                Assert.True(result.IsError != true);
+
+                using var scope = _factory.Services.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+
+                // The key must still be usable as a key: a retry replays the committed row rather
+                // than writing a second one.
+                _factory.EmailSender.ThrowCancelledOnSend = false;
+                var retry = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                {
+                    ["type"] = "Other",
+                    ["note"] = $"send cancelled {marker}",
+                    ["idempotencyKey"] = key,
+                });
+                Assert.True(retry.IsError != true);
+                using var doc = JsonDocument.Parse(retry.Content.OfType<TextContentBlock>().First().Text);
+                Assert.True(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+            }
+            finally
+            {
+                _factory.EmailSender.ThrowCancelledOnSend = false;
+            }
+        }
+
         [Fact]
         public async Task CreateFeedback_TrimsTheNoteItStores()
         {

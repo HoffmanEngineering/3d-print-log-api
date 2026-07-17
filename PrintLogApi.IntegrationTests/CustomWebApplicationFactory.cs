@@ -218,6 +218,12 @@ namespace PrintLogApi.IntegrationTests
             /// <summary>When set, the lookup throws — for testing that callers degrade instead of failing.</summary>
             public bool ThrowOnGetUserEmail { get; set; }
 
+            /// <summary>
+            /// When set, the lookup throws <see cref="OperationCanceledException"/> — the shape a
+            /// client disconnect or the 30s HttpClient timeout arrives in.
+            /// </summary>
+            public bool ThrowCancelledOnGetUserEmail { get; set; }
+
             public Task DeleteUser(string oauthUserId)
             {
                 return Task.CompletedTask;
@@ -230,6 +236,10 @@ namespace PrintLogApi.IntegrationTests
 
             public Task<string> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
             {
+                if (ThrowCancelledOnGetUserEmail)
+                {
+                    throw new OperationCanceledException("Simulated cancellation during Auth0 lookup.");
+                }
                 if (ThrowOnGetUserEmail)
                 {
                     throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
