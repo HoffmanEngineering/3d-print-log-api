@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace PrintLogApi.Mcp
 {
@@ -40,13 +41,37 @@ namespace PrintLogApi.Mcp
             return amount;
         }
 
-        public static int RequirePositiveDuration(int seconds)
+        public static int RequirePositiveDuration(int seconds, string field)
         {
             if (seconds <= 0)
             {
-                throw McpToolException.InvalidArguments("durationSeconds must be greater than zero.");
+                throw McpToolException.InvalidArguments($"{field} must be greater than zero.");
             }
             return seconds;
+        }
+
+        /// <summary>
+        /// Normalizes a caller-supplied clear-field list against the fields a tool actually allows
+        /// clearing. An unknown name is rejected rather than ignored, so a typo can never silently
+        /// leave a field unchanged when the caller believed it was cleared.
+        /// </summary>
+        public static ISet<string> RequireAllowedClearFields(string[] clear, ISet<string> allowed)
+        {
+            var result = new HashSet<string>();
+            if (clear is null)
+            {
+                return result;
+            }
+            foreach (var raw in clear)
+            {
+                var name = raw?.Trim();
+                if (string.IsNullOrEmpty(name) || !allowed.Contains(name))
+                {
+                    throw McpToolException.InvalidArguments($"'{raw}' is not a clearable field.");
+                }
+                result.Add(name);
+            }
+            return result;
         }
 
         public static double RequirePositiveDensity(double density)

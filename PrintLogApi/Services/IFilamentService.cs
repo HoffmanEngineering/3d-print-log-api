@@ -39,15 +39,36 @@ namespace PrintLogApi.Services
         Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
 
         /// <summary>
+        /// Full detail for ONE of the caller's own materials, via the combined ownership predicate.
+        /// Foreign or missing ids surface NotFound identically, so this is never an existence oracle.
+        /// </summary>
+        Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct);
+
+        /// <summary>
         /// Creates a material for the MCP write surface. The category must exist (no silent fallback
         /// to the default), density must be positive, and diameter is required for diameter-tracking
         /// categories. Reuses the existing measurement-fill logic. Invalidates the user cache.
+        /// <para>
+        /// <paramref name="idempotencyKey"/> is OPTIONAL: with a key, a retry carrying the same
+        /// arguments replays the original material and a key reused with different arguments is a
+        /// conflict; without one, every call creates a new material.
+        /// </para>
         /// </summary>
-        Task<MaterialInventoryItem> AddMaterialForMcp(
-            long userId, string displayName, string materialType, string materialCategoryNickname,
-            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
-            double initialAmount, string brand, string colorName, string colorHex,
-            string storageLocation, bool isActive, CancellationToken ct);
+        Task<CreateMaterialResult> CreateMaterialForMcp(
+            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct);
+
+        /// <summary>
+        /// Edits one of the caller's own materials through a dedicated ownership-scoped path.
+        /// <para>
+        /// Deliberately NOT <see cref="UpdateFilament"/>: that method loads via GetFilamentById with
+        /// no creator filter (a cross-user edit hole) and never invalidates the cache. Foreign or
+        /// missing ids surface NotFound. Only fields present in <paramref name="input"/> change;
+        /// fields named in <paramref name="clear"/> are nulled. Everything is validated before any
+        /// mutation reaches the database, so a rejected edit leaves the material untouched.
+        /// </para>
+        /// </summary>
+        Task<MaterialDetail> UpdateOwnMaterialForMcp(
+            long userId, Guid materialId, MaterialAttributesInput input, ISet<string> clear, CancellationToken ct);
 
         /// <summary>
         /// Applies a signed adjustment to a material's remaining amount, expressed in the caller's

@@ -18,6 +18,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long OtherPrinterId { get; private set; }
         public static Guid InactiveFilamentId { get; private set; } // primary user, inactive, null initial weight
         public static Guid NegativeFilamentId { get; private set; } // primary user, PLA/Crimson, remaining = -200 g
+        public static Guid ResinMaterialId { get; private set; } // primary user, resin: density but NO diameter
         public static long RichPrintId1 { get; private set; } // Printer2, Success, 25 g, 7200 s, Filament1
         public static long RichPrintId2 { get; private set; } // Printer2, Failed, 10 g, 3600 s, Filament2
         public static long ForeignPrintId { get; private set; } // owned by OtherUser, Public
@@ -28,6 +29,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long AmsPrinterId { get; private set; } // carries more loaded spools than get_printer returns
         public static long CrossOwnerRefPrintId { get; private set; } // caller's print, another user's project + printer
         public static Guid ForeignProjectId { get; private set; } // owned by OtherUser
+        public static Guid ForeignMaterialId { get; private set; } // owned by OtherUser (the foreign spool)
 
         public const string BulkUserOAuthId = "auth0|mcp-bulk-user";
         public static long BulkUserId { get; private set; } // holds more spools than MaxCandidates
@@ -236,6 +238,31 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.SaveChanges();
             InactiveFilamentId = inactiveFilament.Id;
 
+            // A resin: density but NO diameter. Volume/Weight usage converts; Length cannot, which is
+            // what makes the source-vs-material convertibility matrix testable.
+            var resinMaterial = new Filament
+            {
+                Id = new Guid("aaaaaaaa-0005-0000-0000-000000000000"),
+                Brand = "Elegoo",
+                ColorHex = "808080",
+                ColorName = "Grey",
+                CreatedById = primaryUserId,
+                CreatedDate = now,
+                UpdatedById = primaryUserId,
+                UpdatedDate = now,
+                DiameterMm = null,
+                DisplayName = "Elegoo Grey Standard Resin",
+                MaterialType = "Standard Resin",
+                MaterialCategoryNickname = "resin",
+                MaterialDensityGramPerCubicCm = 1.1,
+                IsActive = true,
+                InitialNominalWeightMg = 1_000_000,
+                Source = Filament.SourceMeasurement.Weight,
+            };
+            context.Filaments.Add(resinMaterial);
+            context.SaveChanges();
+            ResinMaterialId = resinMaterial.Id;
+
             // Text-matching fixtures. These are REAL spellings taken from the production Filaments
             // table, where the material dropdown writes "ACRONYM (Full Name)" but ~6% of rows are
             // hand-typed. Exact matching finds only "PLA" here and misses the rest, which is the
@@ -400,6 +427,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             foreignSpool.IsActive = false;
             context.Filaments.Add(foreignSpool);
             context.SaveChanges();
+            ForeignMaterialId = foreignSpool.Id;
 
             var leaky = new Print
             {

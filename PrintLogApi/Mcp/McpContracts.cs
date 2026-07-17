@@ -27,7 +27,9 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public sealed record MaterialUsage(
         Guid? FilamentId, string? Name, string? Brand, string? Material, string? Color,
-        double Grams, bool IsEstimated);
+        // Grams stays the RESOLVED figure (actual if recorded, else estimate); IsEstimated says which.
+        double Grams, bool IsEstimated,
+        double? ActualGrams, double? EstimatedGrams, string? Notes);
 
     public sealed record PrintDetailResult(
         long Id, string Title, string Status, long? PrinterId, string? PrinterName,
@@ -39,12 +41,45 @@ namespace PrintLogApi.Mcp
         Guid? ProjectId, string? ProjectName,
         IReadOnlyList<MaterialUsage> MaterialsUsed,
         bool MaterialsUsedTruncated,
-        double ReturnedMaterialsUsedGrams);
+        double ReturnedMaterialsUsedGrams,
+        string? FileName, string? Url, string ViewStatus,
+        int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads);
 
     public sealed record MaterialInventoryItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
         double RemainingGrams, bool IsActive,
         string? StorageLocation, double? DiameterMm);
+
+    /// <summary>
+    /// One material in full. Units are grams / mm / ml / °C / seconds.
+    /// <para>
+    /// <see cref="SourceUnit"/> names the AUTHORITATIVE measurement (Weight | Length | Volume) — the
+    /// field the user entered; weight and everything else are derived from it. Reporting only grams
+    /// would hide which number is real.
+    /// </para>
+    /// <para>
+    /// <see cref="RemainingGrams"/> is 0 both when a spool is empty and when it never had a tracked
+    /// capacity, so <see cref="HasNominalCapacity"/> disambiguates: without it "0 g left" and "we
+    /// don't know" are the same answer.
+    /// </para>
+    /// </summary>
+    public sealed record MaterialDetail(
+        Guid Id, string? DisplayName, string? Brand, string? Material, string CategoryNickname,
+        double DensityGramPerCubicCm, double? DiameterMm,
+        string? ColorName, string? ColorHex, IReadOnlyList<string> Colors,
+        string? ColorPattern, string? FinishType, IReadOnlyList<string> Effects,
+        string SourceUnit,
+        double? InitialAmountInSourceUnit,
+        double? InitialCapacityGrams,
+        double? InitialTotalWeightGrams,
+        double? SpoolWeightGrams,
+        double RemainingGrams, bool HasNominalCapacity,
+        double? TempRangeStartC, double? TempRangeEndC, double? RecommendedTempC, double? RecommendedBedTempC,
+        double? InitialLayerTimeS, double? LayerTimeS, double? MeltingTemperatureC,
+        string? InertGas, double? MaterialRefreshRatio,
+        bool IsActive, bool IsFavorite, string? Notes,
+        DateTimeOffset? PurchaseDate, string? StorageLocation,
+        string? PurchaseLocation, string? PurchasePriceValue, string? PurchasePriceCurrency, string? PurchaseNotes);
 
     public sealed record SpoolItem(
         Guid Id, string Name, string? Brand, string Material, string? Color,
@@ -105,7 +140,13 @@ namespace PrintLogApi.Mcp
         IReadOnlyList<LoadedFilament> LoadedFilaments,
         int LoadedFilamentCount,          // true count before capping
         bool LoadedFilamentsTruncated,    // silently omitting a loaded spool is a WRONG answer
-        int ExcludedUnreadableSpools);    // corrupt rows pointing at another user's spool
+        int ExcludedUnreadableSpools,     // corrupt rows pointing at another user's spool
+        // Appended, not interleaved: the remaining settable printer attributes, so a write-only
+        // agent can verify everything create_printer/update_printer accepted.
+        double? FilamentDiameterMm,
+        double? BeamDiameterMm,
+        double? ScreenResolutionXPixels,
+        double? ScreenResolutionYPixels);
 
     public sealed record SummaryMetrics(
         int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,

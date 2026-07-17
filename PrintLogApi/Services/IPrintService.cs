@@ -19,23 +19,31 @@ namespace PrintLogApi.Services
         /// transaction keyed by <paramref name="idempotencyKey"/>. Printer, project and every material
         /// must belong to <paramref name="userId"/> (else NotFound). Does NOT mutate printer
         /// loaded-state. Invalidates the user cache after commit. On replay (same user+tool+key)
-        /// returns the existing print with WasReplayed = true.
+        /// returns the existing print with WasReplayed = true, provided the arguments match the ones
+        /// the key was first used with; a different payload under the same key is a Conflict.
+        /// viewStatus/allowComments fall back to the user's saved defaults when not supplied.
         /// </summary>
-        Task<LogPrintResult> LogPrintForMcp(
+        Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, Print.PrintStatus status,
-            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
+            string notes, Guid? projectId, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);
 
         /// <summary>
         /// Creator-only edit of a print for the MCP write surface. Only supplied fields change; a
         /// null return from GetOwnPrintDetailForMcp or a missing/foreign print surfaces NotFound.
-        /// When <paramref name="materialsProvided"/> is true the usage list is fully replaced. When
-        /// <paramref name="projectProvided"/> is true the project link is set (null clears it).
+        /// When <paramref name="materialsProvided"/> is true the usage list is fully replaced.
+        /// <paramref name="clearFields"/> names nullable fields to null out; setting and clearing the
+        /// same field is InvalidArguments. Everything is validated before any mutation, so a rejected
+        /// edit leaves the print exactly as it was.
         /// </summary>
         Task<PrintDetailResult> UpdateOwnPrintForMcp(
-            long userId, long printId, Print.PrintStatus? status, string notes, int? durationSeconds,
-            bool projectProvided, Guid? projectId,
-            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct);
+            long userId, long printId, string title, Print.PrintStatus? status, string notes,
+            DateTimeOffset? startedAt, long? printerId, int? durationSeconds, int? estimatedDurationSeconds,
+            string fileName, string url, Print.PrintViewStatus? viewStatus, bool? allowComments,
+            bool? allowFileDownloads, Guid? projectId, bool materialsProvided,
+            IReadOnlyList<MaterialUsageInput> materials, ISet<string> clearFields, CancellationToken ct);
 
         /// <summary>
         /// Read-only, creator-only, paginated print search for the MCP server. Filters are applied

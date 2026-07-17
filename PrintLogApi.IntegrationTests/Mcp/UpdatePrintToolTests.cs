@@ -43,11 +43,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
             });
             Assert.Equal(McpTestData.ProjectId, ProjectIdOf(McpTestData.ProjectPrintId));
 
-            // clearProject = true must remove it.
+            // Naming projectId in 'clear' must remove it.
             await client.CallToolAsync("update_print", new Dictionary<string, object>
             {
                 ["id"] = McpTestData.ProjectPrintId,
-                ["clearProject"] = true,
+                ["clear"] = new[] { "projectId" },
             });
             Assert.Null(ProjectIdOf(McpTestData.ProjectPrintId));
         }

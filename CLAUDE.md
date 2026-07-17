@@ -93,10 +93,14 @@ classes by capability:
 
 - **`PrintLogReadTools`** (`[Authorize(Policy = "McpRead")]`) — read tools, gated on the
   `read:printdata` scope.
-- **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`log_print`,
-  `update_print`, `add_material`, `adjust_material_remaining`, `set_material_active`,
-  `create_project`, `update_project`, plus a `whoami` connectivity check), gated on the
-  `write:printdata` scope.
+- **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`create_print`,
+  `update_print`, `create_material`, `update_material`, `adjust_material_remaining`,
+  `set_material_active`, `create_printer`, `update_printer`, `create_project`, `update_project`,
+  plus a `whoami` connectivity check),
+  gated on the `write:printdata` scope. Each tool carries MCP annotations (`create_print` is
+  idempotent and non-destructive; `update_print` and `update_printer` are destructive — in MCP that
+  means "may overwrite or discard existing data", not "deletes the entity") so a client can reason
+  about retry safety.
 
 Authorization topology:
 
@@ -112,12 +116,127 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 
 - The user is always token-derived; ownership is enforced in the query predicate. Foreign/missing
   ids surface a uniform `not_found` (no existence oracle).
-- `log_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
+- `create_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
   through unique-violation replay, and never mutates printer loaded-state (it does NOT call
-  `setLoadedFilament`).
-- Material amounts use a `{ source, amount }` pair (Weight g / Length mm / Volume ml) converted via
-  the existing measurement helpers; a usage row that cannot convert to a weight is rejected.
+  `setLoadedFilament`). Idempotency is **payload-bound**: the record stores a SHA-256
+  `RequestFingerprint` of the caller's arguments (`McpRequestFingerprint`, length-prefixed so a field
+  value cannot forge a boundary). Same key + same args replays; same key + **different** args is a
+  `conflict`. A null fingerprint (legacy row) replays without comparison. Strings are canonicalized
+  (trimmed) **once in the service, before both hashing and persistence** — the fingerprint hashes
+  values exactly as given, so it can never assert two calls are equivalent while storing different
+  rows. Keep it that way: normalizing inside the fingerprint alone reintroduces that split.
+- `create_print` and `update_print` return the full `PrintDetailResult`, so a **write-only** agent can
+  verify what it wrote without holding the read scope.
+- `update_print` changes only the fields passed. Nullable fields are cleared by naming them in
+  `clear` (`fileName`, `url`, `notes`, `startedAt`, `durationSeconds`, `estimatedDurationSeconds`,
+  `projectId`); setting and clearing the same field is `invalid_arguments`. It validates everything
+  before mutating, so a rejected edit leaves the print untouched.
+- Material amounts use `{ source, amount }` and/or `{ estimatedSource, estimatedAmount }` pairs
+  (Weight g / Length mm / Volume ml) converted via the existing measurement helpers; a row must carry
+  at least one complete pair. Convertibility is checked on the **input rows** before persisting:
+  Length usage requires a diameter-tracking material and Volume requires density; otherwise
+  `invalid_arguments`. Convertibility is validated using the **same rounding the persistence path
+  applies**, so an amount outside the recordable range — below 1 mg or beyond the int milligram
+  column — is rejected rather than silently stored as 0 (which reads back as "unset") or overflowing.
+- `viewStatus`/`allowComments` fall back to the user's saved settings when omitted (a malformed or
+  undefined stored value falls back to Private / false); `allowFileDownloads` defaults to false.
 - `adjust_material_remaining` rejects results below zero or above original capacity (no override).
+- `create_material` idempotency is **optional**: with an `idempotencyKey`, same key + same args replays
+  and same key + different args is a `conflict`; **without** one, a retry creates a SECOND material.
+  That residual at-least-once risk is an accepted design choice, stated in the tool description.
+  `McpIdempotencyRecord` carries a nullable `CreatedPrintId` **or** `CreatedFilamentId` — exactly one,
+  decided by `ToolName`. Nothing enforces that; every lookup is scoped by `ToolName` and reads only
+  its own field, treating a null there as a dangling record.
+- `update_material` does **not** reuse `UpdateFilament`: that method loads via `GetFilamentById` with no
+  creator filter (a cross-user edit hole) and never invalidates the cache. The MCP path uses the
+  combined ownership predicate, validates everything before mutating, and invalidates after commit.
+  A rejected patch clears the change tracker, so half-applied mutations can never be flushed later.
+- Material capacity is **source-authoritative**, mirroring the website: `Source` names the field the
+  user entered and the fill derives weight from it. Editing density/diameter on a Length/Volume
+  material therefore recomputes its weight and its remaining-by-weight — documented in the tool
+  description, not a bug. `adjust_material_remaining` is the tool for changing quantity.
+- Every material capacity conversion goes through `McpMaterialConversion.RequireMgInRange` BEFORE the
+  `long` cast. `MeasurementUtilities` casts **unchecked**, so an unguarded huge density or amount
+  would store garbage rather than throw. The guard runs on the post-patch entity, so a density-only
+  edit that overflows is caught too, and capacity passes `minMg: 1` — a capacity rounding to 0 is a
+  material claiming a tracked capacity of nothing, not an empty one.
+- A **Length source requires a diameter**. `UpdateFilamentMeasurements` only early-returns for
+  diameter-*tracking* categories, so a resin with a Length source would reach `DiameterMm.Value` and
+  throw. Both write paths reject that combination rather than defaulting the diameter.
+- Clearing `colorHex` or `colors` clears **both**: the entity keeps `ColorHex` synced to `Colors[0]`, so
+  clearing one alone lets a stale swatch resurrect it. On create, both fields are resolved *before*
+  `AddFilament` sees them — it treats an empty `Colors` as absent and rebuilds it from `ColorHex`.
+- **Printer writes never touch loaded-filament state.** `create_printer`/`update_printer` patch
+  scalar fields directly and the update path does **not** `Include(p => p.LoadedFilaments)` — what is
+  never loaded cannot be marked modified, so the invariant does not depend on the patch code being
+  careful. They deliberately avoid both existing web paths: `PostPrinter`/`PutPrinter` run the
+  `AddPrinterDTO → Printer` AutoMapper map (which ignores only `Category`, so it would clobber
+  `LoadedFilaments`/`UserId`) and `PutPrinter` additionally calls `setLoadedFilament`. Printer
+  ownership is `UserId` — **not** `CreatedById`, which is what Filament uses.
+- `create_printer` requires non-blank `make`/`model`/`name`. Those are `[Required]` on `AddPrinterDTO`
+  but only length-limited on the entity, so legacy rows may hold nulls; requiredness is an MCP
+  **new-write** invariant, not a schema fact. For the same reason `GetPrinterForMcp` normalizes a
+  legacy null `Name` to empty rather than throwing.
+- `create_printer` defaults `isActive` to **true**. The website DTO's `IsActive` is a non-nullable
+  bool (omitted → false), but a freshly created printer is presumably in use. A deliberate MCP-only
+  divergence, consistent with `create_material` (`FilamentService.cs`: `IsActive = input.IsActive ?? true`);
+  the parity claim covers attributes, not defaulting.
+- **"A printer has a category" is an MCP new-write invariant, not a schema fact** — the FK is
+  nullable. Create resolves the default (`PrinterService.DefaultPrinterCategoryNickname`, shared with
+  `PrintersController`) when the nickname is omitted and rejects an unknown one; update leaves an
+  omitted category alone, legacy null included, rather than force-repairing it. `categoryNickname` is
+  not clearable. Note `CategoryNickname` carries a **store default of "FFF"** (`PrintLogContext.cs`),
+  so a null category cannot be created by an ordinary insert — only legacy rows predating the default
+  hold one, and a test that needs that state must force it with an explicit `UPDATE`.
+- Printer numerics are stored exactly as entered (mm/W/px) with no conversion, so unlike the material
+  surface there is no rounding/overflow class of bug: finite and non-negative is the whole rule.
+- `update_printer` validates everything and resolves the category **before** the first assignment, so
+  a rejected patch cannot leave a partially-mutated entity — no `ChangeTracker.Clear()` needed, unlike
+  `update_material`.
+- `McpIdempotencyRecord` carries a nullable `CreatedPrintId`, `CreatedFilamentId`, `CreatedPrinterId`
+  **or** `CreatedProjectId` — exactly one, decided by `ToolName`. That rule is held by
+  `McpIdempotencyRecordFactory`, the single construction path, which counts the non-null targets
+  (a chained XOR is true for an ODD count, which would wave through the worst cases) and throws
+  `InvalidOperationException` — a server bug, never something a caller can provoke.
+  There is no check constraint and the entity is still publicly constructible, so this is the
+  conventional path rather than an enforced one; nothing needs the constraint, because every lookup
+  is scoped by `ToolName` and reads only its own field, treating a null there as a dangling record.
+  Note `CreatedFilamentId` and `CreatedProjectId` are both `Guid?`, so a target written to the wrong
+  one would still compile — the count is what catches it.
+- `create_printer`/`create_material`/`create_project` idempotency is **optional**: with a key, same
+  args replays and different args is a `conflict`; **without** one, a retry creates a SECOND entity.
+  That residual at-least-once risk is an accepted design choice, stated in each tool description and
+  pinned by a test. Only `create_print` requires a key.
+- **Every write tool's result must be self-sufficient.** There is no `get_project`, and a write-only
+  agent cannot call the read tools at all, so a create/update echo is the only way a caller can
+  confirm what it wrote — `ProjectWriteResult` echoes every settable field for that reason, not for
+  symmetry.
+- **Reject-with-the-valid-options.** Nothing lists printer or material categories, so
+  `RequirePrinterCategory`/`RequireCategory` name the valid nicknames in the rejection. Both sets are
+  small fixed `HasData` seeds shared by every user (printer: FFF/FDM/SLA/…; material:
+  filament/resin/powder/wire) — **not per-user** — so the error can carry them; the extra query runs
+  only on the failure path.
+- **Optional tool parameters need C# defaults, not just nullable types.** The SDK derives the
+  schema's `required` list from constructor parameters *without* a default, so a positional record
+  like `MaterialUsageInput` advertised all six fields as required while the server accepted a bare
+  `(materialId, source, amount)` row. A schema-reading agent then sends `"notes": null` on every row
+  to satisfy a rule that does not exist. `ToolSchemaTests` pins this.
+- **Known gap:** the unique-violation *race recovery* in `create_print`/`create_material`/
+  `create_printer` is designed for but not covered by tests. The
+  `IX_McpIdempotencyRecords_User_Tool_Key` unique index is the real guard and is verified; the
+  `DbUpdateException` recovery branch is not reachable deterministically (the pre-insert lookup
+  intercepts a sequential duplicate first), and the integration suite shares a single in-memory
+  `SqliteConnection`, so a parallel test would hit connection contention rather than a unique
+  violation. Exercising it honestly needs a SQL Server-backed test.
+- **Known gap (same cause):** the printer write tools commit, then re-read through `GetPrinterForMcp`
+  to build their result, so the read is not atomic with the write. A concurrent edit makes the return
+  reflect the newer state (the surface's existing "current state, not a snapshot" semantic — not a
+  defect), and a concurrent delete makes a committed write surface as `not_found`. Accepted: the
+  alternative, projecting the tracked entity, trades a vanishingly rare race for a permanent
+  shape-drift risk between the write and read paths. Untestable for the shared-connection reason
+  above.
+- **Wire format:** the SDK's serializer omits nulls, so a cleared or unset field is **absent** from a
+  tool result rather than present-and-null. Tests asserting a clear must check for absence.
 - No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
 
 See the `adding-an-mcp-tool` skill for adding tools.

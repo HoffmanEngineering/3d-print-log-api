@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.Models;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp
@@ -42,7 +44,9 @@ namespace PrintLogApi.IntegrationTests.Mcp
             double? BedWidthMm, double? BedDepthMm, double? BedHeightMm,
             bool? HasHeatedBed, bool? HasHeatedChamber, double? WattageW, bool IsActive,
             List<LoadedFilament> LoadedFilaments, int LoadedFilamentCount,
-            bool LoadedFilamentsTruncated, int ExcludedUnreadableSpools);
+            bool LoadedFilamentsTruncated, int ExcludedUnreadableSpools,
+            double? FilamentDiameterMm, double? BeamDiameterMm,
+            double? ScreenResolutionXPixels, double? ScreenResolutionYPixels);
 
         private static T Parse<T>(CallToolResult result)
         {
@@ -162,6 +166,44 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal(1.75, loaded.DiameterMm);
             // 1,000,000 mg initial, no usage or adjustment against this spool.
             Assert.Equal(1000.0, loaded.RemainingGrams);
+        }
+
+        /// <summary>
+        /// Each newly-exposed field is asserted independently, with a distinct value:
+        /// PrinterDetailResult is a 22-field positional record, so two same-typed fields swapped in
+        /// the constructor would still compile and would still pass a test that checked only one.
+        /// </summary>
+        [Fact]
+        public async Task GetPrinter_ReturnsTheNewlyExposedSettableFields()
+        {
+            long printerId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var printer = new Printer
+                {
+                    Name = "Detail Field Printer",
+                    Make = "Fixture",
+                    Model = "DF1",
+                    UserId = IntegrationTestSeeder.TestUserId,
+                    IsActive = true,
+                    FilamentDiameter = 2.85,
+                    BeamDiameter = 0.05,
+                    ScreenResolutionXPixels = 3840,
+                    ScreenResolutionYPixels = 2160,
+                };
+                ctx.Printers.Add(printer);
+                await ctx.SaveChangesAsync();
+                printerId = printer.Id;
+            }
+
+            await using var client = await _factory.ConnectAsync();
+            var detail = await Get(client, printerId);
+
+            Assert.Equal(2.85, detail.FilamentDiameterMm);
+            Assert.Equal(0.05, detail.BeamDiameterMm);
+            Assert.Equal(3840, detail.ScreenResolutionXPixels);
+            Assert.Equal(2160, detail.ScreenResolutionYPixels);
         }
     }
 }

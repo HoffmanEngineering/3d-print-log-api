@@ -24,5 +24,8 @@ namespace PrintLogApi.Mcp
 
         public static McpToolException Forbidden(string message = "Access denied.") =>
             new("forbidden", message);
+
+        public static McpToolException Conflict(string message) =>
+            new("conflict", message);
     }
 }

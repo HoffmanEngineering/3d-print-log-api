@@ -109,65 +109,641 @@ namespace PrintLogApi.Services
             return McpUnits.MgToGrams(remainingMg);
         }
 
-        public async Task<MaterialInventoryItem> AddMaterialForMcp(
-            long userId, string displayName, string materialType, string materialCategoryNickname,
-            double densityGramPerCubicCm, double? diameterMm, McpMeasurementSource source,
-            double initialAmount, string brand, string colorName, string colorHex,
-            string storageLocation, bool isActive, CancellationToken ct)
+        public async Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct)
+        {
+            var material = await _context.Filaments.AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            var remaining = await GetRemainingGramsForMcp(userId, materialId, ct);
+            return ToMaterialDetail(material, remaining);
+        }
+
+        /// <summary>
+        /// Projects an owned material to the MCP detail shape. The caller has ALREADY established
+        /// ownership; this method does not re-check it and must never be handed a foreign row.
+        /// </summary>
+        private static MaterialDetail ToMaterialDetail(Filament f, double remainingGrams)
+        {
+            // The authoritative amount, in the unit the user actually entered. Storage keeps length in
+            // METERS while the MCP boundary is mm.
+            double? initialInSourceUnit = f.Source switch
+            {
+                Filament.SourceMeasurement.Length => f.InitialNominalLengthM * 1000.0,
+                Filament.SourceMeasurement.Volume => f.InitialNominalVolumeMl,
+                _ => f.InitialNominalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialNominalWeightMg) : null,
+            };
+
+            return new MaterialDetail(
+                f.Id, f.DisplayName, f.Brand, f.MaterialType, f.MaterialCategoryNickname,
+                f.MaterialDensityGramPerCubicCm, f.DiameterMm,
+                f.ColorName, f.ColorHex,
+                f.Colors ?? new List<string>(),
+                f.ColorPattern?.ToString(), f.FinishType?.ToString(),
+                (f.Effects ?? new List<FilamentEffect>()).Select(e => e.ToString()).ToList(),
+                f.Source.ToString(),
+                initialInSourceUnit,
+                f.InitialNominalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialNominalWeightMg) : null,
+                f.InitialTotalWeightMg.HasValue ? McpUnits.MgToGrams(f.InitialTotalWeightMg) : null,
+                f.SpoolWeightMg.HasValue ? McpUnits.MgToGrams(f.SpoolWeightMg) : null,
+                remainingGrams, f.InitialNominalWeightMg.HasValue,
+                f.TempRangeStart, f.TempRangeEnd, f.RecommendedTemp, f.RecommendedBedTemp,
+                f.InitialLayerTimeS, f.LayerTimeS, f.MeltingTemperature,
+                f.InertGas, f.MaterialRefreshRatio,
+                f.IsActive, f.IsFavorite, f.Notes,
+                f.PurchaseDate, f.StorageLocation,
+                f.PurchaseLocation, f.PurchasePriceValue, f.PurchasePriceCurrency, f.PurchaseNotes);
+        }
+
+        /// <summary>
+        /// Loads the category by nickname, rejecting an unknown one instead of AddFilament's silent
+        /// fallback to "filament" — an agent must never be told its resin was created when the row
+        /// says otherwise. Also enforces the category's diameter requirement.
+        /// </summary>
+        private async Task<MaterialCategory> RequireCategory(string nickname, double? diameterMm, CancellationToken ct)
         {
             var category = await _context.MaterialCategories
-                .FirstOrDefaultAsync(c => c.Nickname == materialCategoryNickname, ct);
+                .FirstOrDefaultAsync(c => c.Nickname == nickname, ct);
             if (category == null)
             {
-                throw McpToolException.InvalidArguments($"Unknown material category '{materialCategoryNickname}'.");
+                // Name the valid options: nothing lists material categories, so a bare rejection
+                // leaves an agent guessing. They are a small fixed seed shared by every user, so the
+                // extra query costs nothing on the happy path and only runs when already failing.
+                var known = await _context.MaterialCategories
+                    .Select(c => c.Nickname).OrderBy(n => n).ToListAsync(ct);
+                throw McpToolException.InvalidArguments(
+                    $"Unknown material category '{nickname}'. Valid categories: {string.Join(", ", known)}.");
             }
-            if (category.HasDiameter && (!diameterMm.HasValue || diameterMm <= 0))
+            if (category.HasDiameter && !diameterMm.HasValue)
             {
                 throw McpToolException.InvalidArguments("This material category requires a positive diameterMm.");
             }
-            McpWriteValidation.RequirePositiveDensity(densityGramPerCubicCm);
-            McpWriteValidation.RequirePositiveAmount(initialAmount);
-            if (colorHex != null && colorHex.Length != 6)
+            return category;
+        }
+
+        /// <summary>
+        /// Rejects a capacity whose converted weight cannot be stored, BEFORE anything is persisted.
+        /// UpdateFilamentMeasurements derives InitialNominalWeightMg through an unchecked long cast,
+        /// so an unguarded Length/Volume amount (or a huge density) would silently store garbage
+        /// rather than fail. Mirrors the exact formula the fill will use.
+        /// <para>
+        /// A Length source with no diameter is rejected here rather than defaulted: the fill's early
+        /// return only covers diameter-TRACKING categories (see UpdateFilamentMeasurements), so a
+        /// resin with a Length source reaches DiameterMm.Value and throws. Substituting 0 would be
+        /// worse — it converts to a 0 mg capacity and looks valid.
+        /// </para>
+        /// </summary>
+        private static void RequireRepresentableCapacity(
+            McpMeasurementSource source, double initialAmount, double density, double? diameterMm)
+        {
+            if (source == McpMeasurementSource.Length && !diameterMm.HasValue)
             {
-                throw McpToolException.InvalidArguments("colorHex must be 6 hex digits with no leading '#'.");
+                throw McpToolException.InvalidArguments(
+                    "A Length source requires diameterMm, which this material category does not track.");
             }
+
+            double mg = source switch
+            {
+                McpMeasurementSource.Length =>
+                    GetAmountMgFromLengthUnrounded(initialAmount / 1000.0, diameterMm.Value, density),
+                McpMeasurementSource.Volume =>
+                    GetAmountMgFromVolumeUnrounded(initialAmount, density),
+                _ => initialAmount * 1000.0,
+            };
+            // minMg: 1 — a capacity rounding to 0 mg is not "empty", it is a material claiming a
+            // tracked capacity of nothing, which every later remaining calculation then believes.
+            McpMaterialConversion.RequireMgInRange(mg, "initialAmount", minMg: 1);
+        }
+
+        /// <summary>
+        /// The single-color/multi-color rule, resolved to the pair the entity actually stores.
+        /// An explicit (even empty) 'colors' wins over 'colorHex'; a null 'colors' falls back to the
+        /// single hex; an empty 'colors' means NO color, which must survive AddFilament's
+        /// empty-means-absent backfill — hence resolving both fields together, never one of them.
+        /// </summary>
+        private static List<string> ResolveColors(MaterialAttributesInput input) =>
+            input.Colors != null
+                ? input.Colors.ToList()
+                : (input.ColorHex != null ? new List<string> { input.ColorHex } : new List<string>());
+
+        private static string ResolveColorHex(MaterialAttributesInput input)
+        {
+            var colors = ResolveColors(input);
+            return colors.Count > 0 ? colors[0] : null;
+        }
+
+        public async Task<CreateMaterialResult> CreateMaterialForMcp(
+            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct)
+        {
+            const string toolName = "create_material";
+
+            if (string.IsNullOrWhiteSpace(input.DisplayName))
+            {
+                throw McpToolException.InvalidArguments("displayName is required.");
+            }
+            if (!input.Source.HasValue || !input.InitialAmount.HasValue)
+            {
+                throw McpToolException.InvalidArguments("source and initialAmount are required.");
+            }
+            if (!input.DensityGramPerCubicCm.HasValue)
+            {
+                throw McpToolException.InvalidArguments("densityGramPerCubicCm is required.");
+            }
+
+            // Canonicalize ONCE, before both hashing and persistence. Anything the fingerprint
+            // normalizes away must also be normalized in what we store, or the hash asserts an
+            // equivalence the database contradicts.
+            input = input.Canonicalize();
+            McpMaterialValidation.ValidateAttributes(input);
+
+            if (idempotencyKey != null)
+            {
+                if (string.IsNullOrWhiteSpace(idempotencyKey))
+                {
+                    throw McpToolException.InvalidArguments("idempotencyKey cannot be blank.");
+                }
+                // Trim BEFORE the length check: the trimmed value is what gets stored and compared, so
+                // that is the value the limit applies to.
+                idempotencyKey = idempotencyKey.Trim();
+                McpWriteValidation.RequireMaxLength(idempotencyKey, 200, "idempotencyKey");
+            }
+
+            string fingerprint = null;
+            if (idempotencyKey != null)
+            {
+                fingerprint = McpRequestFingerprint.ComputeCreateMaterial(input);
+                var replay = await FindIdempotentMaterial(userId, toolName, idempotencyKey, fingerprint, ct);
+                if (replay != null)
+                {
+                    return replay;
+                }
+            }
+
+            var category = await RequireCategory(input.MaterialCategoryNickname, input.DiameterMm, ct);
+            var source = input.Source.Value;
+            var density = input.DensityGramPerCubicCm.Value;
+            RequireRepresentableCapacity(source, input.InitialAmount.Value, density, input.DiameterMm);
 
             var dto = new AddFilamentDto
             {
-                DisplayName = displayName,
-                Brand = brand,
-                MaterialType = materialType,
-                MaterialCategoryNickname = materialCategoryNickname,
-                MaterialDensityGramPerCubicCm = densityGramPerCubicCm,
-                DiameterMm = diameterMm,
-                ColorName = colorName,
-                ColorHex = colorHex,
-                Colors = colorHex != null ? new List<string> { colorHex } : new List<string>(),
+                DisplayName = input.DisplayName,
+                Brand = input.Brand,
+                MaterialType = input.MaterialType,
+                MaterialCategoryNickname = category.Nickname,
+                MaterialDensityGramPerCubicCm = density,
+                DiameterMm = input.DiameterMm,
+                ColorName = input.ColorName,
+                // Colors is authoritative. Resolve BOTH fields here rather than handing AddFilament a
+                // disagreeing pair: it treats a null OR EMPTY Colors as "absent" and rebuilds it from
+                // ColorHex, so passing { ColorHex = "1188FF", Colors = [] } would resurrect the color
+                // instead of clearing it.
+                ColorHex = ResolveColorHex(input),
+                Colors = ResolveColors(input),
+                ColorPattern = input.ColorPattern,
+                FinishType = input.FinishType,
+                Effects = (input.Effects ?? Array.Empty<FilamentEffect>()).Distinct().ToList(),
                 Source = (Filament.SourceMeasurement)(int)source,
-                IsActive = isActive,
-                StorageLocation = storageLocation,
+                IsActive = input.IsActive ?? true,
+                IsFavorite = input.IsFavorite ?? false,
+                StorageLocation = input.StorageLocation,
+                Notes = input.Notes,
+                SpoolWeightMg = input.SpoolWeightGrams.HasValue
+                    ? McpMaterialConversion.GramsToMg(input.SpoolWeightGrams.Value, "spoolWeightGrams")
+                    : null,
+                InitialTotalWeightMg = input.InitialTotalWeightGrams.HasValue
+                    ? McpMaterialConversion.GramsToMg(input.InitialTotalWeightGrams.Value, "initialTotalWeightGrams")
+                    : null,
+                TempRangeStart = input.TempRangeStartC,
+                TempRangeEnd = input.TempRangeEndC,
+                RecommendedTemp = input.RecommendedTempC,
+                RecommendedBedTemp = input.RecommendedBedTempC,
+                InitialLayerTimeS = input.InitialLayerTimeS,
+                LayerTimeS = input.LayerTimeS,
+                MeltingTemperature = input.MeltingTemperatureC,
+                InertGas = input.InertGas,
+                MaterialRefreshRatio = input.MaterialRefreshRatio,
+                PurchaseDate = input.PurchaseDate,
+                PurchaseLocation = input.PurchaseLocation,
+                PurchasePriceValue = input.PurchasePriceValue,
+                PurchasePriceCurrency = input.PurchasePriceCurrency,
+                PurchaseNotes = input.PurchaseNotes,
                 FilamentAdjustments = new List<FilamentAdjustmentDto>(),
             };
+
             switch (source)
             {
                 case McpMeasurementSource.Weight:
-                    dto.InitialNominalWeightMg = checked((long)Math.Round(initialAmount * 1000.0)); // g -> mg
+                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
                     break;
                 case McpMeasurementSource.Length:
-                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
+                    dto.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
                     break;
                 case McpMeasurementSource.Volume:
-                    dto.InitialNominalVolumeMl = initialAmount; // ml
+                    dto.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
                     break;
             }
 
-            var created = await AddFilament(dto, userId);
+            Filament created;
+            if (idempotencyKey == null)
+            {
+                created = await AddFilament(dto, userId);
+            }
+            else
+            {
+                try
+                {
+                    created = await CreateMaterialWithIdempotencyRecord(dto, userId, idempotencyKey, fingerprint, ct);
+                }
+                catch (DbUpdateException)
+                {
+                    // Possible unique-index race: another identical call created the material first.
+                    // The transaction rolled back but the failed Added entities are still tracked;
+                    // clear them so the recovery query reads only committed state, then replay the
+                    // winner's result. If there is NO such record the failure was something else
+                    // entirely (a column overflow, a constraint we don't know about) — rethrow it
+                    // rather than reporting every write failure as an idempotency problem.
+                    _context.ChangeTracker.Clear();
+                    var concurrent = await FindIdempotentMaterial(userId, toolName, idempotencyKey, fingerprint, ct);
+                    if (concurrent != null)
+                    {
+                        return concurrent;
+                    }
+                    throw;
+                }
+            }
+
+            _cacheVersionService.InvalidateUserCache(userId);
+            var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
+            return new CreateMaterialResult(ToMaterialDetail(created, remaining), WasReplayed: false);
+        }
+
+        /// <summary>
+        /// Creates the material and its idempotency record atomically. Lets DbUpdateException escape:
+        /// only the caller can tell a lost unique-index race (replayable) from a genuine write
+        /// failure (not), because only it knows the key and fingerprint to look the winner up with.
+        /// </summary>
+        private async Task<Filament> CreateMaterialWithIdempotencyRecord(
+            AddFilamentDto dto, long userId, string key, string fingerprint, CancellationToken ct)
+        {
+            // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
+            // run inside an execution strategy, so the whole tx is the retriable unit.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            Filament created = null;
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _context.Database.BeginTransactionAsync(ct);
+                created = await AddFilament(dto, userId);
+
+                _context.McpIdempotencyRecords.Add(
+                    McpIdempotencyRecordFactory.ForMaterial(userId, key, fingerprint, created.Id));
+                await _context.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+            });
+            return created;
+        }
+
+        private async Task<CreateMaterialResult> FindIdempotentMaterial(
+            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        {
+            var record = await _context.McpIdempotencyRecords.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
+            if (record == null)
+            {
+                return null;
+            }
+
+            // A key reused with a DIFFERENT payload is a caller bug, not a retry: replaying would
+            // silently discard the new arguments. A null fingerprint is a legacy record with no
+            // stored payload to compare, so it replays unconditionally.
+            if (record.RequestFingerprint != null && record.RequestFingerprint != fingerprint)
+            {
+                throw McpToolException.Conflict("This idempotency key was already used with different arguments.");
+            }
+
+            var materialId = record.CreatedFilamentId;
+            var material = materialId.HasValue
+                ? await _context.Filaments.AsNoTracking()
+                    .FirstOrDefaultAsync(f => f.Id == materialId.Value && f.CreatedById == userId, ct)
+                : null;
+            if (material == null)
+            {
+                throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
+            }
+
+            var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
+            return new CreateMaterialResult(ToMaterialDetail(material, remaining), WasReplayed: true);
+        }
+
+        /// <summary>
+        /// Validates the FINAL patched state — everything that depends on fields the caller may not
+        /// have touched. Runs after the patches and before SaveChanges.
+        /// <para>
+        /// This exists because per-request validation is not enough on an update: a density-only edit
+        /// supplies no amount yet still recomputes the derived weight (and could overflow), and a
+        /// tempRangeStartC-only edit is compared against a stored end the request never mentions.
+        /// Checking the request fragment alone would let both through.
+        /// </para>
+        /// </summary>
+        private static void RequireValidFinalState(Filament f)
+        {
+            if (f.TempRangeStart.HasValue && f.TempRangeEnd.HasValue && f.TempRangeStart.Value > f.TempRangeEnd.Value)
+            {
+                throw McpToolException.InvalidArguments("tempRangeStartC must not be greater than tempRangeEndC.");
+            }
+
+            // The fill's early return only covers diameter-TRACKING categories, so a Length-source
+            // material without a diameter reaches DiameterMm.Value and throws.
+            if (f.Source == Filament.SourceMeasurement.Length && !f.DiameterMm.HasValue)
+            {
+                throw McpToolException.InvalidArguments(
+                    "A Length source requires diameterMm, which this material category does not track.");
+            }
+
+            double? mg = f.Source switch
+            {
+                Filament.SourceMeasurement.Length when f.InitialNominalLengthM.HasValue && f.DiameterMm.HasValue =>
+                    GetAmountMgFromLengthUnrounded(f.InitialNominalLengthM.Value, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
+                Filament.SourceMeasurement.Volume when f.InitialNominalVolumeMl.HasValue =>
+                    GetAmountMgFromVolumeUnrounded(f.InitialNominalVolumeMl.Value, f.MaterialDensityGramPerCubicCm),
+                _ => null,
+            };
+            if (mg.HasValue)
+            {
+                McpMaterialConversion.RequireMgInRange(mg.Value, "initialAmount", minMg: 1);
+            }
+        }
+
+        public async Task<MaterialDetail> UpdateOwnMaterialForMcp(
+            long userId, Guid materialId, MaterialAttributesInput input, ISet<string> clear, CancellationToken ct)
+        {
+            clear ??= new HashSet<string>();
+
+            // Canonicalize ONCE, before validation and persistence — same rule as create.
+            input = input.Canonicalize();
+            McpMaterialValidation.ValidateAttributes(input);
+            // Enforced HERE, not only in the tool wrapper: the service is the boundary every caller
+            // goes through, so this is where "displayName is not clearable" is actually true.
+            McpMaterialValidation.RequireClearableFields(clear);
+            RequireNoSetAndClearCollision(input, clear);
+
+            if (input.Source.HasValue != input.InitialAmount.HasValue)
+            {
+                throw McpToolException.InvalidArguments("source and initialAmount must be provided together.");
+            }
+
+            var material = await _context.Filaments
+                .Include(f => f.MaterialCategory)
+                .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
+            if (material == null)
+            {
+                throw McpToolException.NotFound("Material not found.");
+            }
+
+            try
+            {
+                await ApplyMaterialPatch(material, input, clear, userId, ct);
+            }
+            catch (McpToolException)
+            {
+                // The patch mutates the TRACKED entity, so a rejection partway through leaves dirty
+                // state that a later SaveChangesAsync on this same context would happily commit.
+                // Nothing else saves within an MCP request today — but "rejected edits change
+                // nothing" should be a property of the code, not of the current call graph.
+                _context.ChangeTracker.Clear();
+                throw;
+            }
+
             _cacheVersionService.InvalidateUserCache(userId);
 
-            var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
-            return new MaterialInventoryItem(
-                created.Id, created.DisplayName, created.Brand, created.MaterialType, created.ColorName,
-                remaining, created.IsActive, created.StorageLocation, created.DiameterMm);
+            var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
+            return ToMaterialDetail(material, remaining);
+        }
+
+        /// <summary>
+        /// Applies the patch to a tracked, already-ownership-checked entity and saves it. Throws
+        /// before SaveChanges on any rejection; the caller discards the dirty tracked state.
+        /// </summary>
+        private async Task ApplyMaterialPatch(
+            Filament material, MaterialAttributesInput input, ISet<string> clear, long userId, CancellationToken ct)
+        {
+            // --- Non-clearable identity/computation fields: set only. ---
+            if (input.DisplayName != null)
+            {
+                if (input.DisplayName.Length == 0)
+                {
+                    throw McpToolException.InvalidArguments("displayName cannot be empty.");
+                }
+                material.DisplayName = input.DisplayName;
+            }
+            if (input.MaterialType != null)
+            {
+                material.MaterialType = input.MaterialType;
+            }
+            if (input.DensityGramPerCubicCm.HasValue)
+            {
+                material.MaterialDensityGramPerCubicCm = input.DensityGramPerCubicCm.Value;
+            }
+            if (input.IsActive.HasValue)
+            {
+                material.IsActive = input.IsActive.Value;
+            }
+            if (input.IsFavorite.HasValue)
+            {
+                material.IsFavorite = input.IsFavorite.Value;
+            }
+
+            // --- Diameter, then the category, so the requirement is checked against the FINAL pair. ---
+            if (clear.Contains("diameterMm"))
+            {
+                material.DiameterMm = null;
+            }
+            else if (input.DiameterMm.HasValue)
+            {
+                material.DiameterMm = input.DiameterMm.Value;
+            }
+
+            if (input.MaterialCategoryNickname != null)
+            {
+                var category = await RequireCategory(input.MaterialCategoryNickname, material.DiameterMm, ct);
+                material.MaterialCategoryNickname = category.Nickname;
+                material.MaterialCategory = category;
+            }
+            else if (material.MaterialCategory.HasDiameter && !material.DiameterMm.HasValue)
+            {
+                // Clearing the diameter of a diameter-tracking material would silently disable every
+                // later length conversion on it.
+                throw McpToolException.InvalidArguments("This material category requires a positive diameterMm.");
+            }
+
+            // --- Colors. Colors and ColorHex are one field with two faces; they move together. ---
+            if (clear.Contains("colorHex") || clear.Contains("colors"))
+            {
+                material.ColorHex = null;
+                material.Colors = new List<string>();
+            }
+            else if (input.Colors != null)
+            {
+                material.Colors = input.Colors.ToList();
+                material.ColorHex = material.Colors.Count > 0 ? material.Colors[0] : null;
+            }
+            else if (input.ColorHex != null)
+            {
+                material.ColorHex = input.ColorHex;
+                material.Colors = new List<string> { input.ColorHex };
+            }
+
+            PatchString(clear, "colorName", input.ColorName, v => material.ColorName = v);
+            PatchString(clear, "brand", input.Brand, v => material.Brand = v);
+            PatchString(clear, "storageLocation", input.StorageLocation, v => material.StorageLocation = v);
+            PatchString(clear, "notes", input.Notes, v => material.Notes = v);
+            PatchString(clear, "inertGas", input.InertGas, v => material.InertGas = v);
+            PatchString(clear, "purchaseLocation", input.PurchaseLocation, v => material.PurchaseLocation = v);
+            PatchString(clear, "purchasePriceValue", input.PurchasePriceValue, v => material.PurchasePriceValue = v);
+            PatchString(clear, "purchasePriceCurrency", input.PurchasePriceCurrency, v => material.PurchasePriceCurrency = v);
+            PatchString(clear, "purchaseNotes", input.PurchaseNotes, v => material.PurchaseNotes = v);
+
+            PatchValue(clear, "colorPattern", input.ColorPattern, v => material.ColorPattern = v);
+            PatchValue(clear, "finishType", input.FinishType, v => material.FinishType = v);
+            PatchValue(clear, "purchaseDate", input.PurchaseDate, v => material.PurchaseDate = v);
+            PatchValue(clear, "tempRangeStartC", input.TempRangeStartC, v => material.TempRangeStart = v);
+            PatchValue(clear, "tempRangeEndC", input.TempRangeEndC, v => material.TempRangeEnd = v);
+            PatchValue(clear, "recommendedTempC", input.RecommendedTempC, v => material.RecommendedTemp = v);
+            PatchValue(clear, "recommendedBedTempC", input.RecommendedBedTempC, v => material.RecommendedBedTemp = v);
+            PatchValue(clear, "initialLayerTimeS", input.InitialLayerTimeS, v => material.InitialLayerTimeS = v);
+            PatchValue(clear, "layerTimeS", input.LayerTimeS, v => material.LayerTimeS = v);
+            PatchValue(clear, "meltingTemperatureC", input.MeltingTemperatureC, v => material.MeltingTemperature = v);
+            PatchValue(clear, "materialRefreshRatio", input.MaterialRefreshRatio, v => material.MaterialRefreshRatio = v);
+
+            if (clear.Contains("effects"))
+            {
+                material.Effects = new List<FilamentEffect>();
+            }
+            else if (input.Effects != null)
+            {
+                material.Effects = input.Effects.Distinct().ToList();
+            }
+
+            if (clear.Contains("spoolWeightGrams"))
+            {
+                material.SpoolWeightMg = null;
+            }
+            else if (input.SpoolWeightGrams.HasValue)
+            {
+                material.SpoolWeightMg = McpMaterialConversion.GramsToMg(input.SpoolWeightGrams.Value, "spoolWeightGrams");
+            }
+
+            if (clear.Contains("initialTotalWeightGrams"))
+            {
+                material.InitialTotalWeightMg = null;
+            }
+            else if (input.InitialTotalWeightGrams.HasValue)
+            {
+                material.InitialTotalWeightMg = McpMaterialConversion.GramsToMg(input.InitialTotalWeightGrams.Value, "initialTotalWeightGrams");
+            }
+
+            // --- Capacity. The source names the authoritative field; the fill derives the rest. ---
+            if (input.Source.HasValue)
+            {
+                var source = input.Source.Value;
+                material.Source = (Filament.SourceMeasurement)(int)source;
+                switch (source)
+                {
+                    case McpMeasurementSource.Weight:
+                        material.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
+                        break;
+                    case McpMeasurementSource.Length:
+                        material.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
+                        break;
+                    case McpMeasurementSource.Volume:
+                        material.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
+                        break;
+                }
+            }
+
+            // Validate the FINAL merged state before touching the database, so a rejected edit leaves
+            // the material exactly as it was.
+            RequireValidFinalState(material);
+
+            // Recompute weight and the other derived fields from the authoritative field and the
+            // current density/diameter. This is the website's behavior, mirrored deliberately.
+            UpdateFilamentMeasurements(material);
+
+            material.UpdatedById = userId;
+            await _context.SaveChangesAsync(ct);
+        }
+
+        private static void PatchString(ISet<string> clear, string field, string value, Action<string> set)
+        {
+            if (clear.Contains(field))
+            {
+                set(null);
+            }
+            else if (value != null)
+            {
+                set(value);
+            }
+        }
+
+        private static void PatchValue<T>(ISet<string> clear, string field, T? value, Action<T?> set) where T : struct
+        {
+            if (clear.Contains(field))
+            {
+                set(null);
+            }
+            else if (value.HasValue)
+            {
+                set(value);
+            }
+        }
+
+        /// <summary>
+        /// Setting and clearing the same field in one call is contradictory, so it is rejected rather
+        /// than resolved by precedence — either resolution would silently do the opposite of half the
+        /// request.
+        /// </summary>
+        private static void RequireNoSetAndClearCollision(MaterialAttributesInput input, ISet<string> clear)
+        {
+            void Check(string field, bool provided)
+            {
+                if (provided && clear.Contains(field))
+                {
+                    throw McpToolException.InvalidArguments($"'{field}' cannot be both set and cleared.");
+                }
+            }
+
+            Check("brand", input.Brand != null);
+            Check("colorName", input.ColorName != null);
+            Check("colorHex", input.ColorHex != null);
+            Check("colors", input.Colors != null);
+            // Colors and ColorHex clear jointly, so naming EITHER while setting the OTHER is the same
+            // contradiction.
+            Check("colors", input.ColorHex != null);
+            Check("colorHex", input.Colors != null);
+            Check("storageLocation", input.StorageLocation != null);
+            Check("notes", input.Notes != null);
+            Check("inertGas", input.InertGas != null);
+            Check("purchaseLocation", input.PurchaseLocation != null);
+            Check("purchasePriceValue", input.PurchasePriceValue != null);
+            Check("purchasePriceCurrency", input.PurchasePriceCurrency != null);
+            Check("purchaseNotes", input.PurchaseNotes != null);
+            Check("purchaseDate", input.PurchaseDate.HasValue);
+            Check("spoolWeightGrams", input.SpoolWeightGrams.HasValue);
+            Check("initialTotalWeightGrams", input.InitialTotalWeightGrams.HasValue);
+            Check("diameterMm", input.DiameterMm.HasValue);
+            Check("tempRangeStartC", input.TempRangeStartC.HasValue);
+            Check("tempRangeEndC", input.TempRangeEndC.HasValue);
+            Check("recommendedTempC", input.RecommendedTempC.HasValue);
+            Check("recommendedBedTempC", input.RecommendedBedTempC.HasValue);
+            Check("initialLayerTimeS", input.InitialLayerTimeS.HasValue);
+            Check("layerTimeS", input.LayerTimeS.HasValue);
+            Check("meltingTemperatureC", input.MeltingTemperatureC.HasValue);
+            Check("materialRefreshRatio", input.MaterialRefreshRatio.HasValue);
+            Check("colorPattern", input.ColorPattern.HasValue);
+            Check("finishType", input.FinishType.HasValue);
+            Check("effects", input.Effects != null);
         }
 
         public async Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
@@ -236,7 +812,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync(ct);
             _cacheVersionService.InvalidateUserCache(userId);
 
-            return new MaterialWriteResult(materialId, beforeGrams, afterGrams, "g");
+            return new MaterialWriteResult(materialId, beforeGrams, afterGrams);
         }
 
         public async Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct)

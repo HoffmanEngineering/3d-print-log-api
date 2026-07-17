@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20260716171930_AddMcpIdempotencyPrinterTarget")]
+    partial class AddMcpIdempotencyPrinterTarget
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -606,9 +609,6 @@ namespace PrintLogApi.Migrations
 
                     b.Property<long?>("CreatedPrinterId")
                         .HasColumnType("bigint");
-
-                    b.Property<Guid?>("CreatedProjectId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()

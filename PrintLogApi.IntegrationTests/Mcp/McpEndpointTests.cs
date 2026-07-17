@@ -88,6 +88,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 new[]
                 {
                     "find_material",
+                    "get_material",
                     "get_material_inventory",
                     "get_print",
                     "get_print_summary",

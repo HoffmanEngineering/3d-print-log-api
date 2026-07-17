@@ -193,6 +193,11 @@ namespace PrintLogApi.Services
                         : 0),
                     p.PrintTimeInSeconds,
                     p.EstimatedPrintTimeInSeconds,
+                    p.FileName,
+                    p.Url,
+                    p.ViewStatus,
+                    p.AllowComments,
+                    p.AllowFileDownloads,
                     p.Notes,
                     ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                     ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
@@ -228,6 +233,12 @@ namespace PrintLogApi.Services
                                 : 0,
                             IsEstimated = !(pf.AmountMg.HasValue && pf.AmountMg > 0)
                                 && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0,
+
+                            // The unresolved figures, so a caller can see what was actually recorded
+                            // vs. estimated. Same non-positive-means-unset rule as Mg above.
+                            ActualMg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg : (int?)null,
+                            EstimatedMg = pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg : (int?)null,
+                            pf.Notes,
                         })
                         .ToList(),
                 })
@@ -249,7 +260,10 @@ namespace PrintLogApi.Services
                     u.Readable ? u.Material : null,
                     u.Readable ? u.Color : null,
                     McpUnits.MgToGrams(u.Mg),
-                    u.IsEstimated))
+                    u.IsEstimated,
+                    u.ActualMg.HasValue ? McpUnits.MgToGrams(u.ActualMg.Value) : (double?)null,
+                    u.EstimatedMg.HasValue ? McpUnits.MgToGrams(u.EstimatedMg.Value) : (double?)null,
+                    u.Notes))
                 .ToList();
 
             var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
@@ -267,7 +281,10 @@ namespace PrintLogApi.Services
                 EstimatedCost: null, row.Notes, row.ProjectId, row.ProjectName,
                 materialsUsed,
                 truncated,
-                materialsUsed.Sum(m => m.Grams));
+                materialsUsed.Sum(m => m.Grams),
+                FileName: row.FileName, Url: row.Url, ViewStatus: row.ViewStatus.ToString(),
+                EstimatedDurationSeconds: row.EstimatedPrintTimeInSeconds,
+                AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads);
         }
 
         /// <summary>
@@ -606,14 +623,29 @@ namespace PrintLogApi.Services
             return await GetPrintById(newPrint.Id); ;
         }
 
-        public async Task<LogPrintResult> LogPrintForMcp(
+        public async Task<CreatePrintResult> CreatePrintForMcp(
             long userId, string title, long printerId, PrintStatus status,
-            DateTimeOffset? startedAt, int? durationSeconds, string notes, Guid? projectId,
+            DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
+            string notes, Guid? projectId, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
         {
-            const string toolName = "log_print";
+            const string toolName = "create_print";
 
-            var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+            // Canonicalize ONCE, before both hashing and persistence. The fingerprint decides whether
+            // two calls are "the same request", so anything it normalizes away must also be normalized
+            // in what we store — otherwise the hash asserts an equivalence the stored row contradicts.
+            title = title?.Trim();
+            notes = notes?.Trim();
+            fileName = fileName?.Trim();
+            url = url?.Trim();
+            materials = materials.Select(m => m with { Notes = m.Notes?.Trim() }).ToList();
+
+            var fingerprint = McpRequestFingerprint.ComputeCreatePrint(
+                title, printerId, status, startedAt, durationSeconds, estimatedDurationSeconds,
+                notes, projectId, fileName, url, viewStatus, allowComments, allowFileDownloads, materials);
+
+            var replay = await FindIdempotentPrint(userId, toolName, idempotencyKey, fingerprint, ct);
             if (replay != null)
             {
                 return replay;
@@ -642,6 +674,7 @@ namespace PrintLogApi.Services
             {
                 throw McpToolException.NotFound("Material not found.");
             }
+            await RequireMcpConvertibleUsage(materials, userId, ct); // validate BEFORE building/persisting
 
             var newPrint = new Print
             {
@@ -650,15 +683,18 @@ namespace PrintLogApi.Services
                 PrinterId = printerId,
                 StartDate = startedAt,
                 PrintTimeInSeconds = durationSeconds,
+                EstimatedPrintTimeInSeconds = estimatedDurationSeconds,
                 Notes = notes,
+                FileName = fileName,
+                Url = url,
                 ProjectId = projectId,
                 CreatedById = userId,
                 UpdatedById = userId,
                 FilamentUsage = materials.Select(ToPrintFilament).ToList(),
             };
 
+            await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);
             await UpdateFilamentUsageWeights(newPrint);
-            RequireConvertibleUsage(newPrint);
 
             try
             {
@@ -671,14 +707,8 @@ namespace PrintLogApi.Services
                     _context.Prints.Add(newPrint);
                     await _context.SaveChangesAsync(ct);
 
-                    _context.McpIdempotencyRecords.Add(new McpIdempotencyRecord
-                    {
-                        UserId = userId,
-                        ToolName = toolName,
-                        IdempotencyKey = idempotencyKey,
-                        CreatedPrintId = newPrint.Id,
-                        CreatedAt = DateTimeOffset.UtcNow,
-                    });
+                    _context.McpIdempotencyRecords.Add(
+                        McpIdempotencyRecordFactory.ForPrint(userId, idempotencyKey, fingerprint, newPrint.Id));
                     await _context.SaveChangesAsync(ct);
                     await tx.CommitAsync(ct);
                 });
@@ -690,7 +720,8 @@ namespace PrintLogApi.Services
                 // them so the recovery query reads only committed state, then replay the winner's
                 // result. If there is no such record the failure was something else, so rethrow.
                 _context.ChangeTracker.Clear();
-                var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, ct);
+                // Fingerprint match -> replay the winner's result; a mismatch throws conflict inside.
+                var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, fingerprint, ct);
                 if (concurrent != null)
                 {
                     return concurrent;
@@ -699,11 +730,11 @@ namespace PrintLogApi.Services
             }
 
             _cacheVersionService.InvalidateUserCache(userId);
-            return await BuildLogPrintResult(newPrint.Id, wasReplayed: false, userId, ct);
+            return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
         }
 
-        private async Task<LogPrintResult> FindIdempotentPrint(
-            long userId, string toolName, string key, CancellationToken ct)
+        private async Task<CreatePrintResult> FindIdempotentPrint(
+            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
@@ -712,71 +743,210 @@ namespace PrintLogApi.Services
                 return null;
             }
 
-            var exists = await _context.Prints
-                .AnyAsync(p => p.Id == record.CreatedPrintId && p.CreatedById == userId, ct);
+            // A key reused with a DIFFERENT payload is a caller bug, not a retry: replaying the old
+            // print would silently discard the new arguments. A null fingerprint is a legacy record
+            // with no stored payload to compare, so it replays unconditionally.
+            if (record.RequestFingerprint != null && record.RequestFingerprint != fingerprint)
+            {
+                throw McpToolException.Conflict("This idempotency key was already used with different arguments.");
+            }
+
+            // The record is scoped by ToolName, so a create_print row always carries a print id. A
+            // null here means the row is corrupt, not that another tool owns it — treat it exactly
+            // like a dangling reference rather than dereferencing it.
+            var createdPrintId = record.CreatedPrintId;
+            var exists = createdPrintId.HasValue && await _context.Prints
+                .AnyAsync(p => p.Id == createdPrintId.Value && p.CreatedById == userId, ct);
             if (!exists)
             {
                 throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
             }
 
-            return await BuildLogPrintResult(record.CreatedPrintId, wasReplayed: true, userId, ct);
+            return await BuildCreatePrintResult(createdPrintId.Value, wasReplayed: true, userId, ct);
         }
 
+        /// <summary>
+        /// Builds the entity row from an input row. Source/EstimatedSource are non-nullable enums on
+        /// the entity, so each is assigned only when its input pair is present; otherwise the entity
+        /// default (0) stands and the paired amount fields stay null, which downstream code reads as
+        /// "unset". Length/Volume overflow safety is enforced on the input rows by
+        /// RequireMcpConvertibleUsage, which runs before this in the create/update flow.
+        /// </summary>
         private static PrintFilament ToPrintFilament(MaterialUsageInput m)
         {
-            var pf = new PrintFilament
+            var pf = new PrintFilament { FilamentId = m.MaterialId, Notes = m.Notes };
+
+            if (m.Source.HasValue && m.Amount.HasValue)
             {
-                FilamentId = m.MaterialId,
-                Source = (PrintFilament.SourceMeasurement)(int)m.Source,
-            };
-            switch (m.Source)
-            {
-                case McpMeasurementSource.Weight:
-                    pf.AmountMg = checked((int)Math.Round(m.Amount * 1000.0)); // g -> mg
-                    break;
-                case McpMeasurementSource.Length:
-                    pf.LengthInM = m.Amount / 1000.0; // mm -> m
-                    break;
-                case McpMeasurementSource.Volume:
-                    pf.VolumeMl = m.Amount; // ml
-                    break;
+                pf.Source = (PrintFilament.SourceMeasurement)(int)m.Source.Value;
+                switch (m.Source.Value)
+                {
+                    case McpMeasurementSource.Weight:
+                        pf.AmountMg = checked((int)Math.Round(m.Amount.Value * 1000.0)); // g -> mg
+                        break;
+                    case McpMeasurementSource.Length:
+                        pf.LengthInM = m.Amount.Value / 1000.0; // mm -> m
+                        break;
+                    case McpMeasurementSource.Volume:
+                        pf.VolumeMl = m.Amount.Value; // ml
+                        break;
+                }
             }
+
+            if (m.EstimatedSource.HasValue && m.EstimatedAmount.HasValue)
+            {
+                pf.EstimatedSource = (PrintFilament.SourceMeasurement)(int)m.EstimatedSource.Value;
+                switch (m.EstimatedSource.Value)
+                {
+                    case McpMeasurementSource.Weight:
+                        pf.EstimatedAmountMg = checked((int)Math.Round(m.EstimatedAmount.Value * 1000.0));
+                        break;
+                    case McpMeasurementSource.Length:
+                        pf.EstimatedLengthInM = m.EstimatedAmount.Value / 1000.0; // mm -> m
+                        break;
+                    case McpMeasurementSource.Volume:
+                        pf.EstimatedVolumeMl = m.EstimatedAmount.Value; // ml
+                        break;
+                }
+            }
+
             return pf;
         }
 
         /// <summary>
-        /// Shared conversion-integrity guard for the MCP log/update paths. Material remaining is
-        /// weight-based (see FilamentProfile: FilamentRemaining sums PrintFilament.AmountMg), so a
-        /// Length/Volume usage row on a material lacking the density/diameter to derive a weight would
-        /// be silently ignored by inventory accounting. UpdateFilamentUsageWeights leaves AmountMg
-        /// null in that case; for MCP we hard-fail rather than record usage that never decrements.
+        /// MCP-only pre-persist convertibility guard, validated on the INPUT rows (native units:
+        /// Weight=g, Length=mm, Volume=ml). Requirement per source: Weight=none; Volume=density;
+        /// Length=density+diameter (finite &amp; &gt; 0). Converted milligrams must be finite and in
+        /// (0, int.MaxValue]. Rejects with invalid_arguments instead of overflowing or throwing.
         /// </summary>
-        private static void RequireConvertibleUsage(Print print)
+        private async Task RequireMcpConvertibleUsage(
+            IReadOnlyList<MaterialUsageInput> rows, long userId, CancellationToken ct)
         {
-            foreach (var pf in print.FilamentUsage)
+            var ids = rows.Select(r => r.MaterialId).Distinct().ToList();
+            if (ids.Count == 0)
             {
-                if (!pf.FilamentId.HasValue)
+                return;
+            }
+
+            var map = await _context.Filaments
+                .Where(f => ids.Contains(f.Id))
+                .Include(f => f.MaterialCategory)
+                .AsNoTracking()
+                .ToDictionaryAsync(f => f.Id, ct);
+
+            foreach (var row in rows)
+            {
+                if (!map.TryGetValue(row.MaterialId, out var f))
                 {
-                    continue;
+                    // Ownership/existence is enforced separately; a missing map entry means the row
+                    // will already have been rejected as not_found. Fail closed here regardless.
+                    throw McpToolException.NotFound("Material not found.");
                 }
-                if (pf.AmountMg is null)
+                if (row.Source.HasValue)
                 {
-                    throw McpToolException.InvalidArguments(
-                        "A material is missing the density/diameter needed to record its usage by weight.");
+                    RequireConvertible(row.Source.Value, row.Amount.Value, f);
                 }
-                // A non-positive weight after conversion means the amount was too small to record or,
-                // for a Length/Volume source, overflowed the int milligram column (see
-                // UpdateFilamentUsageWeights, which casts unchecked). Reject rather than store corruption.
-                if (pf.AmountMg <= 0)
+                if (row.EstimatedSource.HasValue)
                 {
-                    throw McpToolException.InvalidArguments(
-                        "A material usage amount is out of the recordable range.");
+                    RequireConvertible(row.EstimatedSource.Value, row.EstimatedAmount.Value, f);
                 }
             }
         }
 
-        private async Task<LogPrintResult> BuildLogPrintResult(
+        private static void RequireConvertible(McpMeasurementSource source, double amountInSourceUnit, Filament f)
+        {
+            bool requiresDensity = source != McpMeasurementSource.Weight;
+            bool requiresDiameter = source == McpMeasurementSource.Length;
+
+            if (requiresDensity && !(double.IsFinite(f.MaterialDensityGramPerCubicCm) && f.MaterialDensityGramPerCubicCm > 0))
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material cannot record usage measured by that unit (missing density).");
+            }
+            if (requiresDiameter && !(f.DiameterMm.HasValue && double.IsFinite(f.DiameterMm.Value) && f.DiameterMm.Value > 0))
+            {
+                throw McpToolException.InvalidArguments(
+                    "This material cannot record usage measured by length (missing diameter).");
+            }
+
+            // Must apply the SAME rounding the persistence path applies, or a positive amount that
+            // rounds to 0 mg passes validation and is then stored as zero — which every read path
+            // treats as "unset" and silently replaces with the estimate. The Length/Volume helpers
+            // already round internally (matching UpdateFilamentUsageWeights); Weight is rounded here
+            // exactly as ToPrintFilament rounds it.
+            double mg = source switch
+            {
+                // amountInSourceUnit is mm here; GetAmountMgFromLength expects meters -> divide once.
+                McpMeasurementSource.Length => GetAmountMgFromLength(
+                    amountInSourceUnit / 1000.0, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
+                McpMeasurementSource.Volume => GetAmountMgFromVolume(
+                    amountInSourceUnit, f.MaterialDensityGramPerCubicCm),
+                _ => Math.Round(amountInSourceUnit * 1000.0), // g -> mg
+            };
+
+            // 1 mg is the smallest recordable amount: below that the column cannot represent it.
+            if (!double.IsFinite(mg) || mg < 1 || mg > int.MaxValue)
+            {
+                throw McpToolException.InvalidArguments("A material usage amount is out of the recordable range.");
+            }
+        }
+
+        /// <summary>
+        /// Applies the caller's explicit visibility/social choices, falling back to the user's saved
+        /// defaults and finally to the safe defaults (Private, no comments, no downloads). A stored
+        /// setting that is malformed — or numerically parseable but not a DEFINED enum member — falls
+        /// back rather than persisting a nonsense visibility.
+        /// </summary>
+        private async Task ApplyMcpPrintDefaults(
+            Print print, Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
+            long userId, CancellationToken ct)
+        {
+            const int defaultViewStatusTypeId = 1;   // Prints_DefaultPrintViewStatus
+            const int lastAllowCommentsTypeId = 3;   // Prints_LastSelectedAllowComments
+
+            if (viewStatus.HasValue)
+            {
+                print.ViewStatus = viewStatus.Value;
+            }
+            else
+            {
+                print.ViewStatus = Print.PrintViewStatus.Private;
+                var s = await _context.UserSettings.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatusTypeId, ct);
+                if (s?.Value is { } v && Enum.TryParse<Print.PrintViewStatus>(v, out var parsed) && Enum.IsDefined(parsed))
+                {
+                    print.ViewStatus = parsed;
+                }
+            }
+
+            if (allowComments.HasValue)
+            {
+                print.AllowComments = allowComments.Value;
+            }
+            else
+            {
+                print.AllowComments = false;
+                var s = await _context.UserSettings.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == lastAllowCommentsTypeId, ct);
+                if (s?.Value is { } v && bool.TryParse(v, out var parsed))
+                {
+                    print.AllowComments = parsed;
+                }
+            }
+
+            print.AllowFileDownloads = allowFileDownloads ?? false;
+        }
+
+        private async Task<CreatePrintResult> BuildCreatePrintResult(
             long printId, bool wasReplayed, long userId, CancellationToken ct)
+        {
+            var detail = await GetOwnPrintDetailForMcp(userId, printId, ct)
+                ?? throw McpToolException.NotFound("Print not found.");
+            return new CreatePrintResult(detail, wasReplayed, await BuildMaterialRemaining(printId, userId, ct));
+        }
+
+        private async Task<IReadOnlyList<MaterialRemaining>> BuildMaterialRemaining(
+            long printId, long userId, CancellationToken ct)
         {
             var materialIds = await _context.PrintFilament.AsNoTracking()
                 .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
@@ -789,13 +959,15 @@ namespace PrintLogApi.Services
             {
                 remaining.Add(new MaterialRemaining(id, await _filamentService.GetRemainingGramsForMcp(userId, id, ct)));
             }
-            return new LogPrintResult(printId, wasReplayed, remaining);
+            return remaining;
         }
 
         public async Task<PrintDetailResult> UpdateOwnPrintForMcp(
-            long userId, long printId, PrintStatus? status, string notes, int? durationSeconds,
-            bool projectProvided, Guid? projectId,
-            bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials, CancellationToken ct)
+            long userId, long printId, string title, PrintStatus? status, string notes, DateTimeOffset? startedAt,
+            long? printerId, int? durationSeconds, int? estimatedDurationSeconds, string fileName, string url,
+            Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
+            Guid? projectId, bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials,
+            ISet<string> clearFields, CancellationToken ct)
         {
             var print = await _context.Prints
                 .Include(p => p.FilamentUsage)
@@ -805,45 +977,93 @@ namespace PrintLogApi.Services
                 throw McpToolException.NotFound("Print not found.");
             }
 
+            // Canonicalize to the same form create_print stores, so a field's value does not depend on
+            // which tool last wrote it. materials stays null when the caller omitted it entirely.
+            title = title?.Trim();
+            notes = notes?.Trim();
+            fileName = fileName?.Trim();
+            url = url?.Trim();
+            materials = materials?.Select(m => m with { Notes = m.Notes?.Trim() }).ToList();
+
+            // ---- Validate everything first: a rejected edit must leave the print untouched. ----
+            void Guard(string field, bool isSet)
+            {
+                if (isSet && clearFields.Contains(field))
+                {
+                    throw McpToolException.InvalidArguments($"'{field}' cannot be both set and cleared.");
+                }
+            }
+            Guard("fileName", fileName != null);
+            Guard("url", url != null);
+            Guard("notes", notes != null);
+            Guard("startedAt", startedAt.HasValue);
+            Guard("durationSeconds", durationSeconds.HasValue);
+            Guard("estimatedDurationSeconds", estimatedDurationSeconds.HasValue);
+            Guard("projectId", projectId.HasValue);
+
+            if (printerId.HasValue &&
+                !await _context.Printers.AnyAsync(p => p.Id == printerId.Value && p.UserId == userId, ct))
+            {
+                throw McpToolException.NotFound("Printer not found.");
+            }
+            if (projectId.HasValue &&
+                !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+            {
+                throw McpToolException.NotFound("Project not found.");
+            }
+            if (materialsProvided)
+            {
+                var mids = materials.Select(m => m.MaterialId).ToList();
+                if (mids.Count != mids.Distinct().Count())
+                {
+                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
+                }
+                if (mids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, mids))
+                {
+                    throw McpToolException.NotFound("Material not found.");
+                }
+                await RequireMcpConvertibleUsage(materials, userId, ct);
+            }
+
+            // ---- Mutate. ----
+            if (title != null)
+            {
+                print.Title = title;
+            }
             if (status.HasValue)
             {
                 print.Status = status.Value;
             }
-            if (notes != null)
+            if (viewStatus.HasValue)
             {
-                print.Notes = notes;
+                print.ViewStatus = viewStatus.Value;
             }
-            if (durationSeconds.HasValue)
+            if (allowComments.HasValue)
             {
-                print.PrintTimeInSeconds = durationSeconds;
+                print.AllowComments = allowComments.Value;
+            }
+            if (allowFileDownloads.HasValue)
+            {
+                print.AllowFileDownloads = allowFileDownloads.Value;
+            }
+            if (printerId.HasValue)
+            {
+                print.PrinterId = printerId.Value;
             }
 
-            if (projectProvided)
-            {
-                if (projectId.HasValue &&
-                    !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
-                {
-                    throw McpToolException.NotFound("Project not found.");
-                }
-                print.ProjectId = projectId; // null clears the assignment
-            }
+            if (notes != null) { print.Notes = notes; } else if (clearFields.Contains("notes")) { print.Notes = null; }
+            if (fileName != null) { print.FileName = fileName; } else if (clearFields.Contains("fileName")) { print.FileName = null; }
+            if (url != null) { print.Url = url; } else if (clearFields.Contains("url")) { print.Url = null; }
+            if (startedAt.HasValue) { print.StartDate = startedAt; } else if (clearFields.Contains("startedAt")) { print.StartDate = null; }
+            if (durationSeconds.HasValue) { print.PrintTimeInSeconds = durationSeconds; } else if (clearFields.Contains("durationSeconds")) { print.PrintTimeInSeconds = null; }
+            if (estimatedDurationSeconds.HasValue) { print.EstimatedPrintTimeInSeconds = estimatedDurationSeconds; } else if (clearFields.Contains("estimatedDurationSeconds")) { print.EstimatedPrintTimeInSeconds = null; }
+            if (projectId.HasValue) { print.ProjectId = projectId; } else if (clearFields.Contains("projectId")) { print.ProjectId = null; }
 
             if (materialsProvided)
             {
-                var ids = materials.Select(m => m.MaterialId).ToList();
-                if (ids.Count != ids.Distinct().Count())
-                {
-                    throw McpToolException.InvalidArguments("Each material may appear at most once.");
-                }
-                if (ids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, ids))
-                {
-                    throw McpToolException.NotFound("Material not found.");
-                }
-
                 _context.PrintFilament.RemoveRange(print.FilamentUsage);
                 print.FilamentUsage = materials.Select(ToPrintFilament).ToList();
                 await UpdateFilamentUsageWeights(print);
-                RequireConvertibleUsage(print);
             }
 
             print.UpdatedById = userId;

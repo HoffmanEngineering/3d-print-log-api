@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
@@ -21,7 +22,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         // material rather than a shared read-fixture.
         private async Task<Guid> CreateMaterial(McpClient client, string name)
         {
-            await client.CallToolAsync("add_material", new Dictionary<string, object>
+            await client.CallToolAsync("create_material", new Dictionary<string, object>
             {
                 ["displayName"] = name,
                 ["materialType"] = "PLA",
@@ -52,7 +53,37 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.True(result.IsError != true);
             var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
-            Assert.Contains("800", text); // after = 1000 - 200
+            // Asserted on the parsed fields, not a substring of the raw JSON: "800" would match a
+            // material id or any other number that happened to contain it.
+            using var doc = JsonDocument.Parse(text);
+            Assert.Equal(1000.0, doc.RootElement.GetProperty("beforeGrams").GetDouble());
+            Assert.Equal(800.0, doc.RootElement.GetProperty("afterGrams").GetDouble());
+        }
+
+        // The reported values are ALWAYS grams, whatever unit the delta was expressed in — which is
+        // why the fields are not named *InSourceUnit. 5000 mm of 1.75 mm PLA at 1.24 g/cm3 is ~14.9 g,
+        // so a Length delta still reads back on the weight scale.
+        [Fact]
+        public async Task Adjust_ByLength_StillReportsGrams()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+            var id = await CreateMaterial(client, "Adjust Length Mat");
+
+            var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object>
+            {
+                ["materialId"] = id,
+                ["source"] = "Length",
+                ["delta"] = -5000.0, // mm
+            });
+
+            Assert.True(result.IsError != true);
+            var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
+            using var doc = JsonDocument.Parse(text);
+            Assert.Equal(1000.0, doc.RootElement.GetProperty("beforeGrams").GetDouble());
+            // Grams, not the 5000 mm that was passed in.
+            Assert.InRange(doc.RootElement.GetProperty("afterGrams").GetDouble(), 984.0, 986.0);
+            // The old contract carried a hardcoded "g" SourceUnit that named nothing the caller chose.
+            Assert.False(doc.RootElement.TryGetProperty("sourceUnit", out _));
         }
 
         [Fact]
