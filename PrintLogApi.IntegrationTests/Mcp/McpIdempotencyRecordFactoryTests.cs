@@ -6,7 +6,7 @@ using Xunit;
 namespace PrintLogApi.IntegrationTests.Mcp
 {
     /// <summary>
-    /// The exactly-one-target rule is a code invariant, not a schema one: three nullable columns
+    /// The exactly-one-target rule is a code invariant, not a schema one: five nullable columns
     /// share one table. These tests pin the single construction path that makes it true.
     /// </summary>
     public class McpIdempotencyRecordFactoryTests
@@ -61,6 +61,36 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Null(r.CreatedPrinterId);
             Assert.Null(r.CreatedFilamentId);
             Assert.Equal("create_project", r.ToolName);
+        }
+
+        [Fact]
+        public void ForFeedback_SetsOnlyTheFeedbackTarget()
+        {
+            var id = Guid.NewGuid();
+            var r = McpIdempotencyRecordFactory.ForFeedback(7, "k", "fp", id);
+
+            Assert.Equal(id, r.CreatedFeedbackId);
+            Assert.Null(r.CreatedPrintId);
+            Assert.Null(r.CreatedPrinterId);
+            Assert.Null(r.CreatedFilamentId);
+            Assert.Null(r.CreatedProjectId);
+            Assert.Equal("create_feedback", r.ToolName);
+        }
+
+        // CreatedProjectId, CreatedFilamentId and CreatedFeedbackId are all Guid?, so a target set on
+        // the wrong one would still compile and still round-trip. The count is what catches it.
+        [Fact]
+        public void RequireExactlyOneTarget_RejectsBothGuidFeedbackAndProjectTargets()
+        {
+            var r = new McpIdempotencyRecord
+            {
+                UserId = 1,
+                ToolName = "create_feedback",
+                IdempotencyKey = "k",
+                CreatedFeedbackId = Guid.NewGuid(),
+                CreatedProjectId = Guid.NewGuid(),
+            };
+            Assert.Throws<InvalidOperationException>(() => McpIdempotencyRecordFactory.RequireExactlyOneTarget(r));
         }
 
         // CreatedProjectId and CreatedFilamentId are both Guid?, so a target set on the wrong one
