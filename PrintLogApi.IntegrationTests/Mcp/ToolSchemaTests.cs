@@ -51,5 +51,25 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.Equal(new[] { "materialId" }, required);
         }
+
+        /// <summary>
+        /// create_feedback is the only create tool whose idempotencyKey is mandatory, and the schema
+        /// is where an agent learns that. The same SDK rule applies in reverse here: a parameter is
+        /// required precisely because it has no C# default, so giving idempotencyKey one would
+        /// silently downgrade it to optional and reintroduce duplicate-notification retries.
+        /// </summary>
+        [Fact]
+        public async Task CreateFeedback_RequiresTypeNoteAndIdempotencyKey()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+            var tools = await client.ListToolsAsync();
+
+            var createFeedback = tools.Single(t => t.Name == "create_feedback");
+            var required = createFeedback.ProtocolTool.InputSchema
+                .GetProperty("required")
+                .EnumerateArray().Select(e => e.GetString()).ToArray();
+
+            Assert.Equal(new[] { "type", "note", "idempotencyKey" }.OrderBy(x => x), required.OrderBy(x => x));
+        }
     }
 }

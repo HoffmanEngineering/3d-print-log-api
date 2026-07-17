@@ -61,6 +61,14 @@ namespace PrintLogApi.Mcp
 
     public sealed record CreateProjectResult(ProjectWriteResult Project, bool WasReplayed);
 
+    /// <summary>
+    /// Echoes what was recorded. There is no get_feedback read tool and a write-only agent cannot
+    /// call the read tools at all, so this echo is the ONLY way a caller can confirm what it sent.
+    /// </summary>
+    public sealed record FeedbackWriteResult(Guid FeedbackId, string Type, string Note);
+
+    public sealed record CreateFeedbackResult(FeedbackWriteResult Feedback, bool WasReplayed);
+
     public sealed record ProjectListItem(
         Guid Id, string Name, string? Reference, string Status, string ViewStatus);
 

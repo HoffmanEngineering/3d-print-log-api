@@ -28,19 +28,22 @@ namespace PrintLogApi.Mcp
         private readonly IFilamentService filamentService;
         private readonly IProjectService projectService;
         private readonly IPrinterService printerService;
+        private readonly IFeedbackService feedbackService;
 
         public PrintLogWriteTools(
             IHttpContextAccessor httpContextAccessor,
             IPrintService printService,
             IFilamentService filamentService,
             IProjectService projectService,
-            IPrinterService printerService)
+            IPrinterService printerService,
+            IFeedbackService feedbackService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.printService = printService;
             this.filamentService = filamentService;
             this.projectService = projectService;
             this.printerService = printerService;
+            this.feedbackService = feedbackService;
         }
 
         private long CurrentUserId =>
@@ -630,6 +633,42 @@ namespace PrintLogApi.Mcp
             {
                 McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
             }
+        }
+
+        /// <summary>Upper bound on a feedback note, matching the Feedback.Note column.</summary>
+        private const int MaxFeedbackNoteLength = 5000;
+
+        [McpServerTool(Name = "create_feedback", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
+            "Send feedback about 3D Print Log to its maintainers on the user's behalf — a question, " +
+            "a bug report, a suggestion, or anything else. Use this only when the user actually asks " +
+            "to send feedback; write the note in the user's own words rather than your summary of " +
+            "them. The note is required (max 5000 chars) and the feedback is submitted under the " +
+            "user's account. 'idempotencyKey' is REQUIRED: submitting feedback emails the " +
+            "maintainers, and neither the message nor the email can be taken back, so a retry MUST " +
+            "reuse the same key. Same key + same arguments returns the original feedback " +
+            "(wasReplayed = true) and sends nothing further; the same key with DIFFERENT arguments " +
+            "is a conflict. Feedback cannot be listed, edited, or deleted afterwards.")]
+        public async Task<CreateFeedbackResult> CreateFeedback(
+            [Description("The kind of feedback: Question, Bug, Suggestion, or Other.")] Feedback.FeedbackType type,
+            [Description("The feedback itself, in the user's own words (max 5000 chars).")] string note,
+            [Description("Stable key making a retry safe. Required — reuse it verbatim when retrying.")] string idempotencyKey,
+            CancellationToken ct = default)
+        {
+            // Nothing lists the feedback types, so name them rather than reporting a bare
+            // "not a valid value" an agent cannot act on. The set is a fixed enum, not per-user.
+            if (!Enum.IsDefined(type))
+            {
+                throw McpToolException.InvalidArguments(
+                    $"type is not a valid value. Valid types: {string.Join(", ", Enum.GetNames<Feedback.FeedbackType>())}.");
+            }
+            if (string.IsNullOrWhiteSpace(note))
+            {
+                throw McpToolException.InvalidArguments("note is required.");
+            }
+            McpWriteValidation.RequireMaxLength(note.Trim(), MaxFeedbackNoteLength, "note");
+
+            return await feedbackService.CreateFeedbackForMcp(CurrentUserId, type, note, idempotencyKey, ct);
         }
     }
 }

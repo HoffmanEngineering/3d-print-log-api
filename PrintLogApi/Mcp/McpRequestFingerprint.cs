@@ -202,6 +202,26 @@ namespace PrintLogApi.Mcp
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }
 
+        /// <summary>
+        /// Fingerprint of the caller-provided create_feedback arguments. Same rules as
+        /// <see cref="ComputeCreatePrint"/>: fixed field order, length-prefixed strings, and values
+        /// hashed EXACTLY as given (the caller canonicalizes first).
+        /// <para>
+        /// Covers only what the caller supplies. The submitter is token-derived and the contact
+        /// address is resolved server-side, so neither is an argument and neither belongs here.
+        /// </para>
+        /// </summary>
+        public static string ComputeCreateFeedback(Feedback.FeedbackType type, string note)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                w.Write((int)type);
+                WriteStr(w, note);
+            }
+            return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+        }
+
         private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v); }
         private static void WriteInt(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteEnum(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }

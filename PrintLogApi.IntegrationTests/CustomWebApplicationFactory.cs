@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
@@ -35,9 +37,30 @@ namespace PrintLogApi.IntegrationTests
             _connection.Open();
         }
 
+        /// <summary>The address feedback notifications are sent to under test.</summary>
+        public const string TestFeedbackEmailAddress = "feedback-inbox@example.test";
+
+        /// <summary>The recording email sender, for asserting on notifications the app sent.</summary>
+        public RecordingEmailSender EmailSender => (RecordingEmailSender)Services.GetRequiredService<IEmailSender>();
+
+        /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
+        public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("IntegrationTesting");
+
+            // A feedback notification is only composed when a recipient is configured, and the test
+            // settings leave it empty — without this the whole notification path would be skipped and
+            // the tests covering it would pass vacuously.
+            //
+            // Must be ConfigureAppConfiguration, not UseSetting: UseSetting writes host configuration,
+            // which appsettings.json is then layered ON TOP of, putting the empty value back.
+            builder.ConfigureAppConfiguration(config =>
+                config.AddInMemoryCollection(new Dictionary<string, string>
+                {
+                    ["FeedbackEmailAddress"] = TestFeedbackEmailAddress,
+                }));
 
             builder.ConfigureServices(services =>
             {
@@ -76,6 +99,13 @@ namespace PrintLogApi.IntegrationTests
                     services.Remove(auth0Descriptor);
                 }
                 services.AddSingleton<IAuth0Service, TestAuth0Service>();
+
+                var emailDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IEmailSender));
+                if (emailDescriptor != null)
+                {
+                    services.Remove(emailDescriptor);
+                }
+                services.AddSingleton<IEmailSender, RecordingEmailSender>();
 
                 // Add test authentication scheme
                 services.AddAuthentication(options =>
@@ -180,8 +210,14 @@ namespace PrintLogApi.IntegrationTests
             }
         }
 
-        private class TestAuth0Service : IAuth0Service
+        public class TestAuth0Service : IAuth0Service
         {
+            /// <summary>The address <see cref="GetUserEmail"/> returns. Null means the account has none.</summary>
+            public string UserEmail { get; set; }
+
+            /// <summary>When set, the lookup throws — for testing that callers degrade instead of failing.</summary>
+            public bool ThrowOnGetUserEmail { get; set; }
+
             public Task DeleteUser(string oauthUserId)
             {
                 return Task.CompletedTask;
@@ -192,9 +228,13 @@ namespace PrintLogApi.IntegrationTests
                 return Task.FromResult("test-token");
             }
 
-            public Task GetUser(string oauthUserId)
+            public Task<string> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
             {
-                return Task.CompletedTask;
+                if (ThrowOnGetUserEmail)
+                {
+                    throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
+                }
+                return Task.FromResult(UserEmail);
             }
 
             public Task<System.Collections.Generic.IReadOnlyList<PrintLogApi.Models.DTOs.ConnectedAgentDto>> ListMcpGrants(
