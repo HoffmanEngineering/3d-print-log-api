@@ -96,7 +96,7 @@ classes by capability:
 - **`PrintLogWriteTools`** (`[Authorize(Policy = "McpWrite")]`) — write tools (`create_print`,
   `update_print`, `create_material`, `update_material`, `adjust_material_remaining`,
   `set_material_active`, `create_printer`, `update_printer`, `create_project`, `update_project`,
-  plus a `whoami` connectivity check),
+  `create_feedback`, plus a `whoami` connectivity check),
   gated on the `write:printdata` scope. Each tool carries MCP annotations (`create_print` is
   idempotent and non-destructive; `update_print` and `update_printer` are destructive — in MCP that
   means "may overwrite or discard existing data", not "deletes the entity") so a client can reason
@@ -110,7 +110,12 @@ Authorization topology:
 - The read/write scope is enforced per tool *class* by the SDK's authorization filter, which also
   **hides** write tools from a read-only token's `tools/list`.
 - A new write scope requires a manual Auth0 dashboard step: add `write:printdata` to the MCP API's
-  permissions in every environment.
+  permissions in every environment. `create_feedback` deliberately reuses `write:printdata` rather
+  than adding a `write:feedback` scope, which would mean that dashboard step again for no real
+  isolation gain.
+- Separately, the **M2M application** needs `read:users` on the Management API in every environment
+  for the feedback notification's account-email lookup (see `IAuth0Service.GetUserEmail`). Without
+  it the lookup 403s and the body degrades to `(not available)`; feedback still saves.
 
 Write-tool invariants (defense against a headless/misbehaving agent, not just a well-behaved one):
 
@@ -193,20 +198,20 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 - `update_printer` validates everything and resolves the category **before** the first assignment, so
   a rejected patch cannot leave a partially-mutated entity — no `ChangeTracker.Clear()` needed, unlike
   `update_material`.
-- `McpIdempotencyRecord` carries a nullable `CreatedPrintId`, `CreatedFilamentId`, `CreatedPrinterId`
-  **or** `CreatedProjectId` — exactly one, decided by `ToolName`. That rule is held by
+- `McpIdempotencyRecord` carries a nullable `CreatedPrintId`, `CreatedFilamentId`, `CreatedPrinterId`,
+  `CreatedProjectId` **or** `CreatedFeedbackId` — exactly one, decided by `ToolName`. That rule is held by
   `McpIdempotencyRecordFactory`, the single construction path, which counts the non-null targets
   (a chained XOR is true for an ODD count, which would wave through the worst cases) and throws
   `InvalidOperationException` — a server bug, never something a caller can provoke.
   There is no check constraint and the entity is still publicly constructible, so this is the
   conventional path rather than an enforced one; nothing needs the constraint, because every lookup
   is scoped by `ToolName` and reads only its own field, treating a null there as a dangling record.
-  Note `CreatedFilamentId` and `CreatedProjectId` are both `Guid?`, so a target written to the wrong
-  one would still compile — the count is what catches it.
+  Note `CreatedFilamentId`, `CreatedProjectId` and `CreatedFeedbackId` are all `Guid?`, so a target
+  written to the wrong one would still compile — the count is what catches it.
 - `create_printer`/`create_material`/`create_project` idempotency is **optional**: with a key, same
   args replays and different args is a `conflict`; **without** one, a retry creates a SECOND entity.
   That residual at-least-once risk is an accepted design choice, stated in each tool description and
-  pinned by a test. Only `create_print` requires a key.
+  pinned by a test. Only `create_print` and `create_feedback` require a key.
 - **Every write tool's result must be self-sufficient.** There is no `get_project`, and a write-only
   agent cannot call the read tools at all, so a create/update echo is the only way a caller can
   confirm what it wrote — `ProjectWriteResult` echoes every settable field for that reason, not for
@@ -237,7 +242,26 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
   above.
 - **Wire format:** the SDK's serializer omits nulls, so a cleared or unset field is **absent** from a
   tool result rather than present-and-null. Tests asserting a clear must check for absence.
-- No hard-delete tools. Every write invalidates `ICacheVersionService` after commit.
+- **`create_feedback` is the only write with an outbound side effect** — it emails
+  `FeedbackEmailAddress` — which is why its idempotency key is **required** rather than optional: a
+  keyless retry would insert a duplicate row AND send a second email, and neither can be taken back
+  from the UI. A replay returns the stored row and deliberately does **not** re-notify; that pairing
+  is what the key buys, and both halves are pinned by a test.
+- **The feedback notification is best-effort and must stay that way.** `FeedbackService` swallows a
+  mail or Auth0 failure and tracks `FeedbackNotificationFailed` / `FeedbackAccountEmailLookupFailed`
+  instead of throwing. Throwing would not undo the committed row — it would only report failure for
+  feedback that was saved and burn the idempotency key, so the retry replays and never notifies
+  either. The row is the source of truth; alarm on the telemetry.
+- **`Feedback.Email` means "the address the user typed into the website form" — nothing else.**
+  Agents pass no email and it stays null for them. The account address in the notification body comes
+  from Auth0 at compose time and is never persisted. The old `Email (from token)` line could never
+  resolve: Auth0 puts `email` in **ID tokens**, and this API authenticates with an **access token**,
+  so no scope or claim lookup would have fixed it.
+- `FeedbacksController` and `create_feedback` share `FeedbackService` on purpose: two callers
+  composing the same notification independently is how the bodies drift apart.
+- No hard-delete tools. Every write invalidates `ICacheVersionService` after commit — except
+  `create_feedback`, which has nothing to invalidate: feedback appears in no cached response, so
+  busting the user's cache would be pure cost. Adding a feedback read path would change that.
 
 See the `adding-an-mcp-tool` skill for adding tools.
 
