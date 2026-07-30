@@ -359,3 +359,7 @@ docker-compose.override.yml
 # deliverables — they should never reach main. The rest of docs/ IS tracked (deployment
 # runbooks, Auth0 setup), so this is deliberately scoped rather than ignoring all of docs/.
 docs/superpowers/
+
+# MCP Registry publishing credentials (see docs/mcp-discoverability.md)
+key.pem
+mcp-registry-auth
