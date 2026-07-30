@@ -25,4 +25,10 @@
     <ProjectReference Include="..\PrintLogApi\PrintLogApi.csproj" />
   </ItemGroup>
 
+  <!-- The golden cost corpus, shared byte-for-byte with the UI repo's copy so a divergence
+       between PrintCostCalculator and print.service.ts fails both suites. -->
+  <ItemGroup>
+    <None Include="..\tests-fixtures\cost-fixtures.json" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\cost-fixtures.json" />
+  </ItemGroup>
+
 </Project>
