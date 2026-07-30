@@ -305,10 +305,12 @@ namespace PrintLogApi.Services
             SortRequest<PrintSummarySortColumn> sortRequest,
             IEnumerable<long> filterByPrinterIds,
             IEnumerable<Guid> filterByFilamentIds,
-            PrintStatus? filterByStatus,
+            IReadOnlyCollection<PrintStatus> statuses,
             long? userId,
             long? currentUserId,
-            Guid? filterByProjectId = null)
+            IReadOnlyCollection<Guid> projectIds = null,
+            DateTimeOffset? fromDate = null,
+            DateTimeOffset? toDate = null)
         {
             if (pagingRequest == null)
             {
@@ -353,9 +355,16 @@ namespace PrintLogApi.Services
                 }
             }
 
-            if (filterByStatus != null)
+            // Half-open [fromDate, toDate) so adjacent windows never double-count a boundary
+            // instant — the same rule the analytics endpoints use.
+            if (fromDate.HasValue && toDate.HasValue)
             {
-                printQuery = printQuery.Where(p => p.Status == filterByStatus);
+                printQuery = printQuery.Where(p => p.StartDate >= fromDate.Value && p.StartDate < toDate.Value);
+            }
+
+            if (statuses != null && statuses.Count > 0)
+            {
+                printQuery = printQuery.Where(p => statuses.Contains(p.Status));
             }
 
             // Filter by an of the selected printer ids.
@@ -370,9 +379,9 @@ namespace PrintLogApi.Services
                 printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
-            if (filterByProjectId.HasValue)
+            if (projectIds != null && projectIds.Count > 0)
             {
-                printQuery = printQuery.Where(p => p.ProjectId == filterByProjectId.Value);
+                printQuery = printQuery.Where(p => p.ProjectId.HasValue && projectIds.Contains(p.ProjectId.Value));
             }
 
             if (sortRequest != null)
