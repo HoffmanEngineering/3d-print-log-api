@@ -92,10 +92,11 @@ namespace PrintLogApi.Mcp
             McpWriteValidation.RequireMaxLength(row.Notes, 1000, "materials.notes");
         }
 
-        [McpServerTool(Name = "whoami"), Description("Confirms write access is granted. Returns your internal user id.")]
+        [McpServerTool(Name = "whoami", Title = "Who Am I", ReadOnly = true, OpenWorld = false),
+         Description("Confirms write access is granted. Returns your internal user id.")]
         public long WhoAmI() => CurrentUserId;
 
-        [McpServerTool(Name = "create_print", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "create_print", Title = "Create Print", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Log a finished 3D print for yourself. Records status, optional start time, actual and " +
             "estimated duration (seconds), notes, file name, url, visibility, and per-material usage. " +
@@ -168,7 +169,7 @@ namespace PrintLogApi.Mcp
                 rows, idempotencyKey.Trim(), ct);
         }
 
-        [McpServerTool(Name = "update_print", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "update_print", Title = "Update Print", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
          Description(
             "Edit one of your own prints. Only fields you pass are changed. To clear a nullable field, " +
             "list its name in 'clear' (fileName, url, notes, startedAt, durationSeconds, " +
@@ -241,7 +242,7 @@ namespace PrintLogApi.Mcp
                 materialsProvided, materials ?? Array.Empty<MaterialUsageInput>(), clearFields, ct);
         }
 
-        [McpServerTool(Name = "create_material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "create_material", Title = "Create Material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Add a new material to your inventory (filament, resin, powder, etc.). 'source' is how the " +
             "initial amount is measured: Weight (grams), Length (mm), or Volume (ml) — it names the " +
@@ -333,7 +334,7 @@ namespace PrintLogApi.Mcp
             return await filamentService.CreateMaterialForMcp(CurrentUserId, input, idempotencyKey, ct);
         }
 
-        [McpServerTool(Name = "update_material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "update_material", Title = "Update Material", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Edit one of your own materials. Only fields you pass are changed. To clear a nullable " +
             "field, list its name in 'clear' (brand, colorName, colorHex, colors, storageLocation, " +
@@ -430,7 +431,7 @@ namespace PrintLogApi.Mcp
             return await filamentService.UpdateOwnMaterialForMcp(CurrentUserId, materialId, input, clearFields, ct);
         }
 
-        [McpServerTool(Name = "create_printer", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "create_printer", Title = "Create Printer", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Add a printer to your account. 'make', 'model' and 'name' are required. " +
             "'categoryNickname' must be one of the known printer categories (e.g. FFF, FDM, SLA, " +
@@ -472,7 +473,7 @@ namespace PrintLogApi.Mcp
 
         // Destructive = true, matching update_print: this tool overwrites fields and honours 'clear',
         // so a retry is not free and a client must be able to reason about that.
-        [McpServerTool(Name = "update_printer", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "update_printer", Title = "Update Printer", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
          Description(
             "Edit one of your own printers. Only fields you pass are changed. To clear a nullable " +
             "field, list its name in 'clear' (description, nozzleDiameterMm, filamentDiameterMm, " +
@@ -544,7 +545,10 @@ namespace PrintLogApi.Mcp
             IsActive = isActive,
         };
 
-        [McpServerTool, Description(
+        // Destructive = false: the change is a bounded, reversible delta on one quantity — the
+        // inverse delta restores it. Idempotent = false: replaying it applies the delta twice.
+        [McpServerTool(Title = "Adjust Material Remaining", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
             "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
             "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +
             "cannot go below zero or above the material's original capacity — an out-of-range " +
@@ -563,7 +567,10 @@ namespace PrintLogApi.Mcp
             return await filamentService.AdjustMaterialRemainingForMcp(CurrentUserId, materialId, source, delta, notes, ct);
         }
 
-        [McpServerTool, Description(
+        // Idempotent = true: setting the flag to a value it already holds is a no-op, so a retry is
+        // free. Destructive = false: retiring hides the material but keeps all of its history.
+        [McpServerTool(Title = "Set Material Active", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
+         Description(
             "Activate or retire one of your materials. Retiring hides it from default inventory " +
             "listings but keeps its history. Foreign materials are 'not found'.")]
         public async Task<MaterialInventoryItem> SetMaterialActive(
@@ -574,7 +581,7 @@ namespace PrintLogApi.Mcp
             return await filamentService.SetMaterialActiveForMcp(CurrentUserId, materialId, isActive, ct);
         }
 
-        [McpServerTool(Name = "create_project", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "create_project", Title = "Create Project", Idempotent = false, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Create a new project to group prints under. Name is required (max 100 chars). viewStatus " +
             "controls visibility (Private, Unlisted, Public) and defaults to Private; the result echoes " +
@@ -600,7 +607,10 @@ namespace PrintLogApi.Mcp
                 CurrentUserId, name, reference, description, url, status, viewStatus, idempotencyKey, ct);
         }
 
-        [McpServerTool, Description(
+        // Destructive = true, matching the other update_* tools: passing a field overwrites whatever
+        // it held, and the previous value is not recoverable through any tool.
+        [McpServerTool(Title = "Update Project", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
+         Description(
             "Edit one of your own projects. Only fields you pass are changed. viewStatus changes " +
             "visibility; the result echoes the resulting visibility. Foreign projects are 'not found'.")]
         public async Task<ProjectWriteResult> UpdateProject(
@@ -638,7 +648,7 @@ namespace PrintLogApi.Mcp
         /// <summary>Upper bound on a feedback note, matching the Feedback.Note column.</summary>
         private const int MaxFeedbackNoteLength = 5000;
 
-        [McpServerTool(Name = "create_feedback", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
+        [McpServerTool(Name = "create_feedback", Title = "Send Feedback", Idempotent = true, Destructive = false, ReadOnly = false, OpenWorld = false),
          Description(
             "Send feedback about 3D Print Log to its maintainers on the user's behalf — a question, " +
             "a bug report, a suggestion, or anything else. Use this only when the user actually asks " +
