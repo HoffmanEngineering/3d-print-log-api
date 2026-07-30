@@ -48,6 +48,31 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static readonly DateTimeOffset RichPrint1Date = DateTimeOffset.UtcNow.AddDays(-1);
         public static readonly DateTimeOffset RichPrint2Date = DateTimeOffset.UtcNow;
 
+        public const string EmptyUserOAuthId = "auth0|mcp-empty-user";
+
+        /// <summary>
+        /// A user who owns NO prints at all. Analytics must report a null success rate for them
+        /// rather than 0%: with no resolved prints there is no denominator, and "0% success" is a
+        /// different and false claim from "no data yet".
+        /// </summary>
+        public static long EmptyUserId { get; private set; }
+
+        public const string DstUserOAuthId = "auth0|mcp-dst-user";
+
+        /// <summary>
+        /// Owns exactly the two DST fixtures below, so a bucketing assertion can be exact.
+        /// </summary>
+        public static long DstUserId { get; private set; }
+        public static long DstPrinterId { get; private set; }
+
+        /// <summary>
+        /// Both instants are 01:30 local in America/New_York on 1 November 2026 — the first in EDT,
+        /// the second in EST, the repeated hour of a 25-hour fall-back day. They must land in the
+        /// SAME local day bucket. A fixed-offset implementation splits them across two days.
+        /// </summary>
+        public static readonly DateTimeOffset DstBeforeFallBack = new(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
+        public static readonly DateTimeOffset DstAfterFallBack = new(2026, 11, 1, 6, 30, 0, TimeSpan.Zero);
+
         public const string MetricsUserOAuthId = "auth0|mcp-metrics-user";
 
         /// <summary>
@@ -691,6 +716,57 @@ namespace PrintLogApi.IntegrationTests.Mcp
             ZeroActualPrintId = zeroActual.Id;
             ActualWinsPrintId = actualWins.Id;
             NoDurationPrintId = noDuration.Id;
+
+            // Owns nothing. Analytics must report a null success rate here, not 0%.
+            var emptyUser = new User
+            {
+                OAuthUserId = EmptyUserOAuthId,
+                ViewStatus = User.ProfileViewStatus.Public,
+            };
+            context.Users.Add(emptyUser);
+            context.SaveChanges();
+            EmptyUserId = emptyUser.Id;
+
+            // DST fixtures, isolated so the bucket assertion can be exact.
+            var dstUser = new User
+            {
+                OAuthUserId = DstUserOAuthId,
+                ViewStatus = User.ProfileViewStatus.Public,
+            };
+            context.Users.Add(dstUser);
+            context.SaveChanges();
+            DstUserId = dstUser.Id;
+
+            var dstPrinter = new Printer
+            {
+                Name = "DST Fixture Printer",
+                Model = "DST1",
+                Make = "Fixture",
+                UserId = DstUserId,
+                IsActive = true,
+            };
+            context.Printers.Add(dstPrinter);
+            context.SaveChanges();
+            DstPrinterId = dstPrinter.Id;
+
+            Print DstPrint(string title, DateTimeOffset start) => new()
+            {
+                Title = title,
+                StartDate = start,
+                Status = Print.PrintStatus.Success,
+                ViewStatus = Print.PrintViewStatus.Private,
+                PrinterId = dstPrinter.Id,
+                CreatedById = DstUserId,
+                CreatedDate = now,
+                UpdatedById = DstUserId,
+                UpdatedDate = now,
+                PrintTimeInSeconds = 600,
+            };
+
+            context.Prints.AddRange(
+                DstPrint("Before Fall Back", DstBeforeFallBack),
+                DstPrint("After Fall Back", DstAfterFallBack));
+            context.SaveChanges();
         }
 
         private static Filament NewTextMatchFilament(
