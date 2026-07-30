@@ -108,6 +108,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// </summary>
         public const long UsersEndpointMaterialTotalMg = MaterialMatrixTotalMg + LegacyMaterialMatrixTotalMg;
 
+        /// <summary>
+        /// Prints whose canonical material total (rows + "other filament") contains ANY estimated
+        /// term: EstimatedOnly and ZeroActual via their rows, plus ActualWins via its scalar
+        /// (actual -1 falls back to the 1000 estimate). NoDuration's negative estimate resolves to
+        /// 0, which is not a fallback. Differs from MaterialMatrixEstimatedCount, which is rows only.
+        /// </summary>
+        public const int MaterialEstimatedCountIncludingOtherFilament = 3;
+
         public static void Seed(PrintLogContext context)
         {
             var now = DateTime.UtcNow;
