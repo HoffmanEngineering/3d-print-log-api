@@ -142,10 +142,14 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
   least one data scope — including a read-only one — so write-tool denial rests entirely on the
   SDK's per-tool-class authorization filter, not on the endpoint. Pinned by
   `McpWritePolicyTests.ReadOnlyToken_HandshakeLessWriteToolCall_DoesNotSucceed`, which was verified
-  to fail when the `McpWrite` policy's scope requirement is relaxed to `read:printdata`. Note
-  `AddAuthorizationFilters()` is **not** a usable mutation for that check: removing it also breaks
-  the tool's own `IHttpContextAccessor` plumbing, so `whoami` throws for every caller and the test
-  would pass for the wrong reason.
+  to fail when the `McpWrite` policy's scope requirement is relaxed to `read:printdata` — the
+  read-only token then reaches `whoami` and gets a plain successful result. The test also requires
+  HTTP 200, so it cannot go green by being refused at the endpoint instead: a 401/403 fails it,
+  because a refusal one layer up would mean the tool-layer boundary was never exercised.
+  Note `AddAuthorizationFilters()` is **not** a usable mutation for that check — removing it takes
+  down the *entire* MCP surface (`tools/list` and `ping` fail too, and neither touches user
+  context), because the tool classes carry `[Authorize]` metadata the SDK cannot evaluate without
+  it. Every MCP test fails, so it tells you nothing about this specific boundary.
 - `create_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
   through unique-violation replay, and never mutates printer loaded-state (it does NOT call
   `setLoadedFilament`). Idempotency is **payload-bound**: the record stores a SHA-256

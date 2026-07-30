@@ -135,21 +135,19 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 .SendAsync(RawHandshakeLessToolCall("whoami", token));
             var body = await response.Content.ReadAsStringAsync();
 
-            // A 400 means the request never reached tool dispatch — a malformed protocol envelope, not
-            // an authorization decision. Fail loudly rather than counting it as a refusal, because
-            // "rejected before authorization" is exactly the false pass this test must not give.
-            Assert.NotEqual(HttpStatusCode.BadRequest, response.StatusCode);
-
-            // 401/403 from the endpoint policy is a genuine refusal; nothing further to check.
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                return;
-            }
-
+            // The request MUST be admitted by the endpoint (HTTP 200) so that the refusal we go on to
+            // assert can only have come from the per-tool-class authorization filter. Treating a
+            // 400/401/403 as "refused" would let this test keep passing while silently no longer
+            // covering the tool layer at all — e.g. if the "Mcp" endpoint policy were tightened to
+            // require write:printdata, every read-only call would be rejected at the endpoint and this
+            // test would go green without the filter ever running. A failure here is therefore not
+            // necessarily a vulnerability; it means the authorization topology moved and this test
+            // needs to be re-pointed at whatever layer now owns the boundary.
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            // On HTTP 200 the refusal must be in the payload — either a JSON-RPC error or an
-            // isError result. Note we cannot assert on the *absence* of a success payload:
+            // The refusal must be in the payload — either a JSON-RPC error or an isError result.
+            // Which of the two is an SDK-owned wire detail this test does not pin. Note we cannot
+            // assert on the *absence* of a success payload:
             // whoami returns a bare long, so a successful body is just the user id as text and
             // there is no distinctive property name to look for. Requiring a positive error
             // signal is what keeps this assertion from being vacuous.
