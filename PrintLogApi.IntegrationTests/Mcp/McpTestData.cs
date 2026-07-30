@@ -116,6 +116,16 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// </summary>
         public const int MaterialEstimatedCountIncludingOtherFilament = 3;
 
+        /// <summary>
+        /// What PrintStatistic/PrintDetailReport must report for the metrics user once the legacy
+        /// scalars are guarded the same way the row sums already are. These are the ACTUAL and
+        /// ESTIMATED columns kept separate — deliberately NOT the resolved canonical total, which
+        /// is UsersEndpointMaterialTotalMg. The unguarded mapping reports 12999 and 9500 because
+        /// ActualWins' -1 and NoDuration's -500 subtract.
+        /// </summary>
+        public const long StatisticActualMaterialTotalMg = 13_000;
+        public const long StatisticEstimatedMaterialTotalMg = 10_000;
+
         public static void Seed(PrintLogContext context)
         {
             var now = DateTime.UtcNow;
