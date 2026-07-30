@@ -18,7 +18,7 @@ The `/mcp` server has **two** tool classes, split by scope. Both are creator-onl
 
 A tool = a **contract record** + an **ownership-scoped service method** + a **thin tool method** +
 **integration tests through /mcp**. Copy the nearest existing tool; this skill is the checklist and
-the gotchas. `CLAUDE.md` holds the surface's invariants and the reasoning behind them.
+the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
 
 ## Steps (both kinds)
 
@@ -57,6 +57,12 @@ the gotchas. `CLAUDE.md` holds the surface's invariants and the reasoning behind
 6. **Validate before mutating**, so a rejected write leaves the entity untouched.
 7. **Invalidate `ICacheVersionService` after commit** — unless the entity appears in no cached
    response (feedback), where invalidating is pure cost.
+8. **Reuse `write:printdata`.** A new scope means a manual Auth0 dashboard step in *every*
+   environment. `create_feedback` reuses it deliberately rather than adding `write:feedback` for no
+   real isolation gain.
+9. **Share the service with the website path** where one exists (`FeedbacksController` and
+   `create_feedback` both use `FeedbackService`) — two callers composing the same notification
+   independently is how the bodies drift apart.
 
 ## Gotchas (these cost real time)
 
@@ -104,6 +110,67 @@ the gotchas. `CLAUDE.md` holds the surface's invariants and the reasoning behind
 - **Auth0 access tokens carry no `email` claim** (it lives in ID tokens). Resolve account email
   server-side via `IAuth0Service.GetUserEmail`; needs `read:users` on the M2M app per environment.
   Treat it as best-effort — never fail a user's write because Auth0 is down.
+
+## Domain rules that are easy to get wrong
+
+**Materials.** Capacity is **source-authoritative**, mirroring the website: `Source` names the field
+the user entered and weight is derived from it. Editing density/diameter on a Length/Volume material
+therefore recomputes its weight and remaining-by-weight — expected, not a bug. Say so in the tool
+description. `adjust_material_remaining` is the only tool for changing quantity, and it refuses a
+result below zero or above original capacity.
+
+- Route **every** capacity conversion through `McpMaterialConversion.RequireMgInRange` before the
+  `long` cast — `MeasurementUtilities` casts **unchecked**, so an unguarded huge density or amount
+  stores garbage instead of throwing. Run it on the *post-patch* entity so a density-only edit is
+  caught too. Capacity uses `minMg: 1`: rounding to 0 is a material claiming a tracked capacity of
+  nothing, not an empty one.
+- A **Length source requires a diameter.** `UpdateFilamentMeasurements` early-returns only for
+  diameter-*tracking* categories, so a resin with a Length source reaches `DiameterMm.Value` and
+  throws. Reject the combination; don't default the diameter.
+- Clearing `colorHex` or `colors` must clear **both** — the entity keeps `ColorHex` synced to
+  `Colors[0]`, so clearing one lets a stale swatch resurrect it. On create, resolve both *before*
+  `AddFilament` sees them: it treats an empty `Colors` as absent and rebuilds it from `ColorHex`.
+- Usage rows take `{ source, amount }` and/or `{ estimatedSource, estimatedAmount }` (Weight g /
+  Length mm / Volume ml) and need at least one complete pair. Check convertibility on the **input
+  rows** before persisting, using the same rounding the persistence path applies — otherwise an
+  out-of-range amount is silently stored as 0 (which reads back as "unset").
+- `update_material` must **not** reuse `UpdateFilament`: it loads via `GetFilamentById` with no
+  creator filter (a cross-user edit hole) and never invalidates the cache. Clear the change tracker
+  on a rejected patch so half-applied mutations can't be flushed later.
+
+**Printers.** Ownership is `UserId` — **not** `CreatedById`, which is what Filament uses.
+
+- **Never touch loaded-filament state.** Patch scalars directly and do **not**
+  `Include(p => p.LoadedFilaments)`; what is never loaded cannot be marked modified, so the
+  invariant doesn't depend on the patch code being careful. Avoid both website paths:
+  `PostPrinter`/`PutPrinter` run an AutoMapper map that clobbers `LoadedFilaments`/`UserId`, and
+  `PutPrinter` also calls `setLoadedFilament`.
+- Non-blank `make`/`model`/`name` and "has a category" are MCP **new-write** invariants, not schema
+  facts — the columns are only length-limited and the category FK is nullable, so legacy rows may
+  hold nulls. Normalize a legacy null rather than throwing; leave an omitted category alone on
+  update rather than force-repairing it. `categoryNickname` is not clearable, and it carries a store
+  default of `"FFF"`, so a test needing a null category must force it with an explicit `UPDATE`.
+- `create_printer` defaults `isActive` to **true** — a deliberate MCP-only divergence from the
+  website DTO's non-nullable bool, matching `create_material`.
+- Numerics are stored exactly as entered (mm/W/px) with no conversion, so unlike materials there is
+  no rounding/overflow class of bug: finite and non-negative is the whole rule.
+- Validate and resolve the category **before** the first assignment, so a rejected patch needs no
+  `ChangeTracker.Clear()`.
+
+## Known gaps (don't re-discover these)
+
+- The unique-violation **race recovery** in `create_print`/`create_material`/`create_printer` is
+  designed for but not test-covered. `IX_McpIdempotencyRecords_User_Tool_Key` is the real guard and
+  is verified; the `DbUpdateException` branch isn't deterministically reachable (the pre-insert
+  lookup intercepts a sequential duplicate) and the suite shares one in-memory `SqliteConnection`,
+  so a parallel test hits connection contention instead. Honest coverage needs SQL Server.
+- Printer write tools commit, then re-read through `GetPrinterForMcp`, so the result is not atomic
+  with the write: a concurrent delete makes a committed write surface as `not_found`. Accepted —
+  projecting the tracked entity would trade a rare race for permanent shape drift between the write
+  and read paths.
+- SMTP delivery is inline on the response path and `IEmailSender` takes no `CancellationToken`, so a
+  slow mail server delays the tool's success response. Pre-existing and shared with the website
+  endpoint; an outbox would fix it properly but isn't worth it for a handful of emails.
 
 ## Verify
 
