@@ -156,6 +156,36 @@ namespace PrintLogApi.IntegrationTests.Analytics
         }
 
         [Fact]
+        public void SeriesRowCap_IsSetLowEnoughToBoundTheQuery()
+        {
+            // The series has no LIMIT — it groups by exact instant and materializes every
+            // group. The cap is the only thing bounding it, so pin that it exists and is a
+            // real bound rather than an effectively-infinite number.
+            Assert.InRange(AnalyticsService.MaxSeriesRows, 1, 100_000);
+        }
+
+        [Fact]
+        public async Task Overview_UnderTheSeriesCap_StillReturnsBuckets()
+        {
+            // The fixture is far under the cap, so truncation must NOT engage — otherwise the
+            // cap test above would pass while every real query silently lost its chart.
+            var filter = new AnalyticsFilter
+            {
+                TimeZone = "UTC",
+                FromDate = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                ToDate = new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                Granularity = AnalyticsGranularity.Month,
+            };
+
+            var result = await Run(filter);
+
+            Assert.NotEmpty(result.Series);
+            Assert.DoesNotContain(
+                result.Tiles.PrintCount.Coverage.Exclusions,
+                e => e.Reason == ExclusionReason.RowCapExceeded);
+        }
+
+        [Fact]
         public async Task Overview_CostCoverageCountsPrints_NotDistinctReasons()
         {
             // The metrics user's prints have no priced spools, so every one of them is excluded

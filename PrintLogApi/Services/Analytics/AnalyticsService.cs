@@ -24,6 +24,15 @@ namespace PrintLogApi.Services.Analytics
         /// </summary>
         public const int MaxCostRows = 20000;
 
+        /// <summary>
+        /// The series groups by exact instant, so its row count is bounded by the number of
+        /// dated prints in range — fine for a month, but an all-time or 20-year range on a
+        /// large library would stream tens of thousands of rows back to be bucketed in memory.
+        /// Above this the series is omitted and reported as RowCapExceeded rather than silently
+        /// returning an empty chart or quietly doing the unbounded work.
+        /// </summary>
+        public const int MaxSeriesRows = 20000;
+
         private readonly PrintLogContext _context;
 
         public AnalyticsService(PrintLogContext context) => _context = context;
@@ -66,6 +75,7 @@ namespace PrintLogApi.Services.Analytics
             string Currency,
             Dictionary<string, int> StatusCounts,
             IReadOnlyList<SeriesBucket> Series,
+            bool SeriesTruncated,
             OverviewHighlights Highlights);
 
         private async Task<AggregateResult> Aggregate(
@@ -109,12 +119,13 @@ namespace PrintLogApi.Services.Analytics
             // A missing key reads as "unknown", not "none".
             foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
-            var series = await BuildSeries(scoped, from, to, zone, granularity, ct);
+            var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
             var (cost, costExclusions, currency) = await ComputeCost(userId, scoped, ct);
             var highlights = await BuildHighlights(scoped, ct);
 
             return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
-                materialMg, materialEstimated, cost, costExclusions, currency, statusCounts, series, highlights);
+                materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
+                series, seriesTruncated, highlights);
         }
 
         /// <summary>
@@ -131,7 +142,7 @@ namespace PrintLogApi.Services.Analytics
         /// 45-minute zones (Kathmandu, Chatham) place local midnight inside a UTC hour, so any
         /// coarser grain risks misattributing prints in a boundary period.
         /// </summary>
-        private static async Task<IReadOnlyList<SeriesBucket>> BuildSeries(
+        private static async Task<(IReadOnlyList<SeriesBucket> Series, bool Truncated)> BuildSeries(
             IQueryable<Print> scoped, DateTimeOffset? from, DateTimeOffset? to,
             TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
         {
@@ -139,10 +150,19 @@ namespace PrintLogApi.Services.Analytics
 
             var windowFrom = from ?? await dated.MinAsync(p => p.StartDate, ct) ?? DateTimeOffset.UtcNow;
             var windowTo = to ?? DateTimeOffset.UtcNow;
-            if (windowTo <= windowFrom) return Array.Empty<SeriesBucket>();
+            if (windowTo <= windowFrom) return (Array.Empty<SeriesBucket>(), false);
 
             var buckets = TimeBucketer.BuildBuckets(windowFrom, windowTo, zone, granularity, DayOfWeek.Sunday);
-            if (buckets.Count == 0) return Array.Empty<SeriesBucket>();
+            if (buckets.Count == 0) return (Array.Empty<SeriesBucket>(), false);
+
+            // Bound the work before doing it. Grouping is by exact instant, so the returned row
+            // count is at most the dated print count; a cheap COUNT decides whether streaming
+            // them all back is reasonable. Reporting truncation beats either silently returning
+            // an empty chart or running an unbounded query.
+            if (await dated.CountAsync(ct) > MaxSeriesRows)
+            {
+                return (Array.Empty<SeriesBucket>(), true);
+            }
 
             var groups = await dated
                 .GroupBy(p => new { p.StartDate, p.Status })
@@ -165,9 +185,11 @@ namespace PrintLogApi.Services.Analytics
                 accumulator[buckets[index].Index][g.Status.ToString()] += g.Count;
             }
 
-            return buckets
-                .Select(b => new SeriesBucket(b.Index, b.LocalStart, accumulator[b.Index]))
-                .ToList();
+            return (
+                buckets
+                    .Select(b => new SeriesBucket(b.Index, b.LocalStart, accumulator[b.Index]))
+                    .ToList(),
+                false);
         }
 
         private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency)> ComputeCost(
@@ -370,8 +392,15 @@ namespace PrintLogApi.Services.Analytics
             double? Avg(AggregateResult r) =>
                 r is null || r.PrintCount == 0 ? null : (double)r.DurationSeconds / r.PrintCount;
 
+            // A dropped series is reported on the print-count tile, which is the one the chart
+            // is drawn from — the UI renders this as its coverage note, so an empty chart comes
+            // with a reason instead of looking like "you have no prints".
+            var printCountCoverage = Cov(
+                "prints", c.PrintCount, c.PrintCount, c.UndatedCount,
+                (ExclusionReason.RowCapExceeded, c.SeriesTruncated ? c.PrintCount : 0));
+
             return new OverviewTiles(
-                PrintCount: new Metric(c.PrintCount, p?.PrintCount, Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)),
+                PrintCount: new Metric(c.PrintCount, p?.PrintCount, printCountCoverage),
                 SuccessRatePercent: new Metric(SuccessRate(c), SuccessRate(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)),
                 FilamentGrams: new Metric(c.MaterialMg / 1000.0, p is null ? null : p.MaterialMg / 1000.0,
                     Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
