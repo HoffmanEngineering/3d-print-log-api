@@ -102,6 +102,22 @@ classes by capability:
   means "may overwrite or discard existing data", not "deletes the entity") so a client can reason
   about retry safety.
 
+The server targets MCP specification revision 2026-07-28 (SDK 2.0.0), with the SDK handling
+down-level interop for clients negotiating 2025-11-25 and earlier. Two consequences worth knowing:
+
+- **Stateless is now the SDK default**, not our override. `options.Stateless = true`
+  (`Startup.cs`) is kept deliberately: it documents an invariant the surrounding configuration
+  relies on (no session state, no standalone SSE `GET`/`DELETE`, no unsolicited server-to-client
+  requests) rather than resting on a package default a future major could flip.
+- **`tools/list` carries SEP-2549 caching hints** — `ttlMs: 0` and `cacheScope: private`, stamped
+  by the SDK and gated on the negotiated protocol revision. `private` is not optional for us: the
+  tool list varies by token scope (write tools are hidden from a read-only token), so a shared
+  cache holding one response would disclose the write-tool surface to a read-only caller. Pinned
+  by `McpCachingHintsTests`. Note these hints apply only to list/read results, never to
+  `tools/call` — they do not cache tool output and have nothing to do with `ICacheVersionService`.
+  They are surfaced only on the lower-level `ListToolsAsync(ListToolsRequestParams, …)` overload;
+  the flattening convenience overload drops them.
+
 Authorization topology:
 
 - The `/mcp` endpoint uses the `"Mcp"` policy: authenticated MCP bearer (or `DevAuth` bypass) + a
@@ -121,6 +137,15 @@ Write-tool invariants (defense against a headless/misbehaving agent, not just a 
 
 - The user is always token-derived; ownership is enforced in the query predicate. Foreign/missing
   ids surface a uniform `not_found` (no existence oracle).
+- **Write-tool authorization holds on the handshake-less path.** Since SDK 2.0.0 a caller can reach
+  `tools/call` with no `initialize` and no session. The endpoint policy admits any token with at
+  least one data scope — including a read-only one — so write-tool denial rests entirely on the
+  SDK's per-tool-class authorization filter, not on the endpoint. Pinned by
+  `McpWritePolicyTests.ReadOnlyToken_HandshakeLessWriteToolCall_DoesNotSucceed`, which was verified
+  to fail when the `McpWrite` policy's scope requirement is relaxed to `read:printdata`. Note
+  `AddAuthorizationFilters()` is **not** a usable mutation for that check: removing it also breaks
+  the tool's own `IHttpContextAccessor` plumbing, so `whoami` throws for every caller and the test
+  would pass for the wrong reason.
 - `create_print` is idempotent via `McpIdempotencyRecord` (unique index on user+tool+key), race-safe
   through unique-violation replay, and never mutates printer loaded-state (it does NOT call
   `setLoadedFilament`). Idempotency is **payload-bound**: the record stores a SHA-256
