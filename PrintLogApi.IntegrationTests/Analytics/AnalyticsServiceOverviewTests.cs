@@ -156,6 +156,32 @@ namespace PrintLogApi.IntegrationTests.Analytics
         }
 
         [Fact]
+        public async Task Overview_CostCoverageCountsPrints_NotDistinctReasons()
+        {
+            // The metrics user's prints have no priced spools, so every one of them is excluded
+            // for the same reason. A coverage list that reports "PriceMissing: 1" for four
+            // excluded prints is not a smaller truth, it is a false one — Coverage exists so the
+            // reader can weigh how much of the total is missing.
+            var result = await Run(AllTime());
+
+            var exclusions = result.Tiles.TotalCost.Coverage.Exclusions;
+            Assert.All(exclusions, e => Assert.True(
+                e.Count > 0, $"exclusion '{e.Reason}' reported a non-positive count"));
+
+            // The metrics user has no electricity rate configured, so every print that HAS a
+            // duration is excluded from the cost for that reason. That is 3 of their 4 prints:
+            // NoDurationPrint records neither an actual nor an estimate, so it never reaches the
+            // rate check at all (an unrecorded duration yields no cost rather than a zero one).
+            //
+            // The exact number is the point. A count of 1 here would mean the reasons had been
+            // collapsed into a distinct list, which is what this test exists to prevent.
+            var rateMissing = Assert.Single(
+                exclusions.Where(e => e.Reason == ExclusionReason.RateMissing));
+
+            Assert.Equal(3, rateMissing.Count);
+        }
+
+        [Fact]
         public async Task Highlights_NestedFilamentAggregate_TranslatesToSql()
         {
             // The printer tie-breaker sums a child collection INSIDE a group aggregate. If the

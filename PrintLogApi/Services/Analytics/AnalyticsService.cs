@@ -62,7 +62,7 @@ namespace PrintLogApi.Services.Analytics
             long MaterialMg,
             int MaterialEstimatedCount,
             decimal? Cost,
-            IReadOnlyList<string> CostExclusions,
+            IReadOnlyDictionary<string, int> CostExclusions,
             string Currency,
             Dictionary<string, int> StatusCounts,
             IReadOnlyList<SeriesBucket> Series,
@@ -170,7 +170,7 @@ namespace PrintLogApi.Services.Analytics
                 .ToList();
         }
 
-        private async Task<(decimal? Cost, IReadOnlyList<string> Exclusions, string Currency)> ComputeCost(
+        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency)> ComputeCost(
             long userId, IQueryable<Print> scoped, CancellationToken ct)
         {
             var settings = await _context.UserSettings.AsNoTracking()
@@ -192,7 +192,10 @@ namespace PrintLogApi.Services.Analytics
             var filamentRows = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
             var printRows = await scoped.CountAsync(ct);
             if (filamentRows + printRows > MaxCostRows)
-                return (null, new[] { ExclusionReason.RowCapExceeded }, inputs.UserCurrency);
+                return (
+                    null,
+                    new Dictionary<string, int> { [ExclusionReason.RowCapExceeded] = printRows },
+                    inputs.UserCurrency);
 
             var projected = await scoped
                 .Select(p => new
@@ -223,7 +226,19 @@ namespace PrintLogApi.Services.Analytics
                 .ToListAsync(ct);
 
             decimal? total = null;
-            var exclusions = new List<string>();
+            // Counted per PRINT, not de-duplicated to a bare reason list: "PriceMissing" against
+            // 200 prints and against 1 are very different claims, and Coverage exists precisely
+            // to let the reader tell them apart. FilamentCost already de-duplicates within a
+            // single print, so each print contributes at most 1 to any reason.
+            var exclusions = new Dictionary<string, int>();
+
+            void Count(IReadOnlyList<string> reasons)
+            {
+                foreach (var reason in reasons)
+                {
+                    exclusions[reason] = exclusions.TryGetValue(reason, out var n) ? n + 1 : 1;
+                }
+            }
 
             foreach (var p in projected)
             {
@@ -239,11 +254,11 @@ namespace PrintLogApi.Services.Analytics
                 if (filament.Amount.HasValue) total = (total ?? 0m) + filament.Amount.Value;
                 if (electricity.Amount.HasValue) total = (total ?? 0m) + electricity.Amount.Value;
 
-                exclusions.AddRange(filament.ExclusionReasons);
-                exclusions.AddRange(electricity.ExclusionReasons);
+                Count(filament.ExclusionReasons);
+                Count(electricity.ExclusionReasons);
             }
 
-            return (total, exclusions.Distinct().ToList(), inputs.UserCurrency);
+            return (total, exclusions, inputs.UserCurrency);
         }
 
         private static async Task<OverviewHighlights> BuildHighlights(IQueryable<Print> scoped, CancellationToken ct)
@@ -366,7 +381,7 @@ namespace PrintLogApi.Services.Analytics
                         (ExclusionReason.DurationEstimated, c.DurationEstimatedCount))),
                 TotalCost: new MoneyMetric(c.Cost, p?.Cost, c.Currency,
                     Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
-                        c.CostExclusions.Select(r => (r, 1)).ToArray())),
+                        c.CostExclusions.Select(kv => (kv.Key, kv.Value)).ToArray())),
                 AvgPrintTimeSeconds: new Metric(Avg(c), Avg(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)));
         }
     }

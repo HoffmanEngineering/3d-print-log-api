@@ -116,6 +116,14 @@ namespace PrintLogApi.Controllers
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
 
+            // A one-sided range must be rejected, not ignored: silently returning unbounded
+            // results for ?fromDate=... alone looks like a filter that ran and found everything.
+            // Matches AnalyticsFilter.Validate, so both endpoints answer the same way.
+            if (fromDate.HasValue != toDate.HasValue)
+            {
+                return BadRequest("fromDate and toDate must be supplied together.");
+            }
+
             if (fromDate.HasValue && toDate.HasValue && fromDate >= toDate)
             {
                 return BadRequest("fromDate must be earlier than toDate.");

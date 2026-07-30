@@ -56,6 +56,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
         {
             var result = await Get("pageNumber=1&pageSize=100&filterByStatuses=Success&filterByStatuses=Failed");
 
+            // Assert.All over an empty list passes and proves nothing — the filter could be
+            // matching NOTHING rather than matching correctly.
+            Assert.NotEmpty(result.Items);
             Assert.All(result.Items, i =>
                 Assert.True(i.Status == Print.PrintStatus.Success || i.Status == Print.PrintStatus.Failed));
         }
@@ -64,7 +67,25 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task Summary_LegacyScalarStatusStillWorks()
         {
             var result = await Get("pageNumber=1&pageSize=100&filterByStatus=Success");
+
+            Assert.NotEmpty(result.Items);
             Assert.All(result.Items, i => Assert.Equal(Print.PrintStatus.Success, i.Status));
+        }
+
+        [Theory]
+        [InlineData("fromDate=2026-01-01T00%3A00%3A00Z")]
+        [InlineData("toDate=2026-01-01T00%3A00%3A00Z")]
+        public async Task Summary_OneSidedRangeIsRejected_NotSilentlyIgnored(string rangeParam)
+        {
+            // Applying nothing and returning every print looks identical to "your filter ran
+            // and matched everything", which is a wrong answer rather than a missing feature.
+            var request = new HttpRequestMessage(
+                HttpMethod.Get, $"/api/Prints/summary?pageNumber=1&pageSize=10&{rangeParam}");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            var response = await _httpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         [Fact]
