@@ -89,6 +89,12 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long MetricsPrinterId { get; private set; }
         public static Guid MetricsProjectId { get; private set; }
 
+        /// <summary>PLA / Acme / Fixture Red. No purchase price, so it cannot be costed.</summary>
+        public static Guid MetricsRedSpoolId { get; private set; }
+
+        /// <summary>PETG / Globex / Fixture Blue. Priced, so its consumed cost is a real figure.</summary>
+        public static Guid MetricsBlueSpoolId { get; private set; }
+
         public static long EstimatedOnlyPrintId { get; private set; } // actual null, estimate 6933 (prod case)
         public static long ZeroActualPrintId { get; private set; }    // actual 0 (webhook coercion), estimate 1800
         public static long ActualWinsPrintId { get; private set; }    // actual 7200 beats estimate 3600
@@ -679,10 +685,35 @@ namespace PrintLogApi.IntegrationTests.Mcp
             context.SaveChanges();
             MetricsProjectId = metricsProject.Id;
 
+            // Two spools, so the matrix prints have a real material GRAIN: a type, a brand and a
+            // colour to group by. The usage AMOUNTS are unchanged, which is what keeps every
+            // exact total above (MaterialMatrixTotalMg, the duration matrix, the legacy scalars)
+            // valid — attaching a spool changes what a row can be grouped by, not how much it used.
+            //
+            // MetricsRedSpoolId carries NO purchase price and MetricsBlueSpoolId does, so the
+            // Materials tab's per-spool cost has both a priceable and an unpriceable case.
+            var metricsRedSpool = NewTextMatchFilament(
+                "aaaaaaaa-9001-0000-0000-000000000000", "Metrics Red PLA", "PLA", "Fixture Red",
+                MetricsUserId, now);
+            metricsRedSpool.Brand = "Acme";
+            metricsRedSpool.ColorHex = "ff0000";
+
+            var metricsBlueSpool = NewTextMatchFilament(
+                "aaaaaaaa-9002-0000-0000-000000000000", "Metrics Blue PETG", "PETG", "Fixture Blue",
+                MetricsUserId, now);
+            metricsBlueSpool.Brand = "Globex";
+            metricsBlueSpool.ColorHex = "0000ff";
+            metricsBlueSpool.PurchasePriceValue = "25.00";
+
+            context.Filaments.AddRange(metricsRedSpool, metricsBlueSpool);
+            context.SaveChanges();
+            MetricsRedSpoolId = metricsRedSpool.Id;
+            MetricsBlueSpoolId = metricsBlueSpool.Id;
+
             // Each print carries ONE usage row, so the material rule is exercised by the same fixture.
             Print MatrixPrint(
                 string title, int? actual, int? estimated, int? amountMg, int? estimatedAmountMg,
-                int? legacyActualMg = null, int? legacyEstimatedMg = null) => new()
+                int? legacyActualMg = null, int? legacyEstimatedMg = null, Guid? filamentId = null) => new()
             {
                 Title = title,
                 StartDate = now,                     // dated, so ranged queries see them too
@@ -701,7 +732,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 EstimatedFilamentUsageMg = legacyEstimatedMg,
                 FilamentUsage = new List<PrintFilament>
                 {
-                    new() { Id = Guid.NewGuid(), FilamentId = null, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
+                    new() { Id = Guid.NewGuid(), FilamentId = filamentId, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
                 },
             };
 
@@ -710,14 +741,16 @@ namespace PrintLogApi.IntegrationTests.Mcp
             //    actual is null while a genuine estimate exists. This is the row that made MCP report 0.
             //  - ZeroActual: what the completion webhooks write when the device reports no duration.
             //  - NoDuration carries a NEGATIVE material estimate: it must not subtract from the total.
-            var estimatedOnly = MatrixPrint("Estimated Only Print", null, 6933, null, 5000);
-            var zeroActual = MatrixPrint("Zero Actual Print", 0, 1800, 0, 3000);
+            var estimatedOnly = MatrixPrint("Estimated Only Print", null, 6933, null, 5000,
+                filamentId: metricsRedSpool.Id);
+            var zeroActual = MatrixPrint("Zero Actual Print", 0, 1800, 0, 3000,
+                filamentId: metricsRedSpool.Id);
             // Legacy scalars on the last two: a NEGATIVE legacy actual must fall back to its estimate
             // (1000), and a NEGATIVE legacy estimate must not subtract (0). See LegacyMaterialMatrixTotalMg.
             var actualWins = MatrixPrint("Actual Wins Print", 7200, 3600, 9000, 1000,
-                legacyActualMg: -1, legacyEstimatedMg: 1000);
+                legacyActualMg: -1, legacyEstimatedMg: 1000, filamentId: metricsBlueSpool.Id);
             var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500,
-                legacyActualMg: null, legacyEstimatedMg: -500);
+                legacyActualMg: null, legacyEstimatedMg: -500, filamentId: metricsBlueSpool.Id);
 
             // An undated print: StartDate null, so it is absent from every time-bucketed metric
             // (series, calendar, streaks, histogram, matrix) and reported as undatedCount instead.

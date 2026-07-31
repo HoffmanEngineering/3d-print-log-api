@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -31,6 +31,7 @@ namespace PrintLogApi.Controllers
         private readonly IAnalyticsService _analytics;
         private readonly IActivityAnalyticsService _activity;
         private readonly IPrinterAnalyticsService _printers;
+        private readonly IMaterialAnalyticsService _materials;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
 
@@ -38,12 +39,14 @@ namespace PrintLogApi.Controllers
             IAnalyticsService analytics,
             IActivityAnalyticsService activity,
             IPrinterAnalyticsService printers,
+            IMaterialAnalyticsService materials,
             IMemoryCache cache,
             ICacheVersionService cacheVersionService)
         {
             _analytics = analytics;
             _activity = activity;
             _printers = printers;
+            _materials = materials;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
         }
@@ -106,5 +109,13 @@ namespace PrintLogApi.Controllers
         public Task<ActionResult<PrintersResponse>> GetPrinters(
             [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
             Cached("printers", filter, (userId, f) => _printers.GetPrinters(userId, f, ct));
+
+        [HttpGet("materials")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public Task<ActionResult<MaterialsResponse>> GetMaterials(
+            [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
+            Cached("materials", filter, (userId, f) => _materials.GetMaterials(userId, f, ct));
     }
 }
