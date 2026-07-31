@@ -37,19 +37,21 @@ namespace PrintLogApi.Controllers
         private readonly ILogger _logger;
         private readonly IPrintService _printService;
         private readonly INotificationService _notificationService;
+        private readonly ICacheVersionService _cacheVersionService;
 
         public MoonrakerController(PrintLogContext context,
                                    TelemetryClient telemetry,
                                    ILogger<MoonrakerController> logger,
                                    IPrintService printService,
-                                   INotificationService notificationService)
+                                   INotificationService notificationService,
+                                   ICacheVersionService cacheVersionService)
         {
             _context = context;
             _telemetry = telemetry;
             _logger = logger;
             _printService = printService;
             _notificationService = notificationService;
-
+            _cacheVersionService = cacheVersionService;
         }
 
         /// <summary>
@@ -243,6 +245,10 @@ namespace PrintLogApi.Controllers
 
             _ = await _context.SaveChangesAsync();
 
+            // Webhooks are how most prints get created for automated setups. Saving straight
+            // through the context skips the invalidation the controllers do, so the cached
+            // print summary and analytics aggregates would keep serving pre-print figures.
+            _cacheVersionService.InvalidateUserCache(userId);
         }
 
 
@@ -329,6 +335,7 @@ namespace PrintLogApi.Controllers
             }
 
             _ = await _context.SaveChangesAsync();
+            _cacheVersionService.InvalidateUserCache(userId);
 
             // Send notification for print failure
             await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
@@ -408,6 +415,7 @@ namespace PrintLogApi.Controllers
             }
 
             _ = await _context.SaveChangesAsync();
+            _cacheVersionService.InvalidateUserCache(userId);
 
             // Send notification for print completion
             await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);

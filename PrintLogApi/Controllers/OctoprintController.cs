@@ -35,6 +35,7 @@ namespace PrintLogApi.Controllers
         private readonly IPrintService _printService;
         private readonly INotificationService _notificationService;
         private readonly IBlobStorageService _blobStorageService;
+        private readonly ICacheVersionService _cacheVersionService;
 
         private readonly string printImageContainerName = "printimages";
 
@@ -45,7 +46,8 @@ namespace PrintLogApi.Controllers
                                    IUserApiKeyService userApiKeyService,
                                    IPrintService printService,
                                    INotificationService notificationService,
-                                   IBlobStorageService blobStorageService)
+                                   IBlobStorageService blobStorageService,
+                                   ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
@@ -55,6 +57,7 @@ namespace PrintLogApi.Controllers
             _printService = printService;
             _notificationService = notificationService;
             _blobStorageService = blobStorageService;
+            _cacheVersionService = cacheVersionService;
         }
 
 
@@ -376,6 +379,9 @@ namespace PrintLogApi.Controllers
 
             await _context.SaveChangesAsync();
 
+            // Webhook-created prints must invalidate the same caches the controllers do, or the
+            // print list and analytics keep serving figures from before the print existed.
+            _cacheVersionService.InvalidateUserCache(userId);
         }
 
         private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
@@ -484,6 +490,7 @@ namespace PrintLogApi.Controllers
             }
 
             await _context.SaveChangesAsync();
+            _cacheVersionService.InvalidateUserCache(userId);
 
             // Send notification for print failure
             await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
@@ -595,6 +602,7 @@ namespace PrintLogApi.Controllers
             }
 
             await _context.SaveChangesAsync();
+            _cacheVersionService.InvalidateUserCache(userId);
 
             // Send notification for print completion
             await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Linq.Expressions;
 using PrintLogApi.Models;
 
@@ -44,5 +45,34 @@ namespace PrintLogApi
         public static Expression<Func<Print, bool>> DurationIsEstimatedExpr =>
             p => !(p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0)
                 && p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0;
+
+        /// <summary>
+        /// EF-translatable material usage in milligrams. TOP-LEVEL USE ONLY, as with
+        /// DurationSecondsExpr. The per-filament rows (each falling back to its own estimate)
+        /// PLUS the scalar Print.FilamentUsageMg, which records "other filament" — material
+        /// used on the print that was never attached to a tracked spool. The two are disjoint,
+        /// so they add; see UsersPrintController's total-filament-usage action, which has
+        /// always summed them this way. Every term obeys the zero-or-negative rule above, so a
+        /// stored 0 or a negative falls back rather than contributing.
+        /// </summary>
+        public static Expression<Func<Print, long>> MaterialMgExpr =>
+            p => p.FilamentUsage.Sum(pf =>
+                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
+                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
+                    : 0)
+                + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
+                   : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
+                   : 0);
+
+        /// <summary>
+        /// True when ANY term contributing to MaterialMgExpr fell back to its estimate —
+        /// either a per-filament row or the "other filament" scalar. Top-level use only.
+        /// </summary>
+        public static Expression<Func<Print, bool>> MaterialIsEstimatedExpr =>
+            p => p.FilamentUsage.Any(pf =>
+                    !(pf.AmountMg.HasValue && pf.AmountMg > 0)
+                    && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0)
+                || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
+                    && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0);
     }
 }

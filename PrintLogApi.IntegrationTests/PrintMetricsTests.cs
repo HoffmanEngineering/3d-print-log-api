@@ -73,6 +73,36 @@ namespace PrintLogApi.IntegrationTests
         }
 
         [Fact]
+        public async Task MaterialMgExpr_TranslatesToSql_AndAddsOtherFilamentToTheRows()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            // Passing the expression straight to SumAsync forces EF to translate it.
+            // An untranslatable expression throws here; that throw IS the assertion.
+            var total = await db.Prints.AsNoTracking()
+                .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
+                .SumAsync(PrintMetrics.MaterialMgExpr);
+
+            // Rows (21000) PLUS the "other filament" scalars (1000). The scalar is material
+            // that was never attached to a tracked spool, so it is additive, not a duplicate.
+            Assert.Equal(Mcp.McpTestData.UsersEndpointMaterialTotalMg, total);
+        }
+
+        [Fact]
+        public async Task MaterialIsEstimatedExpr_TranslatesToSql_AndFlagsRowAndScalarFallbacks()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            var estimated = await db.Prints.AsNoTracking()
+                .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
+                .CountAsync(PrintMetrics.MaterialIsEstimatedExpr);
+
+            Assert.Equal(Mcp.McpTestData.MaterialEstimatedCountIncludingOtherFilament, estimated);
+        }
+
+        [Fact]
         public async Task InlinedRule_InPrinterStats_MatchesTheSharedExpression()
         {
             // McpStatisticsService inlines the ternary because EF cannot take the shared expression

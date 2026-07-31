@@ -67,7 +67,12 @@ namespace PrintLogApi.Services
         Task<Print> GetPrintById(long id);
         Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
         Task<List<long>> GetPublicPrintIds();
-        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, IEnumerable<Guid> filterByFilamentIds, Print.PrintStatus? filterByStatus, long? userId, long? currentUserId, Guid? filterByProjectId = null);
+        /// <summary>
+        /// The statuses and projectIds collections replace the former scalar filters; the caller
+        /// folds any legacy scalar parameters into them so there is a single code path here.
+        /// The date range is half-open [fromDate, toDate).
+        /// </summary>
+        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, IEnumerable<Guid> filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus> statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid> projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null);
         Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
         Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(
             int pageNumber,

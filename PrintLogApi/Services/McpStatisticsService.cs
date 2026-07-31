@@ -85,25 +85,19 @@ namespace PrintLogApi.Services
             return new McpPage<PrinterStatsItem>(items, page, pageSize, totalCount, totalPages);
         }
 
-        // Canonical material usage from the per-filament rows (the scalar Print.FilamentUsageMg is
-        // legacy and not maintained). Actual weight, falling back to the estimate when the actual is
-        // missing, zero, or negative.
+        // Canonical material usage: the per-filament rows PLUS "other filament" (the scalar
+        // Print.FilamentUsageMg — material never attached to a tracked spool). Both terms
+        // resolve actual-then-estimate, with zero or negative meaning "not recorded".
+        // Every sum here is top-level, so the shared expressions translate. `?? 0` on the
+        // duration was the live defect: a never-completed print has a null actual and a real
+        // estimate, and reported 0.
         private static async Task<SummaryMetrics> Aggregate(IQueryable<Print> prints, CancellationToken ct)
         {
             var count = await prints.CountAsync(ct);
-            var materialMg = await prints.SumAsync(p => (long)p.FilamentUsage.Sum(pf =>
-                pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                : 0), ct);
-            // Top-level sums, so the shared expression translates. `?? 0` here was the live defect:
-            // a never-completed print has a null actual and a real estimate, and reported 0.
+            var materialMg = await prints.SumAsync(PrintMetrics.MaterialMgExpr, ct);
             var timeSeconds = await prints.SumAsync(PrintMetrics.DurationSecondsExpr, ct);
             var estimatedDuration = await prints.CountAsync(PrintMetrics.DurationIsEstimatedExpr, ct);
-
-            // A print's material is "estimated" when ANY contributing usage row fell back to its estimate.
-            var estimatedMaterial = await prints.CountAsync(p => p.FilamentUsage.Any(pf =>
-                !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0), ct);
+            var estimatedMaterial = await prints.CountAsync(PrintMetrics.MaterialIsEstimatedExpr, ct);
 
             return new SummaryMetrics(
                 count, McpUnits.MgToGrams(materialMg), timeSeconds, estimatedDuration, estimatedMaterial);

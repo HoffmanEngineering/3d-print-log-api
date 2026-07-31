@@ -102,7 +102,11 @@ namespace PrintLogApi.Controllers
             [FromQuery] IEnumerable<Guid> filterByFilamentIds,
             [FromQuery] Print.PrintStatus? filterByStatus,
             [FromQuery] long? userId,
-            [FromQuery] Guid? filterByProjectId = null)
+            [FromQuery] Guid? filterByProjectId = null,
+            [FromQuery] DateTimeOffset? fromDate = null,
+            [FromQuery] DateTimeOffset? toDate = null,
+            [FromQuery] IEnumerable<Print.PrintStatus> filterByStatuses = null,
+            [FromQuery] IEnumerable<Guid> filterByProjectIds = null)
         {
 
             long? currentUserId = User.GetUserId();
@@ -112,17 +116,45 @@ namespace PrintLogApi.Controllers
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
 
+            // A one-sided range must be rejected, not ignored: silently returning unbounded
+            // results for ?fromDate=... alone looks like a filter that ran and found everything.
+            // Matches AnalyticsFilter.Validate, so both endpoints answer the same way.
+            if (fromDate.HasValue != toDate.HasValue)
+            {
+                return BadRequest("fromDate and toDate must be supplied together.");
+            }
+
+            if (fromDate.HasValue && toDate.HasValue && fromDate >= toDate)
+            {
+                return BadRequest("fromDate must be earlier than toDate.");
+            }
+
+            // Fold the legacy scalar parameters into the collections so downstream has one code
+            // path and so ?filterByStatus=Success and ?filterByStatuses=Success share a cache entry.
+            var statuses = (filterByStatuses ?? Enumerable.Empty<Print.PrintStatus>()).ToList();
+            if (filterByStatus.HasValue && !statuses.Contains(filterByStatus.Value))
+            {
+                statuses.Add(filterByStatus.Value);
+            }
+
+            var projectIds = (filterByProjectIds ?? Enumerable.Empty<Guid>()).ToList();
+            if (filterByProjectId.HasValue && !projectIds.Contains(filterByProjectId.Value))
+            {
+                projectIds.Add(filterByProjectId.Value);
+            }
+
             var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
             var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
-                                            filterByPrinterIds, filterByFilamentIds, sortRequest, filterByStatus, filterByProjectId);
+                                            filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
+                                            fromDate, toDate);
 
             if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
             {
                 return cachedResult;
             }
 
-            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, filterByStatus, userId, currentUserId, filterByProjectId);
+            var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, statuses, userId, currentUserId, projectIds, fromDate, toDate);
 
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(EstimateCacheSize(result))
@@ -1082,8 +1114,10 @@ namespace PrintLogApi.Controllers
                                         IEnumerable<long> filterByPrinterIds,
                                         IEnumerable<Guid> filterByFilamentIds,
                                         SortRequest<PrintSummarySortColumn> sortRequest,
-                                        Print.PrintStatus? filterByStatus,
-                                        Guid? filterByProjectId = null)
+                                        IReadOnlyCollection<Print.PrintStatus> statuses,
+                                        IReadOnlyCollection<Guid> projectIds,
+                                        DateTimeOffset? fromDate,
+                                        DateTimeOffset? toDate)
         {
             var printerIds = filterByPrinterIds?.Any() == true
                 ? string.Join(",", filterByPrinterIds.OrderBy(x => x))
@@ -1095,14 +1129,32 @@ namespace PrintLogApi.Controllers
 
             var viewerKey = currentUserId.HasValue ? currentUserId.Value.ToString() : "anon";
 
+            // EVERY filter must reach the key. This action is [AllowAnonymous] and serves public
+            // profiles, so a filter that is applied to the query but omitted from the key lets one
+            // request's result be served to a different request — a July query returning June's
+            // rows, cross-viewer. Collections are sorted so ?a=1&a=2 and ?a=2&a=1 share an entry,
+            // and "none" keeps an empty collection from rendering as "" and colliding with a value.
+            var statusKey = statuses?.Count > 0
+                ? string.Join(",", statuses.Select(s => s.ToString()).OrderBy(x => x, StringComparer.Ordinal))
+                : "none";
+
+            var projectKey = projectIds?.Count > 0
+                ? string.Join(",", projectIds.OrderBy(x => x))
+                : "none";
+
+            // Round-trip format: two instants differing by a tick must produce different keys.
+            var fromKey = fromDate?.ToUniversalTime().ToString("O") ?? "none";
+            var toKey = toDate?.ToUniversalTime().ToString("O") ?? "none";
+
             return $"{PRINT_SUMMARY_CACHE_PREFIX}{userId}_viewer{viewerKey}_v{version}_" +
                    $"p{pagingRequest.PageNumber}_s{pagingRequest.PageSize}_" +
                    $"q{searchText ?? "none"}_" +
                    $"pr{printerIds}_" +
                    $"fl{filamentIds}_" +
                    $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
-                   $"fs{filterByStatus}_" +
-                   $"fp{filterByProjectId}";
+                   $"fs{statusKey}_" +
+                   $"fp{projectKey}_" +
+                   $"df{fromKey}_dt{toKey}";
         }
 
         /// <summary>

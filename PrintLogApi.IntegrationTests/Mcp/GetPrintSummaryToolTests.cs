@@ -192,16 +192,23 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [Fact]
         public async Task Material_AppliesTheSameRule_AndCountsWhatWasEstimated()
         {
-            // 5000 + 3000 + 9000 + 4000 = 21000 mg. A reader that let the stored 0 win would give
-            // 18000; one that added NoDuration's -500 estimate would give 20500.
+            // Rows 5000 + 3000 + 9000 + 4000 = 21000 mg, PLUS "other filament" (the scalar
+            // Print.FilamentUsageMg — material never attached to a tracked spool) = 1000 mg.
+            // The two populations are disjoint, so they ADD: this is the same 22000 mg that
+            // /api/Users/{id}/total-filament-usage reports. MCP used to ignore the scalar and
+            // under-report. A reader that let the stored 0 win would give 18000; one that added
+            // NoDuration's -500 estimate would give 20500.
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var s = await Get(client, new());
 
             Assert.Equal(
-                McpUnits.MgToGrams(McpTestData.MaterialMatrixTotalMg),
+                McpUnits.MgToGrams(McpTestData.UsersEndpointMaterialTotalMg),
                 s.Filtered.MaterialUsedGrams,
                 precision: 3);
-            Assert.Equal(McpTestData.MaterialMatrixEstimatedCount, s.Filtered.PrintsWithEstimatedMaterial);
+            // Rows-only would be 2; ActualWins also falls back on its scalar (-1 -> 1000).
+            Assert.Equal(
+                McpTestData.MaterialEstimatedCountIncludingOtherFilament,
+                s.Filtered.PrintsWithEstimatedMaterial);
         }
     }
 }

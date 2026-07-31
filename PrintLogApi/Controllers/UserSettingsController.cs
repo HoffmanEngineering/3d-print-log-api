@@ -24,12 +24,16 @@ namespace PrintLogApi.Controllers
     {
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
+        private readonly Services.ICacheVersionService _cacheVersionService;
 
-        public UserSettingsController(PrintLogContext context, IMapper mapper)
+        public UserSettingsController(
+            PrintLogContext context,
+            IMapper mapper,
+            Services.ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
-
+            _cacheVersionService = cacheVersionService;
         }
 
         /// <summary>
@@ -97,6 +101,12 @@ namespace PrintLogApi.Controllers
                 }
             }
 
+            // Analytics costs are derived from settings (currency, default material price,
+            // electricity rate and wattage), so a settings change makes any cached aggregate
+            // wrong. Without this the user edits their kWh rate and the cost tile keeps the
+            // old figure for up to the cache TTL.
+            _cacheVersionService.InvalidateUserCache(userId.Value);
+
             return _mapper.Map<UserSettingDto>(existingSetting);
         }
 
@@ -132,6 +142,9 @@ namespace PrintLogApi.Controllers
 
             _context.UserSettings.Add(newSetting);
             await _context.SaveChangesAsync();
+
+            // As with the update path: a newly-set price or rate changes every cached cost.
+            _cacheVersionService.InvalidateUserCache(userId.Value);
 
             return _mapper.Map<UserSettingDto>(newSetting);
         }
