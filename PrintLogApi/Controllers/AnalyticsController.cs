@@ -29,23 +29,33 @@ namespace PrintLogApi.Controllers
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(15);
 
         private readonly IAnalyticsService _analytics;
+        private readonly IActivityAnalyticsService _activity;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
 
         public AnalyticsController(
-            IAnalyticsService analytics, IMemoryCache cache, ICacheVersionService cacheVersionService)
+            IAnalyticsService analytics,
+            IActivityAnalyticsService activity,
+            IMemoryCache cache,
+            ICacheVersionService cacheVersionService)
         {
             _analytics = analytics;
+            _activity = activity;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
         }
 
-        [HttpGet("overview")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<OverviewResponse>> GetOverview(
-            [FromQuery] AnalyticsFilter filter, CancellationToken ct)
+        /// <summary>
+        /// Every analytics endpoint validates, caches and authorizes identically. Written once so
+        /// a sixth endpoint cannot quietly omit the tenant from its cache key.
+        ///
+        /// The key includes the tenant, the per-user cache version (bumped by every mutation,
+        /// exactly as PrintsController does) and every normalized filter value. A TTL alone
+        /// would serve stale analytics right after a user logs a print — the single most
+        /// likely moment for them to open this page.
+        /// </summary>
+        private async Task<ActionResult<T>> Cached<T>(
+            string name, AnalyticsFilter filter, Func<long, AnalyticsFilter, Task<T>> load) where T : class
         {
             var userId = User.GetUserId();
             if (!userId.HasValue) return Unauthorized();
@@ -56,15 +66,11 @@ namespace PrintLogApi.Controllers
             var errors = filter.Validate();
             if (errors.Count > 0) return BadRequest(new { errors });
 
-            // The key includes the tenant, the per-user cache version (bumped by every mutation,
-            // exactly as PrintsController does) and every normalized filter value. A TTL alone
-            // would serve stale analytics right after a user logs a print — the single most
-            // likely moment for them to open this page.
             var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
-            var cacheKey = $"overview:v{version}:{filter.CacheKey(userId.Value)}";
-            if (_cache.TryGetValue(cacheKey, out OverviewResponse cached)) return cached;
+            var cacheKey = $"{name}:v{version}:{filter.CacheKey(userId.Value)}";
+            if (_cache.TryGetValue(cacheKey, out T cached)) return cached;
 
-            var result = await _analytics.GetOverview(userId.Value, filter, ct);
+            var result = await load(userId.Value, filter);
 
             _cache.Set(cacheKey, result, new MemoryCacheEntryOptions()
                 .SetAbsoluteExpiration(CacheTtl)
@@ -73,5 +79,21 @@ namespace PrintLogApi.Controllers
 
             return result;
         }
+
+        [HttpGet("overview")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public Task<ActionResult<OverviewResponse>> GetOverview(
+            [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
+            Cached("overview", filter, (userId, f) => _analytics.GetOverview(userId, f, ct));
+
+        [HttpGet("activity")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public Task<ActionResult<ActivityResponse>> GetActivity(
+            [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
+            Cached("activity", filter, (userId, f) => _activity.GetActivity(userId, f, ct));
     }
 }

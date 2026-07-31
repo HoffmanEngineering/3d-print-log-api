@@ -93,6 +93,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long ZeroActualPrintId { get; private set; }    // actual 0 (webhook coercion), estimate 1800
         public static long ActualWinsPrintId { get; private set; }    // actual 7200 beats estimate 3600
         public static long NoDurationPrintId { get; private set; }    // neither recorded
+        public static long UndatedPrintId { get; private set; }       // StartDate null: never bucketed
 
         /// <summary>6933 (est) + 1800 (est; stored actual was 0) + 7200 (actual) + 0 (neither).</summary>
         public const int DurationMatrixTotalSeconds = 15933;
@@ -718,8 +719,17 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500,
                 legacyActualMg: null, legacyEstimatedMg: -500);
 
-            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration);
+            // An undated print: StartDate null, so it is absent from every time-bucketed metric
+            // (series, calendar, streaks, histogram, matrix) and reported as undatedCount instead.
+            // Deliberately carries NO duration and NO material, so every named total above
+            // (DurationMatrixTotalSeconds, MaterialMatrixTotalMg, …) keeps its value and this
+            // print changes only the counts that are supposed to notice it.
+            var undated = MatrixPrint("Undated Print", null, null, null, null);
+            undated.StartDate = null;
+
+            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration, undated);
             context.SaveChanges();
+            UndatedPrintId = undated.Id;
 
             EstimatedOnlyPrintId = estimatedOnly.Id;
             ZeroActualPrintId = zeroActual.Id;
