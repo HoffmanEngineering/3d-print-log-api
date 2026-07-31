@@ -116,6 +116,70 @@ namespace PrintLogApi.IntegrationTests.Analytics
         }
 
         [Fact]
+        public async Task GetActivity_AFutureDatedPrintDoesNotWipeOutTheCurrentStreak()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            // A dedicated printer so this asserts about its own prints only, and the filter is
+            // pinned to it — the shared fixture must not shift under other tests.
+            var printer = new PrintLogApi.Models.Printer
+            {
+                UserId = Mcp.McpTestData.MetricsUserId,
+                Name = $"streak-{Guid.NewGuid():N}",
+                Make = "Test",
+                Model = "Streak",
+                IsActive = true,
+            };
+            db.Printers.Add(printer);
+            await db.SaveChangesAsync();
+
+            PrintLogApi.Models.Print Print(string title, DateTimeOffset start) => new()
+            {
+                Title = title,
+                StartDate = start,
+                PrintTimeInSeconds = 3600,
+                Status = PrintLogApi.Models.Print.PrintStatus.Success,
+                ViewStatus = PrintLogApi.Models.Print.PrintViewStatus.Private,
+                PrinterId = printer.Id,
+                CreatedById = Mcp.McpTestData.MetricsUserId,
+                UpdatedById = Mcp.McpTestData.MetricsUserId,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedDate = DateTime.UtcNow,
+            };
+
+            // A genuine two-day run ending today, plus one print mis-dated a month ahead.
+            var today = DateTimeOffset.UtcNow;
+            var prints = new[]
+            {
+                Print("yesterday", today.AddDays(-1)),
+                Print("today", today),
+                Print("mis-dated into next month", today.AddDays(30)),
+            };
+            db.Prints.AddRange(prints);
+            await db.SaveChangesAsync();
+
+            try
+            {
+                var response = await Get(new AnalyticsFilter
+                {
+                    TimeZone = "UTC",
+                    PrinterIds = { printer.Id },
+                });
+
+                // Without the guard the future date is the most recent day in the set, which is
+                // neither today nor yesterday, so the current streak collapses to 0.
+                Assert.Equal(2, response.Streaks.CurrentDays);
+            }
+            finally
+            {
+                db.RemoveRange(prints);
+                db.Remove(printer);
+                await db.SaveChangesAsync();
+            }
+        }
+
+        [Fact]
         public async Task GetActivity_AnUnownedPrinterFilterYieldsEmptyRatherThanAnError()
         {
             var response = await Get(new AnalyticsFilter

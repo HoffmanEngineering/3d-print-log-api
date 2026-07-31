@@ -219,6 +219,112 @@ namespace PrintLogApi.IntegrationTests.Analytics
             }
         }
 
+        [Fact]
+        public async Task GetPrinters_CountsAPrintThatStartedBeforeTheWindowButRanIntoIt()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            var printer = await CreateScratchPrinter(db);
+
+            // Starts one hour BEFORE the window and runs for ten hours, so nine of them fall
+            // inside a 24-hour window. Selecting intervals by StartDate >= from drops this row
+            // entirely and reports the printer as completely idle.
+            var windowFrom = new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero);
+            var print = new PrintLogApi.Models.Print
+            {
+                Title = "Spans the window start",
+                StartDate = windowFrom.AddHours(-1),
+                PrintTimeInSeconds = 10 * 3600,
+                Status = PrintLogApi.Models.Print.PrintStatus.Success,
+                ViewStatus = PrintLogApi.Models.Print.PrintViewStatus.Private,
+                PrinterId = printer.Id,
+                CreatedById = Mcp.McpTestData.MetricsUserId,
+                UpdatedById = Mcp.McpTestData.MetricsUserId,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedDate = DateTime.UtcNow,
+            };
+            db.Prints.Add(print);
+            await db.SaveChangesAsync();
+
+            try
+            {
+                var response = await Get(new AnalyticsFilter
+                {
+                    TimeZone = "UTC",
+                    FromDate = windowFrom,
+                    ToDate = windowFrom.AddDays(1),
+                    PrinterIds = { printer.Id },
+                });
+
+                var row = Assert.Single(response.Printers);
+
+                // Nine hours of a 24-hour window = 37.5%. The pre-fix behaviour was 0%.
+                Assert.NotNull(row.UtilizationPercent);
+                Assert.Equal(37.5, row.UtilizationPercent!.Value, 1);
+            }
+            finally
+            {
+                db.Remove(print);
+                db.Remove(printer);
+                await db.SaveChangesAsync();
+            }
+        }
+
+        [Fact]
+        public async Task GetPrinters_SuppressesUtilizationAndAverageWhenNoDurationWasEverRecorded()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            var printer = await CreateScratchPrinter(db);
+
+            // A real print with NO duration. "We do not know how long it ran" must not be
+            // reported as 0% utilization or averaged into the fleet as an idle machine.
+            var print = new PrintLogApi.Models.Print
+            {
+                Title = "No duration recorded",
+                StartDate = new DateTimeOffset(2026, 5, 10, 6, 0, 0, TimeSpan.Zero),
+                PrintTimeInSeconds = null,
+                EstimatedPrintTimeInSeconds = null,
+                Status = PrintLogApi.Models.Print.PrintStatus.Success,
+                ViewStatus = PrintLogApi.Models.Print.PrintViewStatus.Private,
+                PrinterId = printer.Id,
+                CreatedById = Mcp.McpTestData.MetricsUserId,
+                UpdatedById = Mcp.McpTestData.MetricsUserId,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedDate = DateTime.UtcNow,
+            };
+            db.Prints.Add(print);
+            await db.SaveChangesAsync();
+
+            try
+            {
+                var response = await Get(new AnalyticsFilter
+                {
+                    TimeZone = "UTC",
+                    FromDate = new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero),
+                    ToDate = new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero),
+                    PrinterIds = { printer.Id },
+                });
+
+                var row = Assert.Single(response.Printers);
+
+                Assert.Equal(1, row.PrintCount);
+                Assert.False(row.IsIdle);
+                Assert.Null(row.UtilizationPercent);
+                Assert.Null(row.AvgDurationSeconds);
+                // With no measurable printer, there is no fleet figure to report either.
+                Assert.Null(response.FleetUtilizationPercent.Value);
+            }
+            finally
+            {
+                db.Remove(print);
+                db.Remove(printer);
+                await db.SaveChangesAsync();
+            }
+        }
+
         [Theory]
         [InlineData(0, false)]
         [InlineData(AnalyticsService.MaxSeriesRows, false)]

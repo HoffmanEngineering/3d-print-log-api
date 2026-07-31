@@ -29,15 +29,25 @@ namespace PrintLogApi.Services.Analytics
             if (from.HasValue && to.HasValue)
                 scoped = scoped.Where(p => p.StartDate >= from.Value && p.StartDate < to.Value);
 
+            // Each id filter carries its OWN ownership predicate rather than trusting that the
+            // parent print's CreatedById implies an owned printer or spool. The write paths do
+            // validate both (PrintService.cs:574 for the printer, CanUserAccessAllFilaments for
+            // spools), so a cross-owner reference should not exist — but PrintService itself
+            // re-checks ownership on the read side too (PrintService.cs:125,221), and matching
+            // that habit is what keeps a future write path, an import, or a manual data fix from
+            // silently turning one of these filters into a probe for another user's ids.
             if (filter.PrinterIds.Count > 0)
-                scoped = scoped.Where(p => filter.PrinterIds.Contains(p.PrinterId));
+                scoped = scoped.Where(p =>
+                    p.Printer.UserId == userId && filter.PrinterIds.Contains(p.PrinterId));
             if (filter.ProjectIds.Count > 0)
                 scoped = scoped.Where(p => p.ProjectId.HasValue && filter.ProjectIds.Contains(p.ProjectId.Value));
             if (filter.Statuses.Count > 0)
                 scoped = scoped.Where(p => filter.Statuses.Contains(p.Status));
             if (filter.FilamentIds.Count > 0)
                 scoped = scoped.Where(p => p.FilamentUsage.Any(pf =>
-                    pf.FilamentId.HasValue && filter.FilamentIds.Contains(pf.FilamentId.Value)));
+                    pf.FilamentId.HasValue
+                    && pf.Filament.CreatedById == userId
+                    && filter.FilamentIds.Contains(pf.FilamentId.Value)));
 
             return scoped;
         }

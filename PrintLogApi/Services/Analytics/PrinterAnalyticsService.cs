@@ -66,12 +66,22 @@ namespace PrintLogApi.Services.Analytics
                         p.Status == Print.PrintStatus.PartialSuccess ||
                         p.Status == Print.PrintStatus.Failed ||
                         p.Status == Print.PrintStatus.Cancelled),
+                    // Prints with a RESOLVABLE duration. This is the average's denominator:
+                    // dividing by every print would treat "no duration recorded" as a real
+                    // observation of zero and drag the average down.
+                    DurationCount = g.Count(p =>
+                        (p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0) ||
+                        (p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0)),
                     DurationSeconds = g.Sum(p =>
                         (long)(p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
                         : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
                         : 0)),
+                    // `no linked spool OR an owned one`, not `linked AND owned` — an unlinked
+                    // usage row is legitimate untracked material under the rowSum + other rule.
                     MaterialMg = g.Sum(p =>
-                        (long)p.FilamentUsage.Sum(pf =>
+                        (long)p.FilamentUsage
+                            .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
+                            .Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                             : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                             : 0)
@@ -120,6 +130,10 @@ namespace PrintLogApi.Services.Analytics
             var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
             var windowSeconds = Math.Max(0, (windowTo - windowFrom).TotalSeconds);
 
+            var utilizationIntervals = seriesTruncated
+                ? new List<(long PrinterId, DateTimeOffset Start, int Duration, int Count)>()
+                : await LoadUtilizationIntervals(userId, filter, windowFrom, windowTo, ct);
+
             var maintenance = await LoadMaintenance(userId, filter, zone, coverage, ct);
 
             // Money comes from its OWN uncapped read. Summing the capped event list would make a
@@ -147,12 +161,18 @@ namespace PrintLogApi.Services.Analytics
                 var seconds = s?.DurationSeconds ?? 0;
 
                 double? utilization = null;
-                if (printCount > 0 && windowSeconds > 0 && !seriesTruncated)
+                // Utilization is reported only when this printer actually has a measurable
+                // interval. A printer whose prints all lack a duration would otherwise report a
+                // confident 0%, and be averaged into the fleet figure as an idle machine —
+                // "we do not know how long it ran" is not evidence that it did not run.
+                var printerIntervals = utilizationIntervals
+                    .Where(i => i.PrinterId == printer.Id && i.Duration > 0)
+                    .ToList();
+
+                if (printerIntervals.Count > 0 && windowSeconds > 0 && !seriesTruncated)
                 {
                     var union = IntervalUnion.UnionSeconds(
-                        intervals
-                            .Where(i => i.PrinterId == printer.Id && i.Duration > 0)
-                            .Select(i => (i.Start, i.Start.AddSeconds(i.Duration))),
+                        printerIntervals.Select(i => (i.Start, i.Start.AddSeconds(i.Duration))),
                         windowFrom, windowTo);
                     utilization = Math.Min(100.0, 100.0 * union / windowSeconds);
                 }
@@ -170,7 +190,12 @@ namespace PrintLogApi.Services.Analytics
                     SuccessRatePercent: s is null || s.Resolved == 0 ? null : 100.0 * s.Success / s.Resolved,
                     PrintTimeSeconds: seconds,
                     MaterialMg: s?.MaterialMg ?? 0,
-                    AvgDurationSeconds: printCount == 0 ? null : (double)seconds / printCount,
+                    // Denominator is prints with a RECORDED duration, not every print: the
+                    // numerator only ever sums positive durations, so dividing by the full
+                    // count would silently average in zeroes nobody entered.
+                    AvgDurationSeconds: (s?.DurationCount ?? 0) == 0
+                        ? null
+                        : (double)seconds / s!.DurationCount,
                     Cost: costByPrinter.TryGetValue(printer.Id, out var cost) ? cost : null,
                     MaintenanceCost: maintenanceCost,
                     UtilizationPercent: utilization,
@@ -198,6 +223,74 @@ namespace PrintLogApi.Services.Analytics
                 filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
                 costProjection.Inputs.UserCurrency,
                 rows, series, fleet, maintenance, coverage.Build());
+        }
+
+        /// <summary>
+        /// Candidate intervals for utilization, selected by OVERLAP with the window rather than
+        /// by start-inside-the-window.
+        ///
+        /// The main scoped query filters on StartDate >= from, which is right for the time
+        /// series (it buckets by start) but wrong here: a ten-hour print beginning a minute
+        /// before the window runs for ten hours *inside* it, and dropping it reports that time
+        /// as idle. IntervalUnion is built to clip exactly this case; it just never saw the row.
+        ///
+        /// The lookback is derived, not guessed: the longest resolved duration this tenant has
+        /// recorded is the furthest back a print could still overlap `from`. That keeps the
+        /// candidate set exact and translatable on both SQL Server and SQLite, where an
+        /// AddSeconds() comparison inside the predicate is not.
+        /// </summary>
+        private async Task<List<(long PrinterId, DateTimeOffset Start, int Duration, int Count)>>
+            LoadUtilizationIntervals(
+                long userId, AnalyticsFilter filter,
+                DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct)
+        {
+            // Same tenant and same filters, deliberately WITHOUT the range: the range is what
+            // this method has to widen.
+            var unranged = AnalyticsQueryScope.Scope(
+                _context.Prints.AsNoTracking(), userId, filter, null, null)
+                .Where(p => p.StartDate != null);
+
+            // Projected as int? so this is a plain SQL MAX that yields NULL on an empty set.
+            // DefaultIfEmpty(0) reads more naturally but does not translate, and EF throws
+            // rather than falling back — which would have meant materializing every print.
+            var maxDurationSeconds = await unranged
+                .Select(p => (int?)(p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0
+                    ? p.PrintTimeInSeconds.Value
+                    : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
+                        ? p.EstimatedPrintTimeInSeconds.Value
+                        : 0))
+                .MaxAsync(ct) ?? 0;
+
+            if (maxDurationSeconds <= 0) return new();
+
+            var candidateFrom = windowFrom.AddSeconds(-maxDurationSeconds);
+
+            var candidates = unranged
+                .Where(p => p.StartDate < windowTo && p.StartDate >= candidateFrom);
+
+            // Bounded like every other second stage. Over the cap the caller already reports
+            // RowCapExceeded and suppresses utilization rather than reporting a partial figure.
+            if (await candidates.CountAsync(ct) > AnalyticsService.MaxSeriesRows) return new();
+
+            return (await candidates
+                .GroupBy(p => new
+                {
+                    p.PrinterId,
+                    p.StartDate,
+                    Duration = p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0
+                        ? p.PrintTimeInSeconds.Value
+                        : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
+                            ? p.EstimatedPrintTimeInSeconds.Value
+                            : 0,
+                })
+                .Select(g => new { g.Key.PrinterId, g.Key.StartDate, g.Key.Duration, Count = g.Count() })
+                .ToListAsync(ct))
+                .Select(x => (
+                    PrinterId: x.PrinterId,
+                    Start: x.StartDate!.Value,
+                    Duration: x.Duration,
+                    Count: x.Count))
+                .ToList();
         }
 
         private static IReadOnlyList<PrinterSeriesBucket> BuildSeries(

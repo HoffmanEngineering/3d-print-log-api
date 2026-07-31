@@ -106,7 +106,7 @@ namespace PrintLogApi.Services.Analytics
 
             var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
             var (cost, costExclusions, currency) = await ComputeCost(userId, scoped, ct);
-            var highlights = await BuildHighlights(scoped, ct);
+            var highlights = await BuildHighlights(scoped, userId, ct);
 
             return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
                 materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
@@ -195,14 +195,18 @@ namespace PrintLogApi.Services.Analytics
             return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency);
         }
 
-        private static async Task<OverviewHighlights> BuildHighlights(IQueryable<Print> scoped, CancellationToken ct)
+        private static async Task<OverviewHighlights> BuildHighlights(
+            IQueryable<Print> scoped, long userId, CancellationToken ct)
         {
             // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
             // as a final deterministic backstop. Both tie-breakers must be projected, or the
             // ordering silently degrades to "lowest id wins", which is not the specified rule.
             // The sums are inlined rather than using PrintMetrics.*Expr because g.Sum takes a
             // Func, not an Expression (PrintMetrics.cs:31-38).
+            // Owner-scoped before the group: this projection reads printer NAME, make and model,
+            // so an unowned reference here would surface another user's machine on the tile.
             var topPrinter = await scoped
+                .Where(p => p.Printer.UserId == userId)
                 .GroupBy(p => new { p.PrinterId, p.Printer.Name, p.Printer.Make, p.Printer.Model })
                 .Select(g => new
                 {
@@ -235,7 +239,10 @@ namespace PrintLogApi.Services.Analytics
             // that has no meaning at this grain.
             var topMaterial = await scoped
                 .SelectMany(p => p.FilamentUsage)
-                .Where(pf => pf.Filament != null)
+                // Reads DisplayName and MaterialType, so ownership is required, not just
+                // existence. Unlike the mass sums, a null Filament genuinely has nothing to
+                // rank here, so `linked AND owned` is the right predicate in this one place.
+                .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
                 .GroupBy(pf => new { pf.FilamentId, pf.Filament.DisplayName, pf.Filament.MaterialType })
                 .Select(g => new
                 {

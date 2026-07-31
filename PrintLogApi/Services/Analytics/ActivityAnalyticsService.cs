@@ -70,8 +70,16 @@ namespace PrintLogApi.Services.Analytics
                     Count = g.Count(),
                     // Inlined copy of PrintMetrics.MaterialMgExpr: g.Sum takes a Func, not an
                     // Expression, so a group projection cannot consume the shared expression.
+                    //
+                    // The ownership guard is `no linked spool OR an owned one`, NOT
+                    // `linked AND owned`: a usage row with FilamentId == null is legitimate
+                    // untracked material and counts toward the canonical rowSum + other rule.
+                    // Requiring a linked spool would silently drop it and make these totals
+                    // disagree with /overview.
                     MaterialMg = g.Sum(p =>
-                        (long)p.FilamentUsage.Sum(pf =>
+                        (long)p.FilamentUsage
+                            .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
+                            .Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                             : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                             : 0)
@@ -135,8 +143,19 @@ namespace PrintLogApi.Services.Analytics
             if (truncated) coverage.Exclude(ExclusionReason.WindowTruncated, 1);
 
             var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).DateTime);
+
+            // Future-dated days are excluded from the streak input. An all-time query has no
+            // upper bound, so a print mis-dated into next month becomes the most recent day in
+            // the set — and because that day is neither today nor yesterday, Streaks reports a
+            // CURRENT streak of 0 and silently wipes out a run the user is genuinely on. A
+            // future date is also not a day anyone has printed on yet, so it cannot extend the
+            // longest run either.
             var streaks = ActivityStats.Streaks(
-                calendarCounts.Select(kv => new DayCount(kv.Key, kv.Value)).ToList(), localToday);
+                calendarCounts
+                    .Where(kv => kv.Key <= localToday)
+                    .Select(kv => new DayCount(kv.Key, kv.Value))
+                    .ToList(),
+                localToday);
 
             return new ActivityResponse(
                 filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
