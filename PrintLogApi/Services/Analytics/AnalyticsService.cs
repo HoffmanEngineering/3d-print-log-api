@@ -83,24 +83,9 @@ namespace PrintLogApi.Services.Analytics
             DateTimeOffset? from, DateTimeOffset? to,
             TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
         {
-            // Tenant scoping is applied first and never relaxed. Unowned filter ids simply
-            // match nothing, which is why an unowned printer id yields zeros rather than an error.
-            var owned = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
-
             var hasRange = from.HasValue && to.HasValue;
-            var scoped = hasRange
-                ? owned.Where(p => p.StartDate >= from.Value && p.StartDate < to.Value) // half-open
-                : owned;
-
-            if (filter.PrinterIds.Count > 0)
-                scoped = scoped.Where(p => filter.PrinterIds.Contains(p.PrinterId));
-            if (filter.ProjectIds.Count > 0)
-                scoped = scoped.Where(p => p.ProjectId.HasValue && filter.ProjectIds.Contains(p.ProjectId.Value));
-            if (filter.Statuses.Count > 0)
-                scoped = scoped.Where(p => filter.Statuses.Contains(p.Status));
-            if (filter.FilamentIds.Count > 0)
-                scoped = scoped.Where(p => p.FilamentUsage.Any(pf =>
-                    pf.FilamentId.HasValue && filter.FilamentIds.Contains(pf.FilamentId.Value)));
+            var scoped = AnalyticsQueryScope.Scope(
+                _context.Prints.AsNoTracking(), userId, filter, from, to);
 
             var printCount = await scoped.CountAsync(ct);
             var undatedCount = hasRange ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);

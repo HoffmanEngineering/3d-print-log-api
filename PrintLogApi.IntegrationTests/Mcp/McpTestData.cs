@@ -66,12 +66,16 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long DstPrinterId { get; private set; }
 
         /// <summary>
-        /// Both instants are 01:30 local in America/New_York on 1 November 2026 — the first in EDT,
+        /// Both instants are 01:30 local in America/New_York on 2 November 2025 — the first in EDT,
         /// the second in EST, the repeated hour of a 25-hour fall-back day. They must land in the
         /// SAME local day bucket. A fixed-offset implementation splits them across two days.
+        ///
+        /// The fixture sits deliberately in the PAST. AnalyticsFilter.Normalize clamps a future
+        /// ToDate back to now, so a fixture dated ahead of the clock is unreachable: the window
+        /// asking for it inverts and Validate rejects it.
         /// </summary>
-        public static readonly DateTimeOffset DstBeforeFallBack = new(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
-        public static readonly DateTimeOffset DstAfterFallBack = new(2026, 11, 1, 6, 30, 0, TimeSpan.Zero);
+        public static readonly DateTimeOffset DstBeforeFallBack = new(2025, 11, 2, 5, 30, 0, TimeSpan.Zero);
+        public static readonly DateTimeOffset DstAfterFallBack = new(2025, 11, 2, 6, 30, 0, TimeSpan.Zero);
 
         public const string MetricsUserOAuthId = "auth0|mcp-metrics-user";
 

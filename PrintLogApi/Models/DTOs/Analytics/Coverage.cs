@@ -19,6 +19,28 @@ namespace PrintLogApi.Models.DTOs.Analytics
         public const string OutlierExcluded = "OutlierExcluded";
         public const string SampleTooSmall = "SampleTooSmall";
         public const string RowCapExceeded = "RowCapExceeded";
+
+        /// <summary>
+        /// The print has NO resolvable duration — neither actual nor estimate was recorded.
+        /// Distinct from DurationEstimated, which says the duration exists but came from the
+        /// estimate. Histogram, utilization and cost-per-print-hour all have to drop these.
+        /// </summary>
+        public const string DurationMissing = "DurationMissing";
+
+        /// <summary>
+        /// The requested range is longer than the widget can display, so it rendered a trailing
+        /// sub-window. The calendar heatmap caps at 53 weeks; an all-time range on a long
+        /// library is truncated rather than silently drawn wrong.
+        /// </summary>
+        public const string WindowTruncated = "WindowTruncated";
+
+        /// <summary>
+        /// The print records "other filament" (Print.FilamentUsageMg) — material never attached
+        /// to a tracked spool. It has no type, brand or colour, so it cannot be placed in any
+        /// Materials group. Reported so the shortfall against the Overview total is explained
+        /// rather than looking like the two pages disagree.
+        /// </summary>
+        public const string UnattributedMaterial = "UnattributedMaterial";
     }
 
     public sealed record CoverageExclusion(string Reason, int Count);

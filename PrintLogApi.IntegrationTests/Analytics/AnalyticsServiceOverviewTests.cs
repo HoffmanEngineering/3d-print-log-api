@@ -228,22 +228,22 @@ namespace PrintLogApi.IntegrationTests.Analytics
         {
             // TimeBucketerTests proves the bucketer in isolation. This proves the SQL grouping
             // grain and the in-memory bucket assignment still agree once a real provider has
-            // stored and returned the DateTimeOffset. Both fixtures are 01:30 local on 1 Nov 2026
+            // stored and returned the DateTimeOffset. Both fixtures are 01:30 local on 2 Nov 2025
             // — one EDT, one EST — the repeated hour of a 25-hour day.
             var filter = new AnalyticsFilter
             {
                 TimeZone = "America/New_York",
-                FromDate = new DateTimeOffset(2026, 10, 31, 4, 0, 0, TimeSpan.Zero),
-                ToDate = new DateTimeOffset(2026, 11, 3, 4, 0, 0, TimeSpan.Zero),
+                FromDate = new DateTimeOffset(2025, 11, 1, 4, 0, 0, TimeSpan.Zero),
+                ToDate = new DateTimeOffset(2025, 11, 4, 5, 0, 0, TimeSpan.Zero),
                 Granularity = AnalyticsGranularity.Day,
             };
 
             var result = await Run(filter, Mcp.McpTestData.DstUserId);
 
-            var nov1 = result.Series.Single(b => b.LocalStart == new DateOnly(2026, 11, 1));
-            Assert.Equal(2, nov1.CountsByStatus.Values.Sum());
+            var fallBackDay = result.Series.Single(b => b.LocalStart == new DateOnly(2025, 11, 2));
+            Assert.Equal(2, fallBackDay.CountsByStatus.Values.Sum());
             Assert.All(
-                result.Series.Where(b => b.LocalStart != new DateOnly(2026, 11, 1)),
+                result.Series.Where(b => b.LocalStart != new DateOnly(2025, 11, 2)),
                 b => Assert.Equal(0, b.CountsByStatus.Values.Sum()));
         }
     }

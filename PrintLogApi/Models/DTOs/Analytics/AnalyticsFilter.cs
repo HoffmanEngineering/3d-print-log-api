@@ -36,13 +36,56 @@ namespace PrintLogApi.Models.DTOs.Analytics
 
         public bool HasRange => FromDate.HasValue && ToDate.HasValue;
 
-        public void Normalize()
+        /// <summary>
+        /// The clamp ceiling, rounded UP to the next whole UTC hour.
+        ///
+        /// Rounding is what makes the clamp cacheable. Clamping to DateTimeOffset.UtcNow would
+        /// stamp a different tick into every request, and since CacheKey serializes ToDate with
+        /// "O", two otherwise-identical requests a second apart would mint two cache entries —
+        /// turning a fix for unbounded ranges into an unbounded cache. An hour's ceiling also
+        /// keeps "up to now" genuinely inclusive of the current hour's prints.
+        /// </summary>
+        public static DateTimeOffset ClampCeiling(DateTimeOffset now)
+        {
+            // Convert to UTC BEFORE reading the calendar fields. now.Year/Month/Day/Hour are the
+            // value's own offset's wall clock, so pairing them with TimeSpan.Zero would silently
+            // reinterpret 14:37-05:00 (19:37Z) as 14:37Z and round to the wrong hour. Harmless
+            // while the only caller passes UtcNow, but this is public and documents a UTC
+            // contract, so it has to honour one.
+            var utc = now.ToUniversalTime();
+            return new DateTimeOffset(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, TimeSpan.Zero)
+                .AddHours(1);
+        }
+
+        public void Normalize() => Normalize(DateTimeOffset.UtcNow);
+
+        /// <summary>
+        /// Clock-injectable. Every clamp assertion needs a fixed `now`, or it becomes flaky at
+        /// whatever boundary the clamp rounds to and calendar-dependent besides.
+        ///
+        /// PUBLIC, not internal: the tests live in `PrintLogApi.IntegrationTests`, a separate
+        /// assembly, and the solution has no `InternalsVisibleTo` anywhere. An internal overload
+        /// would simply not compile from the test project, and adding a friend-assembly
+        /// declaration to widen one method's reach is the larger change.
+        /// </summary>
+        public void Normalize(DateTimeOffset now)
         {
             PrinterIds = PrinterIds?.Distinct().OrderBy(x => x).ToList() ?? new List<long>();
             FilamentIds = FilamentIds?.Distinct().OrderBy(x => x).ToList() ?? new List<Guid>();
             ProjectIds = ProjectIds?.Distinct().OrderBy(x => x).ToList() ?? new List<Guid>();
             Statuses = Statuses?.Distinct().OrderBy(x => (int)x).ToList() ?? new List<PrintEntity.PrintStatus>();
             if (string.IsNullOrWhiteSpace(TimeZone)) TimeZone = "UTC";
+
+            // Clamp anything beyond NOW — not merely beyond the rounded ceiling, or a timestamp
+            // up to an hour ahead would slip through unclamped. The stored value is the rounded
+            // ceiling, which is what keeps CacheKey stable: clamping to the raw instant would
+            // stamp a distinct tick into every request and mint a cache entry per call.
+            if (ToDate.HasValue && ToDate.Value > now) ToDate = ClampCeiling(now);
+
+            // FromDate is deliberately NOT moved. A range lying entirely in the future stays
+            // inverted and Validate() rejects it, which is the honest answer to "show me next
+            // March". Rewriting FromDate to equal ToDate would produce exactly the
+            // `FromDate >= ToDate` state Validate already rejects, just less legibly.
         }
 
         public IReadOnlyList<string> Validate()
