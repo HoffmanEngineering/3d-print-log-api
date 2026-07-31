@@ -176,6 +176,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 Make = "Bambu",
                 UserId = OtherUserId,
                 IsActive = true,
+                // Deliberately wattage-bearing, and deliberately the ONLY printer that is.
+                // AnalyticsCostProjection guards its Printer join with an ownership predicate;
+                // without a foreign printer whose wattage would visibly change a cost figure,
+                // that guard has nothing to be tested against.
+                WattageW = 350,
             };
             context.Printers.Add(otherPrinter);
             context.SaveChanges();
