@@ -154,6 +154,173 @@ namespace PrintLogApi.IntegrationTests.Analytics
         }
 
         [Fact]
+        public async Task GetMaterials_TimeSeriesKeysNeverEscapeTheTruncatedGroupKeySet()
+        {
+            var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+            // The UI builds one chart series per ByType entry and reads bucket values by that
+            // key. A bucket key outside the set is a series the chart never draws — silently
+            // dropping mass from a stacked chart the user reads as a total.
+            var known = response.ByType.Select(g => g.Key).ToHashSet();
+
+            Assert.All(response.ConsumptionOverTime, bucket =>
+                Assert.All(bucket.MaterialMgByType.Keys, key => Assert.Contains(key, known)));
+        }
+
+        [Fact]
+        public async Task GetMaterials_TimeSeriesConservesTheSameMassAsTheGroupTotals()
+        {
+            var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+            var grouped = response.ByType.Sum(g => g.MaterialMg);
+            var bucketed = response.ConsumptionOverTime.Sum(b => b.MaterialMgByType.Values.Sum());
+
+            // Equal because the metrics fixture's spool-attached prints are all dated. Undated
+            // usage is excluded from time buckets by design, so this holds only while that is
+            // true of the fixture — which GetMaterials_... coverage assertions also rely on.
+            Assert.Equal(grouped, bucketed);
+        }
+
+        /// <summary>
+        /// The group cap only bites above MaxGroups, and the shared metrics fixture has two
+        /// material types — so this test seeds its OWN isolated user with one more type than the
+        /// cap. Without that, every truncation assertion here passes vacuously.
+        /// </summary>
+        [Fact]
+        public async Task GetMaterials_RollsOverCapMaterialTypesIntoOtherInBothTheGroupsAndTheSeries()
+        {
+            var typeCount = MaterialAnalyticsService.MaxGroups + 1;
+            long userId;
+
+            using (var seed = _factory.Services.CreateScope())
+            {
+                var db = seed.ServiceProvider.GetRequiredService<PrintLogContext>();
+                var now = DateTime.UtcNow;
+
+                var user = new PrintLogApi.Models.User
+                {
+                    OAuthUserId = $"auth0|materials-cap-{Guid.NewGuid()}",
+                    ViewStatus = PrintLogApi.Models.User.ProfileViewStatus.Private,
+                };
+                db.Users.Add(user);
+                await db.SaveChangesAsync();
+                userId = user.Id;
+
+                var printer = new PrintLogApi.Models.Printer
+                {
+                    Name = "Cap Fixture Printer",
+                    Model = "CF1",
+                    Make = "Fixture",
+                    UserId = userId,
+                    IsActive = true,
+                };
+                db.Printers.Add(printer);
+                await db.SaveChangesAsync();
+
+                // Descending amounts, so which types get truncated is deterministic.
+                for (var i = 0; i < typeCount; i++)
+                {
+                    var spool = new PrintLogApi.Models.Filament
+                    {
+                        Id = Guid.NewGuid(),
+                        DisplayName = $"Cap Spool {i:D2}",
+                        MaterialType = $"TYPE{i:D2}",
+                        ColorName = $"Colour {i:D2}",
+                        ColorHex = "ff0000",
+                        Brand = "Cap Brand",
+                        CreatedById = userId,
+                        CreatedDate = now,
+                        UpdatedById = userId,
+                        UpdatedDate = now,
+                        DiameterMm = 1.75,
+                        MaterialCategoryNickname = "filament",
+                        MaterialDensityGramPerCubicCm = 1.24,
+                        IsActive = true,
+                        InitialNominalWeightMg = 1_000_000,
+                        Source = PrintLogApi.Models.Filament.SourceMeasurement.Weight,
+                    };
+                    db.Filaments.Add(spool);
+                    await db.SaveChangesAsync();
+
+                    db.Prints.Add(new PrintLogApi.Models.Print
+                    {
+                        Title = $"Cap Print {i:D2}",
+                        StartDate = now.AddDays(-1),
+                        Status = PrintLogApi.Models.Print.PrintStatus.Success,
+                        ViewStatus = PrintLogApi.Models.Print.PrintViewStatus.Private,
+                        PrinterId = printer.Id,
+                        CreatedById = userId,
+                        CreatedDate = now,
+                        UpdatedById = userId,
+                        UpdatedDate = now,
+                        FilamentUsage = new System.Collections.Generic.List<PrintLogApi.Models.PrintFilament>
+                        {
+                            new()
+                            {
+                                Id = Guid.NewGuid(),
+                                FilamentId = spool.Id,
+                                AmountMg = (typeCount - i) * 1000,
+                            },
+                        },
+                    });
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            var filter = new AnalyticsFilter { TimeZone = "UTC" };
+            filter.Normalize();
+
+            using var scope = _factory.Services.CreateScope();
+            var response = await scope.ServiceProvider.GetRequiredService<IMaterialAnalyticsService>()
+                .GetMaterials(userId, filter, CancellationToken.None);
+
+            // Truncated to the cap plus exactly one rollup row.
+            Assert.Equal(MaterialAnalyticsService.MaxGroups + 1, response.ByType.Count);
+            Assert.Equal("Other", response.ByType.Last().Label);
+
+            // Every series key is one the UI will actually draw.
+            var known = response.ByType.Select(g => g.Key).ToHashSet();
+            Assert.All(response.ConsumptionOverTime, bucket =>
+                Assert.All(bucket.MaterialMgByType.Keys, key => Assert.Contains(key, known)));
+
+            // And no mass is lost on the way into the buckets — the bug this test exists for
+            // dropped the over-cap types from the series entirely.
+            var expected = Enumerable.Range(0, typeCount).Sum(i => (long)(typeCount - i) * 1000);
+            Assert.Equal(expected, response.ByType.Sum(g => g.MaterialMg));
+            Assert.Equal(
+                expected,
+                response.ConsumptionOverTime.Sum(b => b.MaterialMgByType.Values.Sum()));
+
+            // The rollup is genuinely carrying the truncated types, not an empty placeholder.
+            Assert.True(response.ByType.Last().MaterialMg > 0);
+        }
+
+        [Fact]
+        public async Task GetMaterials_WasteCostCarriesItsOwnPricingCoverage()
+        {
+            var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+            // The stat tile renders its honesty note from the METRIC's coverage, so a pricing
+            // exclusion recorded only at tab level would leave a partial cost unexplained.
+            Assert.Equal("prints", response.WasteCost.Coverage.Population);
+            Assert.True(
+                response.WasteCost.Coverage.Counted <= response.WasteCost.Coverage.Total,
+                "cost coverage counted more prints than it totalled");
+        }
+
+        [Fact]
+        public async Task GetMaterials_CoverageCountedNeverExceedsItsOwnPopulationTotal()
+        {
+            var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+            // Counted was the distinct FILAMENT count while Total was the PRINT count, which
+            // can report an impossible "20 of 5" for a library with more spools than prints.
+            Assert.True(
+                response.Coverage.Counted <= response.Coverage.Total,
+                $"counted {response.Coverage.Counted} of total {response.Coverage.Total}");
+        }
+
+        [Fact]
         public async Task GetMaterials_NeverReturnsASpoolBelongingToAnotherUser()
         {
             var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });

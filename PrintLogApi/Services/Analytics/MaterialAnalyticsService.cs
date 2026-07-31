@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -25,6 +25,12 @@ namespace PrintLogApi.Services.Analytics
         public const int MaxSpools = 25;
         public const int BurnRateWindowDays = 90;
         public const int MaxRunwayDays = 365;
+
+        /// <summary>The synthetic rollup key, shared by the group lists and the time series.</summary>
+        public const string OtherKey = "__other";
+
+        /// <summary>Neutral grey, used when a spool records no colour at all (spec §10).</summary>
+        public const string UnknownSwatchColor = "#9e9e9e";
 
         private readonly PrintLogContext _context;
 
@@ -105,20 +111,35 @@ namespace PrintLogApi.Services.Analytics
                 .Select(r => new UsageRow(
                     r.PrintId,
                     r.FilamentId, r.DisplayName, r.Brand, r.MaterialType, r.ColorName,
-                    r.Colors is { Count: > 0 } ? r.Colors : new List<string> { r.ColorHex },
+                    SwatchColors(r.Colors, r.ColorHex),
                     (int)(r.ColorPattern ?? Enums.ColorPatternType.Solid),
                     (int)(r.FinishType ?? Enums.FilamentFinishType.Standard),
                     (r.Effects ?? new List<Enums.FilamentEffect>()).Select(e => (int)e).ToList(),
                     r.StartDate, r.Status, r.UsedMg))
                 .ToList();
 
-            coverage.Counted = rows.Select(r => r.FilamentId).Distinct().Count();
+            // A usage row with no recorded amount resolves to 0 and is dropped here rather than
+            // carried into grouping: it would otherwise produce a zero-mass material group and a
+            // zero-use "top spool", and make the tab report itself non-empty on the strength of
+            // rows that say nothing. The ROW CAP above deliberately still counts them, because
+            // its job is bounding what gets materialized, and these rows are materialized.
+            rows = rows.Where(r => r.UsedMg > 0).ToList();
 
-            var byType = Group(rows, r => r.MaterialType ?? "Unknown");
-            var byBrand = Group(rows, r => r.Brand ?? "Unknown");
-            var byColor = Group(rows, r => r.ColorName ?? "Unknown");
+            // Counted and Total must describe the SAME population, which the builder names as
+            // "prints". Distinct filaments is a different population, and reporting it here
+            // produced impossible coverage — "20 of 5" for a library with more spools than
+            // prints in range.
+            coverage.Counted = rows.Select(r => r.PrintId).Distinct().Count();
 
-            var series = BuildSeries(rows, filter, zone, granularity);
+            var byType = Group(rows, r => Label(r.MaterialType));
+            var byBrand = Group(rows, r => Label(r.Brand));
+            var byColor = Group(rows, r => Label(r.ColorName));
+
+            // The series must use the SAME key set the groups were truncated to. Keyed on raw
+            // material type it would emit buckets under keys the UI has no series for — the UI
+            // builds its series from ByType — and every type ranked below the cap would vanish
+            // from a stacked chart the user reads as a total.
+            var series = BuildSeries(rows, byType, filter, zone, granularity);
             var costInputs = await AnalyticsCostProjection.LoadInputs(_context, userId, ct);
             var spools = await TopSpools(userId, rows, costInputs, ct);
             var runway = Runway(spools, rows, filter);
@@ -129,6 +150,35 @@ namespace PrintLogApi.Services.Analytics
                 byType, byBrand, byColor, series, spools, runway,
                 wasteGrams, wasteCost, coverage.Build());
         }
+
+        /// <summary>
+        /// The colour tokens for a swatch: the spool's own list, else its legacy single hex.
+        ///
+        /// Blank entries are dropped rather than passed through, and a spool with NO recorded
+        /// colour gets neutral grey (spec §10) instead of a token the client would resolve to
+        /// black — "we do not know this spool's colour" and "this spool is black" are different
+        /// claims, and the swatch must not make the second one on the first one's evidence.
+        /// </summary>
+        private static IReadOnlyList<string> SwatchColors(List<string> colors, string colorHex)
+        {
+            var tokens = (colors ?? new List<string>())
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim())
+                .ToList();
+
+            if (tokens.Count > 0) return tokens;
+            if (!string.IsNullOrWhiteSpace(colorHex)) return new List<string> { colorHex.Trim() };
+            return new List<string> { UnknownSwatchColor };
+        }
+
+        /// <summary>
+        /// The key a row groups under. Blank and whitespace-only metadata is "Unknown", not its
+        /// own nameless group, and surrounding whitespace is trimmed so " PLA " and "PLA" are
+        /// one material rather than two. Case is deliberately preserved: folding it would change
+        /// the label the user chose for their own spool.
+        /// </summary>
+        private static string Label(string value) =>
+            string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Trim();
 
         /// <summary>
         /// Top MaxGroups by mass plus an aggregated "Other". Truncating without the rollup would
@@ -159,20 +209,27 @@ namespace PrintLogApi.Services.Analytics
             var kept = groups.Take(MaxGroups).ToList();
             var rest = groups.Skip(MaxGroups).ToList();
             kept.Add(new MaterialGroup(
-                "__other", "Other",
+                OtherKey, "Other",
                 // Summed, not de-duplicated: one print can appear under several rolled-up
                 // groups, so this is "group appearances", and the label makes no per-print claim.
                 rest.Sum(g => g.PrintCount),
                 rest.Sum(g => g.MaterialMg),
-                new SwatchDto(new List<string> { "#9e9e9e" },
+                new SwatchDto(new List<string> { UnknownSwatchColor },
                     (int)Enums.ColorPatternType.Solid, (int)Enums.FilamentFinishType.Standard, new List<int>())));
             return kept;
         }
 
+        /// <summary>
+        /// Grams per bucket, split by material type — using the SAME keys ByType was truncated
+        /// to. A type that was rolled into "Other" for the group chart is rolled into "Other"
+        /// here too, so the stacked series conserves mass instead of dropping everything ranked
+        /// below the cap on the floor.
+        /// </summary>
         private static IReadOnlyList<MaterialSeriesBucket> BuildSeries(
-            IReadOnlyList<UsageRow> rows, AnalyticsFilter filter,
-            TimeZoneInfo zone, AnalyticsGranularity granularity)
+            IReadOnlyList<UsageRow> rows, IReadOnlyList<MaterialGroup> byType,
+            AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity)
         {
+            var retained = byType.Select(g => g.Key).ToHashSet();
             var dated = rows.Where(r => r.StartDate.HasValue).ToList();
             if (dated.Count == 0) return Array.Empty<MaterialSeriesBucket>();
 
@@ -188,7 +245,8 @@ namespace PrintLogApi.Services.Analytics
                 var index = TimeBucketer.IndexOf(buckets, row.StartDate!.Value.ToUniversalTime());
                 if (index < 0) continue;
 
-                var key = row.MaterialType ?? "Unknown";
+                var label = Label(row.MaterialType);
+                var key = retained.Contains(label) ? label : OtherKey;
                 var slot = accumulator[buckets[index].Index];
                 slot[key] = (slot.TryGetValue(key, out var n) ? n : 0) + row.UsedMg;
             }
@@ -339,26 +397,39 @@ namespace PrintLogApi.Services.Analytics
             var wastedMg = await wasted.SumAsync(PrintMetrics.MaterialMgExpr, ct);
             var wastedCount = await wasted.CountAsync(ct);
 
+            // The COST metric carries its own coverage. The stat tile renders the honesty note
+            // from the metric it is given, not from the tab, so pricing exclusions recorded only
+            // at tab level would leave "Cost of waste" showing a partial — or null — figure with
+            // nothing on the tile to say why.
+            var costCoverage = new CoverageBuilder("prints") { Total = wastedCount };
+
             var projection = await AnalyticsCostProjection.Project(_context, userId, wasted, ct);
             decimal? cost = null;
             if (projection.RowCapExceeded)
             {
                 coverage.Exclude(ExclusionReason.RowCapExceeded, projection.PrintCount);
+                costCoverage.Exclude(ExclusionReason.RowCapExceeded, projection.PrintCount);
             }
             else
             {
-                cost = projection.Prints.Any(p => p.Total.HasValue)
-                    ? projection.Prints.Sum(p => p.Total ?? 0m)
-                    : null;
+                var priced = projection.Prints.Where(p => p.Total.HasValue).ToList();
+                cost = priced.Count > 0 ? priced.Sum(p => p.Total ?? 0m) : null;
+                costCoverage.Counted = priced.Count;
+
                 foreach (var (reason, count) in AnalyticsCostProjection.CountExclusions(projection.Prints))
+                {
                     coverage.Exclude(reason, count);
+                    costCoverage.Exclude(reason, count);
+                }
             }
 
-            var wasteCoverage = new CoverageBuilder("prints") { Counted = wastedCount, Total = wastedCount }.Build();
+            // Mass does not depend on pricing, so the grams metric keeps a clean record: every
+            // wasted print's material is counted, whether or not it could be costed.
+            var massCoverage = new CoverageBuilder("prints") { Counted = wastedCount, Total = wastedCount }.Build();
 
             return (
-                new Metric(wastedMg / 1000.0, null, wasteCoverage),
-                new MoneyMetric(cost, null, projection.Inputs.UserCurrency, wasteCoverage),
+                new Metric(wastedMg / 1000.0, null, massCoverage),
+                new MoneyMetric(cost, null, projection.Inputs.UserCurrency, costCoverage.Build()),
                 projection.Inputs.UserCurrency);
         }
 
