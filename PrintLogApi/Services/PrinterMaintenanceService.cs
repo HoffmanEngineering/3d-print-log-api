@@ -20,14 +20,36 @@ namespace PrintLogApi.Services
         private readonly PrintLogContext _context;
         private readonly IMapper _mapper;
         private readonly TelemetryClient _telemetry;
+        private readonly ICacheVersionService _cacheVersionService;
 
         public PrinterMaintenanceService(PrintLogContext context,
                             IMapper mapper,
-                            TelemetryClient telemetry)
+                            TelemetryClient telemetry,
+                            ICacheVersionService cacheVersionService)
         {
             _context = context;
             _mapper = mapper;
             _telemetry = telemetry;
+            _cacheVersionService = cacheVersionService;
+        }
+
+        /// <summary>
+        /// Maintenance feeds /api/analytics/printers, which caches per-printer maintenance cost
+        /// for fifteen minutes. Without this bump, logging a service would leave the tab showing
+        /// the old number for up to a quarter of an hour with no way to force a refresh.
+        ///
+        /// The owner comes from the PRINTER, never from a caller-supplied id: the write paths
+        /// already prove the caller owns the machine, and re-deriving ownership from the entity
+        /// is what keeps that proof and this invalidation from drifting apart.
+        /// </summary>
+        private async Task InvalidateAnalyticsCache(long printerId)
+        {
+            var ownerId = await _context.Printers
+                .Where(p => p.Id == printerId)
+                .Select(p => (long?)p.UserId)
+                .FirstOrDefaultAsync();
+
+            if (ownerId.HasValue) _cacheVersionService.InvalidateUserCache(ownerId.Value);
         }
 
         public async Task<List<PrinterMaintenance>> GetEntriesByPrinterId(long printerId)
@@ -184,6 +206,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync();
 
             _telemetry.TrackEvent("PrinterMaintenanceAdd");
+            await InvalidateAnalyticsCache(newEntry.PrinterId);
 
             return await GetEntryById(newEntry.Id); ;
 
@@ -232,6 +255,7 @@ namespace PrintLogApi.Services
             }
 
             _telemetry.TrackEvent("PrinterMaintenanceEdit");
+            await InvalidateAnalyticsCache(updatedEntry.PrinterId);
 
             return await GetEntryById(updatedEntry.Id);
         }
@@ -257,11 +281,16 @@ namespace PrintLogApi.Services
         {
             ArgumentNullException.ThrowIfNull(entry);
 
+            // Captured BEFORE the delete: afterwards the row is gone and the owner is no longer
+            // derivable from it.
+            var printerId = entry.PrinterId;
+
             _context.PrinterMaintenance.Remove(entry);
 
             await _context.SaveChangesAsync();
 
             _telemetry.TrackEvent("PrinterMaintenanceDelete");
+            await InvalidateAnalyticsCache(printerId);
         }
     }
 

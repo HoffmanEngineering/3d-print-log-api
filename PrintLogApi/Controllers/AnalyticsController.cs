@@ -30,17 +30,20 @@ namespace PrintLogApi.Controllers
 
         private readonly IAnalyticsService _analytics;
         private readonly IActivityAnalyticsService _activity;
+        private readonly IPrinterAnalyticsService _printers;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
 
         public AnalyticsController(
             IAnalyticsService analytics,
             IActivityAnalyticsService activity,
+            IPrinterAnalyticsService printers,
             IMemoryCache cache,
             ICacheVersionService cacheVersionService)
         {
             _analytics = analytics;
             _activity = activity;
+            _printers = printers;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
         }
@@ -95,5 +98,13 @@ namespace PrintLogApi.Controllers
         public Task<ActionResult<ActivityResponse>> GetActivity(
             [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
             Cached("activity", filter, (userId, f) => _activity.GetActivity(userId, f, ct));
+
+        [HttpGet("printers")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public Task<ActionResult<PrintersResponse>> GetPrinters(
+            [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
+            Cached("printers", filter, (userId, f) => _printers.GetPrinters(userId, f, ct));
     }
 }
