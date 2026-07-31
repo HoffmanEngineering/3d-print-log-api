@@ -54,6 +54,22 @@ namespace PrintLogApi.IntegrationTests.Analytics
         }
 
         [Fact]
+        public async Task GetActivity_RejectsAnUnauthenticatedRequest()
+        {
+            var response = await _httpClient.GetAsync("/api/analytics/activity?timeZone=UTC");
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetActivity_RejectsAnInvertedRange()
+        {
+            var response = await _httpClient.SendAsync(Authed(
+                "/api/analytics/activity?timeZone=UTC&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z"));
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
         public async Task Overview_InvertedRange_ReturnsBadRequest()
         {
             var response = await _httpClient.SendAsync(Authed(

@@ -16,6 +16,87 @@ namespace PrintLogApi.IntegrationTests.Analytics
             TimeZone = "America/Chicago",
         };
 
+        // A fixed clock, so every clamp assertion is deterministic regardless of when the suite
+        // runs or which hour boundary it straddles.
+        private static readonly DateTimeOffset Now =
+            new(2026, 7, 30, 14, 37, 12, TimeSpan.Zero);
+
+        [Fact]
+        public void Normalize_ClampsAFutureToDateToTheNextWholeHour()
+        {
+            var f = Valid();
+            f.ToDate = Now.AddYears(10);
+            f.Normalize(Now);
+
+            Assert.Equal(new DateTimeOffset(2026, 7, 30, 15, 0, 0, TimeSpan.Zero), f.ToDate);
+        }
+
+        [Fact]
+        public void ClampCeiling_RoundsInUtcRegardlessOfTheInputsOffset()
+        {
+            // 14:37-05:00 is 19:37Z and must round to 20:00Z, not 15:00Z. Reading the calendar
+            // fields before converting is the bug this pins.
+            var offsetNow = new DateTimeOffset(2026, 7, 30, 14, 37, 12, TimeSpan.FromHours(-5));
+
+            Assert.Equal(
+                new DateTimeOffset(2026, 7, 30, 20, 0, 0, TimeSpan.Zero),
+                AnalyticsFilter.ClampCeiling(offsetNow));
+        }
+
+        [Fact]
+        public void Normalize_ClampsATimestampLessThanAnHourInTheFuture()
+        {
+            // The gap the rounded-ceiling comparison used to let through: 20 minutes ahead is
+            // still the future, and §6.6 says future dates are clamped.
+            var f = Valid();
+            f.ToDate = Now.AddMinutes(20);
+            f.Normalize(Now);
+
+            Assert.Equal(new DateTimeOffset(2026, 7, 30, 15, 0, 0, TimeSpan.Zero), f.ToDate);
+        }
+
+        [Fact]
+        public void Normalize_MakesTwoFutureReachingRangesShareACacheKey()
+        {
+            var a = Valid();
+            a.ToDate = Now.AddYears(5);
+            var b = Valid();
+            b.ToDate = Now.AddYears(9);
+
+            a.Normalize(Now);
+            b.Normalize(Now);
+
+            // The actual claim: ONE cache entry, not merely similar dates. CacheKey serializes
+            // with "O", so it exposes any sub-second difference the clamp failed to remove.
+            Assert.Equal(a.CacheKey(7), b.CacheKey(7));
+        }
+
+        [Fact]
+        public void Validate_RejectsARangeLyingEntirelyInTheFuture()
+        {
+            var f = Valid();
+            f.FromDate = Now.AddYears(1);
+            f.ToDate = Now.AddYears(2);
+            f.Normalize(Now);
+
+            // ToDate clamps back, FromDate does not move, so the range is inverted and rejected —
+            // "there is no data for next year" is a 400, not a silent empty chart.
+            Assert.Contains(f.Validate(), e => e.Contains("fromDate"));
+        }
+
+        [Fact]
+        public void Normalize_LeavesAWhollyPastRangeAlone()
+        {
+            var f = Valid();
+            f.FromDate = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            f.ToDate = new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero);
+
+            f.Normalize(Now);
+
+            Assert.Equal(new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero), f.FromDate);
+            Assert.Equal(new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero), f.ToDate);
+        }
+
         [Fact]
         public void Validate_AcceptsAWellFormedFilter()
         {

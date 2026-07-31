@@ -173,6 +173,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IFeedbackService, FeedbackService>();
             services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
             services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
+            services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
+            services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();
 
             services.AddTransient<IBlobStorageService, AzureBlobStorageService>();
 

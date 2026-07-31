@@ -83,24 +83,9 @@ namespace PrintLogApi.Services.Analytics
             DateTimeOffset? from, DateTimeOffset? to,
             TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
         {
-            // Tenant scoping is applied first and never relaxed. Unowned filter ids simply
-            // match nothing, which is why an unowned printer id yields zeros rather than an error.
-            var owned = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
-
             var hasRange = from.HasValue && to.HasValue;
-            var scoped = hasRange
-                ? owned.Where(p => p.StartDate >= from.Value && p.StartDate < to.Value) // half-open
-                : owned;
-
-            if (filter.PrinterIds.Count > 0)
-                scoped = scoped.Where(p => filter.PrinterIds.Contains(p.PrinterId));
-            if (filter.ProjectIds.Count > 0)
-                scoped = scoped.Where(p => p.ProjectId.HasValue && filter.ProjectIds.Contains(p.ProjectId.Value));
-            if (filter.Statuses.Count > 0)
-                scoped = scoped.Where(p => filter.Statuses.Contains(p.Status));
-            if (filter.FilamentIds.Count > 0)
-                scoped = scoped.Where(p => p.FilamentUsage.Any(pf =>
-                    pf.FilamentId.HasValue && filter.FilamentIds.Contains(pf.FilamentId.Value)));
+            var scoped = AnalyticsQueryScope.Scope(
+                _context.Prints.AsNoTracking(), userId, filter, from, to);
 
             var printCount = await scoped.CountAsync(ct);
             var undatedCount = hasRange ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
@@ -121,7 +106,7 @@ namespace PrintLogApi.Services.Analytics
 
             var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
             var (cost, costExclusions, currency) = await ComputeCost(userId, scoped, ct);
-            var highlights = await BuildHighlights(scoped, ct);
+            var highlights = await BuildHighlights(scoped, userId, ct);
 
             return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
                 materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
@@ -195,102 +180,33 @@ namespace PrintLogApi.Services.Analytics
         private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency)> ComputeCost(
             long userId, IQueryable<Print> scoped, CancellationToken ct)
         {
-            var settings = await _context.UserSettings.AsNoTracking()
-                .Where(s => s.UserId == userId)
-                .Select(s => new { s.UserSettingTypeId, s.Value })
-                .ToListAsync(ct);
+            var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
 
-            string Setting(int id) => settings.FirstOrDefault(s => s.UserSettingTypeId == id)?.Value;
-
-            var inputs = new CostInputs(
-                UserCurrency: Setting(5),            // Currency_Name
-                DefaultFilamentPrice: Setting(8),    // Filaments_DefaultPrice
-                KwhRate: Setting(12),                // Electricity_KwhRate
-                DefaultWattageW: Setting(13));       // Electricity_DefaultWattageW
-
-            // Cap on the rows that would actually be materialized: one per filament usage row,
-            // plus one per print for the printer/electricity term. Counting prints alone would
-            // let a multi-material library blow several times past the limit.
-            var filamentRows = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
-            var printRows = await scoped.CountAsync(ct);
-            if (filamentRows + printRows > MaxCostRows)
+            if (projection.RowCapExceeded)
                 return (
                     null,
-                    new Dictionary<string, int> { [ExclusionReason.RowCapExceeded] = printRows },
-                    inputs.UserCurrency);
+                    new Dictionary<string, int> { [ExclusionReason.RowCapExceeded] = projection.PrintCount },
+                    projection.Inputs.UserCurrency);
 
-            var projected = await scoped
-                .Select(p => new
-                {
-                    DurationSeconds = p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0
-                        ? p.PrintTimeInSeconds.Value
-                        : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
-                            ? p.EstimatedPrintTimeInSeconds.Value
-                            : 0,
-                    p.Printer.WattageW,
-                    Rows = p.FilamentUsage.Where(pf => pf.Filament != null).Select(pf => new
-                    {
-                        pf.Filament.PurchasePriceValue,
-                        pf.Filament.PurchasePriceCurrency,
-                        pf.Filament.InitialNominalWeightMg,
-                        pf.Filament.MaterialDensityGramPerCubicCm,
-                        pf.Filament.DiameterMm,
-                        Source = (int)pf.Source,
-                        AmountMg = (double?)pf.AmountMg,
-                        pf.LengthInM,
-                        pf.VolumeMl,
-                        EstimatedSource = (int)pf.EstimatedSource,
-                        EstimatedAmountMg = (double?)pf.EstimatedAmountMg,
-                        pf.EstimatedLengthInM,
-                        pf.EstimatedVolumeMl,
-                    }).ToList(),
-                })
-                .ToListAsync(ct);
+            var total = projection.Prints.Any(p => p.Total.HasValue)
+                ? projection.Prints.Sum(p => p.Total ?? 0m)
+                : (decimal?)null;
 
-            decimal? total = null;
-            // Counted per PRINT, not de-duplicated to a bare reason list: "PriceMissing" against
-            // 200 prints and against 1 are very different claims, and Coverage exists precisely
-            // to let the reader tell them apart. FilamentCost already de-duplicates within a
-            // single print, so each print contributes at most 1 to any reason.
-            var exclusions = new Dictionary<string, int>();
-
-            void Count(IReadOnlyList<string> reasons)
-            {
-                foreach (var reason in reasons)
-                {
-                    exclusions[reason] = exclusions.TryGetValue(reason, out var n) ? n + 1 : 1;
-                }
-            }
-
-            foreach (var p in projected)
-            {
-                var rows = p.Rows.Select(r => new FilamentCostRow(
-                    r.PurchasePriceValue, r.PurchasePriceCurrency, r.InitialNominalWeightMg,
-                    r.MaterialDensityGramPerCubicCm, r.DiameterMm,
-                    r.Source, r.AmountMg, r.LengthInM, r.VolumeMl,
-                    r.EstimatedSource, r.EstimatedAmountMg, r.EstimatedLengthInM, r.EstimatedVolumeMl));
-
-                var filament = PrintCostCalculator.FilamentCost(rows, inputs);
-                var electricity = PrintCostCalculator.ElectricityCost(p.DurationSeconds, p.WattageW, inputs);
-
-                if (filament.Amount.HasValue) total = (total ?? 0m) + filament.Amount.Value;
-                if (electricity.Amount.HasValue) total = (total ?? 0m) + electricity.Amount.Value;
-
-                Count(filament.ExclusionReasons);
-                Count(electricity.ExclusionReasons);
-            }
-
-            return (total, exclusions, inputs.UserCurrency);
+            return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency);
         }
 
-        private static async Task<OverviewHighlights> BuildHighlights(IQueryable<Print> scoped, CancellationToken ct)
+        private static async Task<OverviewHighlights> BuildHighlights(
+            IQueryable<Print> scoped, long userId, CancellationToken ct)
         {
             // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
             // as a final deterministic backstop. Both tie-breakers must be projected, or the
             // ordering silently degrades to "lowest id wins", which is not the specified rule.
             // The sums are inlined rather than using PrintMetrics.*Expr because g.Sum takes a
             // Func, not an Expression (PrintMetrics.cs:31-38).
+            // Owner-scoped before the group: this projection reads printer NAME, make and model,
+            // so an unowned reference here would surface another user's machine on the tile.
             var topPrinter = await scoped
+                .Where(p => p.Printer.UserId == userId)
                 .GroupBy(p => new { p.PrinterId, p.Printer.Name, p.Printer.Make, p.Printer.Model })
                 .Select(g => new
                 {
@@ -323,7 +239,10 @@ namespace PrintLogApi.Services.Analytics
             // that has no meaning at this grain.
             var topMaterial = await scoped
                 .SelectMany(p => p.FilamentUsage)
-                .Where(pf => pf.Filament != null)
+                // Reads DisplayName and MaterialType, so ownership is required, not just
+                // existence. Unlike the mass sums, a null Filament genuinely has nothing to
+                // rank here, so `linked AND owned` is the right predicate in this one place.
+                .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
                 .GroupBy(pf => new { pf.FilamentId, pf.Filament.DisplayName, pf.Filament.MaterialType })
                 .Select(g => new
                 {

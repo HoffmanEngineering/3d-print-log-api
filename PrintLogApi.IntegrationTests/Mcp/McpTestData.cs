@@ -66,12 +66,16 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long DstPrinterId { get; private set; }
 
         /// <summary>
-        /// Both instants are 01:30 local in America/New_York on 1 November 2026 — the first in EDT,
+        /// Both instants are 01:30 local in America/New_York on 2 November 2025 — the first in EDT,
         /// the second in EST, the repeated hour of a 25-hour fall-back day. They must land in the
         /// SAME local day bucket. A fixed-offset implementation splits them across two days.
+        ///
+        /// The fixture sits deliberately in the PAST. AnalyticsFilter.Normalize clamps a future
+        /// ToDate back to now, so a fixture dated ahead of the clock is unreachable: the window
+        /// asking for it inverts and Validate rejects it.
         /// </summary>
-        public static readonly DateTimeOffset DstBeforeFallBack = new(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
-        public static readonly DateTimeOffset DstAfterFallBack = new(2026, 11, 1, 6, 30, 0, TimeSpan.Zero);
+        public static readonly DateTimeOffset DstBeforeFallBack = new(2025, 11, 2, 5, 30, 0, TimeSpan.Zero);
+        public static readonly DateTimeOffset DstAfterFallBack = new(2025, 11, 2, 6, 30, 0, TimeSpan.Zero);
 
         public const string MetricsUserOAuthId = "auth0|mcp-metrics-user";
 
@@ -89,6 +93,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long ZeroActualPrintId { get; private set; }    // actual 0 (webhook coercion), estimate 1800
         public static long ActualWinsPrintId { get; private set; }    // actual 7200 beats estimate 3600
         public static long NoDurationPrintId { get; private set; }    // neither recorded
+        public static long UndatedPrintId { get; private set; }       // StartDate null: never bucketed
 
         /// <summary>6933 (est) + 1800 (est; stored actual was 0) + 7200 (actual) + 0 (neither).</summary>
         public const int DurationMatrixTotalSeconds = 15933;
@@ -172,6 +177,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 Make = "Bambu",
                 UserId = OtherUserId,
                 IsActive = true,
+                // Deliberately wattage-bearing, and deliberately the ONLY printer that is.
+                // AnalyticsCostProjection guards its Printer join with an ownership predicate;
+                // without a foreign printer whose wattage would visibly change a cost figure,
+                // that guard has nothing to be tested against.
+                WattageW = 350,
             };
             context.Printers.Add(otherPrinter);
             context.SaveChanges();
@@ -709,8 +719,17 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var noDuration = MatrixPrint("No Duration Print", null, null, 4000, -500,
                 legacyActualMg: null, legacyEstimatedMg: -500);
 
-            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration);
+            // An undated print: StartDate null, so it is absent from every time-bucketed metric
+            // (series, calendar, streaks, histogram, matrix) and reported as undatedCount instead.
+            // Deliberately carries NO duration and NO material, so every named total above
+            // (DurationMatrixTotalSeconds, MaterialMatrixTotalMg, …) keeps its value and this
+            // print changes only the counts that are supposed to notice it.
+            var undated = MatrixPrint("Undated Print", null, null, null, null);
+            undated.StartDate = null;
+
+            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration, undated);
             context.SaveChanges();
+            UndatedPrintId = undated.Id;
 
             EstimatedOnlyPrintId = estimatedOnly.Id;
             ZeroActualPrintId = zeroActual.Id;
