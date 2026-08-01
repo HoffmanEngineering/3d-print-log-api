@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +30,11 @@ namespace PrintLogApi.IntegrationTests.Analytics
         public async Task GetAccuracy_SuppressesAGroupBelowTheMinimumSampleSize()
         {
             var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+            // Assert.All over an empty — or entirely large-sample — collection proves nothing, so
+            // pin that the fixture actually contains a group below the threshold first.
+            Assert.NotEmpty(response.ByPrinter);
+            Assert.Contains(response.ByPrinter, g => g.SampleSize < AccuracyStats.MinSampleSize);
 
             Assert.All(response.ByPrinter, group =>
             {
@@ -144,6 +150,56 @@ namespace PrintLogApi.IntegrationTests.Analytics
                 Assert.Contains(callout.Scope, new[] { "printer", "material" });
                 Assert.Contains(callout.Dimension, new[] { "time", "material" });
             });
+        }
+
+        /// <summary>
+        /// The unowned-FILTER test below proves ids the caller supplies match nothing. This proves
+        /// the other direction: a print the caller genuinely owns that REFERENCES someone else's
+        /// printer must not surface that machine's name or its id as a clickable group.
+        /// </summary>
+        [Fact]
+        public async Task GetAccuracy_NeverNamesAPrinterTheCallerDoesNotOwn()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            var foreignPrinter = await db.Printers
+                .FirstAsync(p => p.UserId != Mcp.McpTestData.MetricsUserId);
+
+            var trespass = new PrintLogApi.Models.Print
+            {
+                CreatedById = Mcp.McpTestData.MetricsUserId,
+                PrinterId = foreignPrinter.Id,
+                Title = "Cross-tenant printer reference",
+                Status = PrintLogApi.Models.Print.PrintStatus.Success,
+                ViewStatus = PrintLogApi.Models.Print.PrintViewStatus.Private,
+                StartDate = DateTimeOffset.UtcNow.AddDays(-1),
+                PrintTimeInSeconds = 3600,
+                EstimatedPrintTimeInSeconds = 3000,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedById = Mcp.McpTestData.MetricsUserId,
+                UpdatedDate = DateTime.UtcNow,
+            };
+            db.Prints.Add(trespass);
+            await db.SaveChangesAsync();
+
+            try
+            {
+                var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
+
+                Assert.DoesNotContain(
+                    response.ByPrinter,
+                    g => g.Key == foreignPrinter.Id.ToString(CultureInfo.InvariantCulture));
+                Assert.All(response.ByPrinter, g =>
+                    Assert.NotEqual(foreignPrinter.Name, g.Label));
+                Assert.All(response.Callouts, c =>
+                    Assert.NotEqual(foreignPrinter.Name, c.Label));
+            }
+            finally
+            {
+                db.Remove(trespass);
+                await db.SaveChangesAsync();
+            }
         }
 
         [Fact]

@@ -172,8 +172,18 @@ namespace PrintLogApi.Services.Analytics
             AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity)
         {
             var dated = prints.Where(p => p.StartDate.HasValue).ToList();
-            var from = filter.FromDate
-                ?? (dated.Count > 0 ? dated.Min(p => p.StartDate!.Value) : DateTimeOffset.UtcNow);
+
+            // On an all-time query the window opens at the earliest thing the chart has to plot,
+            // which is not necessarily a print: maintenance counts towards MaintenanceSpend, so a
+            // service logged before the first dated print would be in the tile and missing from
+            // the chart, and the two would not add up.
+            var earliest = dated
+                .Select(p => p.StartDate!.Value)
+                .Concat(maintenance.Select(m => m.Instant))
+                .DefaultIfEmpty(DateTimeOffset.UtcNow)
+                .Min();
+
+            var from = filter.FromDate ?? earliest;
             var to = filter.ToDate ?? DateTimeOffset.UtcNow;
             if (to <= from) return Array.Empty<CostSeriesBucket>();
 

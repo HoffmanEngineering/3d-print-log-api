@@ -27,7 +27,8 @@ namespace PrintLogApi.Services.Analytics
         public AccuracyAnalyticsService(PrintLogContext context) => _context = context;
 
         private sealed record Row(
-            long PrinterId, string PrinterName, DateTimeOffset? StartDate,
+            long PrintId, long PrinterId, bool PrinterOwned, string PrinterName,
+            DateTimeOffset? StartDate,
             int EstimatedSeconds, int ActualSeconds,
             long EstimatedMg, long ActualMg);
 
@@ -80,8 +81,16 @@ namespace PrintLogApi.Services.Analytics
             var rows = (await scoped
                 .Select(p => new
                 {
+                    PrintId = p.Id,
                     p.PrinterId,
-                    PrinterName = p.Printer.Name ?? (p.Printer.Make + " " + p.Printer.Model),
+                    // Owner-scoped, exactly as BuildHighlights and AnalyticsCostProjection are:
+                    // this projection reads a printer's NAME, make and model, so an unowned
+                    // reference would surface another user's machine — and its id — as a group
+                    // label the caller can click through on.
+                    PrinterOwned = p.Printer.UserId == userId,
+                    PrinterName = p.Printer.UserId == userId
+                        ? (p.Printer.Name ?? (p.Printer.Make + " " + p.Printer.Model))
+                        : null,
                     p.StartDate,
                     EstimatedSeconds = p.EstimatedPrintTimeInSeconds ?? 0,
                     ActualSeconds = p.PrintTimeInSeconds ?? 0,
@@ -100,7 +109,7 @@ namespace PrintLogApi.Services.Analytics
                 })
                 .ToListAsync(ct))
                 .Select(r => new Row(
-                    r.PrinterId, r.PrinterName, r.StartDate,
+                    r.PrintId, r.PrinterId, r.PrinterOwned, r.PrinterName, r.StartDate,
                     r.EstimatedSeconds, r.ActualSeconds, r.EstimatedMg, r.ActualMg))
                 .ToList();
 
@@ -121,18 +130,38 @@ namespace PrintLogApi.Services.Analytics
             // record below; this one only says "these prints were looked at".
             coverage.Counted = rows.Count;
 
+            // Only prints on a printer this user owns can be grouped BY printer: the group carries
+            // the machine's name and its id. The rest still count towards the headline medians,
+            // the scatter and the trend, none of which name a printer.
+            var ownedRows = rows.Where(r => r.PrinterOwned).ToList();
+
             var byPrinter = GroupAccuracy(
-                rows, "printer",
+                ownedRows, "printer",
                 r => r.PrinterId.ToString(CultureInfo.InvariantCulture),
                 r => r.PrinterName,
                 r => new AccuracySample(r.EstimatedSeconds, r.ActualSeconds));
 
-            var byMaterial = await GroupByMaterial(userId, scoped, coverage, ct);
+            var (byMaterial, materialSuppressedPrintIds) =
+                await GroupByMaterial(userId, scoped, coverage, ct);
 
-            coverage.Exclude(
-                ExclusionReason.SampleTooSmall,
-                byPrinter.Count(g => g.SuppressedForSmallSample) +
-                byMaterial.Count(g => g.SuppressedForSmallSample));
+            // SampleTooSmall is counted in PRINTS, because that is this record's declared
+            // population. A count of suppressed GROUPS would be a number in the wrong unit — the
+            // dishonest-coverage shape spec §6.3 exists to prevent, and the same rule
+            // GroupByMaterial's row-versus-print comment spells out. The two sets are unioned
+            // rather than added, so a print suppressed on both axes is not counted twice.
+            var suppressedPrinterKeys = byPrinter
+                .Where(g => g.SuppressedForSmallSample)
+                .Select(g => g.Key)
+                .ToHashSet();
+
+            var suppressedPrintIds = ownedRows
+                .Where(r => suppressedPrinterKeys.Contains(
+                    r.PrinterId.ToString(CultureInfo.InvariantCulture)))
+                .Select(r => r.PrintId)
+                .ToHashSet();
+            suppressedPrintIds.UnionWith(materialSuppressedPrintIds);
+
+            coverage.Exclude(ExclusionReason.SampleTooSmall, suppressedPrintIds.Count);
 
             return new AccuracyResponse(
                 filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
@@ -166,7 +195,12 @@ namespace PrintLogApi.Services.Analytics
                 .OrderByDescending(g => g.SampleSize).ThenBy(g => g.Key)
                 .ToList();
 
-        private async Task<IReadOnlyList<AccuracyGroup>> GroupByMaterial(
+        /// <summary>
+        /// The by-material groups, plus the ids of the PRINTS in the suppressed ones. The caller's
+        /// coverage record is denominated in prints, so it cannot be told a count of rows or of
+        /// groups; the print ids let it union rather than add across the two axes.
+        /// </summary>
+        private async Task<(IReadOnlyList<AccuracyGroup> Groups, IReadOnlyCollection<long> SuppressedPrintIds)> GroupByMaterial(
             long userId, IQueryable<Print> scoped, CoverageBuilder coverage, CancellationToken ct)
         {
             // Two questions, two units, deliberately — this is not an inconsistency:
@@ -186,7 +220,7 @@ namespace PrintLogApi.Services.Analytics
             if (usageRowCount > AnalyticsService.MaxSeriesRows)
             {
                 coverage.Exclude(ExclusionReason.RowCapExceeded, await scoped.CountAsync(ct));
-                return Array.Empty<AccuracyGroup>();
+                return (Array.Empty<AccuracyGroup>(), Array.Empty<long>());
             }
 
             // Flattened with the result selector and filtered OUTSIDE the SelectMany: the
@@ -196,14 +230,16 @@ namespace PrintLogApi.Services.Analytics
                 .Where(x => x.pf.Filament != null && x.pf.Filament.CreatedById == userId)
                 .Select(x => new
                 {
+                    PrintId = x.p.Id,
                     Key = x.pf.Filament.MaterialType ?? "Unknown",
                     Estimated = (double)(x.pf.EstimatedAmountMg ?? 0),
                     Actual = (double)(x.pf.AmountMg ?? 0),
                 })
                 .ToListAsync(ct);
 
-            return rows
-                .GroupBy(r => r.Key)
+            var grouped = rows.GroupBy(r => r.Key).ToList();
+
+            var groups = grouped
                 .Select(g =>
                 {
                     var result = AccuracyStats.Analyze(
@@ -214,6 +250,19 @@ namespace PrintLogApi.Services.Analytics
                 })
                 .OrderByDescending(g => g.SampleSize).ThenBy(g => g.Key)
                 .ToList();
+
+            var suppressedKeys = groups
+                .Where(g => g.SuppressedForSmallSample)
+                .Select(g => g.Key)
+                .ToHashSet();
+
+            var suppressedPrintIds = grouped
+                .Where(g => suppressedKeys.Contains(g.Key))
+                .SelectMany(g => g.Select(r => r.PrintId))
+                .Distinct()
+                .ToList();
+
+            return (groups, suppressedPrintIds);
         }
 
         private static IReadOnlyList<AccuracyTrendBucket> BiasTrend(
