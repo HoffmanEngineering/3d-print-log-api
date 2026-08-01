@@ -63,9 +63,9 @@ namespace PrintLogApi.Services.Analytics
             var scoped = AnalyticsQueryScope.Scope(
                 _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
-            var coverage = new CoverageBuilder("prints") { Total = await scoped.CountAsync(ct) };
-            coverage.UndatedCount = filter.HasRange
-                ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+            var counts = await AnalyticsPrintCounts.Load(scoped, ct);
+            var coverage = new CoverageBuilder("prints") { Total = counts.Total };
+            coverage.UndatedCount = filter.HasRange ? 0 : counts.Undated;
 
             var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
             var currency = projection.Inputs.UserCurrency;

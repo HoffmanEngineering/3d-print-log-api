@@ -65,9 +65,9 @@ namespace PrintLogApi.Services.Analytics
             var scoped = AnalyticsQueryScope.Scope(
                 _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
-            var coverage = new CoverageBuilder("prints") { Total = await scoped.CountAsync(ct) };
-            coverage.UndatedCount = filter.HasRange
-                ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+            var counts = await AnalyticsPrintCounts.Load(scoped, ct);
+            var coverage = new CoverageBuilder("prints") { Total = counts.Total };
+            coverage.UndatedCount = filter.HasRange ? 0 : counts.Undated;
 
             if (coverage.Total > AnalyticsService.MaxSeriesRows)
             {
@@ -219,7 +219,9 @@ namespace PrintLogApi.Services.Analytics
             var usageRowCount = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
             if (usageRowCount > AnalyticsService.MaxSeriesRows)
             {
-                coverage.Exclude(ExclusionReason.RowCapExceeded, await scoped.CountAsync(ct));
+                // coverage.Total is this same scoped count, already read by the caller. Counting
+                // the set a third time to fill in a number we are holding is pure round-trip.
+                coverage.Exclude(ExclusionReason.RowCapExceeded, coverage.Total);
                 return (Array.Empty<AccuracyGroup>(), Array.Empty<long>());
             }
 

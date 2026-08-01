@@ -93,8 +93,13 @@ namespace PrintLogApi.Services.Analytics
             var scoped = AnalyticsQueryScope.Scope(
                 _context.Prints.AsNoTracking(), userId, filter, from, to);
 
-            var printCount = await scoped.CountAsync(ct);
-            var undatedCount = hasRange ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+            // One aggregate for the plain counts. The four metric sums below stay as separate
+            // top-level calls on purpose: g.Sum takes a Func rather than an Expression, so
+            // folding them in here would mean inlining copies of the shared PrintMetrics
+            // expressions and letting the overview drift from every other tab that uses them.
+            var counts = await AnalyticsPrintCounts.Load(scoped, ct);
+            var printCount = counts.Total;
+            var undatedCount = hasRange ? 0 : counts.Undated;
 
             // Top-level sums so the shared expressions translate. Never inside a GroupBy.
             var durationSeconds = await scoped.SumAsync(PrintMetrics.DurationSecondsExpr, ct);
@@ -110,7 +115,7 @@ namespace PrintLogApi.Services.Analytics
             // A missing key reads as "unknown", not "none".
             foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
-            var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
+            var (series, seriesTruncated) = await BuildSeries(scoped, counts, from, to, zone, granularity, ct);
             var (cost, costExclusions, currency, priciest) = await ComputeCost(userId, scoped, ct);
             var highlights = await BuildHighlights(scoped, userId, priciest, ct);
 
@@ -134,12 +139,16 @@ namespace PrintLogApi.Services.Analytics
         /// coarser grain risks misattributing prints in a boundary period.
         /// </summary>
         private static async Task<(IReadOnlyList<SeriesBucket> Series, bool Truncated)> BuildSeries(
-            IQueryable<Print> scoped, DateTimeOffset? from, DateTimeOffset? to,
+            IQueryable<Print> scoped, ScopedPrintCounts counts,
+            DateTimeOffset? from, DateTimeOffset? to,
             TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
         {
             var dated = scoped.Where(p => p.StartDate != null);
 
-            var windowFrom = from ?? await dated.MinAsync(p => p.StartDate, ct) ?? DateTimeOffset.UtcNow;
+            // The window start and the row cap both come from the caller's single aggregate.
+            // MIN ignores NULLs in SQL, so the earliest start over the whole scoped set is the
+            // earliest DATED start — this is the same number the separate MinAsync returned.
+            var windowFrom = from ?? counts.EarliestStart ?? DateTimeOffset.UtcNow;
             var windowTo = to ?? DateTimeOffset.UtcNow;
             if (windowTo <= windowFrom) return (Array.Empty<SeriesBucket>(), false);
 
@@ -147,10 +156,9 @@ namespace PrintLogApi.Services.Analytics
             if (buckets.Count == 0) return (Array.Empty<SeriesBucket>(), false);
 
             // Bound the work before doing it. Grouping is by exact instant, so the returned row
-            // count is at most the dated print count; a cheap COUNT decides whether streaming
-            // them all back is reasonable. Reporting truncation beats either silently returning
-            // an empty chart or running an unbounded query.
-            if (await dated.CountAsync(ct) > MaxSeriesRows)
+            // count is at most the dated print count. Reporting truncation beats either silently
+            // returning an empty chart or running an unbounded query.
+            if (counts.Dated > MaxSeriesRows)
             {
                 return (Array.Empty<SeriesBucket>(), true);
             }

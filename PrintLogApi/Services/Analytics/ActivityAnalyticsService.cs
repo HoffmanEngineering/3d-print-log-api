@@ -38,13 +38,17 @@ namespace PrintLogApi.Services.Analytics
             var coverage = new CoverageBuilder("prints");
             var dated = scoped.Where(p => p.StartDate != null);
 
-            coverage.Total = await scoped.CountAsync(ct);
-            coverage.UndatedCount = filter.HasRange ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+            // Coverage total, the undated exclusion, the earliest start and the series row cap
+            // are four facts about one filtered set. One aggregate answers all four.
+            var printCounts = await AnalyticsPrintCounts.Load(scoped, ct);
 
-            var windowFrom = filter.FromDate ?? await dated.MinAsync(p => p.StartDate, ct) ?? DateTimeOffset.UtcNow;
+            coverage.Total = printCounts.Total;
+            coverage.UndatedCount = filter.HasRange ? 0 : printCounts.Undated;
+
+            var windowFrom = filter.FromDate ?? printCounts.EarliestStart ?? DateTimeOffset.UtcNow;
             var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
 
-            if (windowTo <= windowFrom || await dated.CountAsync(ct) > AnalyticsService.MaxSeriesRows)
+            if (windowTo <= windowFrom || printCounts.Dated > AnalyticsService.MaxSeriesRows)
             {
                 coverage.Exclude(ExclusionReason.RowCapExceeded, coverage.Total);
                 return Empty(filter, granularity, null, coverage.Build());
@@ -94,7 +98,7 @@ namespace PrintLogApi.Services.Analytics
             coverage.Counted = rows.Sum(r => r.Count);
 
             var buckets = TimeBucketer.BuildBuckets(windowFrom, windowTo, zone, granularity, DayOfWeek.Sunday);
-            var costByBucket = await CostByBucket(userId, scoped, buckets, coverage, ct);
+            var (costByBucket, currency) = await CostByBucket(userId, scoped, buckets, coverage, ct);
 
             var counts = new int[buckets.Count];
             var durations = new long[buckets.Count];
@@ -102,7 +106,11 @@ namespace PrintLogApi.Services.Analytics
 
             var calendarCounts = new Dictionary<DateOnly, int>();
             var matrixObservations = new List<(int Weekday, int Hour, int Count)>();
-            var durationSamples = new List<int>();
+            // (duration, howMany) pairs, NOT one entry per print. The histogram has eight
+            // counters; repeating a duration once per print to fill them allocated an int per
+            // print — up to MaxSeriesRows of them — to answer a question that only ever needed
+            // the weight.
+            var durationSamples = new List<(int Seconds, int Count)>();
             var durationMissing = 0;
 
             foreach (var row in rows)
@@ -125,7 +133,7 @@ namespace PrintLogApi.Services.Analytics
                 matrixObservations.Add(((int)local.DayOfWeek, local.Hour, row.Count));
 
                 if (row.DurationSeconds > 0)
-                    durationSamples.AddRange(Enumerable.Repeat(row.DurationSeconds, row.Count));
+                    durationSamples.Add((row.DurationSeconds, row.Count));
                 else
                     durationMissing += row.Count;
             }
@@ -159,7 +167,7 @@ namespace PrintLogApi.Services.Analytics
 
             return new ActivityResponse(
                 filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
-                await UserCurrency(userId, ct),
+                currency,
                 series, calendar, calendarFrom, calendarTo, streaks,
                 ActivityStats.DurationHistogram(durationSamples),
                 ActivityStats.StartTimeMatrix(matrixObservations),
@@ -170,8 +178,13 @@ namespace PrintLogApi.Services.Analytics
         /// Per-bucket cost, or null for the whole series when the cost row cap was exceeded. The
         /// other three metrics on the toggle stay usable either way — one expensive metric must
         /// not take the tab down with it.
+        ///
+        /// Also hands back the currency the projection already read. The response used to
+        /// re-query UserSettings for it after this had loaded every setting the user has — a
+        /// second round-trip for a value already in hand, and one that could in principle
+        /// disagree with the figures it labels.
         /// </summary>
-        private async Task<decimal?[]> CostByBucket(
+        private async Task<(decimal?[] Totals, string Currency)> CostByBucket(
             long userId, IQueryable<Print> scoped, IReadOnlyList<TimeBucket> buckets,
             CoverageBuilder coverage, CancellationToken ct)
         {
@@ -179,7 +192,7 @@ namespace PrintLogApi.Services.Analytics
             if (projection.RowCapExceeded)
             {
                 coverage.Exclude(ExclusionReason.RowCapExceeded, projection.PrintCount);
-                return null;
+                return (null, projection.Inputs.UserCurrency);
             }
 
             foreach (var (reason, count) in AnalyticsCostProjection.CountExclusions(projection.Prints))
@@ -193,7 +206,7 @@ namespace PrintLogApi.Services.Analytics
                 if (index < 0) continue;
                 totals[index] = (totals[index] ?? 0m) + print.Total.Value;
             }
-            return totals;
+            return (totals, projection.Inputs.UserCurrency);
         }
 
         /// <summary>
@@ -228,18 +241,12 @@ namespace PrintLogApi.Services.Analytics
             return (days, first, last, truncated);
         }
 
-        private async Task<string> UserCurrency(long userId, CancellationToken ct) =>
-            await _context.UserSettings.AsNoTracking()
-                .Where(s => s.UserId == userId && s.UserSettingTypeId == 5)
-                .Select(s => s.Value)
-                .FirstOrDefaultAsync(ct);
-
         private static ActivityResponse Empty(
             AnalyticsFilter filter, AnalyticsGranularity granularity, string currency, Coverage coverage) =>
             new(filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(), currency,
                 Array.Empty<ActivitySeriesBucket>(), Array.Empty<CalendarDay>(), null, null,
                 ActivityStats.Streaks(Array.Empty<DayCount>(), DateOnly.FromDateTime(DateTime.UtcNow)),
-                ActivityStats.DurationHistogram(Array.Empty<int>()),
+                ActivityStats.DurationHistogram(Array.Empty<(int, int)>()),
                 ActivityStats.StartTimeMatrix(Array.Empty<(int, int, int)>()),
                 coverage);
     }

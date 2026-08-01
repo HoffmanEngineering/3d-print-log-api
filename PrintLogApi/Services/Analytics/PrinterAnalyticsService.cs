@@ -113,6 +113,9 @@ namespace PrintLogApi.Services.Analytics
 
             // Intervals for utilization, plus the per-bucket time series: both need per-print
             // (start, duration), so they share one bounded read.
+            // A single targeted COUNT, deliberately not AnalyticsPrintCounts: this is the only
+            // count this method needs over `scoped`, so the shared aggregate would compute three
+            // more numbers to save no round-trip at all.
             var datedCount = await scoped.CountAsync(p => p.StartDate != null, ct);
             var seriesTruncated = datedCount > AnalyticsService.MaxSeriesRows;
 

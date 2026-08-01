@@ -70,16 +70,34 @@ namespace PrintLogApi.Services.Analytics
                 DefaultWattageW: Setting(13));       // Electricity_DefaultWattageW
         }
 
+        /// <param name="inputs">
+        /// Pre-loaded settings, for a caller that has already read them. Passing them avoids a
+        /// second identical UserSettings round-trip AND removes the possibility of one request
+        /// costing two things against two different reads of the same rate.
+        /// </param>
         public static async Task<CostProjection> Project(
-            PrintLogContext context, long userId, IQueryable<Print> scoped, CancellationToken ct)
+            PrintLogContext context, long userId, IQueryable<Print> scoped, CancellationToken ct,
+            CostInputs inputs = null)
         {
-            var inputs = await LoadInputs(context, userId, ct);
+            inputs ??= await LoadInputs(context, userId, ct);
 
             // Cap on the rows that would actually be materialized: one per filament usage row,
             // plus one per print for the printer/electricity term. Counting prints alone would
             // let a multi-material library blow several times past the limit.
-            var filamentRows = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
-            var printRows = await scoped.CountAsync(ct);
+            //
+            // Both counts come from ONE aggregate: they are two numbers about the same filtered
+            // set, and asking for them separately meant two scans to decide a single question.
+            var caps = await scoped
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    PrintRows = g.Count(),
+                    FilamentRows = g.Sum(p => p.FilamentUsage.Count()),
+                })
+                .FirstOrDefaultAsync(ct);
+
+            var filamentRows = caps?.FilamentRows ?? 0;
+            var printRows = caps?.PrintRows ?? 0;
             if (filamentRows + printRows > AnalyticsService.MaxCostRows)
                 return new CostProjection(System.Array.Empty<CostedPrint>(), inputs, true, printRows);
 
