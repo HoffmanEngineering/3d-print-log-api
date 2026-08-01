@@ -45,11 +45,17 @@ namespace PrintLogApi.Services.Analytics
 
             var current = await Aggregate(userId, filter, filter.FromDate, filter.ToDate, zone, granularity, ct);
 
+            // PreviousWindow, not TimeBucketer.PreviousWindow: the latter subtracts a UTC span,
+            // which lands an hour off local midnight whenever the range crosses a DST boundary.
+            // The other five tabs use this helper, and one screen must not show the same delta
+            // computed two ways.
             AggregateResult previous = null;
-            if (filter.ComparePrevious && filter.HasRange)
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is not null)
             {
-                var (pFrom, pTo) = TimeBucketer.PreviousWindow(filter.FromDate.Value, filter.ToDate.Value);
-                previous = await Aggregate(userId, filter, pFrom, pTo, zone, granularity, ct);
+                previous = await Aggregate(
+                    userId, previousFilter, previousFilter.FromDate, previousFilter.ToDate,
+                    zone, granularity, ct);
             }
 
             return new OverviewResponse(

@@ -44,6 +44,31 @@ namespace PrintLogApi.Services.Analytics
 
         public async Task<MaterialsResponse> GetMaterials(long userId, AnalyticsFilter filter, CancellationToken ct)
         {
+            var current = await Compute(userId, filter, ct);
+
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is null) return current;
+
+            var previous = await Compute(userId, previousFilter, ct);
+
+            // The two waste figures are this tab's scalar tiles. Burn rate and runway are
+            // deliberately excluded: both already describe a trailing window, so a delta against
+            // another trailing window would compare two overlapping periods.
+            return current with
+            {
+                WasteGrams = current.WasteGrams with
+                {
+                    Previous = PreviousWindow.Usable(previous.WasteGrams.Value),
+                },
+                WasteCost = current.WasteCost with
+                {
+                    Previous = PreviousWindow.Usable(previous.WasteCost.Value),
+                },
+            };
+        }
+
+        private async Task<MaterialsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+        {
             filter.TryResolveTimeZone(out var zone);
             zone ??= TimeZoneInfo.Utc;
             var granularity = filter.ResolveGranularity();

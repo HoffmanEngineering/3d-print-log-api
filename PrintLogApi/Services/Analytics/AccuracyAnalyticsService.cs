@@ -33,6 +33,30 @@ namespace PrintLogApi.Services.Analytics
 
         public async Task<AccuracyResponse> GetAccuracy(long userId, AnalyticsFilter filter, CancellationToken ct)
         {
+            var current = await Compute(userId, filter, ct);
+
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is null) return current;
+
+            var previous = await Compute(userId, previousFilter, ct);
+
+            // Only the SCALAR medians carry a delta. The scatter, the trend and the per-group
+            // rows are not tiles, and a per-bucket delta is a different chart.
+            return current with
+            {
+                TimeAccuracyMedian = current.TimeAccuracyMedian with
+                {
+                    Previous = PreviousWindow.Usable(previous.TimeAccuracyMedian.Value),
+                },
+                MaterialAccuracyMedian = current.MaterialAccuracyMedian with
+                {
+                    Previous = PreviousWindow.Usable(previous.MaterialAccuracyMedian.Value),
+                },
+            };
+        }
+
+        private async Task<AccuracyResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+        {
             filter.TryResolveTimeZone(out var zone);
             zone ??= TimeZoneInfo.Utc;
             var granularity = filter.ResolveGranularity();

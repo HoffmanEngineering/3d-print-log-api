@@ -35,6 +35,27 @@ namespace PrintLogApi.Services.Analytics
 
         public async Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct)
         {
+            var current = await Compute(userId, filter, ct);
+
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is null) return current;
+
+            var previous = await Compute(userId, previousFilter, ct);
+
+            // Only the SCALAR tiles carry a delta. A bucket-by-bucket delta on a series is a
+            // different chart, not a delta, and the spec asks for tile deltas.
+            return current with
+            {
+                TotalSpend = current.TotalSpend with { Previous = PreviousWindow.Usable(previous.TotalSpend.Value) },
+                FilamentSpend = current.FilamentSpend with { Previous = PreviousWindow.Usable(previous.FilamentSpend.Value) },
+                ElectricitySpend = current.ElectricitySpend with { Previous = PreviousWindow.Usable(previous.ElectricitySpend.Value) },
+                MaintenanceSpend = current.MaintenanceSpend with { Previous = PreviousWindow.Usable(previous.MaintenanceSpend.Value) },
+                CostOfFailure = current.CostOfFailure with { Previous = PreviousWindow.Usable(previous.CostOfFailure.Value) },
+            };
+        }
+
+        private async Task<CostsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+        {
             filter.TryResolveTimeZone(out var zone);
             zone ??= TimeZoneInfo.Utc;
             var granularity = filter.ResolveGranularity();
