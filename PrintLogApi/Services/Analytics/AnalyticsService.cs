@@ -105,8 +105,8 @@ namespace PrintLogApi.Services.Analytics
             foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
             var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
-            var (cost, costExclusions, currency) = await ComputeCost(userId, scoped, ct);
-            var highlights = await BuildHighlights(scoped, userId, ct);
+            var (cost, costExclusions, currency, priciest) = await ComputeCost(userId, scoped, ct);
+            var highlights = await BuildHighlights(scoped, userId, priciest, ct);
 
             return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
                 materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
@@ -177,7 +177,7 @@ namespace PrintLogApi.Services.Analytics
                 false);
         }
 
-        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency)> ComputeCost(
+        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency, HighlightRef Priciest)> ComputeCost(
             long userId, IQueryable<Print> scoped, CancellationToken ct)
         {
             var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
@@ -186,17 +186,29 @@ namespace PrintLogApi.Services.Analytics
                 return (
                     null,
                     new Dictionary<string, int> { [ExclusionReason.RowCapExceeded] = projection.PrintCount },
-                    projection.Inputs.UserCurrency);
+                    projection.Inputs.UserCurrency,
+                    // No projection means no priciest print. Guessing one from a second, cheaper
+                    // pass would put a figure on screen the cost tile has already declined to show.
+                    null);
 
             var total = projection.Prints.Any(p => p.Total.HasValue)
                 ? projection.Prints.Sum(p => p.Total ?? 0m)
                 : (decimal?)null;
 
-            return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency);
+            // Priciest print, from the SAME projection the cost tile uses — computing it from a
+            // second pass is how the tile and the highlight would come to disagree.
+            var priciest = projection.Prints
+                .Where(p => p.Total.HasValue)
+                .OrderByDescending(p => p.Total!.Value).ThenBy(p => p.PrintId)
+                .Select(p => new HighlightRef(
+                    p.PrintId.ToString(CultureInfo.InvariantCulture), p.Title, (double)p.Total!.Value, "cost"))
+                .FirstOrDefault();
+
+            return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency, priciest);
         }
 
         private static async Task<OverviewHighlights> BuildHighlights(
-            IQueryable<Print> scoped, long userId, CancellationToken ct)
+            IQueryable<Print> scoped, long userId, HighlightRef priciest, CancellationToken ct)
         {
             // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
             // as a final deterministic backstop. Both tie-breakers must be projected, or the
@@ -287,8 +299,9 @@ namespace PrintLogApi.Services.Analytics
                     topMaterial.Count, "prints"),
                 longest is null ? null : new HighlightRef(
                     longest.Id.ToString(CultureInfo.InvariantCulture), longest.Title, longest.Seconds, "seconds"),
-                // Priciest print needs per-print costing, which is capped; Phase 4 (Costs tab) owns it.
-                null);
+                // Computed in ComputeCost, from the same projection the cost tile uses, and null
+                // whenever that projection could not price anything.
+                priciest);
         }
 
         private static OverviewTiles BuildTiles(AggregateResult c, AggregateResult p)

@@ -732,7 +732,19 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 EstimatedFilamentUsageMg = legacyEstimatedMg,
                 FilamentUsage = new List<PrintFilament>
                 {
-                    new() { Id = Guid.NewGuid(), FilamentId = filamentId, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
+                    // Source is explicit because the enum has no 0 member: leaving it at default(0)
+                    // makes PrintCostCalculator.ToGrams return null for every row, so the whole
+                    // fixture becomes unpriceable and every cost assertion passes vacuously.
+                    // Weight matches the AmountMg columns these rows actually carry.
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        FilamentId = filamentId,
+                        AmountMg = amountMg,
+                        EstimatedAmountMg = estimatedAmountMg,
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                    },
                 },
             };
 
