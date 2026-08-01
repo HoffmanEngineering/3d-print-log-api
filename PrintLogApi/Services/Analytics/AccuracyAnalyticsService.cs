@@ -1,0 +1,244 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Analytics;
+
+namespace PrintLogApi.Services.Analytics
+{
+    /// <summary>
+    /// The Accuracy tab. Time and material are computed as SEPARATE populations: a print can have
+    /// a measured duration and an estimated-only material amount, and requiring both would
+    /// silently shrink each sample.
+    /// </summary>
+    public sealed class AccuracyAnalyticsService : IAccuracyAnalyticsService
+    {
+        public const int ScatterBins = 24;
+
+        /// <summary>Below a 10% deviation, a callout is noise dressed up as advice.</summary>
+        public const double MinCalloutDeviation = 0.1;
+
+        private readonly PrintLogContext _context;
+
+        public AccuracyAnalyticsService(PrintLogContext context) => _context = context;
+
+        private sealed record Row(
+            long PrinterId, string PrinterName, DateTimeOffset? StartDate,
+            int EstimatedSeconds, int ActualSeconds,
+            long EstimatedMg, long ActualMg);
+
+        public async Task<AccuracyResponse> GetAccuracy(long userId, AnalyticsFilter filter, CancellationToken ct)
+        {
+            filter.TryResolveTimeZone(out var zone);
+            zone ??= TimeZoneInfo.Utc;
+            var granularity = filter.ResolveGranularity();
+
+            var scoped = AnalyticsQueryScope.Scope(
+                _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+
+            var coverage = new CoverageBuilder("prints") { Total = await scoped.CountAsync(ct) };
+            coverage.UndatedCount = filter.HasRange
+                ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+
+            if (coverage.Total > AnalyticsService.MaxSeriesRows)
+            {
+                coverage.Exclude(ExclusionReason.RowCapExceeded, coverage.Total);
+                return Empty(filter, granularity, coverage.Build());
+            }
+
+            // Accuracy needs the actual and estimated columns SEPARATELY, so this is one of the
+            // few places that must not use MaterialMgExpr — that expression resolves between
+            // them, which is exactly the comparison being made here.
+            var rows = (await scoped
+                .Select(p => new
+                {
+                    p.PrinterId,
+                    PrinterName = p.Printer.Name ?? (p.Printer.Make + " " + p.Printer.Model),
+                    p.StartDate,
+                    EstimatedSeconds = p.EstimatedPrintTimeInSeconds ?? 0,
+                    ActualSeconds = p.PrintTimeInSeconds ?? 0,
+                    // The rows PLUS the "other filament" scalars. Those two columns are a
+                    // genuine actual/estimate pair on the print itself (PrintProfile keeps them
+                    // parallel for exactly this reason), so omitting them would silently shrink
+                    // the material sample and bias it toward spool-tracked prints.
+                    EstimatedMg = (long)p.FilamentUsage.Sum(pf =>
+                        pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value : 0)
+                        + (p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0
+                            ? p.EstimatedFilamentUsageMg.Value : 0),
+                    ActualMg = (long)p.FilamentUsage.Sum(pf =>
+                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value : 0)
+                        + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0
+                            ? p.FilamentUsageMg.Value : 0),
+                })
+                .ToListAsync(ct))
+                .Select(r => new Row(
+                    r.PrinterId, r.PrinterName, r.StartDate,
+                    r.EstimatedSeconds, r.ActualSeconds, r.EstimatedMg, r.ActualMg))
+                .ToList();
+
+            var timeSamples = rows
+                .Select(r => new AccuracySample(r.EstimatedSeconds, r.ActualSeconds))
+                .ToList();
+            var materialSamples = rows
+                .Select(r => new AccuracySample(r.EstimatedMg, r.ActualMg))
+                .ToList();
+
+            var time = AccuracyStats.Analyze(timeSamples, suppressSmallSamples: false);
+            var material = AccuracyStats.Analyze(materialSamples, suppressSmallSamples: false);
+
+            // The response-level record describes the PRINTS this endpoint examined, and nothing
+            // finer. Time and material are different populations with different sample sizes, so
+            // summing their outliers here would produce a number that describes neither — the
+            // dishonest-coverage shape spec §6.3 exists to prevent. Each metric carries its own
+            // record below; this one only says "these prints were looked at".
+            coverage.Counted = rows.Count;
+
+            var byPrinter = GroupAccuracy(
+                rows, "printer",
+                r => r.PrinterId.ToString(CultureInfo.InvariantCulture),
+                r => r.PrinterName,
+                r => new AccuracySample(r.EstimatedSeconds, r.ActualSeconds));
+
+            var byMaterial = await GroupByMaterial(userId, scoped, coverage, ct);
+
+            coverage.Exclude(
+                ExclusionReason.SampleTooSmall,
+                byPrinter.Count(g => g.SuppressedForSmallSample) +
+                byMaterial.Count(g => g.SuppressedForSmallSample));
+
+            return new AccuracyResponse(
+                filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
+                new Metric(time.MedianRatio, null,
+                    new CoverageBuilder("prints") { Counted = time.SampleSize, Total = rows.Count }
+                        .Exclude(ExclusionReason.OutlierExcluded, time.OutliersExcluded).Build()),
+                new Metric(material.MedianRatio, null,
+                    new CoverageBuilder("prints") { Counted = material.SampleSize, Total = rows.Count }
+                        .Exclude(ExclusionReason.OutlierExcluded, material.OutliersExcluded).Build()),
+                AccuracyStats.Bin(timeSamples, ScatterBins),
+                byPrinter,
+                byMaterial,
+                BiasTrend(rows, filter, zone, granularity),
+                Callouts(byPrinter, "time").Concat(Callouts(byMaterial, "material")).ToList(),
+                coverage.Build());
+        }
+
+        private static IReadOnlyList<AccuracyGroup> GroupAccuracy(
+            IReadOnlyList<Row> rows, string scope,
+            Func<Row, string> key, Func<Row, string> label, Func<Row, AccuracySample> sample) =>
+            rows
+                .GroupBy(key)
+                .Select(g =>
+                {
+                    // suppressSmallSamples: true — a per-group figure below n=5 is noise.
+                    var result = AccuracyStats.Analyze(g.Select(sample), suppressSmallSamples: true);
+                    return new AccuracyGroup(
+                        scope, g.Key, label(g.First()),
+                        result.MedianRatio, result.SampleSize, result.SuppressedForSmallSample);
+                })
+                .OrderByDescending(g => g.SampleSize).ThenBy(g => g.Key)
+                .ToList();
+
+        private async Task<IReadOnlyList<AccuracyGroup>> GroupByMaterial(
+            long userId, IQueryable<Print> scoped, CoverageBuilder coverage, CancellationToken ct)
+        {
+            // Two questions, two units, deliberately — this is not an inconsistency:
+            //
+            //   DECIDING whether to proceed asks "how much would this materialize?" The answer is
+            //   in FILAMENT ROWS, because that is what the projection below returns: one row per
+            //   spool per print, which the caller's print-grain check does not bound (spec §6.4).
+            //
+            //   REPORTING the exclusion asks "what did the reader lose?" The answer must be in
+            //   the unit of the coverage record's population, which here is PRINTS. A row count
+            //   inside a CoverageBuilder("prints") record would be a number in the wrong unit —
+            //   the dishonest-coverage shape §6.3 exists to prevent.
+            //
+            // Reported rather than silent either way: an empty by-material list with no reason is
+            // indistinguishable from "you have never used a tracked spool".
+            var usageRowCount = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
+            if (usageRowCount > AnalyticsService.MaxSeriesRows)
+            {
+                coverage.Exclude(ExclusionReason.RowCapExceeded, await scoped.CountAsync(ct));
+                return Array.Empty<AccuracyGroup>();
+            }
+
+            // Flattened with the result selector and filtered OUTSIDE the SelectMany: the
+            // inner-filter form is a correlated subquery needing SQL APPLY, unsupported on SQLite.
+            var rows = await scoped
+                .SelectMany(p => p.FilamentUsage, (p, pf) => new { p, pf })
+                .Where(x => x.pf.Filament != null && x.pf.Filament.CreatedById == userId)
+                .Select(x => new
+                {
+                    Key = x.pf.Filament.MaterialType ?? "Unknown",
+                    Estimated = (double)(x.pf.EstimatedAmountMg ?? 0),
+                    Actual = (double)(x.pf.AmountMg ?? 0),
+                })
+                .ToListAsync(ct);
+
+            return rows
+                .GroupBy(r => r.Key)
+                .Select(g =>
+                {
+                    var result = AccuracyStats.Analyze(
+                        g.Select(r => new AccuracySample(r.Estimated, r.Actual)), suppressSmallSamples: true);
+                    return new AccuracyGroup(
+                        "material", g.Key, g.Key,
+                        result.MedianRatio, result.SampleSize, result.SuppressedForSmallSample);
+                })
+                .OrderByDescending(g => g.SampleSize).ThenBy(g => g.Key)
+                .ToList();
+        }
+
+        private static IReadOnlyList<AccuracyTrendBucket> BiasTrend(
+            IReadOnlyList<Row> rows, AnalyticsFilter filter,
+            TimeZoneInfo zone, AnalyticsGranularity granularity)
+        {
+            var dated = rows.Where(r => r.StartDate.HasValue).ToList();
+            if (dated.Count == 0) return Array.Empty<AccuracyTrendBucket>();
+
+            var from = filter.FromDate ?? dated.Min(r => r.StartDate!.Value);
+            var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+            if (to <= from) return Array.Empty<AccuracyTrendBucket>();
+
+            var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);
+            var samples = buckets.ToDictionary(b => b.Index, _ => new List<AccuracySample>());
+
+            foreach (var row in dated)
+            {
+                var index = TimeBucketer.IndexOf(buckets, row.StartDate!.Value.ToUniversalTime());
+                if (index < 0) continue;
+                samples[buckets[index].Index].Add(new AccuracySample(row.EstimatedSeconds, row.ActualSeconds));
+            }
+
+            return buckets
+                .Select(b =>
+                {
+                    // Per-period suppression too: a bucket with two prints is not a trend point.
+                    var result = AccuracyStats.Analyze(samples[b.Index], suppressSmallSamples: true);
+                    return new AccuracyTrendBucket(b.Index, b.LocalStart, result.MedianRatio, result.SampleSize);
+                })
+                .ToList();
+        }
+
+        private static IEnumerable<AccuracyCallout> Callouts(
+            IReadOnlyList<AccuracyGroup> groups, string dimension) =>
+            groups
+                .Where(g => g.MedianRatio.HasValue
+                    && g.SampleSize >= AccuracyStats.MinSampleSize
+                    && Math.Abs(g.MedianRatio.Value - 1.0) >= MinCalloutDeviation)
+                .OrderByDescending(g => Math.Abs(g.MedianRatio!.Value - 1.0))
+                .Take(3)
+                .Select(g => new AccuracyCallout(
+                    g.Scope, g.Key, g.Label, dimension, g.MedianRatio!.Value, g.SampleSize));
+
+        private static AccuracyResponse Empty(
+            AnalyticsFilter filter, AnalyticsGranularity granularity, Coverage coverage) =>
+            new(filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(),
+                new Metric(null, null, coverage), new Metric(null, null, coverage),
+                Array.Empty<ScatterBin>(), Array.Empty<AccuracyGroup>(), Array.Empty<AccuracyGroup>(),
+                Array.Empty<AccuracyTrendBucket>(), Array.Empty<AccuracyCallout>(), coverage);
+    }
+}

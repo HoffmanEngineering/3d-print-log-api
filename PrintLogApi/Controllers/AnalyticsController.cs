@@ -33,6 +33,7 @@ namespace PrintLogApi.Controllers
         private readonly IPrinterAnalyticsService _printers;
         private readonly IMaterialAnalyticsService _materials;
         private readonly ICostAnalyticsService _costs;
+        private readonly IAccuracyAnalyticsService _accuracy;
         private readonly IMemoryCache _cache;
         private readonly ICacheVersionService _cacheVersionService;
 
@@ -42,6 +43,7 @@ namespace PrintLogApi.Controllers
             IPrinterAnalyticsService printers,
             IMaterialAnalyticsService materials,
             ICostAnalyticsService costs,
+            IAccuracyAnalyticsService accuracy,
             IMemoryCache cache,
             ICacheVersionService cacheVersionService)
         {
@@ -50,6 +52,7 @@ namespace PrintLogApi.Controllers
             _printers = printers;
             _materials = materials;
             _costs = costs;
+            _accuracy = accuracy;
             _cache = cache;
             _cacheVersionService = cacheVersionService;
         }
@@ -128,5 +131,13 @@ namespace PrintLogApi.Controllers
         public Task<ActionResult<CostsResponse>> GetCosts(
             [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
             Cached("costs", filter, (userId, f) => _costs.GetCosts(userId, f, ct));
+
+        [HttpGet("accuracy")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public Task<ActionResult<AccuracyResponse>> GetAccuracy(
+            [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
+            Cached("accuracy", filter, (userId, f) => _accuracy.GetAccuracy(userId, f, ct));
     }
 }
