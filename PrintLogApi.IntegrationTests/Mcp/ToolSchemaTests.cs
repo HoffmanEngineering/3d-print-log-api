@@ -71,5 +71,46 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.Equal(new[] { "type", "note", "idempotencyKey" }.OrderBy(x => x), required.OrderBy(x => x));
         }
+
+        /// <summary>
+        /// Anthropic's Connectors Directory rejects a server unless EVERY tool carries a title and the
+        /// applicable readOnlyHint/destructiveHint, and its submission portal reads them straight off
+        /// tools/list. These two tests are the gate: a new tool added with a bare [McpServerTool]
+        /// silently disqualifies the whole server from the directory, and nothing else would catch it.
+        /// </summary>
+        [Fact]
+        public async Task EveryTool_AdvertisesATitle()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+            var tools = await client.ListToolsAsync();
+
+            var untitled = tools
+                .Where(t => string.IsNullOrWhiteSpace(t.ProtocolTool.Title)
+                            && string.IsNullOrWhiteSpace(t.ProtocolTool.Annotations?.Title))
+                .Select(t => t.Name)
+                .ToArray();
+
+            Assert.Empty(untitled);
+        }
+
+        /// <summary>
+        /// A read tool must say readOnlyHint = true; a write tool must state destructiveHint either
+        /// way. Absent annotations are not neutral — a client that cannot tell a read from a
+        /// destructive write has to assume the worse of the two and gate the call.
+        /// </summary>
+        [Fact]
+        public async Task EveryTool_DeclaresReadOnlyOrDestructiveIntent()
+        {
+            await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+            var tools = await client.ListToolsAsync();
+
+            var unhinted = tools
+                .Where(t => t.ProtocolTool.Annotations is not { } a
+                            || (a.ReadOnlyHint != true && !a.DestructiveHint.HasValue))
+                .Select(t => t.Name)
+                .ToArray();
+
+            Assert.Empty(unhinted);
+        }
     }
 }
