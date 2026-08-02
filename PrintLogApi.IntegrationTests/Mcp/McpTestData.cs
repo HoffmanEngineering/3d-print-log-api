@@ -101,6 +101,12 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public static long NoDurationPrintId { get; private set; }    // neither recorded
         public static long UndatedPrintId { get; private set; }       // StartDate null: never bucketed
 
+        /// <summary>
+        /// Material recorded ONLY as the legacy scalars (actual 8000, estimate 10000): no spool,
+        /// no usable row amounts. The estimate-accuracy sample must still see it.
+        /// </summary>
+        public static long LegacyScalarsOnlyPrintId { get; private set; }
+
         /// <summary>6933 (est) + 1800 (est; stored actual was 0) + 7200 (actual) + 0 (neither).</summary>
         public const int DurationMatrixTotalSeconds = 15933;
 
@@ -135,8 +141,10 @@ namespace PrintLogApi.IntegrationTests.Mcp
         ///                  matched neither branch, so the print contributed nothing at all)
         ///   NoDuration  : FilamentUsageMg null, EstimatedFilamentUsageMg -500 -> 0
         ///                 (a NEGATIVE estimate must not subtract; the old code added it)
+        ///   LegacyScalarsOnly : FilamentUsageMg 8000, EstimatedFilamentUsageMg 10000 -> 8000
+        ///                 (the measured scalar wins; this print has no usable row amounts at all)
         /// </summary>
-        public const long LegacyMaterialMatrixTotalMg = 1_000;
+        public const long LegacyMaterialMatrixTotalMg = 9_000;
 
         /// <summary>
         /// What /api/Users/{id}/total-filament-usage must report for the metrics user: the
@@ -157,10 +165,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// scalars are guarded the same way the row sums already are. These are the ACTUAL and
         /// ESTIMATED columns kept separate — deliberately NOT the resolved canonical total, which
         /// is UsersEndpointMaterialTotalMg. The unguarded mapping reports 12999 and 9500 because
-        /// ActualWins' -1 and NoDuration's -500 subtract.
+        /// ActualWins' -1 and NoDuration's -500 subtract. LegacyScalarsOnly contributes 8000 and
+        /// 10000 through its scalars alone.
         /// </summary>
-        public const long StatisticActualMaterialTotalMg = 13_000;
-        public const long StatisticEstimatedMaterialTotalMg = 10_000;
+        public const long StatisticActualMaterialTotalMg = 21_000;
+        public const long StatisticEstimatedMaterialTotalMg = 20_000;
 
         public static void Seed(PrintLogContext context)
         {
@@ -732,7 +741,19 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 EstimatedFilamentUsageMg = legacyEstimatedMg,
                 FilamentUsage = new List<PrintFilament>
                 {
-                    new() { Id = Guid.NewGuid(), FilamentId = filamentId, AmountMg = amountMg, EstimatedAmountMg = estimatedAmountMg },
+                    // Source is explicit because the enum has no 0 member: leaving it at default(0)
+                    // makes PrintCostCalculator.ToGrams return null for every row, so the whole
+                    // fixture becomes unpriceable and every cost assertion passes vacuously.
+                    // Weight matches the AmountMg columns these rows actually carry.
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        FilamentId = filamentId,
+                        AmountMg = amountMg,
+                        EstimatedAmountMg = estimatedAmountMg,
+                        Source = PrintFilament.SourceMeasurement.Weight,
+                        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                    },
                 },
             };
 
@@ -760,9 +781,19 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var undated = MatrixPrint("Undated Print", null, null, null, null);
             undated.StartDate = null;
 
-            context.Prints.AddRange(estimatedOnly, zeroActual, actualWins, noDuration, undated);
+            // A print whose material exists ONLY as the legacy "other filament" scalars: no spool,
+            // no usable row amounts, but a genuine actual/estimate PAIR on the print itself. The
+            // accuracy sample has to include it — counting filament rows alone would drop it and
+            // bias the material figure toward spool-tracked prints. Durations are deliberately
+            // null so DurationMatrixTotalSeconds and the time sample are untouched.
+            var legacyScalarsOnly = MatrixPrint("Legacy Scalars Only Print", null, null, null, null,
+                legacyActualMg: 8000, legacyEstimatedMg: 10000);
+
+            context.Prints.AddRange(
+                estimatedOnly, zeroActual, actualWins, noDuration, undated, legacyScalarsOnly);
             context.SaveChanges();
             UndatedPrintId = undated.Id;
+            LegacyScalarsOnlyPrintId = legacyScalarsOnly.Id;
 
             EstimatedOnlyPrintId = estimatedOnly.Id;
             ZeroActualPrintId = zeroActual.Id;

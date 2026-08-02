@@ -111,24 +111,29 @@ namespace PrintLogApi.Services.Analytics
                 busiestWeekday.Weekday, busiestWeekday.Count);
         }
 
-        /// <param name="durationSeconds">
-        /// Resolved durations, all strictly positive. Zero or negative means NOT RECORDED and the
+        /// <param name="samples">
+        /// (duration, how many prints had it) pairs. Weighted rather than one entry per print:
+        /// the caller already knows the multiplicity, and expanding it into a flat list allocated
+        /// an int per print to feed eight counters.
+        ///
+        /// Durations must be strictly positive. Zero or negative means NOT RECORDED and the
         /// caller must have excluded it as DurationMissing — a "0 seconds" print in the &lt;30m
         /// bucket would misreport data the user never entered.
         /// </param>
-        public static IReadOnlyList<HistogramBucket> DurationHistogram(IEnumerable<int> durationSeconds)
+        public static IReadOnlyList<HistogramBucket> DurationHistogram(
+            IEnumerable<(int Seconds, int Count)> samples)
         {
             var counts = new int[DurationBuckets.Length];
 
-            foreach (var seconds in durationSeconds ?? Enumerable.Empty<int>())
+            foreach (var (seconds, count) in samples ?? Enumerable.Empty<(int, int)>())
             {
-                if (seconds <= 0) continue;
+                if (seconds <= 0 || count <= 0) continue;
                 for (var i = 0; i < DurationBuckets.Length; i++)
                 {
                     var (_, lower, upper) = DurationBuckets[i];
                     if (seconds >= lower && (upper is null || seconds < upper.Value))
                     {
-                        counts[i]++;
+                        counts[i] += count;
                         break;
                     }
                 }

@@ -176,6 +176,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
             services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();
             services.AddScoped<Services.Analytics.IMaterialAnalyticsService, Services.Analytics.MaterialAnalyticsService>();
+            services.AddScoped<Services.Analytics.ICostAnalyticsService, Services.Analytics.CostAnalyticsService>();
+            services.AddScoped<Services.Analytics.IAccuracyAnalyticsService, Services.Analytics.AccuracyAnalyticsService>();
 
             services.AddTransient<IBlobStorageService, AzureBlobStorageService>();
 
@@ -440,12 +442,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 app.UseHttpsRedirection();
             }
 
+            // Inside the developer exception page so it sees an aborted request first and can
+            // absorb it, and outside everything below so it covers any endpoint that awaits a
+            // slow query — not just analytics, where the abort race was first noticed.
+            app.UseClientAbortHandling();
+
             app.UseCors(builder =>
             {
                 builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
             });
 
-            
+
 
             app.UseRouting();
 

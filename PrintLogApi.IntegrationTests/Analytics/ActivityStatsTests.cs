@@ -88,7 +88,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
         [Fact]
         public void DurationHistogram_AlwaysReturnsAllEightBucketsInOrder()
         {
-            var buckets = ActivityStats.DurationHistogram(Array.Empty<int>());
+            var buckets = ActivityStats.DurationHistogram(Array.Empty<(int, int)>());
 
             Assert.Equal(
                 new[] { "<30m", "30m–1h", "1–2h", "2–4h", "4–8h", "8–12h", "12–24h", "24h+" },
@@ -100,12 +100,31 @@ namespace PrintLogApi.IntegrationTests.Analytics
         public void DurationHistogram_EdgesAreHalfOpenSoABoundaryLandsInTheUpperBucket()
         {
             // 1800s is exactly 30 minutes: it belongs to "30m–1h", not "<30m".
-            var buckets = ActivityStats.DurationHistogram(new[] { 1799, 1800, 3600, 86400 });
+            var buckets = ActivityStats.DurationHistogram(
+                new[] { (1799, 1), (1800, 1), (3600, 1), (86400, 1) });
 
             Assert.Equal(1, buckets.Single(b => b.Label == "<30m").Count);
             Assert.Equal(1, buckets.Single(b => b.Label == "30m–1h").Count);
             Assert.Equal(1, buckets.Single(b => b.Label == "1–2h").Count);
             Assert.Equal(1, buckets.Single(b => b.Label == "24h+").Count);
+        }
+
+        [Fact]
+        public void DurationHistogram_CountsEachSampleByItsWeightNotOnce()
+        {
+            // The weight IS the print count: the service groups prints by duration before
+            // calling this, so a pair of (7200s, 5) means five two-hour prints, not one.
+            var buckets = ActivityStats.DurationHistogram(new[] { (7200, 5), (7200, 2) });
+
+            Assert.Equal(7, buckets.Single(b => b.Label == "2–4h").Count);
+        }
+
+        [Fact]
+        public void DurationHistogram_IgnoresANonPositiveWeight()
+        {
+            var buckets = ActivityStats.DurationHistogram(new[] { (7200, 0), (7200, -3) });
+
+            Assert.All(buckets, b => Assert.Equal(0, b.Count));
         }
 
         [Fact]

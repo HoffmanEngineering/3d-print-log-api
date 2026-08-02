@@ -40,6 +40,15 @@ namespace PrintLogApi.Services.Analytics
         int PrintCount);
 
     /// <summary>
+    /// The two numbers the row cap is decided from. Named rather than anonymous so the query
+    /// that produces them can be lifted out of the projection and asserted on directly.
+    /// </summary>
+    public sealed record CostRowCounts(int PrintRows, int FilamentRows)
+    {
+        public static readonly CostRowCounts Empty = new(0, 0);
+    }
+
+    /// <summary>
     /// The single per-print costing pass, shared by /overview, /activity, /printers and /costs.
     /// Costing needs per-filament-row detail, so it is the one projection in analytics that is
     /// bounded on ROWS rather than prints — a four-spool print materializes four rows, and a cap
@@ -70,16 +79,42 @@ namespace PrintLogApi.Services.Analytics
                 DefaultWattageW: Setting(13));       // Electricity_DefaultWattageW
         }
 
-        public static async Task<CostProjection> Project(
-            PrintLogContext context, long userId, IQueryable<Print> scoped, CancellationToken ct)
-        {
-            var inputs = await LoadInputs(context, userId, ct);
+        /// <summary>
+        /// Cap on the rows that would actually be materialized: one per filament usage row, plus
+        /// one per print for the printer/electricity term. Counting prints alone would let a
+        /// multi-material library blow several times past the limit.
+        ///
+        /// Both counts come from ONE aggregate: they are two numbers about the same filtered set,
+        /// and asking for them separately meant two scans to decide a single question. The
+        /// per-print filament count stays a CORRELATED subquery rather than a join, so a
+        /// four-spool print contributes 4 to the sum without multiplying the outer row set.
+        ///
+        /// Exposed separately from <see cref="Project"/> so its translation can be asserted
+        /// against the production provider without a database — see the note on
+        /// <see cref="AnalyticsPrintCounts.Query"/>.
+        /// </summary>
+        public static IQueryable<CostRowCounts> CapsQuery(IQueryable<Print> scoped) =>
+            scoped
+                .GroupBy(_ => 1)
+                .Select(g => new CostRowCounts(
+                    g.Count(),
+                    g.Sum(p => p.FilamentUsage.Count())));
 
-            // Cap on the rows that would actually be materialized: one per filament usage row,
-            // plus one per print for the printer/electricity term. Counting prints alone would
-            // let a multi-material library blow several times past the limit.
-            var filamentRows = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
-            var printRows = await scoped.CountAsync(ct);
+        /// <param name="inputs">
+        /// Pre-loaded settings, for a caller that has already read them. Passing them avoids a
+        /// second identical UserSettings round-trip AND removes the possibility of one request
+        /// costing two things against two different reads of the same rate.
+        /// </param>
+        public static async Task<CostProjection> Project(
+            PrintLogContext context, long userId, IQueryable<Print> scoped, CancellationToken ct,
+            CostInputs inputs = null)
+        {
+            inputs ??= await LoadInputs(context, userId, ct);
+
+            var caps = await CapsQuery(scoped).FirstOrDefaultAsync(ct) ?? CostRowCounts.Empty;
+
+            var filamentRows = caps.FilamentRows;
+            var printRows = caps.PrintRows;
             if (filamentRows + printRows > AnalyticsService.MaxCostRows)
                 return new CostProjection(System.Array.Empty<CostedPrint>(), inputs, true, printRows);
 

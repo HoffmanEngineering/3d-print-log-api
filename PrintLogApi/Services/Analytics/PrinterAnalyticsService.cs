@@ -34,6 +34,26 @@ namespace PrintLogApi.Services.Analytics
 
         public async Task<PrintersResponse> GetPrinters(long userId, AnalyticsFilter filter, CancellationToken ct)
         {
+            var current = await Compute(userId, filter, ct);
+
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is null) return current;
+
+            var previous = await Compute(userId, previousFilter, ct);
+
+            // Fleet utilization is the tab's only scalar tile; the per-printer rows are a table,
+            // not tiles, and a delta column there is a different feature.
+            return current with
+            {
+                FleetUtilizationPercent = current.FleetUtilizationPercent with
+                {
+                    Previous = PreviousWindow.Usable(previous.FleetUtilizationPercent.Value),
+                },
+            };
+        }
+
+        private async Task<PrintersResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+        {
             filter.TryResolveTimeZone(out var zone);
             zone ??= TimeZoneInfo.Utc;
             var granularity = filter.ResolveGranularity();
@@ -93,6 +113,9 @@ namespace PrintLogApi.Services.Analytics
 
             // Intervals for utilization, plus the per-bucket time series: both need per-print
             // (start, duration), so they share one bounded read.
+            // A single targeted COUNT, deliberately not AnalyticsPrintCounts: this is the only
+            // count this method needs over `scoped`, so the shared aggregate would compute three
+            // more numbers to save no round-trip at all.
             var datedCount = await scoped.CountAsync(p => p.StartDate != null, ct);
             var seriesTruncated = datedCount > AnalyticsService.MaxSeriesRows;
 

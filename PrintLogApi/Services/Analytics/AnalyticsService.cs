@@ -45,11 +45,17 @@ namespace PrintLogApi.Services.Analytics
 
             var current = await Aggregate(userId, filter, filter.FromDate, filter.ToDate, zone, granularity, ct);
 
+            // PreviousWindow, not TimeBucketer.PreviousWindow: the latter subtracts a UTC span,
+            // which lands an hour off local midnight whenever the range crosses a DST boundary.
+            // The other five tabs use this helper, and one screen must not show the same delta
+            // computed two ways.
             AggregateResult previous = null;
-            if (filter.ComparePrevious && filter.HasRange)
+            var previousFilter = PreviousWindow.For(filter);
+            if (previousFilter is not null)
             {
-                var (pFrom, pTo) = TimeBucketer.PreviousWindow(filter.FromDate.Value, filter.ToDate.Value);
-                previous = await Aggregate(userId, filter, pFrom, pTo, zone, granularity, ct);
+                previous = await Aggregate(
+                    userId, previousFilter, previousFilter.FromDate, previousFilter.ToDate,
+                    zone, granularity, ct);
             }
 
             return new OverviewResponse(
@@ -87,8 +93,13 @@ namespace PrintLogApi.Services.Analytics
             var scoped = AnalyticsQueryScope.Scope(
                 _context.Prints.AsNoTracking(), userId, filter, from, to);
 
-            var printCount = await scoped.CountAsync(ct);
-            var undatedCount = hasRange ? 0 : await scoped.CountAsync(p => p.StartDate == null, ct);
+            // One aggregate for the plain counts. The four metric sums below stay as separate
+            // top-level calls on purpose: g.Sum takes a Func rather than an Expression, so
+            // folding them in here would mean inlining copies of the shared PrintMetrics
+            // expressions and letting the overview drift from every other tab that uses them.
+            var counts = await AnalyticsPrintCounts.Load(scoped, ct);
+            var printCount = counts.Total;
+            var undatedCount = hasRange ? 0 : counts.Undated;
 
             // Top-level sums so the shared expressions translate. Never inside a GroupBy.
             var durationSeconds = await scoped.SumAsync(PrintMetrics.DurationSecondsExpr, ct);
@@ -104,9 +115,9 @@ namespace PrintLogApi.Services.Analytics
             // A missing key reads as "unknown", not "none".
             foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
-            var (series, seriesTruncated) = await BuildSeries(scoped, from, to, zone, granularity, ct);
-            var (cost, costExclusions, currency) = await ComputeCost(userId, scoped, ct);
-            var highlights = await BuildHighlights(scoped, userId, ct);
+            var (series, seriesTruncated) = await BuildSeries(scoped, counts, from, to, zone, granularity, ct);
+            var (cost, costExclusions, currency, priciest) = await ComputeCost(userId, scoped, ct);
+            var highlights = await BuildHighlights(scoped, userId, priciest, ct);
 
             return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
                 materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
@@ -128,12 +139,16 @@ namespace PrintLogApi.Services.Analytics
         /// coarser grain risks misattributing prints in a boundary period.
         /// </summary>
         private static async Task<(IReadOnlyList<SeriesBucket> Series, bool Truncated)> BuildSeries(
-            IQueryable<Print> scoped, DateTimeOffset? from, DateTimeOffset? to,
+            IQueryable<Print> scoped, ScopedPrintCounts counts,
+            DateTimeOffset? from, DateTimeOffset? to,
             TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
         {
             var dated = scoped.Where(p => p.StartDate != null);
 
-            var windowFrom = from ?? await dated.MinAsync(p => p.StartDate, ct) ?? DateTimeOffset.UtcNow;
+            // The window start and the row cap both come from the caller's single aggregate.
+            // MIN ignores NULLs in SQL, so the earliest start over the whole scoped set is the
+            // earliest DATED start — this is the same number the separate MinAsync returned.
+            var windowFrom = from ?? counts.EarliestStart ?? DateTimeOffset.UtcNow;
             var windowTo = to ?? DateTimeOffset.UtcNow;
             if (windowTo <= windowFrom) return (Array.Empty<SeriesBucket>(), false);
 
@@ -141,10 +156,9 @@ namespace PrintLogApi.Services.Analytics
             if (buckets.Count == 0) return (Array.Empty<SeriesBucket>(), false);
 
             // Bound the work before doing it. Grouping is by exact instant, so the returned row
-            // count is at most the dated print count; a cheap COUNT decides whether streaming
-            // them all back is reasonable. Reporting truncation beats either silently returning
-            // an empty chart or running an unbounded query.
-            if (await dated.CountAsync(ct) > MaxSeriesRows)
+            // count is at most the dated print count. Reporting truncation beats either silently
+            // returning an empty chart or running an unbounded query.
+            if (counts.Dated > MaxSeriesRows)
             {
                 return (Array.Empty<SeriesBucket>(), true);
             }
@@ -177,7 +191,7 @@ namespace PrintLogApi.Services.Analytics
                 false);
         }
 
-        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency)> ComputeCost(
+        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency, HighlightRef Priciest)> ComputeCost(
             long userId, IQueryable<Print> scoped, CancellationToken ct)
         {
             var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
@@ -186,17 +200,29 @@ namespace PrintLogApi.Services.Analytics
                 return (
                     null,
                     new Dictionary<string, int> { [ExclusionReason.RowCapExceeded] = projection.PrintCount },
-                    projection.Inputs.UserCurrency);
+                    projection.Inputs.UserCurrency,
+                    // No projection means no priciest print. Guessing one from a second, cheaper
+                    // pass would put a figure on screen the cost tile has already declined to show.
+                    null);
 
             var total = projection.Prints.Any(p => p.Total.HasValue)
                 ? projection.Prints.Sum(p => p.Total ?? 0m)
                 : (decimal?)null;
 
-            return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency);
+            // Priciest print, from the SAME projection the cost tile uses — computing it from a
+            // second pass is how the tile and the highlight would come to disagree.
+            var priciest = projection.Prints
+                .Where(p => p.Total.HasValue)
+                .OrderByDescending(p => p.Total!.Value).ThenBy(p => p.PrintId)
+                .Select(p => new HighlightRef(
+                    p.PrintId.ToString(CultureInfo.InvariantCulture), p.Title, (double)p.Total!.Value, "cost"))
+                .FirstOrDefault();
+
+            return (total, AnalyticsCostProjection.CountExclusions(projection.Prints), projection.Inputs.UserCurrency, priciest);
         }
 
         private static async Task<OverviewHighlights> BuildHighlights(
-            IQueryable<Print> scoped, long userId, CancellationToken ct)
+            IQueryable<Print> scoped, long userId, HighlightRef priciest, CancellationToken ct)
         {
             // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
             // as a final deterministic backstop. Both tie-breakers must be projected, or the
@@ -287,8 +313,9 @@ namespace PrintLogApi.Services.Analytics
                     topMaterial.Count, "prints"),
                 longest is null ? null : new HighlightRef(
                     longest.Id.ToString(CultureInfo.InvariantCulture), longest.Title, longest.Seconds, "seconds"),
-                // Priciest print needs per-print costing, which is capped; Phase 4 (Costs tab) owns it.
-                null);
+                // Computed in ComputeCost, from the same projection the cost tile uses, and null
+                // whenever that projection could not price anything.
+                priciest);
         }
 
         private static OverviewTiles BuildTiles(AggregateResult c, AggregateResult p)
