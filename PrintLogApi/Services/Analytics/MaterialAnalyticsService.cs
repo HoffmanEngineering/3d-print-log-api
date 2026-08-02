@@ -36,6 +36,45 @@ namespace PrintLogApi.Services.Analytics
 
         public MaterialAnalyticsService(PrintLogContext context) => _context = context;
 
+        /// <summary>
+        /// The four numbers this tab needs about one filtered print set. Named rather than
+        /// anonymous so <see cref="StatsQuery"/> can be lifted out of <c>Compute</c> and its
+        /// translation asserted directly.
+        /// </summary>
+        public sealed record MaterialScopeStats(int Total, int Undated, int UsageRows, int Unattributed)
+        {
+            public static readonly MaterialScopeStats Empty = new(0, 0, 0, 0);
+        }
+
+        /// <summary>
+        /// Four numbers about one filtered set, in one aggregate rather than four scans. This does
+        /// not use <see cref="AnalyticsPrintCounts"/> because two of the four are specific to this
+        /// tab: the usage-ROW cap and the unattributed-material print count.
+        ///
+        /// Exposed separately from its execution so its translation can be asserted against the
+        /// production provider without a database — see the note on
+        /// <see cref="AnalyticsPrintCounts.Query"/>.
+        /// </summary>
+        public static IQueryable<MaterialScopeStats> StatsQuery(IQueryable<Print> scoped) =>
+            scoped
+                .GroupBy(_ => 1)
+                .Select(g => new MaterialScopeStats(
+                    g.Count(),
+                    g.Count(p => p.StartDate == null),
+                    // Bound the second stage on the grain it actually materializes. Every widget
+                    // on this tab is built from PrintFilament ROWS, not prints, so a print-count
+                    // cap would let a multi-material library stream several times its own limit
+                    // into memory (spec §6.4).
+                    g.Sum(p => p.FilamentUsage.Count()),
+                    // Material that was never attached to a spool has no attributes to group by.
+                    // Count the PRINTS carrying it, so the coverage note reads as "N prints used
+                    // filament that is not linked to a spool" — without this the tab silently
+                    // disagrees with Overview.
+                    g.Count(p =>
+                        (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
+                        || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
+                            && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0))));
+
         private sealed record UsageRow(
             long PrintId,
             Guid FilamentId, string DisplayName, string Brand, string MaterialType, string ColorName,
@@ -76,49 +115,26 @@ namespace PrintLogApi.Services.Analytics
             var scoped = AnalyticsQueryScope.Scope(
                 _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
-            // Four numbers about one filtered set, in one aggregate rather than four scans. This
-            // does not use AnalyticsPrintCounts because two of the four are specific to this tab:
-            // the usage-ROW cap and the unattributed-material print count.
-            var stats = await scoped
-                .GroupBy(_ => 1)
-                .Select(g => new
-                {
-                    Total = g.Count(),
-                    Undated = g.Count(p => p.StartDate == null),
-                    // Bound the second stage on the grain it actually materializes. Every widget
-                    // on this tab is built from PrintFilament ROWS, not prints, so a print-count
-                    // cap would let a multi-material library stream several times its own limit
-                    // into memory (spec §6.4).
-                    UsageRows = g.Sum(p => p.FilamentUsage.Count()),
-                    // Material that was never attached to a spool has no attributes to group by.
-                    // Count the PRINTS carrying it, so the coverage note reads as "N prints used
-                    // filament that is not linked to a spool" — without this the tab silently
-                    // disagrees with Overview.
-                    Unattributed = g.Count(p =>
-                        (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
-                        || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
-                            && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0)),
-                })
-                .FirstOrDefaultAsync(ct);
+            var stats = await StatsQuery(scoped).FirstOrDefaultAsync(ct) ?? MaterialScopeStats.Empty;
 
             var coverage = new CoverageBuilder("prints")
             {
-                Total = stats?.Total ?? 0,
+                Total = stats.Total,
             };
-            coverage.UndatedCount = filter.HasRange ? 0 : stats?.Undated ?? 0;
+            coverage.UndatedCount = filter.HasRange ? 0 : stats.Undated;
 
             // Loaded once here and threaded through: Waste's projection needs the same settings,
             // and reading them twice is both an extra round-trip and a chance for one response to
             // price two things off two different reads of the same rate.
             var costInputs = await AnalyticsCostProjection.LoadInputs(_context, userId, ct);
 
-            if ((stats?.UsageRows ?? 0) > AnalyticsService.MaxSeriesRows)
+            if (stats.UsageRows > AnalyticsService.MaxSeriesRows)
             {
                 coverage.Exclude(ExclusionReason.RowCapExceeded, coverage.Total);
                 return EmptyMaterials(filter, granularity, costInputs, coverage.Build());
             }
 
-            coverage.Exclude(ExclusionReason.UnattributedMaterial, stats?.Unattributed ?? 0);
+            coverage.Exclude(ExclusionReason.UnattributedMaterial, stats.Unattributed);
 
             // Flattened with the result selector and filtered OUTSIDE the SelectMany, not with a
             // Where inside it. The inner-filter form is a correlated subquery, which needs SQL
