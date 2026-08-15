@@ -597,9 +597,13 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessFilamentException();
             }
 
+            // The != default exclusion is redundant with the normalisation loop above, which has
+            // already turned every empty GUID into a null. Kept anyway: it is free, and it stops
+            // this list from silently admitting Guid.Empty if that loop ever moves.
             var newLoadedFilamentIds = newPrint.FilamentUsage!
-                .Where(filament => filament.FilamentId.HasValue && filament.FilamentId != default)
-                .Select(filament => filament.FilamentId.Value);
+                .Select(filament => filament.FilamentId)
+                .OfType<Guid>()
+                .Where(id => id != default);
 
             // PrinterService setLoadedFilament
             await _printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
@@ -1194,9 +1198,14 @@ namespace PrintLogApi.Services
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
+            // OfType unwraps first so the != default test below compares a plain Guid and needs no
+            // .Value. The empty-GUID exclusion is kept deliberately: it is belt-and-braces with the
+            // identical guard at the top of the loop below, and dropping it here would make this
+            // list depend on that one staying put.
             var filamentIds = print.FilamentUsage!
-                .Where(pf => pf.FilamentId.HasValue && pf.FilamentId != default(Guid))
-                .Select(pf => pf.FilamentId.Value)
+                .Select(pf => pf.FilamentId)
+                .OfType<Guid>()
+                .Where(id => id != default)
                 .Distinct()
                 .ToList();
 
