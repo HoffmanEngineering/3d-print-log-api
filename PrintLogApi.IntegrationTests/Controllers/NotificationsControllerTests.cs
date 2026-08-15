@@ -642,7 +642,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify the notification is deleted
-            var deleted = GetNotificationById(notification.Id)!;
+            var deleted = GetNotificationById(notification.Id);
             Assert.Null(deleted);
         }
 

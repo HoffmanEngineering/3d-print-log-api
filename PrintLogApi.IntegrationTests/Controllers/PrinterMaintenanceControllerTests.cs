@@ -537,7 +537,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify deleted
-            var deleted = GetMaintenanceEntryById(entry.Id)!;
+            var deleted = GetMaintenanceEntryById(entry.Id);
             Assert.Null(deleted);
         }
 
