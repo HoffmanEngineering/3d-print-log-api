@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
@@ -50,7 +52,7 @@ namespace PrintLogApi.Controllers
             // The actual was guarded > 0 but the estimate was not, so a corrupt NEGATIVE estimate
             // subtracted from the total. Both sides are guarded now, matching PrintMetrics.
             var printFilamentUsage = await baseQuery
-                .SelectMany(p => p.FilamentUsage.Select(pf => (long)(
+                .SelectMany(p => p.FilamentUsage!.Select(pf => (long)(
                     pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                     : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                     : 0)))

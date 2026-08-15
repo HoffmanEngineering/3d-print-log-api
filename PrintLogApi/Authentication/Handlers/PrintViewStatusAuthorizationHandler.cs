@@ -1,4 +1,6 @@
-﻿using System.Security.Claims;
+﻿#nullable enable
+
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using PrintLogApi.Models;

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -92,7 +94,7 @@ namespace PrintLogApi.Controllers
             // unvalidated webhook payload is tracked in #39.
             var printEventDto = JsonSerializer.Deserialize<PrintEventDto>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
-            var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message)!;
+            var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message!)!;
 
             try
             {
@@ -121,7 +123,7 @@ namespace PrintLogApi.Controllers
                         await HandlePrintCompleted(dto, userId.Value);
                         break;
                     default:
-                        var properties = new Dictionary<string, string> { { "event", dto.EventName } };
+                        var properties = new Dictionary<string, string> { { "event", dto.EventName! } };
                         _telemetry.TrackEvent("Moonraker_Webhook_Unhandled", properties);
                         break;
                 }
@@ -166,7 +168,7 @@ namespace PrintLogApi.Controllers
                     .Where(p => p.Id == data.PrinterId)
                     .Include(p => p.LoadedFilaments)
                     .FirstOrDefaultAsync();
-                newPrint.Printer = printer;
+                newPrint.Printer = printer!;
 
                 // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
                 // was enabled. It still fails closed, just as a 500 rather than a clean error.
@@ -267,7 +269,7 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintFailed(PrintEventMessageDto data, long userId)
         {
-            Print print = null;
+            Print? print = null;
 
 
             var filename = Path.GetFileName(data.Filename);
@@ -285,7 +287,7 @@ namespace PrintLogApi.Controllers
                                 && p.PrinterId == data.PrinterId
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .Include(p => p.Printer)
                 .ThenInclude(pr => pr.LoadedFilaments)
@@ -320,17 +322,17 @@ namespace PrintLogApi.Controllers
             {
                 var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
 
-                if (print.FilamentUsage.Count > 0)
+                if (print.FilamentUsage!.Count > 0)
                 {
 
 
-                    print.FilamentUsage.ElementAt(0).LengthInM = lengthInM;
-                    print.FilamentUsage.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
+                    print.FilamentUsage!.ElementAt(0).LengthInM = lengthInM;
+                    print.FilamentUsage!.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
 
 
                 } else
                 {
-                    print.FilamentUsage.Add(new PrintFilament
+                    print.FilamentUsage!.Add(new PrintFilament
                     {
                         EstimatedSource = PrintFilament.SourceMeasurement.Length,
                         Id = Guid.Empty,
@@ -355,7 +357,7 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintCompleted(PrintEventMessageDto data, long userId)
         {
-            Print print = null;
+            Print? print = null;
 
             var filename = Path.GetFileName(data.Filename);
 
@@ -370,7 +372,7 @@ namespace PrintLogApi.Controllers
                                 && p.PrinterId == data.PrinterId
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .Include(p => p.Printer)
                 .ThenInclude(pr => pr.LoadedFilaments)
@@ -403,14 +405,14 @@ namespace PrintLogApi.Controllers
             {
                 var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
 
-                if (print.FilamentUsage.Count > 0)
+                if (print.FilamentUsage!.Count > 0)
                 {
-                    print.FilamentUsage.ElementAt(0).LengthInM = lengthInM;
-                    print.FilamentUsage.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
+                    print.FilamentUsage!.ElementAt(0).LengthInM = lengthInM;
+                    print.FilamentUsage!.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
                 }
                 else
                 {
-                    print.FilamentUsage.Add(new PrintFilament
+                    print.FilamentUsage!.Add(new PrintFilament
                     {
                         EstimatedSource = PrintFilament.SourceMeasurement.Length,
                         Id = Guid.Empty,

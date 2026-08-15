@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,7 +30,7 @@ namespace PrintLogApi.Mcp
         Guid MaterialId,
         McpMeasurementSource? Source = null, double? Amount = null,
         McpMeasurementSource? EstimatedSource = null, double? EstimatedAmount = null,
-        string Notes = null);
+        string? Notes = null);
 
     public sealed record MaterialRemaining(Guid MaterialId, double RemainingGrams);
 
@@ -82,24 +84,30 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public sealed record MaterialAttributesInput
     {
-        public string DisplayName { get; init; }
-        public string MaterialType { get; init; }
-        public string MaterialCategoryNickname { get; init; }
+        public string? DisplayName { get; init; }
+        public string? MaterialType { get; init; }
+        public string? MaterialCategoryNickname { get; init; }
         public double? DensityGramPerCubicCm { get; init; }
         public double? DiameterMm { get; init; }
         public McpMeasurementSource? Source { get; init; }
         public double? InitialAmount { get; init; }
-        public string Brand { get; init; }
-        public string ColorName { get; init; }
-        public string ColorHex { get; init; }
-        public string[] Colors { get; init; }
+        public string? Brand { get; init; }
+        public string? ColorName { get; init; }
+        public string? ColorHex { get; init; }
+        /// <remarks>
+        /// The ELEMENTS are nullable too. This is built from the tool's <c>string[]? colors</c>
+        /// parameter, which System.Text.Json will happily fill from <c>["ff0000", null]</c>.
+        /// <c>McpMaterialValidation.RequireHex</c> only checks non-null entries, so a null element
+        /// survives validation today — see the note in <c>FilamentService.ResolveColors</c>.
+        /// </remarks>
+        public string?[]? Colors { get; init; }
         public ColorPatternType? ColorPattern { get; init; }
         public FilamentFinishType? FinishType { get; init; }
-        public FilamentEffect[] Effects { get; init; }
-        public string StorageLocation { get; init; }
+        public FilamentEffect[]? Effects { get; init; }
+        public string? StorageLocation { get; init; }
         public bool? IsActive { get; init; }
         public bool? IsFavorite { get; init; }
-        public string Notes { get; init; }
+        public string? Notes { get; init; }
         public double? SpoolWeightGrams { get; init; }
         public double? InitialTotalWeightGrams { get; init; }
         public double? TempRangeStartC { get; init; }
@@ -109,13 +117,13 @@ namespace PrintLogApi.Mcp
         public double? InitialLayerTimeS { get; init; }
         public double? LayerTimeS { get; init; }
         public double? MeltingTemperatureC { get; init; }
-        public string InertGas { get; init; }
+        public string? InertGas { get; init; }
         public double? MaterialRefreshRatio { get; init; }
         public DateTimeOffset? PurchaseDate { get; init; }
-        public string PurchaseLocation { get; init; }
-        public string PurchasePriceValue { get; init; }
-        public string PurchasePriceCurrency { get; init; }
-        public string PurchaseNotes { get; init; }
+        public string? PurchaseLocation { get; init; }
+        public string? PurchasePriceValue { get; init; }
+        public string? PurchasePriceCurrency { get; init; }
+        public string? PurchaseNotes { get; init; }
 
         /// <summary>
         /// Trims every string. Call this ONCE in the service, BEFORE both fingerprinting and
@@ -155,11 +163,11 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public sealed record PrinterAttributesInput
     {
-        public string Make { get; init; }
-        public string Model { get; init; }
-        public string Name { get; init; }
-        public string Description { get; init; }
-        public string CategoryNickname { get; init; }
+        public string? Make { get; init; }
+        public string? Model { get; init; }
+        public string? Name { get; init; }
+        public string? Description { get; init; }
+        public string? CategoryNickname { get; init; }
         public double? NozzleDiameterMm { get; init; }
         public double? FilamentDiameterMm { get; init; }
         public double? BeamDiameterMm { get; init; }

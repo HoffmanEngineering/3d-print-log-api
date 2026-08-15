@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using System.Text;
@@ -130,11 +132,11 @@ namespace PrintLogApi.Controllers
 
     public class CheckoutSessionResponseDto
     {
-        public string Url { get; set; }
+        public string? Url { get; set; }
     }
 
     public class PortalSessionResponseDto
     {
-        public string Url { get; set; }
+        public string? Url { get; set; }
     }
 }

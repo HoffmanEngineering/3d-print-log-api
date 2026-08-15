@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using PrintLogApi.Models;
 
@@ -10,19 +12,19 @@ namespace PrintLogApi.Mcp
     /// </summary>
     public static class McpIdempotencyRecordFactory
     {
-        public static McpIdempotencyRecord ForPrint(long userId, string key, string fingerprint, long printId) =>
+        public static McpIdempotencyRecord ForPrint(long userId, string key, string? fingerprint, long printId) =>
             Build(userId, "create_print", key, fingerprint, r => r.CreatedPrintId = printId);
 
-        public static McpIdempotencyRecord ForMaterial(long userId, string key, string fingerprint, Guid filamentId) =>
+        public static McpIdempotencyRecord ForMaterial(long userId, string key, string? fingerprint, Guid filamentId) =>
             Build(userId, "create_material", key, fingerprint, r => r.CreatedFilamentId = filamentId);
 
-        public static McpIdempotencyRecord ForPrinter(long userId, string key, string fingerprint, long printerId) =>
+        public static McpIdempotencyRecord ForPrinter(long userId, string key, string? fingerprint, long printerId) =>
             Build(userId, "create_printer", key, fingerprint, r => r.CreatedPrinterId = printerId);
 
-        public static McpIdempotencyRecord ForProject(long userId, string key, string fingerprint, Guid projectId) =>
+        public static McpIdempotencyRecord ForProject(long userId, string key, string? fingerprint, Guid projectId) =>
             Build(userId, "create_project", key, fingerprint, r => r.CreatedProjectId = projectId);
 
-        public static McpIdempotencyRecord ForFeedback(long userId, string key, string fingerprint, Guid feedbackId) =>
+        public static McpIdempotencyRecord ForFeedback(long userId, string key, string? fingerprint, Guid feedbackId) =>
             Build(userId, "create_feedback", key, fingerprint, r => r.CreatedFeedbackId = feedbackId);
 
         /// <summary>
@@ -49,7 +51,7 @@ namespace PrintLogApi.Mcp
         }
 
         private static McpIdempotencyRecord Build(
-            long userId, string toolName, string key, string fingerprint, Action<McpIdempotencyRecord> setTarget)
+            long userId, string toolName, string key, string? fingerprint, Action<McpIdempotencyRecord> setTarget)
         {
             var record = new McpIdempotencyRecord
             {

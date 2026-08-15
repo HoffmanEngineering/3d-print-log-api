@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿#nullable enable
+
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +20,7 @@ namespace PrintLogApi.Services
             _telemetry = telemetry;
         }
 
-        public async Task<PrinterCategory> get(string nickname)
+        public async Task<PrinterCategory?> get(string nickname)
         {
             return await _context.PrinterCategories
                 .Where(p => p.Nickname == nickname)

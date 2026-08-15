@@ -7,7 +7,7 @@ using PrintLogApi.Services.Analytics;
 namespace PrintLogApi.Models.DTOs.Analytics
 {
     public sealed record AccuracyGroup(
-        string Scope, string Key, string Label,
+        string Scope, string Key, string? Label,
         double? MedianRatio, int SampleSize, bool SuppressedForSmallSample);
 
     public sealed record AccuracyTrendBucket(
@@ -18,7 +18,7 @@ namespace PrintLogApi.Models.DTOs.Analytics
     /// longer than estimated" — plain language belongs where units and translation already live.
     /// </summary>
     public sealed record AccuracyCallout(
-        string Scope, string Key, string Label, string Dimension, double MedianRatio, int SampleSize);
+        string Scope, string Key, string? Label, string Dimension, double MedianRatio, int SampleSize);
 
     /// <summary>
     /// The shape NEVER varies by viewport. The phone renders by-printer bars instead of the

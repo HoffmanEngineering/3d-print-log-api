@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -333,7 +335,7 @@ namespace PrintLogApi.Services
                 // Cancel the active Stripe subscription, then delete the Subscription record
                 var stripeSubscriptionId = await _context.Subscriptions
                     .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
-                    .Select(s => s.StripeSubscriptionId)
+                    .Select(s => s.StripeSubscriptionId!)
                     .AsNoTracking()
                     .SingleOrDefaultAsync();
 

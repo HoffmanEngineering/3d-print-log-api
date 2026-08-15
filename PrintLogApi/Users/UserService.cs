@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
@@ -17,7 +19,7 @@ namespace PrintLogApi.Users
             _context = context;
         }
 
-        public User GetLocalUserByAuthUserId(string authUserId)
+        public User? GetLocalUserByAuthUserId(string authUserId)
         {
             return _context.Users.Where(u => u.OAuthUserId == authUserId).FirstOrDefault();
         }
@@ -102,7 +104,9 @@ namespace PrintLogApi.Users
                                         // A custom exception of yours for concurrency issues
 
                                 // If we get a unique constraint error, then query for the user that was created.
-                                return GetLocalUserByAuthUserId(authUserId);
+                                // Null-forgiven: the unique-constraint violation means a
+                                // concurrent insert won, so the row is there to read back.
+                                return GetLocalUserByAuthUserId(authUserId)!;
                         }
                     }
                 }

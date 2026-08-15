@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -80,7 +82,8 @@ namespace PrintLogApi.Controllers
 
             var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
             var cacheKey = $"{name}:v{version}:{filter.CacheKey(userId.Value)}";
-            if (_cache.TryGetValue(cacheKey, out T cached)) return cached;
+            // Null-forgiven: only `load`'s non-null result is ever stored under this key.
+            if (_cache.TryGetValue(cacheKey, out T? cached)) return cached!;
 
             var result = await load(userId.Value, filter);
 

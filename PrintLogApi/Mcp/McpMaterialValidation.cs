@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -153,7 +155,7 @@ namespace PrintLogApi.Mcp
             }
         }
 
-        private static void RequireHex(string value, string field)
+        private static void RequireHex(string? value, string field)
         {
             if (value != null && !HexColor.IsMatch(value))
             {

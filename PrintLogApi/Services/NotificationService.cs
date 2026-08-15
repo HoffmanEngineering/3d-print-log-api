@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -41,7 +43,7 @@ namespace PrintLogApi.Services
                 pagingRequest.PageSize);
         }
 
-        public async Task<NotificationDetailDto> GetNotificationById(Guid notificationId, long userId)
+        public async Task<NotificationDetailDto?> GetNotificationById(Guid notificationId, long userId)
         {
             var notification = await _context.Notifications
                 .Where(n => n.Id == notificationId && n.UserId == userId)
@@ -127,11 +129,11 @@ namespace PrintLogApi.Services
             NotificationType type,
             string title,
             string message,
-            string actionUrl = null,
+            string? actionUrl = null,
             long? printId = null,
             long? commentId = null,
             long? triggeredByUserId = null,
-            string metadata = null)
+            string? metadata = null)
         {
             var notification = new Notification
             {
@@ -158,7 +160,7 @@ namespace PrintLogApi.Services
         public async Task<Notification> CreateCommentNotification(
             long recipientUserId,
             long printId,
-            string printTitle,
+            string? printTitle,
             long commentId,
             long commenterUserId,
             string commenterDisplayName,
@@ -194,7 +196,7 @@ namespace PrintLogApi.Services
         public async Task CreateCommentNotifications(
             IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients,
             long printId,
-            string printTitle,
+            string? printTitle,
             long commentId,
             long commenterUserId,
             string commenterDisplayName)
@@ -227,7 +229,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync();
         }
 
-        public async Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string printTitle)
+        public async Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string? printTitle)
         {
             var title = "Print completed";
             var message = $"Your print \"{printTitle}\" has completed successfully";
@@ -242,7 +244,7 @@ namespace PrintLogApi.Services
                 printId);
         }
 
-        public async Task<Notification> CreatePrintFailedNotification(long userId, long printId, string printTitle)
+        public async Task<Notification> CreatePrintFailedNotification(long userId, long printId, string? printTitle)
         {
             var title = "Print failed";
             var message = $"Your print \"{printTitle}\" has failed";
@@ -257,7 +259,7 @@ namespace PrintLogApi.Services
                 printId);
         }
 
-        public async Task<Notification> CreateApiKeyCreatedNotification(long userId, string keyDescription)
+        public async Task<Notification> CreateApiKeyCreatedNotification(long userId, string? keyDescription)
         {
             var title = "New API key created";
             var message = string.IsNullOrWhiteSpace(keyDescription)
@@ -273,7 +275,7 @@ namespace PrintLogApi.Services
                 actionUrl);
         }
 
-        public async Task<Notification> CreateApiKeyDeletedNotification(long userId, string keyDescription)
+        public async Task<Notification> CreateApiKeyDeletedNotification(long userId, string? keyDescription)
         {
             var title = "API key deleted";
             var message = string.IsNullOrWhiteSpace(keyDescription)

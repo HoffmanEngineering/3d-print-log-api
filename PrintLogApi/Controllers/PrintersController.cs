@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿#nullable enable
+
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -80,7 +82,7 @@ namespace PrintLogApi.Controllers
             var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
             var cacheKey = GeneratePrinterCacheKey(userId.Value, version, pagingRequest, searchText, includeInactive);
 
-            if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto> cachedResult))
+            if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto>? cachedResult))
             {
                 return Ok(cachedResult);
             }
@@ -96,12 +98,12 @@ namespace PrintLogApi.Controllers
 
             if (!string.IsNullOrWhiteSpace(searchText))
             {
-                printers = printers.Where(p => p.Name.Contains(searchText) || p.Make.Contains(searchText) || p.Model.Contains(searchText));
+                printers = printers.Where(p => p.Name!.Contains(searchText) || p.Make!.Contains(searchText) || p.Model!.Contains(searchText));
             }
 
             var result = printers
                 .Include(p => p.Category)
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(lf => lf.Filament)
                 .OrderByDescending(p => p.Name)
                 .ThenByDescending(p => p.Make)
@@ -137,13 +139,13 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
         {
             var printer = await _context.Printers
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.FilamentAdjustments)
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.PrintFilaments)
-                .Include(p => p.Category)
+                .Include(p => p.Category!)
                     .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == id)
                 .AsNoTracking()
@@ -212,7 +214,7 @@ namespace PrintLogApi.Controllers
 
             existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
-            var printerCategory = await _printerCategoryService.get(printer.Category ?? existingPrinter.Category.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+            var printerCategory = await _printerCategoryService.get(printer.Category ?? existingPrinter.Category!.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
             if (printerCategory is null)
             {
@@ -221,7 +223,7 @@ namespace PrintLogApi.Controllers
 
             existingPrinter.Category = printerCategory;
 
-            foreach (var filament in existingPrinter.LoadedFilaments)
+            foreach (var filament in existingPrinter.LoadedFilaments!)
             {
                 if (filament.FilamentId != default)
                 {
@@ -315,10 +317,10 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
         {
             var printer = await _context.Printers
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.FilamentAdjustments)
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(pf => pf.Filament)
                         .ThenInclude(f => f.PrintFilaments)
                 .Where(p => p.Id == id)

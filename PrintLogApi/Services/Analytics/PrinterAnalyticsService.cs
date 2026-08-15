@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -99,7 +101,7 @@ namespace PrintLogApi.Services.Analytics
                     // `no linked spool OR an owned one`, not `linked AND owned` — an unlinked
                     // usage row is legitimate untracked material under the rowSum + other rule.
                     MaterialMg = g.Sum(p =>
-                        (long)p.FilamentUsage
+                        (long)p.FilamentUsage!
                             .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
                             .Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value

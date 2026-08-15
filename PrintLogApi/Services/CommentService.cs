@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,7 +25,7 @@ namespace PrintLogApi.Services
             _telemetry = telemetry;
         }
 
-        public async Task<CommentDetailDto> GetCommentDetailById(long id)
+        public async Task<CommentDetailDto?> GetCommentDetailById(long id)
         {
             return await _context.Comments
                             .Where(c => c.Id == id)

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -49,7 +51,7 @@ namespace PrintLogApi.Services.Analytics
             // which lands an hour off local midnight whenever the range crosses a DST boundary.
             // The other five tabs use this helper, and one screen must not show the same delta
             // computed two ways.
-            AggregateResult previous = null;
+            AggregateResult? previous = null;
             var previousFilter = PreviousWindow.For(filter);
             if (previousFilter is not null)
             {
@@ -191,7 +193,7 @@ namespace PrintLogApi.Services.Analytics
                 false);
         }
 
-        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency, HighlightRef Priciest)> ComputeCost(
+        private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency, HighlightRef? Priciest)> ComputeCost(
             long userId, IQueryable<Print> scoped, CancellationToken ct)
         {
             var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
@@ -222,7 +224,7 @@ namespace PrintLogApi.Services.Analytics
         }
 
         private static async Task<OverviewHighlights> BuildHighlights(
-            IQueryable<Print> scoped, long userId, HighlightRef priciest, CancellationToken ct)
+            IQueryable<Print> scoped, long userId, HighlightRef? priciest, CancellationToken ct)
         {
             // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
             // as a final deterministic backstop. Both tie-breakers must be projected, or the
@@ -246,7 +248,7 @@ namespace PrintLogApi.Services.Analytics
                         : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
                         : 0),
                     MaterialMg = g.Sum(p =>
-                        p.FilamentUsage.Sum(pf =>
+                        p.FilamentUsage!.Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                             : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                             : 0)
@@ -264,12 +266,12 @@ namespace PrintLogApi.Services.Analytics
             // the material ranking tie-breaks on mass alone, then id. Same rule, minus the term
             // that has no meaning at this grain.
             var topMaterial = await scoped
-                .SelectMany(p => p.FilamentUsage)
+                .SelectMany(p => p.FilamentUsage!)
                 // Reads DisplayName and MaterialType, so ownership is required, not just
                 // existence. Unlike the mass sums, a null Filament genuinely has nothing to
                 // rank here, so `linked AND owned` is the right predicate in this one place.
                 .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
-                .GroupBy(pf => new { pf.FilamentId, pf.Filament.DisplayName, pf.Filament.MaterialType })
+                .GroupBy(pf => new { pf.FilamentId, pf.Filament!.DisplayName, pf.Filament.MaterialType })
                 .Select(g => new
                 {
                     g.Key.FilamentId,
@@ -318,7 +320,7 @@ namespace PrintLogApi.Services.Analytics
                 priciest);
         }
 
-        private static OverviewTiles BuildTiles(AggregateResult c, AggregateResult p)
+        private static OverviewTiles BuildTiles(AggregateResult c, AggregateResult? p)
         {
             Coverage Cov(string population, int counted, int total, int undated, params (string Reason, int Count)[] ex)
             {
@@ -327,7 +329,7 @@ namespace PrintLogApi.Services.Analytics
                 return b.Build();
             }
 
-            double? SuccessRate(AggregateResult r)
+            double? SuccessRate(AggregateResult? r)
             {
                 if (r is null) return null;
                 var d = r.StatusCounts["Success"] + r.StatusCounts["PartialSuccess"]
@@ -335,7 +337,7 @@ namespace PrintLogApi.Services.Analytics
                 return d == 0 ? null : 100.0 * r.StatusCounts["Success"] / d;
             }
 
-            double? Avg(AggregateResult r) =>
+            double? Avg(AggregateResult? r) =>
                 r is null || r.PrintCount == 0 ? null : (double)r.DurationSeconds / r.PrintCount;
 
             // A dropped series is reported on the print-count tile, which is the one the chart

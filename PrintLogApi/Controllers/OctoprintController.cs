@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -101,7 +103,7 @@ namespace PrintLogApi.Controllers
                         return BadRequest("Printer does not belong to current user. Please check DeviceIdentifier.");
                     }
 
-                    printerName = printer.Name;
+                    printerName = printer.Name!;
                 }
                 else
                 {
@@ -132,7 +134,7 @@ namespace PrintLogApi.Controllers
                         await HandlePrintCompleted(data, userId.Value);
                         break;
                     default:
-                        var properties = new Dictionary<string, string> { { "Topic", data.Topic } };
+                        var properties = new Dictionary<string, string> { { "Topic", data.Topic! } };
                         _telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
                         break;
                 }
@@ -179,7 +181,7 @@ namespace PrintLogApi.Controllers
                 Status = PrintStatus.Printing,
                 CreatedById = userId,
                 UpdatedById = userId,
-                Title = data?.Job?.File?.Name.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",
+                Title = data?.Job?.File?.Name!.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",
                 EstimatedPrintTimeInSeconds = octoEstimate > 0 ? octoEstimate : (int?)null,
                 FilamentUsage = new List<PrintFilament>(),
                 FileName = data?.Job?.File?.Name ?? ""
@@ -195,7 +197,7 @@ namespace PrintLogApi.Controllers
                     .Where(p => p.Id == printerId)
                     .Include(p => p.LoadedFilaments)
                     .FirstOrDefaultAsync();
-                newPrint.Printer = printer;
+                newPrint.Printer = printer!;
 
                 // Check if the user had access to that printer!
                 // Null-forgiven: an unknown printerId already threw here before nullable analysis
@@ -400,7 +402,7 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
         {
-            Print print = null;
+            Print? print = null;
 
             // Find a print thats Printing with that same hash.
             if (data?.Meta?.Hash is not null)
@@ -413,7 +415,7 @@ namespace PrintLogApi.Controllers
                                 && p.FileHash == hash
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
             }
@@ -428,7 +430,7 @@ namespace PrintLogApi.Controllers
                                 && p.FileName == fileName
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
             }
@@ -449,7 +451,7 @@ namespace PrintLogApi.Controllers
 
             // Round FIRST, then test positivity: 0.3 rounds to 0, and persisting that 0 would
             // recreate the "looks recorded but isn't" row we are eliminating.
-            var failedElapsed = (int)Math.Round(data!.Extra.Time ?? 0.0);
+            var failedElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
             print.PrintTimeInSeconds = failedElapsed > 0 ? failedElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
@@ -513,7 +515,7 @@ namespace PrintLogApi.Controllers
 
         private async Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
         {
-            Print print = null;
+            Print? print = null;
 
             // Find a print thats Printing with that same hash.
             if (data?.Meta?.Hash is not null)
@@ -526,7 +528,7 @@ namespace PrintLogApi.Controllers
                                 && p.FileHash == hash
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
             }
@@ -541,7 +543,7 @@ namespace PrintLogApi.Controllers
                                 && p.FileName == fileName
                                 )
                 .OrderByDescending(p => p.CreatedDate)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
                 .FirstOrDefaultAsync();
             }
@@ -561,7 +563,7 @@ namespace PrintLogApi.Controllers
             print.Status = PrintStatus.Success;
 
             // Round FIRST, then test positivity — see HandlePrintFailed.
-            var successElapsed = (int)Math.Round(data!.Extra.Time ?? 0.0);
+            var successElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
             print.PrintTimeInSeconds = successElapsed > 0 ? successElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;

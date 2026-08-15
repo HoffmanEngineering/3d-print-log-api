@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿#nullable enable
+
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
@@ -128,7 +130,7 @@ namespace PrintLogApi.Controllers
 
             var properties = new Dictionary<string, string> {
                 { "CommentId", existingComment.Id.ToString() },
-                { "UserId", userId.ToString() },
+                { "UserId", userId.ToString()! },
                 { "CommentCreated", existingComment.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
             };
             _telemetry.TrackEvent("CommentDelete", properties);

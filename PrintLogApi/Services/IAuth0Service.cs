@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,7 +9,7 @@ namespace PrintLogApi.Services
 {
     public interface IAuth0Service
     {
-        Task DeleteUser(string oauthUserId);
+        Task DeleteUser(string? oauthUserId);
         Task<string> GetManagementApiBearerToken();
 
         /// <summary>
@@ -23,7 +25,7 @@ namespace PrintLogApi.Services
         /// write path must treat this as best-effort and never fail the write over it.
         /// </para>
         /// </summary>
-        Task<string> GetUserEmail(string oauthUserId, CancellationToken ct);
+        Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct);
 
         /// <summary>
         /// Lists the user's Auth0 grants for the dedicated MCP audience that include the

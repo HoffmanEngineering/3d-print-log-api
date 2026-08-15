@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -73,7 +75,7 @@ namespace PrintLogApi.Services
             return dto;
         }
 
-        public async Task<string> CreateCheckoutSession(long userId, string planId, string successUrl, string cancelUrl)
+        public async Task<string> CreateCheckoutSession(long userId, string? planId, string successUrl, string cancelUrl)
         {
             var priceId = planId switch
             {
@@ -86,7 +88,7 @@ namespace PrintLogApi.Services
                 .Where(s => s.UserId == userId)
                 .SingleOrDefaultAsync();
 
-            string customerId = subscription?.StripeCustomerId;
+            string? customerId = subscription?.StripeCustomerId;
 
             if (string.IsNullOrEmpty(customerId))
             {
@@ -444,7 +446,7 @@ namespace PrintLogApi.Services
             });
         }
 
-        private SubscriptionPlan MapPriceIdToPlan(string priceId)
+        private SubscriptionPlan MapPriceIdToPlan(string? priceId)
         {
             if (priceId == _stripeOptions.ProMonthlyPriceId) return SubscriptionPlan.ProMonthly;
             if (priceId == _stripeOptions.ProAnnualPriceId) return SubscriptionPlan.ProAnnual;

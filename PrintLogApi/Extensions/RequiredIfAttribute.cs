@@ -1,4 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿#nullable enable
+
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
 using System;
@@ -27,7 +29,7 @@ namespace PrintLogApi.Extensions
         /// <value>
         /// The display name of the other property.
         /// </value>
-        public string OtherPropertyDisplayName { get; set; }
+        public string? OtherPropertyDisplayName { get; set; }
 
         /// <summary>
         /// Gets or sets the other property value that will be relevant for validation.
@@ -104,21 +106,21 @@ namespace PrintLogApi.Extensions
         /// <returns>
         /// An instance of the <see cref="T:System.ComponentModel.DataAnnotations.ValidationResult" /> class.
         /// </returns>
-        protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+        protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
         {
             if (validationContext == null)
             {
                 throw new ArgumentNullException("validationContext");
             }
 
-            PropertyInfo otherProperty = validationContext.ObjectType.GetProperty(this.OtherProperty);
+            PropertyInfo? otherProperty = validationContext.ObjectType.GetProperty(this.OtherProperty);
             if (otherProperty == null)
             {
                 return new ValidationResult(
                     string.Format(CultureInfo.CurrentCulture, "Could not find a property named '{0}'.", this.OtherProperty));
             }
 
-            object otherValue = otherProperty.GetValue(validationContext.ObjectInstance);
+            object? otherValue = otherProperty.GetValue(validationContext.ObjectInstance);
 
             // check if this value is actually required and validate it
             if (!this.IsInverted && object.Equals(otherValue, this.OtherPropertyValue) ||
@@ -130,7 +132,7 @@ namespace PrintLogApi.Extensions
                 }
 
                 // additional check for strings so they're not empty
-                string val = value as string;
+                string? val = value as string;
                 if (val != null && val.Trim().Length == 0)
                 {
                     return new ValidationResult(this.FormatErrorMessage(validationContext.DisplayName));

@@ -29,7 +29,7 @@ namespace PrintLogApi.Models.DTOs.Analytics
         int Index, DateOnly LocalStart, IReadOnlyDictionary<string, long> PrintSecondsByPrinterId);
 
     public sealed record MaintenanceEvent(
-        string Id, long PrinterId, DateOnly Date, string Category, string Description, decimal? Cost);
+        string Id, long PrinterId, DateOnly Date, string? Category, string? Description, decimal? Cost);
 
     public sealed record PrintersResponse(
         DateTimeOffset? From,

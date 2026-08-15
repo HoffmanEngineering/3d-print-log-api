@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -23,11 +25,11 @@ namespace PrintLogApi.Mcp
     public static class McpRequestFingerprint
     {
         public static string ComputeCreatePrint(
-            string title, long printerId, Print.PrintStatus status,
+            string? title, long printerId, Print.PrintStatus status,
             DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
-            string notes, Guid? projectId, string fileName, string url,
+            string? notes, Guid? projectId, string? fileName, string? url,
             Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
-            IReadOnlyList<MaterialUsageInput> materials)
+            IReadOnlyList<MaterialUsageInput>? materials)
         {
             using var ms = new MemoryStream();
             using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
@@ -186,7 +188,7 @@ namespace PrintLogApi.Mcp
         /// </para>
         /// </summary>
         public static string ComputeCreateProject(
-            string name, string reference, string description, string url,
+            string? name, string? reference, string? description, string? url,
             Project.ProjectStatus status, Project.ProjectViewStatus viewStatus)
         {
             using var ms = new MemoryStream();
@@ -211,7 +213,7 @@ namespace PrintLogApi.Mcp
         /// address is resolved server-side, so neither is an argument and neither belongs here.
         /// </para>
         /// </summary>
-        public static string ComputeCreateFeedback(Feedback.FeedbackType type, string note)
+        public static string ComputeCreateFeedback(Feedback.FeedbackType type, string? note)
         {
             using var ms = new MemoryStream();
             using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
@@ -222,7 +224,7 @@ namespace PrintLogApi.Mcp
             return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
         }
 
-        private static void WriteStr(BinaryWriter w, string v) { w.Write(v != null); if (v != null) w.Write(v); }
+        private static void WriteStr(BinaryWriter w, string? v) { w.Write(v != null); if (v != null) w.Write(v); }
         private static void WriteInt(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteEnum(BinaryWriter w, int? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteBool(BinaryWriter w, bool? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }

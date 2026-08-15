@@ -12,7 +12,7 @@ namespace PrintLogApi.Models.DTOs.Analytics
 
     public sealed record CostGroup(string Key, string Label, decimal Amount, int PrintCount);
 
-    public sealed record PrintCostRef(long PrintId, string Title, DateOnly? Date, decimal Amount);
+    public sealed record PrintCostRef(long PrintId, string? Title, DateOnly? Date, decimal Amount);
 
     /// <summary>
     /// The Costs tab payload. CostOfFailureSharePercent is null when total spend is 0 — a share

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Linq;
 using System.Linq.Expressions;
@@ -56,7 +58,7 @@ namespace PrintLogApi
         /// stored 0 or a negative falls back rather than contributing.
         /// </summary>
         public static Expression<Func<Print, long>> MaterialMgExpr =>
-            p => p.FilamentUsage.Sum(pf =>
+            p => p.FilamentUsage!.Sum(pf =>
                     pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                     : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                     : 0)
@@ -69,7 +71,7 @@ namespace PrintLogApi
         /// either a per-filament row or the "other filament" scalar. Top-level use only.
         /// </summary>
         public static Expression<Func<Print, bool>> MaterialIsEstimatedExpr =>
-            p => p.FilamentUsage.Any(pf =>
+            p => p.FilamentUsage!.Any(pf =>
                     !(pf.AmountMg.HasValue && pf.AmountMg > 0)
                     && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0)
                 || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
