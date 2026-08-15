@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using PrintLogApi;
+using System.Collections.Generic;
+using System.Reflection;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests
@@ -39,6 +42,73 @@ namespace PrintLogApi.IntegrationTests
                 "MVC's implicit [Required] inference must stay suppressed until #45 adopts it " +
                 "deliberately. Removing it before the DTOs are annotated changes request " +
                 "validation with no compiler warning.");
+        }
+
+        /// <summary>
+        /// Covers the one class of entity-annotation mistake that CI structurally cannot catch.
+        ///
+        /// `dotnet-ef migrations has-pending-model-changes` guards scalar properties, because a
+        /// scalar's annotation is what EF infers the column's nullability from. Reference
+        /// NAVIGATIONS are different: optionality comes from the foreign key property, so a
+        /// navigation annotated `Filament?` on a required relationship (or the reverse) produces an
+        /// identical schema and leaves that check green — while handing every consumer nullability
+        /// information that contradicts the database.
+        ///
+        /// So assert it directly against the built model: a required relationship must have a
+        /// non-nullable navigation, an optional one must have a nullable navigation.
+        /// </summary>
+        [Fact]
+        public void ReferenceNavigationAnnotations_MatchRelationshipRequiredness()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var nullabilityContext = new NullabilityInfoContext();
+
+            var mismatches = new List<string>();
+            var checkedCount = 0;
+
+            foreach (var entityType in context.Model.GetEntityTypes())
+            {
+                foreach (var navigation in entityType.GetNavigations())
+                {
+                    if (navigation.IsCollection || navigation.PropertyInfo is null)
+                    {
+                        continue;
+                    }
+
+                    var state = nullabilityContext.Create(navigation.PropertyInfo).ReadState;
+
+                    // Unknown means the declaring file has no `#nullable enable` yet. Nothing to
+                    // check there, and it must not fail — this test has to stay valid while the
+                    // rest of the migration (#43, #44) is still outstanding.
+                    if (state == NullabilityState.Unknown)
+                    {
+                        continue;
+                    }
+
+                    checkedCount++;
+                    var isRequired = navigation.ForeignKey.IsRequired;
+                    var isNullable = state == NullabilityState.Nullable;
+
+                    if (isRequired == isNullable)
+                    {
+                        mismatches.Add(
+                            $"{entityType.ClrType.Name}.{navigation.Name}: relationship is " +
+                            $"{(isRequired ? "REQUIRED" : "OPTIONAL")} but the navigation is " +
+                            $"annotated {(isNullable ? "nullable" : "non-nullable")}");
+                    }
+                }
+            }
+
+            Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
+
+            // Guards against the assertion above passing vacuously if the annotations were ever
+            // reverted or the entity files lost their `#nullable enable`.
+            Assert.True(
+                checkedCount >= 50,
+                $"Only {checkedCount} annotated reference navigations were checked; the entity " +
+                "models are expected to contribute far more. Did PrintLogApi/Models lose its " +
+                "'#nullable enable' headers?");
         }
     }
 }

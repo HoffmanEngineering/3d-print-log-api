@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -15,10 +17,10 @@ namespace PrintLogApi.Models
 
         public long PrintId { get; set; }
 
-        public Print Print { get; set; }
+        public Print Print { get; set; } = null!;
 
         public long CommentId { get; set; }
-        public Comment Comment { get; set; }
+        public Comment Comment { get; set; } = null!;
 
     }
 }

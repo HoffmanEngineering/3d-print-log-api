@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.ComponentModel.DataAnnotations;
 
@@ -22,11 +24,11 @@ namespace PrintLogApi.Models
 
         [Required]
         [StringLength(64)]
-        public string ToolName { get; set; }
+        public string ToolName { get; set; } = null!;
 
         [Required]
         [StringLength(200)]
-        public string IdempotencyKey { get; set; }
+        public string IdempotencyKey { get; set; } = null!;
 
         /// <summary>
         /// Lowercase-hex SHA-256 over the canonical serialization of the create-tool arguments that
@@ -34,7 +36,7 @@ namespace PrintLogApi.Models
         /// while unreleased); a null fingerprint replays without comparison.
         /// </summary>
         [StringLength(64)]
-        public string RequestFingerprint { get; set; }
+        public string? RequestFingerprint { get; set; }
 
         /// <summary>
         /// The entity this key created. Exactly one of the five is set, decided by

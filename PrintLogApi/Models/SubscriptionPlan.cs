@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PrintLogApi.Models
 {
     public enum SubscriptionPlan

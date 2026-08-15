@@ -34,6 +34,29 @@ them from the deploy workflow (see Deployment) — never rely on startup migrati
 New migrations must be **backwards compatible** (additive only): the old app version is still
 running against the database while migrations execute.
 
+## Nullable Reference Types
+
+Mid-migration (see #46). The project is on `<Nullable>warnings</Nullable>`, so the annotation
+context is off *except* in files carrying an explicit `#nullable enable` — currently everything in
+`PrintLogApi/Models/` (the EF entities). Annotations there are load-bearing, not cosmetic:
+
+**On an entity, a `?` is a database column decision.** EF Core infers required/optional from the
+annotation, so dropping a `?` silently makes a nullable column NOT NULL. That does not fail the
+build — it fails the migration against production data. The nullability of every entity property
+was taken from `PrintLogContextModelSnapshot.cs` (`.IsRequired()` present or not), which is the
+ground truth for what is already deployed. CI runs
+`dotnet-ef migrations has-pending-model-changes` to catch a mistake; keep it green.
+
+Two conventions in `Models/`:
+
+- **Collection navigations are nullable** (`ICollection<T>?`), *not* initialized to an empty
+  collection. This deviates from the usual EF guidance on purpose: an unloaded navigation really is
+  null today, and initializing it would change "not loaded" from a `NullReferenceException` into a
+  silent empty result. That is a runtime behaviour change, and it does not belong in an annotation
+  change. Revisit it deliberately, on its own, if wanted.
+- **Required reference navigations and required scalars use `= null!`**, which keeps the property
+  non-nullable for EF while staying a no-op at runtime (the field was already null).
+
 ## MCP Server
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -40,30 +42,30 @@ namespace PrintLogApi.Models
         public long Id { get; set; }
 
         [MaxLength(100)]
-        public string Title { get; set; }
+        public string? Title { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 
         public long PrinterId { get; set; }
-        public Printer Printer { get; set; }
+        public Printer Printer { get; set; } = null!;
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg  { get; set; }
         public int? PrintTimeInSeconds { get; set; }
 
-        public ICollection<PrintFilament> FilamentUsage { get; set; }
+        public ICollection<PrintFilament>? FilamentUsage { get; set; }
         /// <summary>
         /// Filament usage in milligrams 
         /// </summary>
         public int? FilamentUsageMg { get; set; }
 
         [MaxLength(100)]
-        public string FilamentType { get; set; }
+        public string? FilamentType { get; set; }
 
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         [MaxLength(1000)]
-        public string Url { get; set; }
+        public string? Url { get; set; }
 
         public bool AllowComments { get; set; }
 
@@ -74,16 +76,16 @@ namespace PrintLogApi.Models
         /// </summary>
         [MaxLength(20)]
         [MinLength(20)]
-        public byte[] FileHash { get; set; }
+        public byte[]? FileHash { get; set; }
 
         [MaxLength(1000)]
-        public string FileName { get; set; }
+        public string? FileName { get; set; }
 
-        public ICollection<PrintImage> Images { get; set; }
+        public ICollection<PrintImage>? Images { get; set; }
 
-        public ICollection<PrintAttachment> Attachments { get; set; }
+        public ICollection<PrintAttachment>? Attachments { get; set; }
 
-        public ICollection<PrintComment> Comments { get; set; }
+        public ICollection<PrintComment>? Comments { get; set; }
 
 
         public PrintStatus Status { get; set; }
@@ -91,6 +93,6 @@ namespace PrintLogApi.Models
         public PrintViewStatus ViewStatus { get; set; }
 
         public Guid? ProjectId { get; set; }
-        public Project Project { get; set; }
+        public Project? Project { get; set; }
     }
 }

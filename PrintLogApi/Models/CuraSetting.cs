@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -15,13 +17,13 @@ namespace PrintLogApi.Models
         public Guid Id { get; set; }
 
         [StringLength(100)]
-        public string CuraVersion { get; set; }
+        public string? CuraVersion { get; set; }
 
         [StringLength(100)]
-        public string PluginVersion { get; set; }
+        public string? PluginVersion { get; set; }
 
         //// https://docs.microsoft.com/en-us/ef/core/modeling/backing-field
-        internal string _Settings { get; set; }
+        internal string? _Settings { get; set; }
 
         [NotMapped]
         public JsonElement Settings
