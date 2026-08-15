@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models.SortEnums
+﻿#nullable enable
+
+namespace PrintLogApi.Models.SortEnums
 {
     public enum PrinterMaintenanceSortColumn
     {

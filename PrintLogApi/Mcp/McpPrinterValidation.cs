@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 
 namespace PrintLogApi.Mcp
@@ -76,7 +78,7 @@ namespace PrintLogApi.Mcp
         /// Only checks a value the caller actually supplied: on update, a null make means "leave it
         /// alone", which is not the same as asking for a blank one.
         /// </summary>
-        private static void RequireNonBlankIfSet(string value, string field)
+        private static void RequireNonBlankIfSet(string? value, string field)
         {
             if (value != null && string.IsNullOrWhiteSpace(value))
             {

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +12,7 @@ namespace PrintLogApi.Services
     public interface IPrinterService
     {
         Task DeletePrinter(long printerId);
-        Task<Printer> getPrinterById(long printerId);
+        Task<Printer?> getPrinterById(long printerId);
         Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds);
 
         /// <summary>
@@ -43,7 +45,7 @@ namespace PrintLogApi.Services
         /// </para>
         /// </summary>
         Task<CreatePrinterResult> CreatePrinterForMcp(
-            long userId, PrinterAttributesInput input, string idempotencyKey, CancellationToken ct);
+            long userId, PrinterAttributesInput input, string? idempotencyKey, CancellationToken ct);
 
         /// <summary>
         /// Edits one of the caller's own printers through a dedicated ownership-scoped path.

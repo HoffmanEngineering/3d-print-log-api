@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Linq;
 using PrintLogApi.Models.DTOs.Analytics;
@@ -20,7 +22,7 @@ namespace PrintLogApi.Services.Analytics
         /// compare against — no explicit range, or comparison not requested. Callers treat null
         /// as "leave Previous alone", which is what suppresses the delta in the UI.
         /// </summary>
-        public static AnalyticsFilter For(AnalyticsFilter filter)
+        public static AnalyticsFilter? For(AnalyticsFilter? filter)
         {
             if (filter is null || !filter.ComparePrevious || !filter.HasRange) return null;
 

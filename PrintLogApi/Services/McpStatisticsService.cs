@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -72,7 +74,7 @@ namespace PrintLogApi.Services
             var items = rows
                 .Select(g => new PrinterStatsItem(
                     g.PrinterId,
-                    g.Name,
+                    g.Name!,
                     g.TotalPrints,
                     g.SuccessfulPrints,
                     g.FailedPrints,

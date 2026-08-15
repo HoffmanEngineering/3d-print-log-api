@@ -1,4 +1,6 @@
-﻿using System.Threading.Tasks;
+﻿#nullable enable
+
+using System.Threading.Tasks;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.Services

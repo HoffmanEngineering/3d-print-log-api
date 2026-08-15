@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -6,15 +8,15 @@ using PrintLogApi.Models.DTOs.Analytics;
 
 namespace PrintLogApi.Services.Analytics
 {
-    public sealed record CostInputs(string UserCurrency, string DefaultFilamentPrice, string KwhRate, string DefaultWattageW);
+    public sealed record CostInputs(string UserCurrency, string? DefaultFilamentPrice, string? KwhRate, string? DefaultWattageW);
 
     /// <summary>
     /// One filament usage row flattened for costing. SourceMeasurement mirrors
     /// PrintFilament.SourceMeasurement: 1 = Weight, 2 = Length, 3 = Volume.
     /// </summary>
     public sealed record FilamentCostRow(
-        string PurchasePriceValue,
-        string PurchasePriceCurrency,
+        string? PurchasePriceValue,
+        string? PurchasePriceCurrency,
         long? InitialNominalWeightMg,
         double MaterialDensityGramPerCubicCm,
         double? DiameterMm,
@@ -45,7 +47,7 @@ namespace PrintLogApi.Services.Analytics
         /// Invariant-culture parse with finite and non-negative checks. Deliberately stricter than
         /// the client's Number(...): "1,5" is rejected rather than silently becoming 15 or NaN.
         /// </summary>
-        public static decimal? ParseInvariant(string raw)
+        public static decimal? ParseInvariant(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
             if (!decimal.TryParse(raw, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
@@ -54,7 +56,7 @@ namespace PrintLogApi.Services.Analytics
             return value < 0 ? null : value;
         }
 
-        public static CostResult FilamentCost(IEnumerable<FilamentCostRow> rows, CostInputs inputs)
+        public static CostResult FilamentCost(IEnumerable<FilamentCostRow>? rows, CostInputs inputs)
         {
             var exclusions = new List<string>();
             var usedDefault = false;
@@ -144,7 +146,7 @@ namespace PrintLogApi.Services.Analytics
             }
         }
 
-        private static bool CurrencyMatches(string rowCurrency, string userCurrency)
+        private static bool CurrencyMatches(string? rowCurrency, string? userCurrency)
         {
             // Legacy spools predate the currency field; treat absent as matching rather than
             // excluding years of data.

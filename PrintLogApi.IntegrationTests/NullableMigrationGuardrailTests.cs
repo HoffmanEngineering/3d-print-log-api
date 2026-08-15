@@ -223,6 +223,68 @@ namespace PrintLogApi.IntegrationTests
         }
 
         /// <summary>
+        /// The same file-level check as <see cref="EveryDtoFile_EnablesTheNullableAnnotationContext"/>,
+        /// widened to the rest of the project once #44 annotated it: services, MCP tools,
+        /// controllers, profiles, middleware and the loose root files.
+        ///
+        /// It subsumes the DTO-directory test above. Both are kept rather than collapsed because
+        /// #45 removes this whole class at once, and the narrower one carries its own vacuity
+        /// guard for a directory that is expected to keep growing.
+        ///
+        /// Migrations are excluded deliberately: all 169 of them produce zero nullable warnings
+        /// (measured in #46), they are generated rather than written, and #45 leaves them alone.
+        /// </summary>
+        [Fact]
+        public void EverySourceFile_EnablesTheNullableAnnotationContext()
+        {
+            var projectDirectory = Path.Combine(RepositoryRoot(), "PrintLogApi");
+            Assert.True(Directory.Exists(projectDirectory), $"Project directory not found at {projectDirectory}.");
+
+            var files = Directory.GetFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !IsExcludedFromNullableScan(projectDirectory, f))
+                .ToList();
+
+            var offenders = new List<string>();
+
+            foreach (var file in files)
+            {
+                var source = File.ReadAllText(file);
+                var relative = Path.GetRelativePath(projectDirectory, file);
+
+                if (!source.Contains("#nullable enable", System.StringComparison.Ordinal))
+                {
+                    offenders.Add($"{relative}: missing '#nullable enable'");
+                }
+                else if (source.Contains("#nullable disable", System.StringComparison.Ordinal))
+                {
+                    offenders.Add($"{relative}: contains '#nullable disable'");
+                }
+            }
+
+            Assert.True(
+                offenders.Count == 0,
+                "Every PrintLogApi source file outside Migrations must opt into the nullable " +
+                "annotation context until #45 turns it on project-wide. A new file added without " +
+                "the header is silently oblivious, and flips to non-nullable at #45 along with " +
+                "everything else:\n" + string.Join("\n", offenders));
+
+            Assert.True(
+                files.Count >= 250,
+                $"Only {files.Count} source files were scanned under {projectDirectory}; ~290 are " +
+                "expected. Did the path resolution or the exclusion filter break and make this " +
+                "test vacuous?");
+        }
+
+        /// <summary>
+        /// Build output and generated migrations, matched on path segments so a directory named
+        /// e.g. "Binding" is not caught by a substring test for "bin".
+        /// </summary>
+        private static bool IsExcludedFromNullableScan(string projectDirectory, string file) =>
+            Path.GetRelativePath(projectDirectory, file)
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Any(segment => segment is "bin" or "obj" or "Migrations");
+
+        /// <summary>
         /// Resolves the repo root from this file's compile-time path rather than the working
         /// directory, which for a test run is the output folder and varies between local runs,
         /// `dotnet test`, and CI.

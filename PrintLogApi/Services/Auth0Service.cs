@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,9 +45,9 @@ namespace PrintLogApi.Services
             return $"Bearer {token}";
         }
 
-        private async Task<string> GetCachedAccessTokenAsync(CancellationToken ct)
+        private async Task<string?> GetCachedAccessTokenAsync(CancellationToken ct)
         {
-            if (_cache.TryGetValue(TokenCacheKey, out string cached) && !string.IsNullOrEmpty(cached))
+            if (_cache.TryGetValue(TokenCacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
             {
                 return cached;
             }
@@ -78,8 +80,8 @@ namespace PrintLogApi.Services
             var content = new List<KeyValuePair<string, string>>
             {
                 new("grant_type", "client_credentials"),
-                new("client_id", _configuration["Auth0Management:ClientId"]),
-                new("client_secret", _configuration["Auth0Management:ClientSecret"]),
+                new("client_id", _configuration["Auth0Management:ClientId"]!),
+                new("client_secret", _configuration["Auth0Management:ClientSecret"]!),
                 new("audience", $"https://{_configuration["Auth0Management:Domain"]}/api/v2/"),
             };
 
@@ -133,7 +135,7 @@ namespace PrintLogApi.Services
                         && grant.Scope != null
                         && grant.Scope.Contains(ReadPrintDataScope))
                     {
-                        agents.Add(new ConnectedAgentDto(grant.Id, grant.ClientId, grant.Scope));
+                        agents.Add(new ConnectedAgentDto(grant.Id!, grant.ClientId!, grant.Scope));
                     }
                 }
 
@@ -216,7 +218,7 @@ namespace PrintLogApi.Services
         ///   Get a user's email address from Auth0 by their oauth id. Null when the account has no
         ///   email, or when the id is blank.
         /// </summary>
-        public async Task<string> GetUserEmail(string oauthUserId, CancellationToken ct)
+        public async Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(oauthUserId))
             {
@@ -236,21 +238,21 @@ namespace PrintLogApi.Services
 
         private sealed class Auth0User
         {
-            [JsonPropertyName("email")] public string Email { get; set; }
+            [JsonPropertyName("email")] public string? Email { get; set; }
         }
 
         /// <summary>
         ///   Permanently delete a user from Auth0 by their oauth id.
         /// </summary>
-        public async Task DeleteUser(string oauthUserId)
+        public async Task DeleteUser(string? oauthUserId)
         {
-            var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}";
+            var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId!)}";
             await SendManagementAsync(HttpMethod.Delete, requestUrl, CancellationToken.None);
         }
 
         private sealed class GrantsPage
         {
-            [JsonPropertyName("grants")] public List<Auth0Grant> Grants { get; set; }
+            [JsonPropertyName("grants")] public List<Auth0Grant>? Grants { get; set; }
             [JsonPropertyName("start")] public int Start { get; set; }
             [JsonPropertyName("limit")] public int Limit { get; set; }
             [JsonPropertyName("length")] public int Length { get; set; }
@@ -259,11 +261,11 @@ namespace PrintLogApi.Services
 
         private sealed class Auth0Grant
         {
-            [JsonPropertyName("id")] public string Id { get; set; }
-            [JsonPropertyName("clientID")] public string ClientId { get; set; }
-            [JsonPropertyName("audience")] public string Audience { get; set; }
-            [JsonPropertyName("scope")] public List<string> Scope { get; set; }
-            [JsonPropertyName("user_id")] public string UserId { get; set; }
+            [JsonPropertyName("id")] public string? Id { get; set; }
+            [JsonPropertyName("clientID")] public string? ClientId { get; set; }
+            [JsonPropertyName("audience")] public string? Audience { get; set; }
+            [JsonPropertyName("scope")] public List<string>? Scope { get; set; }
+            [JsonPropertyName("user_id")] public string? UserId { get; set; }
         }
     }
 }

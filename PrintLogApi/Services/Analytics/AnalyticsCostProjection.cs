@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -15,7 +17,7 @@ namespace PrintLogApi.Services.Analytics
     /// </summary>
     public sealed record CostedPrint(
         long PrintId,
-        string Title,
+        string? Title,
         System.DateTimeOffset? StartDate,
         Print.PrintStatus Status,
         long PrinterId,
@@ -70,10 +72,15 @@ namespace PrintLogApi.Services.Analytics
                 .Select(s => new { s.UserSettingTypeId, s.Value })
                 .ToListAsync(ct);
 
-            string Setting(int id) => settings.FirstOrDefault(s => s.UserSettingTypeId == id)?.Value;
+            string? Setting(int id) => settings.FirstOrDefault(s => s.UserSettingTypeId == id)?.Value;
 
             return new CostInputs(
-                UserCurrency: Setting(5),            // Currency_Name
+                // Null-forgiven at the single source rather than nullable: UserCurrency feeds
+                // the Currency of every analytics response record, whose positional parameters
+                // are non-nullable by the #43 convention. A user with no currency setting
+                // already yields a null Currency today; this keeps that unchanged instead of
+                // pushing eight null-forgives out to the response boundary.
+                UserCurrency: Setting(5)!,           // Currency_Name
                 DefaultFilamentPrice: Setting(8),    // Filaments_DefaultPrice
                 KwhRate: Setting(12),                // Electricity_KwhRate
                 DefaultWattageW: Setting(13));       // Electricity_DefaultWattageW
@@ -98,7 +105,7 @@ namespace PrintLogApi.Services.Analytics
                 .GroupBy(_ => 1)
                 .Select(g => new CostRowCounts(
                     g.Count(),
-                    g.Sum(p => p.FilamentUsage.Count())));
+                    g.Sum(p => p.FilamentUsage!.Count())));
 
         /// <param name="inputs">
         /// Pre-loaded settings, for a caller that has already read them. Passing them avoids a
@@ -107,7 +114,7 @@ namespace PrintLogApi.Services.Analytics
         /// </param>
         public static async Task<CostProjection> Project(
             PrintLogContext context, long userId, IQueryable<Print> scoped, CancellationToken ct,
-            CostInputs inputs = null)
+            CostInputs? inputs = null)
         {
             inputs ??= await LoadInputs(context, userId, ct);
 
@@ -137,11 +144,11 @@ namespace PrintLogApi.Services.Analytics
                     // more endpoints. A wattage or price read through an unscoped navigation is
                     // a cross-tenant read even when the parent print is correctly scoped.
                     WattageW = p.Printer.UserId == userId ? p.Printer.WattageW : null,
-                    Rows = p.FilamentUsage
+                    Rows = p.FilamentUsage!
                         .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
                         .Select(pf => new
                     {
-                        pf.Filament.PurchasePriceValue,
+                        pf.Filament!.PurchasePriceValue,
                         pf.Filament.PurchasePriceCurrency,
                         pf.Filament.InitialNominalWeightMg,
                         pf.Filament.MaterialDensityGramPerCubicCm,

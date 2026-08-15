@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -65,7 +67,7 @@ namespace PrintLogApi.Services.Analytics
                     // on this tab is built from PrintFilament ROWS, not prints, so a print-count
                     // cap would let a multi-material library stream several times its own limit
                     // into memory (spec §6.4).
-                    g.Sum(p => p.FilamentUsage.Count()),
+                    g.Sum(p => p.FilamentUsage!.Count()),
                     // Material that was never attached to a spool has no attributes to group by.
                     // Count the PRINTS carrying it, so the coverage note reads as "N prints used
                     // filament that is not linked to a spool" — without this the tab silently
@@ -77,7 +79,7 @@ namespace PrintLogApi.Services.Analytics
 
         private sealed record UsageRow(
             long PrintId,
-            Guid FilamentId, string DisplayName, string Brand, string MaterialType, string ColorName,
+            Guid FilamentId, string? DisplayName, string? Brand, string? MaterialType, string? ColorName,
             IReadOnlyList<string> Colors, int ColorPattern, int FinishType, IReadOnlyList<int> Effects,
             DateTimeOffset? StartDate, Print.PrintStatus Status, long UsedMg);
 
@@ -141,7 +143,7 @@ namespace PrintLogApi.Services.Analytics
             // APPLY — unsupported on SQLite, so it throws under the integration-test provider
             // while working on SQL Server. This form is a plain INNER JOIN on every provider.
             var rows = (await scoped
-                .SelectMany(p => p.FilamentUsage, (p, pf) => new { p, pf })
+                .SelectMany(p => p.FilamentUsage!, (p, pf) => new { p, pf })
                 .Where(x => x.pf.FilamentId.HasValue
                     && x.pf.Filament != null
                     && x.pf.Filament.CreatedById == userId)
@@ -149,7 +151,7 @@ namespace PrintLogApi.Services.Analytics
                 {
                     PrintId = x.p.Id,
                     FilamentId = x.pf.FilamentId.Value,
-                    x.pf.Filament.DisplayName,
+                    x.pf.Filament!.DisplayName,
                     x.pf.Filament.Brand,
                     x.pf.Filament.MaterialType,
                     x.pf.Filament.ColorName,
@@ -215,7 +217,7 @@ namespace PrintLogApi.Services.Analytics
         /// black — "we do not know this spool's colour" and "this spool is black" are different
         /// claims, and the swatch must not make the second one on the first one's evidence.
         /// </summary>
-        private static IReadOnlyList<string> SwatchColors(List<string> colors, string colorHex)
+        private static IReadOnlyList<string> SwatchColors(List<string>? colors, string? colorHex)
         {
             var tokens = (colors ?? new List<string>())
                 .Where(c => !string.IsNullOrWhiteSpace(c))
@@ -233,7 +235,7 @@ namespace PrintLogApi.Services.Analytics
         /// one material rather than two. Case is deliberately preserved: folding it would change
         /// the label the user chose for their own spool.
         /// </summary>
-        private static string Label(string value) =>
+        private static string Label(string? value) =>
             string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Trim();
 
         /// <summary>
@@ -348,11 +350,11 @@ namespace PrintLogApi.Services.Analytics
                     f.DiameterMm,
                     RemainingMg = f.InitialNominalWeightMg.HasValue
                         ? (long?)(f.InitialNominalWeightMg.Value
-                            - f.PrintFilaments.Sum(pf =>
+                            - f.PrintFilaments!.Sum(pf =>
                                 pf.AmountMg.HasValue && pf.AmountMg > 0 ? (long)pf.AmountMg
                                 : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (long)pf.EstimatedAmountMg
                                 : (long)0)
-                            + f.FilamentAdjustments.Sum(adj => adj.AmountMg))
+                            + f.FilamentAdjustments!.Sum(adj => adj.AmountMg))
                         : null,
                 })
                 .ToListAsync(ct);

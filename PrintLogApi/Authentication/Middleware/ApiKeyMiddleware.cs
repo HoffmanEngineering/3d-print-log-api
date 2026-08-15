@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Net;
 using System.Security.Claims;
@@ -50,7 +52,7 @@ namespace PrintLogApi.Authentication.Middleware
             }
         }
 
-        private async Task ValidateApiKey(HttpContext context, RequestDelegate next, string key, IUserApiKeyService userApiKeyService)
+        private async Task ValidateApiKey(HttpContext context, RequestDelegate next, string? key, IUserApiKeyService userApiKeyService)
         {
             long userId;
             try

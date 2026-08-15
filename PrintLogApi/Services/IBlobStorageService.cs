@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -12,12 +14,16 @@ namespace PrintLogApi.Services
         /// <summary>
         /// The blob path relative to storage (e.g., "container/filename.jpg")
         /// </summary>
-        public string BlobPath { get; set; }
+        /// <remarks>
+        /// Null-forgiven rather than nullable: this type is never deserialized, and its single
+        /// construction site (AzureBlobStorageService.UploadAsync) always assigns both properties.
+        /// </remarks>
+        public string BlobPath { get; set; } = null!;
 
         /// <summary>
         /// The public URI/URL of the blob for accessing it.
         /// </summary>
-        public Uri BlobUri { get; set; }
+        public Uri BlobUri { get; set; } = null!;
     }
 
     /// <summary>

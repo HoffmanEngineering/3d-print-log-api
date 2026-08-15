@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -57,7 +59,7 @@ namespace PrintLogApi.Services
 
         public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
             long userId, int page, int pageSize, PrintStatus? status, long? printerId,
-            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string searchQuery,
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? searchQuery,
             CancellationToken ct)
         {
             var query = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
@@ -78,13 +80,13 @@ namespace PrintLogApi.Services
                 // remembers the project rather than the print can still find it.
                 var term = searchQuery.Trim().ToLower();
                 query = query.Where(p =>
-                    p.Title.ToLower().Contains(term)
+                    p.Title!.ToLower().Contains(term)
                     // Ownership, not merely non-null: matching on a project the caller does not own
                     // would turn search_prints into an existence oracle for another user's project
                     // names (guess a name, see whether a hit comes back).
                     || (p.Project != null
                         && p.Project.CreatedById == userId
-                        && p.Project.Name.ToLower().Contains(term)));
+                        && p.Project.Name!.ToLower().Contains(term)));
             }
 
             if (status.HasValue)
@@ -97,7 +99,7 @@ namespace PrintLogApi.Services
             }
             if (filamentId.HasValue)
             {
-                query = query.Where(p => p.FilamentUsage.Any(f => f.FilamentId == filamentId.Value));
+                query = query.Where(p => p.FilamentUsage!.Any(f => f.FilamentId == filamentId.Value));
             }
             if (from.HasValue)
             {
@@ -128,14 +130,14 @@ namespace PrintLogApi.Services
                     // Canonical material usage: sum of per-filament actual weight, falling back to
                     // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
                     // maintained, so it must not be used. Mirrors PrintProfile / remaining-weight.
-                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                    MaterialMg = p.FilamentUsage!.Sum(pf =>
                         pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
                     p.PrintTimeInSeconds,
                     p.EstimatedPrintTimeInSeconds,
                     // Material provenance: true when ANY contributing usage row fell back to its estimate.
-                    MaterialIsEstimated = p.FilamentUsage.Any(pf =>
+                    MaterialIsEstimated = p.FilamentUsage!.Any(pf =>
                         !(pf.AmountMg.HasValue && pf.AmountMg > 0)
                         && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0),
                     ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
@@ -149,7 +151,7 @@ namespace PrintLogApi.Services
                 var seconds = PrintMetrics.Resolve(r.PrintTimeInSeconds, r.EstimatedPrintTimeInSeconds);
                 return new PrintListItem(
                     r.Id,
-                    r.Title,
+                    r.Title!,
                     r.Status.ToString(),
                     r.PrinterId,
                     r.PrinterName,
@@ -173,7 +175,7 @@ namespace PrintLogApi.Services
         /// </summary>
         public const int MaxMaterialsUsed = 100;
 
-        public async Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct)
+        public async Task<PrintDetailResult?> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct)
         {
             var row = await _context.Prints.AsNoTracking()
                 .Where(p => p.Id == printId && p.CreatedById == userId)
@@ -187,7 +189,7 @@ namespace PrintLogApi.Services
                     PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
                     PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                     p.StartDate,
-                    MaterialMg = p.FilamentUsage.Sum(pf =>
+                    MaterialMg = p.FilamentUsage!.Sum(pf =>
                         pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
                         : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
                         : 0),
@@ -210,7 +212,7 @@ namespace PrintLogApi.Services
                     // print's filament rows (a printer's tool/AMS slots — single digits), not by how
                     // much data the user has. MaxMaterialsUsed below is a safety net against bad
                     // data, not a paging mechanism.
-                    Usage = p.FilamentUsage
+                    Usage = p.FilamentUsage!
                         .OrderBy(pf => pf.Id)
                         .Select(pf => new
                         {
@@ -272,7 +274,7 @@ namespace PrintLogApi.Services
             var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
 
             return new PrintDetailResult(
-                row.Id, row.Title, row.Status.ToString(), row.PrinterId, row.PrinterName,
+                row.Id, row.Title!, row.Status.ToString(), row.PrinterId, row.PrinterName,
                 row.StartDate, McpUnits.MgToGrams(row.MaterialMg),
                 // Null, not 0, when nothing was recorded: a 0 would claim a measured zero seconds.
                 seconds > 0 ? seconds : (int?)null,
@@ -304,14 +306,14 @@ namespace PrintLogApi.Services
         /// <returns></returns>
         public async Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(
             PagedRequest pagingRequest,
-            string searchText,
+            string? searchText,
             SortRequest<PrintSummarySortColumn> sortRequest,
-            IEnumerable<long> filterByPrinterIds,
-            IEnumerable<Guid> filterByFilamentIds,
-            IReadOnlyCollection<PrintStatus> statuses,
+            IEnumerable<long>? filterByPrinterIds,
+            IEnumerable<Guid>? filterByFilamentIds,
+            IReadOnlyCollection<PrintStatus>? statuses,
             long? userId,
             long? currentUserId,
-            IReadOnlyCollection<Guid> projectIds = null,
+            IReadOnlyCollection<Guid>? projectIds = null,
             DateTimeOffset? fromDate = null,
             DateTimeOffset? toDate = null)
         {
@@ -354,7 +356,7 @@ namespace PrintLogApi.Services
                      .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
                 {
-                    printQuery = printQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text));
+                    printQuery = printQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text));
                 }
             }
 
@@ -379,7 +381,7 @@ namespace PrintLogApi.Services
             // Filter by any of the selected filament ids.
             if (filamentIdList != null && filamentIdList.Any())
             {
-                printQuery = printQuery.Where(p => p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
+                printQuery = printQuery.Where(p => p.FilamentUsage!.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             if (projectIds != null && projectIds.Count > 0)
@@ -416,7 +418,7 @@ namespace PrintLogApi.Services
                     // NOTE: This is still problematic - consider computing and storing this value
                     if (sortRequest.SortDirection == SortDirection.Asc)
                     {
-                        printQuery = printQuery.OrderBy(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                        printQuery = printQuery.OrderBy(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
                                                                                                     p.AmountMg > 0 ?
                                                                                                     p.AmountMg :
                                                                                                     p.EstimatedAmountMg.HasValue &&
@@ -425,7 +427,7 @@ namespace PrintLogApi.Services
                     }
                     else
                     {
-                        printQuery = printQuery.OrderByDescending(src => src.FilamentUsage.Sum(p => p.AmountMg.HasValue &&
+                        printQuery = printQuery.OrderByDescending(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
                                                                                                     p.AmountMg > 0 ?
                                                                                                     p.AmountMg :
                                                                                                     p.EstimatedAmountMg.HasValue &&
@@ -452,10 +454,10 @@ namespace PrintLogApi.Services
             var prints = await _context.Prints
                 .Where(p => printIds.Contains(p.Id))
                 .Include(p => p.Printer)
-                    .ThenInclude(pr => pr.Category)
+                    .ThenInclude(pr => pr.Category!)
                         .ThenInclude(c => c.MaterialCategory)
-                .Include(p => p.FilamentUsage)
-                    .ThenInclude(pf => pf.Filament)
+                .Include(p => p.FilamentUsage!)
+                    .ThenInclude(pf => pf.Filament!)
                         .ThenInclude(f => f.MaterialCategory)
                 .Include(p => p.Images)
                 .Include(p => p.Project)
@@ -530,15 +532,15 @@ namespace PrintLogApi.Services
             return stream;
         }
 
-        public async Task<Print> GetPrintById(long id)
+        public async Task<Print?> GetPrintById(long id)
         {
             var print = await this._context.Prints
                 .Include(p => p.Printer)
-                .Include(p => p.Images)
+                .Include(p => p.Images!)
                     .ThenInclude(p => p.File)
-                .Include(p => p.Comments)
+                .Include(p => p.Comments!)
                     .ThenInclude(p => p.Comment)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .AsSplitQuery()
@@ -546,7 +548,7 @@ namespace PrintLogApi.Services
 
             if (print is not null)
             {
-                print.Comments = print.Comments.OrderBy(c => c.CreatedDate).ThenBy(c => c.Id).ToList();
+                print.Comments = print.Comments!.OrderBy(c => c.CreatedDate).ThenBy(c => c.Id).ToList();
             }
 
             return print;
@@ -580,13 +582,13 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessPrinterException();
             }
 
-            foreach (var filament in newPrint.FilamentUsage)
+            foreach (var filament in newPrint.FilamentUsage!)
             {
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                     filament.FilamentId = null;
             }
 
-            var filamentIdsToCheck = newPrint.FilamentUsage
+            var filamentIdsToCheck = newPrint.FilamentUsage!
                 .Where(f => f.FilamentId.HasValue)
                 .Select(f => f.FilamentId.Value);
 
@@ -595,7 +597,7 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessFilamentException();
             }
 
-            var newLoadedFilamentIds = newPrint.FilamentUsage
+            var newLoadedFilamentIds = newPrint.FilamentUsage!
                 .Where(filament => filament.FilamentId.HasValue && filament.FilamentId != default)
                 .Select(filament => filament.FilamentId.Value);
 
@@ -632,13 +634,14 @@ namespace PrintLogApi.Services
 
             _context.Prints.Add(newPrint);
             await _context.SaveChangesAsync();
-            return await GetPrintById(newPrint.Id); ;
+            // Null-forgiven: the print was just persisted, so the re-read always finds it.
+            return (await GetPrintById(newPrint.Id))!;
         }
 
         public async Task<CreatePrintResult> CreatePrintForMcp(
-            long userId, string title, long printerId, PrintStatus status,
+            long userId, string? title, long printerId, PrintStatus status,
             DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
-            string notes, Guid? projectId, string fileName, string url,
+            string? notes, Guid? projectId, string? fileName, string? url,
             Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct)
         {
@@ -745,7 +748,7 @@ namespace PrintLogApi.Services
             return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
         }
 
-        private async Task<CreatePrintResult> FindIdempotentPrint(
+        private async Task<CreatePrintResult?> FindIdempotentPrint(
             long userId, string toolName, string key, string fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords
@@ -975,10 +978,10 @@ namespace PrintLogApi.Services
         }
 
         public async Task<PrintDetailResult> UpdateOwnPrintForMcp(
-            long userId, long printId, string title, PrintStatus? status, string notes, DateTimeOffset? startedAt,
-            long? printerId, int? durationSeconds, int? estimatedDurationSeconds, string fileName, string url,
+            long userId, long printId, string? title, PrintStatus? status, string? notes, DateTimeOffset? startedAt,
+            long? printerId, int? durationSeconds, int? estimatedDurationSeconds, string? fileName, string? url,
             Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
-            Guid? projectId, bool materialsProvided, IReadOnlyList<MaterialUsageInput> materials,
+            Guid? projectId, bool materialsProvided, IReadOnlyList<MaterialUsageInput>? materials,
             ISet<string> clearFields, CancellationToken ct)
         {
             var print = await _context.Prints
@@ -1037,7 +1040,7 @@ namespace PrintLogApi.Services
                 {
                     throw McpToolException.NotFound("Material not found.");
                 }
-                await RequireMcpConvertibleUsage(materials, userId, ct);
+                await RequireMcpConvertibleUsage(materials!, userId, ct);
             }
 
             // ---- Mutate. ----
@@ -1076,7 +1079,7 @@ namespace PrintLogApi.Services
 
             if (materialsProvided)
             {
-                _context.PrintFilament.RemoveRange(print.FilamentUsage);
+                _context.PrintFilament.RemoveRange(print.FilamentUsage!);
                 print.FilamentUsage = materials!.Select(ToPrintFilament).ToList();
                 await UpdateFilamentUsageWeights(print);
             }
@@ -1101,7 +1104,7 @@ namespace PrintLogApi.Services
             var updatedPrint = _mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
             var printer = await _context.Printers.FindAsync(dto.PrinterId);
-            updatedPrint.Printer = printer;
+            updatedPrint.Printer = printer!;
 
             // Check if the user had access to that printer!
             // Null-forgiven: an unknown PrinterId already threw here before nullable analysis was
@@ -1113,13 +1116,13 @@ namespace PrintLogApi.Services
                 throw new UserCannotAccessPrinterException();
             }
 
-            foreach (var filament in updatedPrint.FilamentUsage)
+            foreach (var filament in updatedPrint.FilamentUsage!)
             {
                 if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                     filament.FilamentId = null;
             }
 
-            var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage
+            var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage!
                 .Where(f => f.FilamentId.HasValue)
                 .Select(f => f.FilamentId.Value);
 
@@ -1179,7 +1182,8 @@ namespace PrintLogApi.Services
 
             _telemetry.TrackEvent("PrintEdit");
 
-            return await GetPrintById(updatedPrint.Id);
+            // Null-forgiven: the print was just persisted, so the re-read always finds it.
+            return (await GetPrintById(updatedPrint.Id))!;
         }
 
         /// <summary>
@@ -1187,7 +1191,7 @@ namespace PrintLogApi.Services
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
-            var filamentIds = print.FilamentUsage
+            var filamentIds = print.FilamentUsage!
                 .Where(pf => pf.FilamentId.HasValue && pf.FilamentId != default(Guid))
                 .Select(pf => pf.FilamentId.Value)
                 .Distinct()
@@ -1201,7 +1205,7 @@ namespace PrintLogApi.Services
                 .AsNoTracking()
                 .ToDictionaryAsync(f => f.Id);
 
-            foreach (var pf in print.FilamentUsage)
+            foreach (var pf in print.FilamentUsage!)
             {
                 if (!pf.FilamentId.HasValue || pf.FilamentId == default(Guid))
                 {
@@ -1369,18 +1373,18 @@ namespace PrintLogApi.Services
             }
 
             // Remove Print Comments.
-            foreach (var comment in print.Comments.ToArray())
+            foreach (var comment in print.Comments!.ToArray())
             {
                 _context.Comments.Remove(comment.Comment);
             }
-            _context.PrintComments.RemoveRange(print.Comments.ToArray());
+            _context.PrintComments.RemoveRange(print.Comments!.ToArray());
 
             // Remove Print Images.
-            foreach (var image in print.Images.ToArray())
+            foreach (var image in print.Images!.ToArray())
             {
                 _context.Files.Remove(image.File);
             }
-            _context.PrintImages.RemoveRange(print.Images.ToArray());
+            _context.PrintImages.RemoveRange(print.Images!.ToArray());
 
             // Remove Print Attachments.
             var attachments = await _context.PrintAttachments
@@ -1394,7 +1398,7 @@ namespace PrintLogApi.Services
             _context.PrintAttachments.RemoveRange(attachments);
 
             // Remove PrintFilament for this print.
-            _context.PrintFilament.RemoveRange(print.FilamentUsage.ToArray());
+            _context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
 
             // Remove Notifications referencing this print.
             var notifications = await _context.Notifications
@@ -1478,7 +1482,7 @@ namespace PrintLogApi.Services
             public long? PrintId { get; init; }
             public Guid? ProjectId { get; init; }
             public DateTimeOffset SortDate { get; init; }
-            public string SortTitle { get; init; }
+            public string? SortTitle { get; init; }
             public long TotalFilamentWeightMg { get; init; }
         }
 
@@ -1502,11 +1506,11 @@ namespace PrintLogApi.Services
             int pageNumber,
             int pageSize,
             long userId,
-            string searchText = null,
-            IEnumerable<long> filterByPrinterIds = null,
-            IEnumerable<Guid> filterByFilamentIds = null,
+            string? searchText = null,
+            IEnumerable<long>? filterByPrinterIds = null,
+            IEnumerable<Guid>? filterByFilamentIds = null,
             Print.PrintStatus? filterByStatus = null,
-            SortRequest<PrintSummarySortColumn> sortRequest = null)
+            SortRequest<PrintSummarySortColumn>? sortRequest = null)
         {
             var printerIdList = filterByPrinterIds?.ToList();
             var filamentIdList = filterByFilamentIds?.ToList();
@@ -1528,7 +1532,7 @@ namespace PrintLogApi.Services
                         : new string[] { element })
                     .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
-                    filteredPrintQuery = filteredPrintQuery.Where(p => p.Title.Contains(text) || p.Notes.Contains(text) || p.Project.Name.Contains(text));
+                    filteredPrintQuery = filteredPrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text) || p.Project!.Name!.Contains(text));
             }
 
             if (filterByStatus.HasValue)
@@ -1540,7 +1544,7 @@ namespace PrintLogApi.Services
             if (filamentIdList != null && filamentIdList.Any())
             {
                 filteredPrintQuery = filteredPrintQuery.Where(p =>
-                    p.FilamentUsage.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
+                    p.FilamentUsage!.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
             }
 
             // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
@@ -1806,7 +1810,7 @@ namespace PrintLogApi.Services
                 var printerEntities = uniquePrinterIds.Count > 0
                     ? await _context.Printers
                         .Where(pr => uniquePrinterIds.Contains(pr.Id))
-                        .Include(pr => pr.Category)
+                        .Include(pr => pr.Category!)
                             .ThenInclude(c => c.MaterialCategory)
                         .AsNoTracking()
                         .ToListAsync()
@@ -1835,6 +1839,9 @@ namespace PrintLogApi.Services
                                   };
                               })
                               .Where(ps => ps != null)
+                              // Restates the element type after the null filter above; the
+                              // Where already guarantees it, but flow analysis cannot see that.
+                              .Select(ps => ps!)
                               .ToList());
             }
             else
@@ -1850,10 +1857,10 @@ namespace PrintLogApi.Services
                 ? await _context.Prints
                     .Where(p => pagePrintIds.Contains(p.Id))
                     .Include(p => p.Printer)
-                        .ThenInclude(pr => pr.Category)
+                        .ThenInclude(pr => pr.Category!)
                             .ThenInclude(c => c.MaterialCategory)
-                    .Include(p => p.FilamentUsage)
-                        .ThenInclude(pf => pf.Filament)
+                    .Include(p => p.FilamentUsage!)
+                        .ThenInclude(pf => pf.Filament!)
                             .ThenInclude(f => f.MaterialCategory)
                     .Include(p => p.Images)
                     .AsNoTracking()
@@ -1904,7 +1911,7 @@ namespace PrintLogApi.Services
                         Print = _mapper.Map<PrintSummaryDTO>(p)
                     };
                 }
-            }).Where(item => item != null).ToList();
+            }).Where(item => item != null).Select(item => item!).ToList();
 
             return new PagedList<GroupedFeedItemDto>(pagedItems, total, pageNumber, pageSize);
         }

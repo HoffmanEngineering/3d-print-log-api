@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -24,9 +26,9 @@ namespace PrintLogApi.Services
         /// viewStatus/allowComments fall back to the user's saved defaults when not supplied.
         /// </summary>
         Task<CreatePrintResult> CreatePrintForMcp(
-            long userId, string title, long printerId, Print.PrintStatus status,
+            long userId, string? title, long printerId, Print.PrintStatus status,
             DateTimeOffset? startedAt, int? durationSeconds, int? estimatedDurationSeconds,
-            string notes, Guid? projectId, string fileName, string url,
+            string? notes, Guid? projectId, string? fileName, string? url,
             Print.PrintViewStatus? viewStatus, bool? allowComments, bool? allowFileDownloads,
             IReadOnlyList<MaterialUsageInput> materials, string idempotencyKey, CancellationToken ct);
 
@@ -39,11 +41,11 @@ namespace PrintLogApi.Services
         /// edit leaves the print exactly as it was.
         /// </summary>
         Task<PrintDetailResult> UpdateOwnPrintForMcp(
-            long userId, long printId, string title, Print.PrintStatus? status, string notes,
+            long userId, long printId, string? title, Print.PrintStatus? status, string? notes,
             DateTimeOffset? startedAt, long? printerId, int? durationSeconds, int? estimatedDurationSeconds,
-            string fileName, string url, Print.PrintViewStatus? viewStatus, bool? allowComments,
+            string? fileName, string? url, Print.PrintViewStatus? viewStatus, bool? allowComments,
             bool? allowFileDownloads, Guid? projectId, bool materialsProvided,
-            IReadOnlyList<MaterialUsageInput> materials, ISet<string> clearFields, CancellationToken ct);
+            IReadOnlyList<MaterialUsageInput>? materials, ISet<string> clearFields, CancellationToken ct);
 
         /// <summary>
         /// Read-only, creator-only, paginated print search for the MCP server. Filters are applied
@@ -51,7 +53,7 @@ namespace PrintLogApi.Services
         /// </summary>
         Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
             long userId, int page, int pageSize, Print.PrintStatus? status, long? printerId,
-            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string query,
+            Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? query,
             CancellationToken ct);
 
         /// <summary>
@@ -59,12 +61,12 @@ namespace PrintLogApi.Services
         /// OR is not owned by <paramref name="userId"/> (no existence oracle for foreign prints,
         /// even public/unlisted ones). Excludes images, comments, files, and URLs.
         /// </summary>
-        Task<PrintDetailResult> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct);
+        Task<PrintDetailResult?> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct);
 
         Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
         Task DeletePrint(Print existingPrint);
         Task<Stream> GeneratePrintReportAsCsvForUser(long userId);
-        Task<Print> GetPrintById(long id);
+        Task<Print?> GetPrintById(long id);
         Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
         Task<List<long>> GetPublicPrintIds();
         /// <summary>
@@ -72,17 +74,17 @@ namespace PrintLogApi.Services
         /// folds any legacy scalar parameters into them so there is a single code path here.
         /// The date range is half-open [fromDate, toDate).
         /// </summary>
-        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long> filterByPrinterIds, IEnumerable<Guid> filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus> statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid> projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null);
+        Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string? searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long>? filterByPrinterIds, IEnumerable<Guid>? filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus>? statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid>? projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null);
         Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
         Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(
             int pageNumber,
             int pageSize,
             long userId,
-            string searchText = null,
-            IEnumerable<long> filterByPrinterIds = null,
-            IEnumerable<Guid> filterByFilamentIds = null,
+            string? searchText = null,
+            IEnumerable<long>? filterByPrinterIds = null,
+            IEnumerable<Guid>? filterByFilamentIds = null,
             Print.PrintStatus? filterByStatus = null,
-            SortRequest<PrintSummarySortColumn> sortRequest = null);
+            SortRequest<PrintSummarySortColumn>? sortRequest = null);
 
         Task<int> GetMaxImagesPerPrint(long userId);
         Task SetDefaultImage(long printId, int newDefaultImageId);

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -116,14 +118,14 @@ namespace PrintLogApi.Mcp
             [Description("Optional UTC start time.")] DateTimeOffset? startedAt = null,
             [Description("Optional measured duration in seconds (> 0).")] int? durationSeconds = null,
             [Description("Optional estimated duration in seconds (> 0).")] int? estimatedDurationSeconds = null,
-            [Description("Optional notes (max 50000).")] string notes = null,
+            [Description("Optional notes (max 50000).")] string? notes = null,
             [Description("Optional project id (see list_projects).")] Guid? projectId = null,
-            [Description("Optional source file name (max 1000).")] string fileName = null,
-            [Description("Optional url (max 1000).")] string url = null,
+            [Description("Optional source file name (max 1000).")] string? fileName = null,
+            [Description("Optional url (max 1000).")] string? url = null,
             [Description("Optional visibility. Defaults to your account default.")] Print.PrintViewStatus? viewStatus = null,
             [Description("Optional. Defaults to your account default.")] bool? allowComments = null,
             [Description("Optional. Defaults to false.")] bool? allowFileDownloads = null,
-            [Description("Optional per-material usage rows.")] MaterialUsageInput[] materials = null,
+            [Description("Optional per-material usage rows.")] MaterialUsageInput[]? materials = null,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(title))
@@ -177,21 +179,21 @@ namespace PrintLogApi.Mcp
             "Only the print's creator can edit it; any other id is 'not found'.")]
         public async Task<PrintDetailResult> UpdatePrint(
             [Description("The print id.")] long id,
-            [Description("Optional new title (max 100).")] string title = null,
+            [Description("Optional new title (max 100).")] string? title = null,
             [Description("Optional new status.")] Print.PrintStatus? status = null,
-            [Description("Optional new notes (max 50000).")] string notes = null,
+            [Description("Optional new notes (max 50000).")] string? notes = null,
             [Description("Optional new UTC start time.")] DateTimeOffset? startedAt = null,
             [Description("Optional new printer id (must be yours).")] long? printerId = null,
             [Description("Optional new duration seconds (> 0).")] int? durationSeconds = null,
             [Description("Optional new estimated duration seconds (> 0).")] int? estimatedDurationSeconds = null,
-            [Description("Optional new file name (max 1000).")] string fileName = null,
-            [Description("Optional new url (max 1000).")] string url = null,
+            [Description("Optional new file name (max 1000).")] string? fileName = null,
+            [Description("Optional new url (max 1000).")] string? url = null,
             [Description("Optional new visibility.")] Print.PrintViewStatus? viewStatus = null,
             [Description("Optional.")] bool? allowComments = null,
             [Description("Optional.")] bool? allowFileDownloads = null,
             [Description("Optional project id to file under.")] Guid? projectId = null,
-            [Description("Optional field names to clear.")] string[] clear = null,
-            [Description("Optional replacement material-usage list. Omit to leave unchanged.")] MaterialUsageInput[] materials = null,
+            [Description("Optional field names to clear.")] string[]? clear = null,
+            [Description("Optional replacement material-usage list. Omit to leave unchanged.")] MaterialUsageInput[]? materials = null,
             CancellationToken ct = default)
         {
             if (title != null)
@@ -266,17 +268,17 @@ namespace PrintLogApi.Mcp
             [Description("How the initial amount is measured.")] McpMeasurementSource source,
             [Description("Initial amount in the source's unit (g / mm / ml).")] double initialAmount,
             [Description("Diameter in mm (> 0). Required for diameter-tracking categories.")] double? diameterMm = null,
-            [Description("Optional brand (max 255).")] string brand = null,
-            [Description("Optional color name (max 255).")] string colorName = null,
-            [Description("Optional single color as 6 hex digits, no '#', e.g. 1188FF.")] string colorHex = null,
-            [Description("Optional multi-color swatches (max 32); colors[0] becomes the primary color.")] string[] colors = null,
+            [Description("Optional brand (max 255).")] string? brand = null,
+            [Description("Optional color name (max 255).")] string? colorName = null,
+            [Description("Optional single color as 6 hex digits, no '#', e.g. 1188FF.")] string? colorHex = null,
+            [Description("Optional multi-color swatches (max 32); colors[0] becomes the primary color.")] string[]? colors = null,
             [Description("Optional color pattern: Solid, Multi, Gradient, Rainbow.")] ColorPatternType? colorPattern = null,
             [Description("Optional finish: Standard, Silk, Matte.")] FilamentFinishType? finishType = null,
-            [Description("Optional effects, e.g. Sparkle, GlowInDark, CarbonFiber.")] FilamentEffect[] effects = null,
-            [Description("Optional storage location (max 256).")] string storageLocation = null,
+            [Description("Optional effects, e.g. Sparkle, GlowInDark, CarbonFiber.")] FilamentEffect[]? effects = null,
+            [Description("Optional storage location (max 256).")] string? storageLocation = null,
             [Description("Whether the material is active. Defaults to true.")] bool? isActive = null,
             [Description("Optional favorite flag. Defaults to false.")] bool? isFavorite = null,
-            [Description("Optional notes (max 1000).")] string notes = null,
+            [Description("Optional notes (max 1000).")] string? notes = null,
             [Description("Optional empty-spool weight in grams (>= 0).")] double? spoolWeightGrams = null,
             [Description("Optional on-scale weight in grams incl. spool (>= 0).")] double? initialTotalWeightGrams = null,
             [Description("Optional lower print temperature in °C.")] double? tempRangeStartC = null,
@@ -286,14 +288,14 @@ namespace PrintLogApi.Mcp
             [Description("Optional resin initial-layer cure time in seconds (>= 0).")] double? initialLayerTimeS = null,
             [Description("Optional resin layer cure time in seconds (>= 0).")] double? layerTimeS = null,
             [Description("Optional melting temperature in °C.")] double? meltingTemperatureC = null,
-            [Description("Optional inert gas for powder processes (max 255).")] string inertGas = null,
+            [Description("Optional inert gas for powder processes (max 255).")] string? inertGas = null,
             [Description("Optional powder refresh ratio, 0.0 to 1.0.")] double? materialRefreshRatio = null,
             [Description("Optional UTC purchase date.")] DateTimeOffset? purchaseDate = null,
-            [Description("Optional purchase location or URL (max 1000).")] string purchaseLocation = null,
-            [Description("Optional purchase price as text, e.g. '24.99' (max 256).")] string purchasePriceValue = null,
-            [Description("Optional currency marker, e.g. USD (max 256).")] string purchasePriceCurrency = null,
-            [Description("Optional purchase notes (max 1000).")] string purchaseNotes = null,
-            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
+            [Description("Optional purchase location or URL (max 1000).")] string? purchaseLocation = null,
+            [Description("Optional purchase price as text, e.g. '24.99' (max 256).")] string? purchasePriceValue = null,
+            [Description("Optional currency marker, e.g. USD (max 256).")] string? purchasePriceCurrency = null,
+            [Description("Optional purchase notes (max 1000).")] string? purchaseNotes = null,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
             CancellationToken ct = default)
         {
             var input = new MaterialAttributesInput
@@ -353,24 +355,24 @@ namespace PrintLogApi.Mcp
             "belonging to anyone else are 'not found'.")]
         public async Task<MaterialDetail> UpdateMaterial(
             [Description("The material id.")] Guid materialId,
-            [Description("Optional new display name (max 255).")] string displayName = null,
-            [Description("Optional new material type (max 255).")] string materialType = null,
-            [Description("Optional new category nickname (max 50).")] string materialCategoryNickname = null,
+            [Description("Optional new display name (max 255).")] string? displayName = null,
+            [Description("Optional new material type (max 255).")] string? materialType = null,
+            [Description("Optional new category nickname (max 50).")] string? materialCategoryNickname = null,
             [Description("Optional new density in g/cm^3 (> 0).")] double? densityGramPerCubicCm = null,
             [Description("Optional new diameter in mm (> 0).")] double? diameterMm = null,
             [Description("Optional new source. Must accompany initialAmount.")] McpMeasurementSource? source = null,
             [Description("Optional new initial amount in the source's unit. Must accompany source.")] double? initialAmount = null,
-            [Description("Optional new brand (max 255).")] string brand = null,
-            [Description("Optional new color name (max 255).")] string colorName = null,
-            [Description("Optional new single color, 6 hex digits, no '#'.")] string colorHex = null,
-            [Description("Optional new color swatches (max 32); colors[0] becomes the primary color.")] string[] colors = null,
+            [Description("Optional new brand (max 255).")] string? brand = null,
+            [Description("Optional new color name (max 255).")] string? colorName = null,
+            [Description("Optional new single color, 6 hex digits, no '#'.")] string? colorHex = null,
+            [Description("Optional new color swatches (max 32); colors[0] becomes the primary color.")] string[]? colors = null,
             [Description("Optional new color pattern.")] ColorPatternType? colorPattern = null,
             [Description("Optional new finish.")] FilamentFinishType? finishType = null,
-            [Description("Optional replacement effects list.")] FilamentEffect[] effects = null,
-            [Description("Optional new storage location (max 256).")] string storageLocation = null,
+            [Description("Optional replacement effects list.")] FilamentEffect[]? effects = null,
+            [Description("Optional new storage location (max 256).")] string? storageLocation = null,
             [Description("Optional active flag.")] bool? isActive = null,
             [Description("Optional favorite flag.")] bool? isFavorite = null,
-            [Description("Optional new notes (max 1000).")] string notes = null,
+            [Description("Optional new notes (max 1000).")] string? notes = null,
             [Description("Optional new empty-spool weight in grams (>= 0).")] double? spoolWeightGrams = null,
             [Description("Optional new on-scale weight in grams incl. spool (>= 0).")] double? initialTotalWeightGrams = null,
             [Description("Optional new lower print temperature in °C.")] double? tempRangeStartC = null,
@@ -380,14 +382,14 @@ namespace PrintLogApi.Mcp
             [Description("Optional new resin initial-layer cure time in seconds (>= 0).")] double? initialLayerTimeS = null,
             [Description("Optional new resin layer cure time in seconds (>= 0).")] double? layerTimeS = null,
             [Description("Optional new melting temperature in °C.")] double? meltingTemperatureC = null,
-            [Description("Optional new inert gas (max 255).")] string inertGas = null,
+            [Description("Optional new inert gas (max 255).")] string? inertGas = null,
             [Description("Optional new powder refresh ratio, 0.0 to 1.0.")] double? materialRefreshRatio = null,
             [Description("Optional new UTC purchase date.")] DateTimeOffset? purchaseDate = null,
-            [Description("Optional new purchase location or URL (max 1000).")] string purchaseLocation = null,
-            [Description("Optional new purchase price as text (max 256).")] string purchasePriceValue = null,
-            [Description("Optional new currency marker (max 256).")] string purchasePriceCurrency = null,
-            [Description("Optional new purchase notes (max 1000).")] string purchaseNotes = null,
-            [Description("Optional field names to clear.")] string[] clear = null,
+            [Description("Optional new purchase location or URL (max 1000).")] string? purchaseLocation = null,
+            [Description("Optional new purchase price as text (max 256).")] string? purchasePriceValue = null,
+            [Description("Optional new currency marker (max 256).")] string? purchasePriceCurrency = null,
+            [Description("Optional new purchase notes (max 1000).")] string? purchaseNotes = null,
+            [Description("Optional field names to clear.")] string[]? clear = null,
             CancellationToken ct = default)
         {
             var clearFields = McpWriteValidation.RequireAllowedClearFields(
@@ -449,8 +451,8 @@ namespace PrintLogApi.Mcp
             [Description("Manufacturer, e.g. Bambu Lab (max 50).")] string make,
             [Description("Model, e.g. X1 Carbon (max 50).")] string model,
             [Description("Your name for this printer (max 100).")] string name,
-            [Description("Optional description (max 1000).")] string description = null,
-            [Description("Optional category nickname, e.g. FFF or SLA (max 50). Defaults to FFF.")] string categoryNickname = null,
+            [Description("Optional description (max 1000).")] string? description = null,
+            [Description("Optional category nickname, e.g. FFF or SLA (max 50). Defaults to FFF.")] string? categoryNickname = null,
             [Description("Optional nozzle diameter in mm (>= 0).")] double? nozzleDiameterMm = null,
             [Description("Optional filament diameter in mm (>= 0).")] double? filamentDiameterMm = null,
             [Description("Optional laser beam diameter in mm (>= 0).")] double? beamDiameterMm = null,
@@ -463,7 +465,7 @@ namespace PrintLogApi.Mcp
             [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
             [Description("Optional power draw in watts (>= 0).")] double? wattageW = null,
             [Description("Whether the printer is in use. Defaults to true.")] bool? isActive = null,
-            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
             CancellationToken ct = default)
         {
             return await printerService.CreatePrinterForMcp(
@@ -487,11 +489,11 @@ namespace PrintLogApi.Mcp
             "to anyone else are 'not found'.")]
         public async Task<PrinterDetailResult> UpdatePrinter(
             [Description("The printer id (see list_printers).")] long id,
-            [Description("Optional new manufacturer (max 50).")] string make = null,
-            [Description("Optional new model (max 50).")] string model = null,
-            [Description("Optional new name (max 100).")] string name = null,
-            [Description("Optional new description (max 1000).")] string description = null,
-            [Description("Optional new category nickname (max 50).")] string categoryNickname = null,
+            [Description("Optional new manufacturer (max 50).")] string? make = null,
+            [Description("Optional new model (max 50).")] string? model = null,
+            [Description("Optional new name (max 100).")] string? name = null,
+            [Description("Optional new description (max 1000).")] string? description = null,
+            [Description("Optional new category nickname (max 50).")] string? categoryNickname = null,
             [Description("Optional new nozzle diameter in mm (>= 0).")] double? nozzleDiameterMm = null,
             [Description("Optional new filament diameter in mm (>= 0).")] double? filamentDiameterMm = null,
             [Description("Optional new laser beam diameter in mm (>= 0).")] double? beamDiameterMm = null,
@@ -504,7 +506,7 @@ namespace PrintLogApi.Mcp
             [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
             [Description("Optional new power draw in watts (>= 0).")] double? wattageW = null,
             [Description("Optional active flag.")] bool? isActive = null,
-            [Description("Optional field names to clear.")] string[] clear = null,
+            [Description("Optional field names to clear.")] string[]? clear = null,
             CancellationToken ct = default)
         {
             var clearFields = McpWriteValidation.RequireAllowedClearFields(
@@ -523,7 +525,7 @@ namespace PrintLogApi.Mcp
         /// mapping the same argument to different fields.
         /// </summary>
         private static PrinterAttributesInput BuildPrinterInput(
-            string make, string model, string name, string description, string categoryNickname,
+            string? make, string? model, string? name, string? description, string? categoryNickname,
             double? nozzleDiameterMm, double? filamentDiameterMm, double? beamDiameterMm,
             double? bedWidthMm, double? bedDepthMm, double? bedHeightMm,
             double? screenResolutionXPixels, double? screenResolutionYPixels,
@@ -562,7 +564,7 @@ namespace PrintLogApi.Mcp
             [Description("The material id.")] Guid materialId,
             [Description("Unit of the delta.")] McpMeasurementSource source,
             [Description("Signed delta in the unit (g / mm / ml). Negative removes.")] double delta,
-            [Description("Optional note explaining the adjustment.")] string notes = null,
+            [Description("Optional note explaining the adjustment.")] string? notes = null,
             CancellationToken ct = default)
         {
             McpWriteValidation.RequireDefinedEnum(source, "source");
@@ -593,12 +595,12 @@ namespace PrintLogApi.Mcp
             "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND project.")]
         public async Task<CreateProjectResult> CreateProject(
             [Description("Project name (max 100 chars).")] string name,
-            [Description("Optional external reference (max 100 chars).")] string reference = null,
-            [Description("Optional description (max 5000 chars).")] string description = null,
-            [Description("Optional URL (max 1000 chars).")] string url = null,
+            [Description("Optional external reference (max 100 chars).")] string? reference = null,
+            [Description("Optional description (max 5000 chars).")] string? description = null,
+            [Description("Optional URL (max 1000 chars).")] string? url = null,
             [Description("Status, default InProgress.")] Project.ProjectStatus status = Project.ProjectStatus.InProgress,
             [Description("Visibility, default Private.")] Project.ProjectViewStatus viewStatus = Project.ProjectViewStatus.Private,
-            [Description("Optional stable key making a retry safe. Strongly recommended.")] string idempotencyKey = null,
+            [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -618,10 +620,10 @@ namespace PrintLogApi.Mcp
             "visibility; the result echoes the resulting visibility. Foreign projects are 'not found'.")]
         public async Task<ProjectWriteResult> UpdateProject(
             [Description("The project id.")] Guid id,
-            [Description("Optional new name (max 100 chars).")] string name = null,
-            [Description("Optional new reference (max 100 chars).")] string reference = null,
-            [Description("Optional new description (max 5000 chars).")] string description = null,
-            [Description("Optional new URL (max 1000 chars).")] string url = null,
+            [Description("Optional new name (max 100 chars).")] string? name = null,
+            [Description("Optional new reference (max 100 chars).")] string? reference = null,
+            [Description("Optional new description (max 5000 chars).")] string? description = null,
+            [Description("Optional new URL (max 1000 chars).")] string? url = null,
             [Description("Optional new status.")] Project.ProjectStatus? status = null,
             [Description("Optional new visibility.")] Project.ProjectViewStatus? viewStatus = null,
             CancellationToken ct = default)
@@ -631,7 +633,7 @@ namespace PrintLogApi.Mcp
         }
 
         private static void ValidateProjectFields(
-            string name, string reference, string description, string url,
+            string? name, string? reference, string? description, string? url,
             Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus)
         {
             McpWriteValidation.RequireMaxLength(name, 100, "name");

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,7 +28,7 @@ namespace PrintLogApi.Services
         /// <paramref name="email"/> is the address the user typed into the form (optional).
         /// </summary>
         Task<Feedback> CreateFeedback(
-            long userId, Feedback.FeedbackType type, string email, string note, CancellationToken ct);
+            long userId, Feedback.FeedbackType type, string? email, string? note, CancellationToken ct);
 
         /// <summary>
         /// Records feedback on behalf of an agent. The idempotency key is REQUIRED here, unlike the
@@ -34,6 +36,6 @@ namespace PrintLogApi.Services
         /// notification, and neither can be undone from the UI. A replay never re-notifies.
         /// </summary>
         Task<Mcp.CreateFeedbackResult> CreateFeedbackForMcp(
-            long userId, Feedback.FeedbackType type, string note, string idempotencyKey, CancellationToken ct);
+            long userId, Feedback.FeedbackType type, string? note, string idempotencyKey, CancellationToken ct);
     }
 }

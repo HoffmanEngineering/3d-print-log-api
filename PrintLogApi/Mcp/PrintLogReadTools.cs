@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -62,7 +64,7 @@ namespace PrintLogApi.Mcp
             "'durationSeconds' means no duration was ever recorded — say that, do not report it as " +
             "zero. 'materialIsEstimated' works the same way for filament weight.")]
         public Task<McpPage<PrintListItem>> SearchPrints(
-            [Description("Optional text search over the print title and its project name. Case-insensitive substring.")] string query = null,
+            [Description("Optional text search over the print title and its project name. Case-insensitive substring.")] string? query = null,
             [Description("Optional print status filter. A finished print is Success, or PartialSuccess if it completed with defects: when the user asks what they 'finished' or 'completed', say which of the two you counted rather than silently picking one.")] Print.PrintStatus? status = null,
             [Description("Optional printer id filter.")] long? printerId = null,
             [Description("Optional material (filament) id filter.")] Guid? materialId = null,
@@ -117,8 +119,8 @@ namespace PrintLogApi.Mcp
             "remainingGrams means more filament has been logged as used than the spool started " +
             "with, which is a data problem worth reporting to the user. Paginated (default 25, max 100).")]
         public Task<McpPage<MaterialInventoryItem>> GetMaterialInventory(
-            [Description("Optional material filter (e.g. PLA). Matches whole words, so PLA also finds 'PLA (Polylactic Acid)' and 'PLA+'.")] string material = null,
-            [Description("Optional color filter (e.g. blue). Matches whole words, so blue also finds 'Light Blue'.")] string color = null,
+            [Description("Optional material filter (e.g. PLA). Matches whole words, so PLA also finds 'PLA (Polylactic Acid)' and 'PLA+'.")] string? material = null,
+            [Description("Optional color filter (e.g. blue). Matches whole words, so blue also finds 'Light Blue'.")] string? color = null,
             [Description("Include inactive/archived spools. Defaults to false.")] bool includeInactive = false,
             [Description("1-based page number.")] int page = 1,
             [Description("Page size (default 25, max 100).")] int? pageSize = null,
@@ -160,8 +162,8 @@ namespace PrintLogApi.Mcp
             "not no: say the answer could not be determined rather than telling the user they lack " +
             "the material. Weights are grams.")]
         public Task<FindMaterialResult> FindMaterial(
-            [Description("Optional material filter (e.g. PLA). Matches whole words.")] string material = null,
-            [Description("Optional color filter (e.g. blue). Matches whole words.")] string color = null,
+            [Description("Optional material filter (e.g. PLA). Matches whole words.")] string? material = null,
+            [Description("Optional color filter (e.g. blue). Matches whole words.")] string? color = null,
             [Description("Optional grams needed for the print (finite, > 0).")] double? requiredGrams = null,
             CancellationToken ct = default)
         {
@@ -254,7 +256,7 @@ namespace PrintLogApi.Mcp
             "a project name into the id that create_print and update_print take. Search matches name or " +
             "reference. Paginated (default 25, max 100), most-recently-updated first.")]
         public Task<McpPage<ProjectListItem>> ListProjects(
-            [Description("Optional case-insensitive search over name and reference.")] string search = null,
+            [Description("Optional case-insensitive search over name and reference.")] string? search = null,
             [Description("Optional status filter.")] Project.ProjectStatus? status = null,
             [Description("1-based page number.")] int page = 1,
             [Description("Page size (default 25, max 100).")] int? pageSize = null,

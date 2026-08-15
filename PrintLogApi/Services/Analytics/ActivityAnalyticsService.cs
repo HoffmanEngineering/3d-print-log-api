@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -81,7 +83,7 @@ namespace PrintLogApi.Services.Analytics
                     // Requiring a linked spool would silently drop it and make these totals
                     // disagree with /overview.
                     MaterialMg = g.Sum(p =>
-                        (long)p.FilamentUsage
+                        (long)p.FilamentUsage!
                             .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
                             .Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
@@ -184,7 +186,7 @@ namespace PrintLogApi.Services.Analytics
         /// second round-trip for a value already in hand, and one that could in principle
         /// disagree with the figures it labels.
         /// </summary>
-        private async Task<(decimal?[] Totals, string Currency)> CostByBucket(
+        private async Task<(decimal?[]? Totals, string Currency)> CostByBucket(
             long userId, IQueryable<Print> scoped, IReadOnlyList<TimeBucket> buckets,
             CoverageBuilder coverage, CancellationToken ct)
         {
@@ -242,7 +244,7 @@ namespace PrintLogApi.Services.Analytics
         }
 
         private static ActivityResponse Empty(
-            AnalyticsFilter filter, AnalyticsGranularity granularity, string currency, Coverage coverage) =>
+            AnalyticsFilter filter, AnalyticsGranularity granularity, string? currency, Coverage coverage) =>
             new(filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(), currency,
                 Array.Empty<ActivitySeriesBucket>(), Array.Empty<CalendarDay>(), null, null,
                 ActivityStats.Streaks(Array.Empty<DayCount>(), DateOnly.FromDateTime(DateTime.UtcNow)),

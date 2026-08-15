@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -36,12 +38,12 @@ namespace PrintLogApi.Services
         /// </summary>
         public const string DefaultPrinterCategoryNickname = "FFF";
 
-        public async Task<Printer> getPrinterById(long printerId)
+        public async Task<Printer?> getPrinterById(long printerId)
         {
             var existingPrinter = await _context.Printers
-                .Include(p => p.LoadedFilaments)
+                .Include(p => p.LoadedFilaments!)
                     .ThenInclude(f => f.Filament)
-                .Include(p => p.Category)
+                .Include(p => p.Category!)
                     .ThenInclude(type => type.MaterialCategory)
                 .Where(p => p.Id == printerId)
                 .AsSplitQuery()
@@ -67,7 +69,7 @@ namespace PrintLogApi.Services
 
             // Handle managing loaded filaments for this printer.
             // Unload any filament that isn't in the new print.
-            var currentlyLoadedFilament = printer.LoadedFilaments;
+            var currentlyLoadedFilament = printer.LoadedFilaments!;
             var filamentsToUnload = currentlyLoadedFilament
                 .Where(f => !loadedFilamentIds.Any(id => id == f.FilamentId));
 
@@ -92,12 +94,12 @@ namespace PrintLogApi.Services
                         PrinterId = printer.Id,
                         LoadedDateTime = modifiedTime,
                     };
-                    printer.LoadedFilaments.Add(newLoadedFilament);
+                    printer.LoadedFilaments!.Add(newLoadedFilament);
                 }
             }
 
             // Fixup for any loaded filaments with no set LoadedDateTime:
-            foreach (var pf in printer.LoadedFilaments.Where(lf => lf.LoadedDateTime == default(DateTimeOffset)))
+            foreach (var pf in printer.LoadedFilaments!.Where(lf => lf.LoadedDateTime == default(DateTimeOffset)))
             {
                 pf.LoadedDateTime = modifiedTime;
             }
@@ -138,9 +140,9 @@ namespace PrintLogApi.Services
             }
 
             // Remove any adjustments
-            if (printer.LoadedFilaments.Any())
+            if (printer.LoadedFilaments!.Any())
             {
-                _context.PrinterFilament.RemoveRange(printer.LoadedFilaments);
+                _context.PrinterFilament.RemoveRange(printer.LoadedFilaments!);
             }
 
             var maintenanceEntries = _context.PrinterMaintenance.Where(pm => pm.PrinterId == printerId);
@@ -187,7 +189,7 @@ namespace PrintLogApi.Services
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .Select(p => new PrinterListItem(
-                    p.Id, p.Name, p.Make, p.Model, p.NozzleDiameter, p.IsActive))
+                    p.Id, p.Name!, p.Make, p.Model, p.NozzleDiameter, p.IsActive))
                 .ToListAsync(ct);
 
             var totalPages = pageSize > 0 ? (int)Math.Ceiling(totalCount / (double)pageSize) : 0;
@@ -223,16 +225,16 @@ namespace PrintLogApi.Services
                     // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                     // without the UnloadedDateTime filter every spool ever mounted would be reported
                     // as loaded now.
-                    LoadedCount = p.LoadedFilaments.Count(pf =>
+                    LoadedCount = p.LoadedFilaments!.Count(pf =>
                         pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId),
 
                     // A corrupt row can reference another user's spool. Its material, colour and
                     // remaining weight all live on that foreign row, so a redacted entry would carry
                     // no usable information - exclude it, but count it so the omission is visible.
-                    ExcludedCount = p.LoadedFilaments.Count(pf =>
+                    ExcludedCount = p.LoadedFilaments!.Count(pf =>
                         pf.UnloadedDateTime == null && pf.Filament.CreatedById != userId),
 
-                    Loaded = p.LoadedFilaments
+                    Loaded = p.LoadedFilaments!
                         .Where(pf => pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId)
                         .OrderByDescending(pf => pf.LoadedDateTime)
                         .ThenBy(pf => pf.Id)
@@ -249,11 +251,11 @@ namespace PrintLogApi.Services
                             // initial weight, minus usage (actual, falling back to estimate), plus
                             // adjustments.
                             RemainingMg = (pf.Filament.InitialNominalWeightMg ?? 0)
-                                - pf.Filament.PrintFilaments.Sum(u =>
+                                - pf.Filament.PrintFilaments!.Sum(u =>
                                     u.AmountMg.HasValue && u.AmountMg > 0 ? (long)u.AmountMg
                                     : u.EstimatedAmountMg.HasValue && u.EstimatedAmountMg > 0 ? (long)u.EstimatedAmountMg
                                     : 0L)
-                                + pf.Filament.FilamentAdjustments.Sum(adj => adj.AmountMg),
+                                + pf.Filament.FilamentAdjustments!.Sum(adj => adj.AmountMg),
 
                             pf.LoadedDateTime,
                         })
@@ -310,7 +312,7 @@ namespace PrintLogApi.Services
         /// back to the default: filing a printer under a category the caller did not ask for is a
         /// wrong answer that reads like a right one.
         /// </summary>
-        private async Task<PrinterCategory> RequirePrinterCategory(string nickname, CancellationToken ct)
+        private async Task<PrinterCategory> RequirePrinterCategory(string? nickname, CancellationToken ct)
         {
             var requested = nickname ?? DefaultPrinterCategoryNickname;
             var category = await _context.PrinterCategories
@@ -344,7 +346,7 @@ namespace PrintLogApi.Services
             }
         }
 
-        private static string RequireIdempotencyKey(string key)
+        private static string? RequireIdempotencyKey(string? key)
         {
             if (key == null)
             {
@@ -362,7 +364,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<CreatePrinterResult> CreatePrinterForMcp(
-            long userId, PrinterAttributesInput input, string idempotencyKey, CancellationToken ct)
+            long userId, PrinterAttributesInput input, string? idempotencyKey, CancellationToken ct)
         {
             const string toolName = "create_printer";
 
@@ -374,7 +376,7 @@ namespace PrintLogApi.Services
             McpPrinterValidation.ValidateAttributes(input);
             idempotencyKey = RequireIdempotencyKey(idempotencyKey);
 
-            string fingerprint = null;
+            string? fingerprint = null;
             if (idempotencyKey != null)
             {
                 fingerprint = McpRequestFingerprint.ComputeCreatePrinter(input);
@@ -460,7 +462,7 @@ namespace PrintLogApi.Services
         /// failure (not), because only it knows the key and fingerprint to look the winner up with.
         /// </summary>
         private async Task CreatePrinterWithIdempotencyRecord(
-            Printer printer, long userId, string key, string fingerprint, CancellationToken ct)
+            Printer printer, long userId, string key, string? fingerprint, CancellationToken ct)
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
             // run inside an execution strategy, so the whole tx is the retriable unit.
@@ -478,8 +480,8 @@ namespace PrintLogApi.Services
             });
         }
 
-        private async Task<CreatePrinterResult> FindIdempotentPrinter(
-            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        private async Task<CreatePrinterResult?> FindIdempotentPrinter(
+            long userId, string toolName, string key, string? fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
@@ -600,7 +602,7 @@ namespace PrintLogApi.Services
             return await GetPrinterForMcp(userId, printer.Id, ct);
         }
 
-        private static void PatchString(Action<string> set, string value, bool clear = false)
+        private static void PatchString(Action<string?> set, string? value, bool clear = false)
         {
             if (clear)
             {

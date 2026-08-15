@@ -37,9 +37,12 @@ running against the database while migrations execute.
 ## Nullable Reference Types
 
 Mid-migration (see #46). The project is on `<Nullable>warnings</Nullable>`, so the annotation
-context is off *except* in files carrying an explicit `#nullable enable` — currently everything in
-`PrintLogApi/Models/` (the EF entities) and `PrintLogApi/Models/DTOs/`. Annotations in `Models/`
-are load-bearing, not cosmetic:
+context is off *except* in files carrying an explicit `#nullable enable` — which, since #44, is
+every source file in `PrintLogApi/` outside `Migrations/`. **A new file must carry the header**;
+`NullableMigrationGuardrailTests` fails the build if one does not, because an oblivious file is
+invisible until #45 flips the project and turns all of its properties non-nullable at once.
+
+Annotations in `Models/` are load-bearing, not cosmetic:
 
 **On an entity, a `?` is a database column decision.** EF Core infers required/optional from the
 annotation, so dropping a `?` silently makes a nullable column NOT NULL. That does not fail the
@@ -76,7 +79,12 @@ on a DTO it asserts something about deserialized data that nothing enforces. `re
 is a runtime behaviour change dressed as an annotation.
 
 Positional records (`Analytics/`, `ConnectedAgentDto`) keep their non-nullable parameters: the
-constructor is the enforcement, and every one of them is built server-side.
+constructor is the enforcement, and every one of them is built server-side. #44 corrected the five
+where that premise turned out to be false — the service provably passes null on a documented
+branch, so the parameter is now nullable: `HighlightRef.Id`/`Label`, all four of
+`OverviewHighlights`, `AccuracyGroup`/`AccuracyCallout.Label`, `PrintCostRef.Title`,
+`MaintenanceEvent.Category`/`Description`, and `ActivityResponse.Currency`. Check the call sites
+before adding a non-nullable parameter to one of these.
 
 The rule is uniform on purpose, and it does over-nullable a handful of properties — the ones with a
 single construction site that provably assigns them (`GetUploadUrlResponse`,
@@ -87,7 +95,26 @@ today: no code dereferences those properties, and Swagger does not read nullabil
 (`SupportNonNullableReferenceTypes` is off), so the published contract is identical either way.
 Revisit at #45, when NRT-aware schema generation is actually on the table.
 
-## MCP Server
+### Services, MCP tools and controllers
+
+Annotated in #44, under one rule: **the annotation states what the code already does**, and
+nothing about behaviour changed. Four idioms account for nearly all of it.
+
+- **`!` on an optional navigation inside an EF or AutoMapper expression** (`p.FilamentUsage!.Sum(…)`,
+  `.Include(p => p.Images!)`, `.ThenInclude(pf => pf.Filament!)`). These are translated to SQL and
+  never dereferenced in process. Do not "fix" one with `?.` — that would change a LEFT JOIN into a
+  skipped call.
+- **`Task<T?>` on anything backed by `FirstOrDefaultAsync`/`SingleOrDefaultAsync`.** CS8603 is the
+  one to be strict about; never `return null!` to keep a return type non-nullable. Note that some
+  MCP reads throw `McpToolException.NotFound` instead of returning null (`GetPrinterForMcp`) —
+  read the body, do not assume from the name.
+- **`string?` on an optional parameter.** A `= null` default *is* the annotation; so is a body that
+  starts `x = x?.Trim()` or guards with `if (x == null)`.
+- **`(await Foo(id))!` after a write**, where `Foo` re-reads a row the same method just persisted.
+  Always commented, so the reason survives the next reader.
+
+Anything that needs a real null *guard* rather than an annotation goes to #39, and the `!` carries
+a comment saying so. Several already existed before this step; match their wording.
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes
 tools to agents in two classes: `PrintLogReadTools` (`McpRead`, `read:printdata`) and

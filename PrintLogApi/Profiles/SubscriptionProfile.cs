@@ -1,3 +1,5 @@
+#nullable enable
+
 using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Subscription;

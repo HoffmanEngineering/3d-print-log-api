@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Security;
 using System.Threading;
@@ -17,7 +19,7 @@ namespace PrintLogApi.Services
         private readonly IEmailSender _emailSender;
         private readonly IAuth0Service _auth0Service;
         private readonly TelemetryClient _telemetry;
-        private readonly string _feedbackEmail;
+        private readonly string? _feedbackEmail;
 
         public FeedbackService(
             PrintLogContext context,
@@ -34,7 +36,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<Feedback> CreateFeedback(
-            long userId, Feedback.FeedbackType type, string email, string note, CancellationToken ct)
+            long userId, Feedback.FeedbackType type, string? email, string? note, CancellationToken ct)
         {
             var feedback = new Feedback
             {
@@ -54,7 +56,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<Mcp.CreateFeedbackResult> CreateFeedbackForMcp(
-            long userId, Feedback.FeedbackType type, string note, string idempotencyKey, CancellationToken ct)
+            long userId, Feedback.FeedbackType type, string? note, string idempotencyKey, CancellationToken ct)
         {
             const string toolName = "create_feedback";
 
@@ -119,7 +121,7 @@ namespace PrintLogApi.Services
         /// failure (not), because only it knows the key and fingerprint to look the winner up with.
         /// </summary>
         private async Task CreateFeedbackWithIdempotencyRecord(
-            Feedback feedback, long userId, string key, string fingerprint, CancellationToken ct)
+            Feedback feedback, long userId, string key, string? fingerprint, CancellationToken ct)
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they run
             // inside an execution strategy, so the whole tx is the retriable unit.
@@ -137,8 +139,8 @@ namespace PrintLogApi.Services
             });
         }
 
-        private async Task<Mcp.CreateFeedbackResult> FindIdempotentFeedback(
-            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        private async Task<Mcp.CreateFeedbackResult?> FindIdempotentFeedback(
+            long userId, string toolName, string key, string? fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
@@ -215,7 +217,7 @@ namespace PrintLogApi.Services
         /// missing read:users grant, or a timeout must not cost us the notification entirely. Runs
         /// post-commit, so it takes no caller token either — see <see cref="NotifyBestEffort"/>.
         /// </summary>
-        private async Task<string> ResolveAccountEmail(User user)
+        private async Task<string?> ResolveAccountEmail(User? user)
         {
             if (string.IsNullOrWhiteSpace(user?.OAuthUserId))
             {
@@ -235,7 +237,7 @@ namespace PrintLogApi.Services
         }
 
         private static string BuildBody(
-            Feedback feedback, User user, long userId, string accountEmail, FeedbackSource source)
+            Feedback feedback, User? user, long userId, string? accountEmail, FeedbackSource source)
         {
             var displayName = Escape(user?.DisplayName) ?? NotAvailable;
             var submittedVia = source == FeedbackSource.McpAgent ? "MCP agent" : "Website";
@@ -253,11 +255,11 @@ Feedback: <br>
 ";
         }
 
-        private static string Escape(string value) =>
+        private static string? Escape(string? value) =>
             value == null ? null : SecurityElement.Escape(value);
 
         private static Mcp.FeedbackWriteResult Describe(Feedback f) =>
-            new(f.Id, f.Type.ToString(), f.Note);
+            new(f.Id, f.Type.ToString(), f.Note!);
 
         private static string RequireIdempotencyKey(string key)
         {

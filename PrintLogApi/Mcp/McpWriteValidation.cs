@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 
@@ -55,7 +57,7 @@ namespace PrintLogApi.Mcp
         /// clearing. An unknown name is rejected rather than ignored, so a typo can never silently
         /// leave a field unchanged when the caller believed it was cleared.
         /// </summary>
-        public static ISet<string> RequireAllowedClearFields(string[] clear, ISet<string> allowed)
+        public static ISet<string> RequireAllowedClearFields(string[]? clear, ISet<string> allowed)
         {
             var result = new HashSet<string>();
             if (clear is null)
@@ -83,7 +85,7 @@ namespace PrintLogApi.Mcp
             return density;
         }
 
-        public static string RequireMaxLength(string value, int max, string field)
+        public static string? RequireMaxLength(string? value, int max, string field)
         {
             if (value != null && value.Length > max)
             {

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -28,7 +30,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<Mcp.McpPage<Mcp.ProjectListItem>> ListProjectsForMcp(
-            long userId, int page, int pageSize, string search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
+            long userId, int page, int pageSize, string? search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
         {
             var query = _context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
             if (!string.IsNullOrWhiteSpace(search))
@@ -57,14 +59,14 @@ namespace PrintLogApi.Services
         }
 
         public async Task<Mcp.CreateProjectResult> CreateProjectForMcp(
-            long userId, string name, string reference, string description, string url,
-            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string idempotencyKey,
+            long userId, string name, string? reference, string? description, string? url,
+            Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string? idempotencyKey,
             System.Threading.CancellationToken ct)
         {
             const string toolName = "create_project";
 
             idempotencyKey = RequireIdempotencyKey(idempotencyKey);
-            string fingerprint = null;
+            string? fingerprint = null;
             if (idempotencyKey != null)
             {
                 fingerprint = Mcp.McpRequestFingerprint.ComputeCreateProject(
@@ -126,7 +128,7 @@ namespace PrintLogApi.Services
         /// failure (not), because only it knows the key and fingerprint to look the winner up with.
         /// </summary>
         private async Task CreateProjectWithIdempotencyRecord(
-            Project project, long userId, string key, string fingerprint, System.Threading.CancellationToken ct)
+            Project project, long userId, string key, string? fingerprint, System.Threading.CancellationToken ct)
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they run
             // inside an execution strategy, so the whole tx is the retriable unit.
@@ -144,8 +146,8 @@ namespace PrintLogApi.Services
             });
         }
 
-        private async Task<Mcp.CreateProjectResult> FindIdempotentProject(
-            long userId, string toolName, string key, string fingerprint, System.Threading.CancellationToken ct)
+        private async Task<Mcp.CreateProjectResult?> FindIdempotentProject(
+            long userId, string toolName, string key, string? fingerprint, System.Threading.CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
@@ -177,7 +179,7 @@ namespace PrintLogApi.Services
             return new Mcp.CreateProjectResult(Describe(project), WasReplayed: true);
         }
 
-        private static string RequireIdempotencyKey(string key)
+        private static string? RequireIdempotencyKey(string? key)
         {
             if (key == null)
             {
@@ -198,7 +200,7 @@ namespace PrintLogApi.Services
             p.Id, p.Name, p.Reference, p.Description, p.Url, p.Status.ToString(), p.ViewStatus.ToString());
 
         public async Task<Mcp.ProjectWriteResult> UpdateProjectForMcp(
-            long userId, Guid id, string name, string reference, string description, string url,
+            long userId, Guid id, string? name, string? reference, string? description, string? url,
             Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, System.Threading.CancellationToken ct)
         {
             var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
@@ -224,16 +226,16 @@ namespace PrintLogApi.Services
         {
             IQueryable<Project> query = _context.Projects
                 .Where(p => p.CreatedById == userId)
-                .Include(p => p.Images)
-                .Include(p => p.Prints)
-                    .ThenInclude(pr => pr.FilamentUsage)
+                .Include(p => p.Images!)
+                .Include(p => p.Prints!)
+                    .ThenInclude(pr => pr.FilamentUsage!)
                 .AsSplitQuery()
                 .AsNoTracking();
 
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var trimmed = search.Trim();
-                query = query.Where(p => p.Name.Contains(trimmed) || p.Reference.Contains(trimmed));
+                query = query.Where(p => p.Name!.Contains(trimmed) || p.Reference!.Contains(trimmed));
             }
 
             if (status.HasValue)
@@ -253,13 +255,13 @@ namespace PrintLogApi.Services
             return new PagedList<ProjectSummaryDto>(dtos, total, pageNumber, pageSize);
         }
 
-        public async Task<Project> GetProjectByIdAsync(Guid id)
+        public async Task<Project?> GetProjectByIdAsync(Guid id)
         {
             return await _context.Projects
-                .Include(p => p.Images)
+                .Include(p => p.Images!)
                     .ThenInclude(i => i.File)
-                .Include(p => p.Prints)
-                    .ThenInclude(pr => pr.FilamentUsage)
+                .Include(p => p.Prints!)
+                    .ThenInclude(pr => pr.FilamentUsage!)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
@@ -274,7 +276,8 @@ namespace PrintLogApi.Services
             _context.Projects.Add(project);
             await _context.SaveChangesAsync();
 
-            return await GetProjectByIdAsync(project.Id);
+            // Null-forgiven: the project was just persisted, so the re-read always finds it.
+            return (await GetProjectByIdAsync(project.Id))!;
         }
 
         public async Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId)
@@ -287,14 +290,15 @@ namespace PrintLogApi.Services
             project.UpdatedById = userId;
 
             await _context.SaveChangesAsync();
-            return await GetProjectByIdAsync(id);
+            // Null-forgiven: loaded and updated above, so the re-read always finds it.
+            return (await GetProjectByIdAsync(id))!;
         }
 
         public async Task DeleteProjectAsync(Guid id, bool deletePrints, long userId)
         {
             var project = await _context.Projects
-                .Include(p => p.Prints)
-                .Include(p => p.Images)
+                .Include(p => p.Prints!)
+                .Include(p => p.Images!)
                     .ThenInclude(img => img.File)
                 .FirstOrDefaultAsync(p => p.Id == id);
 
@@ -303,23 +307,23 @@ namespace PrintLogApi.Services
 
             if (deletePrints)
             {
-                _context.Prints.RemoveRange(project.Prints);
+                _context.Prints.RemoveRange(project.Prints!);
             }
             else
             {
-                foreach (var print in project.Prints)
+                foreach (var print in project.Prints!)
                 {
                     print.ProjectId = null;
                 }
             }
 
-            foreach (var image in project.Images)
+            foreach (var image in project.Images!)
             {
                 if (image.File != null)
-                    await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path));
+                    await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
             }
 
-            _context.ProjectImages.RemoveRange(project.Images);
+            _context.ProjectImages.RemoveRange(project.Images!);
             _context.Projects.Remove(project);
             await _context.SaveChangesAsync();
         }
@@ -360,7 +364,7 @@ namespace PrintLogApi.Services
             if (image == null) throw new DoesNotExistException();
 
             if (image.File != null)
-                await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path));
+                await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
 
             _context.ProjectImages.Remove(image);
             await _context.SaveChangesAsync();
@@ -414,7 +418,7 @@ namespace PrintLogApi.Services
                 (!userId.HasValue || userId.Value != data.ProjectCreatedById))
                 return null;
 
-            var blobName = Path.GetFileName(data.Path);
+            var blobName = Path.GetFileName(data.Path!);
             return await _blobStorageService.DownloadAsync("projectimages", blobName);
         }
     }

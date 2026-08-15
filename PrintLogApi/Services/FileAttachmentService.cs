@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -59,7 +61,7 @@ namespace PrintLogApi.Services
             await AssertProAsync(userId);
 
             // Parse container and blob name from the blobPath (format: "printattachments/123/guid.ext")
-            var parts = request.BlobPath.Split('/', 2);
+            var parts = request.BlobPath!.Split('/', 2);
             if (parts.Length != 2 || parts[0] != AttachmentContainer)
                 throw new BadRequestException("Invalid blob path.");
 
@@ -82,8 +84,8 @@ namespace PrintLogApi.Services
             {
                 PrintId = printId,
                 FileId = fileId,
-                OriginalFileName = request.FileName,
-                ContentType = request.ContentType,
+                OriginalFileName = request.FileName!,
+                ContentType = request.ContentType!,
                 DisplayOrder = displayOrder,
                 CreatedById = userId,
                 UpdatedById = userId,
@@ -137,7 +139,7 @@ namespace PrintLogApi.Services
             if (!isOwner && !attachment.Print.AllowFileDownloads)
                 throw new ForbiddenException("File downloads are not enabled for this print.");
 
-            var blobPathParts = attachment.File.Path.Split('/', 2);
+            var blobPathParts = attachment.File.Path!.Split('/', 2);
             if (blobPathParts.Length != 2)
                 throw new InvalidOperationException($"Stored blob path is invalid: {attachment.File.Path}");
             var expiresIn = TimeSpan.FromHours(1);
@@ -210,7 +212,7 @@ namespace PrintLogApi.Services
                 throw new BadRequestException("File size exceeds the 200MB limit.");
         }
 
-        private static void AssertAllowedExtension(string fileName)
+        private static void AssertAllowedExtension(string? fileName)
         {
             var ext = GetExtension(fileName).ToLowerInvariant();
             if (!Array.Exists(AllowedExtensions, e => e == ext))
@@ -218,7 +220,7 @@ namespace PrintLogApi.Services
                     $"File type '{ext}' is not supported. Allowed: {string.Join(", ", AllowedExtensions)}");
         }
 
-        private static string GetExtension(string fileName)
+        private static string GetExtension(string? fileName)
             => System.IO.Path.GetExtension(fileName) ?? string.Empty;
     }
 }

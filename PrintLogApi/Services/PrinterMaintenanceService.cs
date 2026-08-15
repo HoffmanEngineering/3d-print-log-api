@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -64,7 +66,7 @@ namespace PrintLogApi.Services
             return entry;
         }
 
-        public async Task<PrinterMaintenance> GetEntryById(Guid id)
+        public async Task<PrinterMaintenance?> GetEntryById(Guid id)
         {
             var entry = await this._context.PrinterMaintenance
                 .Include(pm => pm.Printer)
@@ -103,9 +105,9 @@ namespace PrintLogApi.Services
                      .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
                 {
-                    maintenanceBaseQuery = maintenanceBaseQuery.Where(f => f.Category.Contains(text)
-                        || f.Description.Contains(text)
-                        || f.Notes.Contains(text));
+                    maintenanceBaseQuery = maintenanceBaseQuery.Where(f => f.Category!.Contains(text)
+                        || f.Description!.Contains(text)
+                        || f.Notes!.Contains(text));
                 }
 
             }
@@ -160,11 +162,11 @@ namespace PrintLogApi.Services
                 {
                     if (sortDirection == SortDirection.Asc)
                     {
-                        maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => PrintLogContext.fnNaturalSort(f.Category)).ThenBy(f => f.Date).ThenBy(f => f.Id);
+                        maintenanceBaseQuery = maintenanceBaseQuery.OrderBy(f => PrintLogContext.fnNaturalSort(f.Category!)).ThenBy(f => f.Date).ThenBy(f => f.Id);
                     }
                     else
                     {
-                        maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.Category)).ThenByDescending(f => f.Date).ThenByDescending(f => f.Id);
+                        maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.Category!)).ThenByDescending(f => f.Date).ThenByDescending(f => f.Id);
                     }
                 }
             } else
@@ -208,7 +210,8 @@ namespace PrintLogApi.Services
             _telemetry.TrackEvent("PrinterMaintenanceAdd");
             await InvalidateAnalyticsCache(newEntry.PrinterId);
 
-            return await GetEntryById(newEntry.Id); ;
+            // Null-forgiven: the entry was just persisted, so the re-read always finds it.
+            return (await GetEntryById(newEntry.Id))!;
 
         }
 
@@ -224,7 +227,7 @@ namespace PrintLogApi.Services
             var updatedEntry = _mapper.Map<PutPrinterMaintenanceDto, PrinterMaintenance>(dto, existingEntry);
 
             var printer = await _context.Printers.FindAsync(dto.PrinterId);
-            updatedEntry.Printer = printer;
+            updatedEntry.Printer = printer!;
 
             // Check if the user had access to that printer!
             // Null-forgiven: an unknown PrinterId already threw here before nullable analysis was
@@ -259,7 +262,8 @@ namespace PrintLogApi.Services
             _telemetry.TrackEvent("PrinterMaintenanceEdit");
             await InvalidateAnalyticsCache(updatedEntry.PrinterId);
 
-            return await GetEntryById(updatedEntry.Id);
+            // Null-forgiven: the entry was just persisted, so the re-read always finds it.
+            return (await GetEntryById(updatedEntry.Id))!;
         }
 
 
@@ -268,7 +272,7 @@ namespace PrintLogApi.Services
             return await _context.PrinterMaintenance
                 .Where(f => f.CreatedById == userId)
                 .Where(f => f.Category != null && f.Category != "")
-                .Select(f => f.Category)
+                .Select(f => f.Category!)
                 .Distinct()
                 .OrderBy(s => s)
                 .ToArrayAsync();

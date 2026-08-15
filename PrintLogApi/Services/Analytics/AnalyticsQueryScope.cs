@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Linq;
 using PrintLogApi.Models;
@@ -44,9 +46,9 @@ namespace PrintLogApi.Services.Analytics
             if (filter.Statuses.Count > 0)
                 scoped = scoped.Where(p => filter.Statuses.Contains(p.Status));
             if (filter.FilamentIds.Count > 0)
-                scoped = scoped.Where(p => p.FilamentUsage.Any(pf =>
+                scoped = scoped.Where(p => p.FilamentUsage!.Any(pf =>
                     pf.FilamentId.HasValue
-                    && pf.Filament.CreatedById == userId
+                    && pf.Filament!.CreatedById == userId
                     && filter.FilamentIds.Contains(pf.FilamentId.Value)));
 
             return scoped;

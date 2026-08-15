@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -22,7 +24,7 @@ namespace PrintLogApi.Mcp
         /// A stable, non-reversible hash of the Auth0 subject for telemetry — never the raw
         /// subject or the internal user id.
         /// </summary>
-        public static string HashSubject(ClaimsPrincipal user)
+        public static string HashSubject(ClaimsPrincipal? user)
         {
             var subject = user?.FindFirst(ClaimTypes.Upn)?.Value;
             if (string.IsNullOrEmpty(subject))

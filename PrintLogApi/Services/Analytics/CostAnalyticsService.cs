@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -236,12 +238,12 @@ namespace PrintLogApi.Services.Analytics
             // APPLY — unsupported on SQLite, so it throws under the integration-test provider
             // while working on SQL Server. This form is a plain INNER JOIN on every provider.
             var rows = await scoped
-                .SelectMany(p => p.FilamentUsage, (p, pf) => new { p, pf })
+                .SelectMany(p => p.FilamentUsage!, (p, pf) => new { p, pf })
                 .Where(x => x.pf.Filament != null && x.pf.Filament.CreatedById == userId)
                 .Select(x => new
                 {
                     PrintId = x.p.Id,
-                    x.pf.Filament.MaterialType,
+                    x.pf.Filament!.MaterialType,
                     x.pf.Filament.Brand,
                     x.pf.Filament.PurchasePriceValue,
                     x.pf.Filament.PurchasePriceCurrency,

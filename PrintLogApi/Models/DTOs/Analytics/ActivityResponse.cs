@@ -25,7 +25,7 @@ namespace PrintLogApi.Models.DTOs.Analytics
         DateTimeOffset? To,
         string TimeZone,
         string Granularity,
-        string Currency,
+        string? Currency,
         IReadOnlyList<ActivitySeriesBucket> Series,
         IReadOnlyList<CalendarDay> Calendar,
         DateOnly? CalendarFrom,

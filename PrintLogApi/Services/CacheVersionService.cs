@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace PrintLogApi.Services
@@ -22,7 +24,7 @@ namespace PrintLogApi.Services
         {
             var key = $"{VERSION_PREFIX}{userId}";
             
-            if (!_cache.TryGetValue(key, out string version))
+            if (!_cache.TryGetValue(key, out string? version))
             {
                 version = Guid.NewGuid().ToString("N");
                 
@@ -34,7 +36,9 @@ namespace PrintLogApi.Services
                 _cache.Set(key, version, cacheOptions);
             }
             
-            return version;
+            // Null-forgiven: nothing ever caches a null under this key - the miss branch above
+            // assigns one, and InvalidateUserCache only ever stores a fresh GUID.
+            return version!;
         }
 
         /// <inheritdoc />

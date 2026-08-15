@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Threading.Tasks;
 using MailKit.Net.Smtp;
 using MailKit.Security;
@@ -19,7 +21,9 @@ namespace PrintLogApi.Services
         public async Task SendEmailAsync(string email, string subject, string message)
         {
             var mimeMessage = new MimeMessage();
-            mimeMessage.From.Add(new MailboxAddress(_options.SenderName, _options.SenderEmail));
+            // Null-forgiven: an unconfigured sender address already threw here before nullable
+            // analysis was enabled, and it fails closed either way.
+            mimeMessage.From.Add(new MailboxAddress(_options.SenderName, _options.SenderEmail!));
             mimeMessage.To.Add(new MailboxAddress(string.Empty, email));
             mimeMessage.Subject = subject;
 

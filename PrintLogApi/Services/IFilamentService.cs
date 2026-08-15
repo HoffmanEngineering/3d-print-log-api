@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,7 +21,7 @@ namespace PrintLogApi.Services
         /// existing remaining-weight expression; results are grams and ordered by display name.
         /// </summary>
         Task<McpPage<MaterialInventoryItem>> GetMaterialInventoryForMcp(
-            long userId, int page, int pageSize, string material, string color,
+            long userId, int page, int pageSize, string? material, string? color,
             bool includeInactive, CancellationToken ct);
 
         /// <summary>
@@ -29,7 +31,7 @@ namespace PrintLogApi.Services
         /// boolean and so could report a print as printable when it was not.
         /// </summary>
         Task<FindMaterialResult> FindMaterialForMcp(
-            long userId, string material, string color, double? requiredGrams, CancellationToken ct);
+            long userId, string? material, string? color, double? requiredGrams, CancellationToken ct);
 
         /// <summary>
         /// Remaining weight (grams) for one of the caller's materials, using the same remaining
@@ -55,7 +57,7 @@ namespace PrintLogApi.Services
         /// </para>
         /// </summary>
         Task<CreateMaterialResult> CreateMaterialForMcp(
-            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct);
+            long userId, MaterialAttributesInput input, string? idempotencyKey, CancellationToken ct);
 
         /// <summary>
         /// Edits one of the caller's own materials through a dedicated ownership-scoped path.
@@ -77,7 +79,7 @@ namespace PrintLogApi.Services
         /// capacity. Before/after remaining are returned in grams (the canonical inventory unit).
         /// </summary>
         Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
-            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string? notes,
             CancellationToken ct);
 
         /// <summary>
@@ -90,7 +92,7 @@ namespace PrintLogApi.Services
         Task DeleteFilament(Guid filamentId);
         bool FilamentExists(Guid id);
         Task<string[]> GetFilamentBrands(long userId);
-        Task<Filament> GetFilamentById(Guid id);
+        Task<Filament?> GetFilamentById(Guid id);
         Task<string[]> GetFilamentPurchaseLocations(long userId);
         Task<string[]> GetFilamentStorageLocations(long userId);
         Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string searchText, string filterByMaterialCategoryNickname, string filterByStorageLocation, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly, List<ColorPatternType>? colorPatterns = null, List<FilamentFinishType>? finishTypes = null, List<FilamentEffect>? effects = null);

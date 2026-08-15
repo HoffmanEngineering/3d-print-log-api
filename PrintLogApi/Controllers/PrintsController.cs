@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
@@ -105,8 +107,8 @@ namespace PrintLogApi.Controllers
             [FromQuery] Guid? filterByProjectId = null,
             [FromQuery] DateTimeOffset? fromDate = null,
             [FromQuery] DateTimeOffset? toDate = null,
-            [FromQuery] IEnumerable<Print.PrintStatus> filterByStatuses = null,
-            [FromQuery] IEnumerable<Guid> filterByProjectIds = null)
+            [FromQuery] IEnumerable<Print.PrintStatus>? filterByStatuses = null,
+            [FromQuery] IEnumerable<Guid>? filterByProjectIds = null)
         {
 
             long? currentUserId = User.GetUserId();
@@ -149,9 +151,10 @@ namespace PrintLogApi.Controllers
                                             filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
                                             fromDate, toDate);
 
-            if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO> cachedResult))
+            // Null-forgiven: only a non-null result is ever stored under this key.
+            if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO>? cachedResult))
             {
-                return cachedResult;
+                return cachedResult!;
             }
 
             var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, statuses, userId, currentUserId, projectIds, fromDate, toDate);
@@ -201,11 +204,11 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PagedList<GroupedFeedItemDto>>> GetGrouped(
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 20,
-            [FromQuery, MaxLength(50)] string searchText = null,
-            [FromQuery] IEnumerable<long> filterByPrinterIds = null,
-            [FromQuery] IEnumerable<Guid> filterByFilamentIds = null,
+            [FromQuery, MaxLength(50)] string? searchText = null,
+            [FromQuery] IEnumerable<long>? filterByPrinterIds = null,
+            [FromQuery] IEnumerable<Guid>? filterByFilamentIds = null,
             [FromQuery] Print.PrintStatus? filterByStatus = null,
-            [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest = null)
+            [FromQuery] SortRequest<PrintSummarySortColumn>? sortRequest = null)
         {
             var userId = User.GetUserId();
             if (!userId.HasValue)
@@ -250,11 +253,11 @@ namespace PrintLogApi.Controllers
 
             var printDetailDto = await this._context.Prints
                 .Include(p => p.Printer)
-                .Include(p => p.Images)
+                .Include(p => p.Images!)
                     .ThenInclude(p => p.File)
-                .Include(p => p.Comments)
+                .Include(p => p.Comments!)
                     .ThenInclude(p => p.Comment)
-                .Include(p => p.FilamentUsage)
+                .Include(p => p.FilamentUsage!)
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .AsNoTracking()
@@ -265,7 +268,7 @@ namespace PrintLogApi.Controllers
             // queries, so a delete in between yields null here. The null-forgive preserves the
             // pre-existing NullReferenceException rather than papering over the race; closing it
             // properly is a behaviour change, tracked in #39.
-            printDetailDto!.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
+            printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
             
             return printDetailDto;
         }
@@ -477,7 +480,7 @@ namespace PrintLogApi.Controllers
 
             var properties = new Dictionary<string, string> { 
                 { "PrintId", existingPrint.Id.ToString() }, 
-                { "UserId", userId.ToString() }, 
+                { "UserId", userId.ToString()! }, 
                 { "PrintCreated", existingPrint.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }  
             };
             _telemetry.TrackEvent("PrintDeleted", properties);
@@ -526,8 +529,8 @@ namespace PrintLogApi.Controllers
             {
                 var printImageDto = await _printImageService.DownloadPrintFile(imageData.File);
 
-                new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName, out var contentType);
-                return File(printImageDto.File, contentType ?? "application/octet-stream");
+                new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName!, out var contentType);
+                return File(printImageDto.File!, contentType ?? "application/octet-stream");
 
             } catch (DoesNotExistException)
             {
@@ -552,7 +555,7 @@ namespace PrintLogApi.Controllers
 
             var print = await _printService.GetPrintById(printId);
 
-            if (print == null || !print.Images.Any(i => i.Id == imageId))
+            if (print == null || !print.Images!.Any(i => i.Id == imageId))
             {
                 return NotFound();
             }
@@ -623,7 +626,7 @@ namespace PrintLogApi.Controllers
             }
 
             // Validate all image IDs belong to this print
-            var printImageIds = print.Images.Select(i => i.Id).ToHashSet();
+            var printImageIds = print.Images!.Select(i => i.Id).ToHashSet();
             var requestedIds = reorderDto.Images.Select(i => i.ImageId).ToHashSet();
 
             if (!requestedIds.SetEquals(printImageIds))
@@ -634,7 +637,7 @@ namespace PrintLogApi.Controllers
             // Update display order for each image
             foreach (var imageOrder in reorderDto.Images)
             {
-                var image = print.Images.First(i => i.Id == imageOrder.ImageId);
+                var image = print.Images!.First(i => i.Id == imageOrder.ImageId);
                 image.DisplayOrder = imageOrder.DisplayOrder;
             }
 
@@ -785,7 +788,7 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var imageToDelete = print.Images.FirstOrDefault(i => i.Id == imageId);
+            var imageToDelete = print.Images!.FirstOrDefault(i => i.Id == imageId);
             if (imageToDelete == null)
             {
                 return NotFound("Image not found");
@@ -798,7 +801,7 @@ namespace PrintLogApi.Controllers
             // If deleted image was default, promote next image by DisplayOrder
             if (wasDefault)
             {
-                var nextDefault = print.Images
+                var nextDefault = print.Images!
                     .Where(i => i.Id != imageId)
                     .OrderBy(i => i.DisplayOrder)
                     .FirstOrDefault();
@@ -856,11 +859,12 @@ namespace PrintLogApi.Controllers
                 return Forbid();
             }
 
-            var comment = await _printService.AddPrintComment(print, newComment.Body, userId.Value);
+            var comment = await _printService.AddPrintComment(print, newComment.Body!, userId.Value);
 
+            // Null-forgiven: the comment was just persisted, so the re-read always finds it.
             var mappedComment = await _commentService.GetCommentDetailById(comment.Id);
 
-            return mappedComment;
+            return mappedComment!;
         }
 
         /// <summary>
@@ -890,7 +894,7 @@ namespace PrintLogApi.Controllers
             }
 
             // Check if print contains the print comment selected.
-            var printComment = print.Comments.Where(pc => pc.CommentId == commentId).SingleOrDefault();
+            var printComment = print.Comments!.Where(pc => pc.CommentId == commentId).SingleOrDefault();
 
             if (printComment is null)
             {

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -34,7 +36,7 @@ namespace PrintLogApi.Services
         }
 
         private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
-            long userId, string material, string color, bool includeInactive)
+            long userId, string? material, string? color, bool includeInactive)
         {
             var query = _context.Filaments.AsNoTracking().Where(f => f.CreatedById == userId);
 
@@ -62,7 +64,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<McpPage<MaterialInventoryItem>> GetMaterialInventoryForMcp(
-            long userId, int page, int pageSize, string material, string color,
+            long userId, int page, int pageSize, string? material, string? color,
             bool includeInactive, CancellationToken ct)
         {
             var projected = OwnedInventoryForMcp(userId, material, color, includeInactive);
@@ -91,7 +93,7 @@ namespace PrintLogApi.Services
             // (usage logged beyond the spool's initial weight) that the user should be able to see
             // and fix. Only find_material clamps them, and only when summing availability.
             var items = rows.Select(r => new MaterialInventoryItem(
-                r.Id, r.DisplayName, r.Brand, r.MaterialType, r.ColorName,
+                r.Id, r.DisplayName!, r.Brand, r.MaterialType!, r.ColorName,
                 McpUnits.MgToGrams(r.FilamentRemaining), r.IsActive,
                 r.StorageLocation, r.DiameterMm)).ToList();
 
@@ -163,7 +165,7 @@ namespace PrintLogApi.Services
         /// fallback to "filament" — an agent must never be told its resin was created when the row
         /// says otherwise. Also enforces the category's diameter requirement.
         /// </summary>
-        private async Task<MaterialCategory> RequireCategory(string nickname, double? diameterMm, CancellationToken ct)
+        private async Task<MaterialCategory> RequireCategory(string? nickname, double? diameterMm, CancellationToken ct)
         {
             var category = await _context.MaterialCategories
                 .FirstOrDefaultAsync(c => c.Nickname == nickname, ct);
@@ -229,14 +231,14 @@ namespace PrintLogApi.Services
                 ? input.Colors.ToList()
                 : (input.ColorHex != null ? new List<string> { input.ColorHex } : new List<string>());
 
-        private static string ResolveColorHex(MaterialAttributesInput input)
+        private static string? ResolveColorHex(MaterialAttributesInput input)
         {
             var colors = ResolveColors(input);
             return colors.Count > 0 ? colors[0] : null;
         }
 
         public async Task<CreateMaterialResult> CreateMaterialForMcp(
-            long userId, MaterialAttributesInput input, string idempotencyKey, CancellationToken ct)
+            long userId, MaterialAttributesInput input, string? idempotencyKey, CancellationToken ct)
         {
             const string toolName = "create_material";
 
@@ -271,7 +273,7 @@ namespace PrintLogApi.Services
                 McpWriteValidation.RequireMaxLength(idempotencyKey, 200, "idempotencyKey");
             }
 
-            string fingerprint = null;
+            string? fingerprint = null;
             if (idempotencyKey != null)
             {
                 fingerprint = McpRequestFingerprint.ComputeCreateMaterial(input);
@@ -386,12 +388,12 @@ namespace PrintLogApi.Services
         /// failure (not), because only it knows the key and fingerprint to look the winner up with.
         /// </summary>
         private async Task<Filament> CreateMaterialWithIdempotencyRecord(
-            AddFilamentDto dto, long userId, string key, string fingerprint, CancellationToken ct)
+            AddFilamentDto dto, long userId, string key, string? fingerprint, CancellationToken ct)
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
             // run inside an execution strategy, so the whole tx is the retriable unit.
             var strategy = _context.Database.CreateExecutionStrategy();
-            Filament created = null;
+            Filament? created = null;
             await strategy.ExecuteAsync(async () =>
             {
                 using var tx = await _context.Database.BeginTransactionAsync(ct);
@@ -402,11 +404,13 @@ namespace PrintLogApi.Services
                 await _context.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
             });
-            return created;
+            // Null-forgiven: ExecuteAsync runs the delegate synchronously with respect to this
+            // method, and AddFilament either assigns or throws.
+            return created!;
         }
 
-        private async Task<CreateMaterialResult> FindIdempotentMaterial(
-            long userId, string toolName, string key, string fingerprint, CancellationToken ct)
+        private async Task<CreateMaterialResult?> FindIdempotentMaterial(
+            long userId, string toolName, string key, string? fingerprint, CancellationToken ct)
         {
             var record = await _context.McpIdempotencyRecords.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
@@ -675,7 +679,7 @@ namespace PrintLogApi.Services
             await _context.SaveChangesAsync(ct);
         }
 
-        private static void PatchString(ISet<string> clear, string field, string value, Action<string> set)
+        private static void PatchString(ISet<string> clear, string field, string? value, Action<string?> set)
         {
             if (clear.Contains(field))
             {
@@ -747,7 +751,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<MaterialWriteResult> AdjustMaterialRemainingForMcp(
-            long userId, Guid materialId, McpMeasurementSource source, double delta, string notes,
+            long userId, Guid materialId, McpMeasurementSource source, double delta, string? notes,
             CancellationToken ct)
         {
             McpWriteValidation.RequireFiniteAmount(delta);
@@ -831,7 +835,7 @@ namespace PrintLogApi.Services
 
             var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
             return new MaterialInventoryItem(
-                material.Id, material.DisplayName, material.Brand, material.MaterialType, material.ColorName,
+                material.Id, material.DisplayName!, material.Brand, material.MaterialType!, material.ColorName,
                 remaining, material.IsActive, material.StorageLocation, material.DiameterMm);
         }
 
@@ -852,7 +856,7 @@ namespace PrintLogApi.Services
         public const int MaxCandidates = 1000;
 
         public async Task<FindMaterialResult> FindMaterialForMcp(
-            long userId, string material, string color, double? requiredGrams, CancellationToken ct)
+            long userId, string? material, string? color, double? requiredGrams, CancellationToken ct)
         {
             var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false);
 
@@ -863,7 +867,7 @@ namespace PrintLogApi.Services
                 .ThenBy(f => f.Id)
                 .Take(MaxCandidates + 1) // +1 detects truncation without a second COUNT
                 .Select(f => new SpoolItem(
-                    f.Id, f.DisplayName, f.Brand, f.MaterialType, f.ColorName,
+                    f.Id, f.DisplayName!, f.Brand, f.MaterialType!, f.ColorName,
                     f.DiameterMm, McpUnits.MgToGrams(f.FilamentRemaining), f.StorageLocation))
                 .ToListAsync(ct);
 
@@ -899,7 +903,7 @@ namespace PrintLogApi.Services
         }
 
         private static MaterialGroup BuildGroup(
-            string material, string color, List<SpoolItem> spools, double? requiredGrams,
+            string material, string? color, List<SpoolItem> spools, double? requiredGrams,
             bool candidatesTruncated)
         {
             // Largest first: guarantees a spool that alone meets the requirement is never the one
@@ -912,7 +916,7 @@ namespace PrintLogApi.Services
             var total = ordered.Sum(s => Math.Max(0, s.RemainingGrams));
             var largest = ordered.Count > 0 ? Math.Max(0, ordered[0].RemainingGrams) : 0;
 
-            List<SpoolItem> combination = null;
+            List<SpoolItem>? combination = null;
             if (requiredGrams is { } required && total >= required)
             {
                 // Minimal prefix that reaches the requirement — the evidence behind the claim, so
@@ -980,7 +984,7 @@ namespace PrintLogApi.Services
             // Filter out unloaded-filaments if requested.
             if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
             {
-                filament = filament.Where(f => f.PrinterFilaments.Any(pf => !pf.UnloadedDateTime.HasValue));
+                filament = filament.Where(f => f.PrinterFilaments!.Any(pf => !pf.UnloadedDateTime.HasValue));
             }
 
             if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
@@ -1028,7 +1032,7 @@ namespace PrintLogApi.Services
                      .SelectMany(element => element).ToList();
                 foreach (var text in criterias)
                 {
-                    filamentsBase = filamentsBase.Where(f => f.DisplayName.Contains(text) || f.Brand.Contains(text) || f.ColorName.Contains(text) || f.MaterialType.Contains(text) || f.Notes.Contains(text));
+                    filamentsBase = filamentsBase.Where(f => f.DisplayName!.Contains(text) || f.Brand!.Contains(text) || f.ColorName!.Contains(text) || f.MaterialType!.Contains(text) || f.Notes!.Contains(text));
                 }
                 
             }
@@ -1051,10 +1055,10 @@ namespace PrintLogApi.Services
             {
                 if (sortDirection == SortDirection.Asc)
                 {
-                    filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
+                    filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName!)).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
                 } else
                 {
-                    filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName)).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
+                    filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName!)).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
             } else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
             {
@@ -1119,7 +1123,7 @@ namespace PrintLogApi.Services
 
         }
 
-        public async Task<Filament> GetFilamentById(Guid id)
+        public async Task<Filament?> GetFilamentById(Guid id)
         {
             return await _context.Filaments
                     .Where(f => f.Id == id)
@@ -1164,11 +1168,11 @@ namespace PrintLogApi.Services
                 materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
             }
 
-            newFilament.MaterialCategory = materialCategory;
+            newFilament.MaterialCategory = materialCategory!;
 
             UpdateFilamentMeasurements(newFilament);
 
-            foreach (var adjustment in newFilament.FilamentAdjustments)
+            foreach (var adjustment in newFilament.FilamentAdjustments!)
             {
                 adjustment.CreatedById = userId;
                 adjustment.UpdatedById = userId;
@@ -1186,7 +1190,8 @@ namespace PrintLogApi.Services
 
             _telemetry.TrackEvent("FilamentAdd");
 
-            return await GetFilamentById(filamentId);
+            // Null-forgiven: the filament was just persisted, so the re-read always finds it.
+            return (await GetFilamentById(filamentId))!;
         }
 
         private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
@@ -1330,7 +1335,7 @@ namespace PrintLogApi.Services
 
             UpdateFilamentMeasurements(updatedFilament);
 
-            foreach (var adjustment in updatedFilament.FilamentAdjustments)
+            foreach (var adjustment in updatedFilament.FilamentAdjustments!)
             {
                 adjustment.CreatedById = userId;
                 adjustment.UpdatedById = userId;
@@ -1370,7 +1375,7 @@ namespace PrintLogApi.Services
             return await _context.Filaments
                 .Where(f => f.CreatedById == userId)
                 .Where(f => f.StorageLocation != null && f.StorageLocation != "" )
-                .Select(f => f.StorageLocation)
+                .Select(f => f.StorageLocation!)
                 .Distinct()
                 .OrderBy(s => s)
                 .ToArrayAsync();
@@ -1381,7 +1386,7 @@ namespace PrintLogApi.Services
             return await _context.Filaments
                 .Where(f => f.CreatedById == userId)
                 .Where(f => f.PurchaseLocation != null && f.PurchaseLocation != "")
-                .Select(f => f.PurchaseLocation)
+                .Select(f => f.PurchaseLocation!)
                 .Distinct()
                 .OrderBy(s => s)
                 .ToArrayAsync();
@@ -1392,7 +1397,7 @@ namespace PrintLogApi.Services
             return await _context.Filaments
                 .Where(f => f.CreatedById == userId)
                 .Where(f => f.Brand != null && f.Brand != "")
-                .Select(f => f.Brand)
+                .Select(f => f.Brand!)
                 .Distinct()
                 .OrderBy(s => s)
                 .ToArrayAsync();
@@ -1435,15 +1440,15 @@ namespace PrintLogApi.Services
             }
 
             // Check if any filament is being used.
-            if (filament.PrintFilaments.Any())
+            if (filament.PrintFilaments!.Any())
             {
                 throw new FilamentIsInUseException();
             }
 
             // Remove any adjustments
-            if (filament.FilamentAdjustments.Any())
+            if (filament.FilamentAdjustments!.Any())
             {
-                _context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments);
+                _context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments!);
             }
 
             _context.Filaments.Remove(filament);

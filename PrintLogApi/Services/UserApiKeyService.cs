@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -70,7 +72,7 @@ namespace PrintLogApi.Services
             await _notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
         }
 
-        public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string description)
+        public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string? description)
         {
             var publicKey = CreateCryptographicallySecureGuid().ToString().ToUpper(CultureInfo.InvariantCulture).Replace("-", "");
 
@@ -105,7 +107,7 @@ namespace PrintLogApi.Services
             return response;
         }
 
-        public async Task<long> GetUserIdByApiKey(string publicKey)
+        public async Task<long> GetUserIdByApiKey(string? publicKey)
         {
             var hashedKey = GetSHA256Hash(publicKey);
 
@@ -128,7 +130,7 @@ namespace PrintLogApi.Services
             return userId;
         }
 
-        public async Task UpdateApiKeyLastUsed(string publicKey)
+        public async Task UpdateApiKeyLastUsed(string? publicKey)
         {
             var hashedKey = GetSHA256Hash(publicKey);
 
@@ -161,9 +163,9 @@ namespace PrintLogApi.Services
         /// each time. Matches how the rest of the codebase already hashes (McpUserContext,
         /// McpRequestFingerprint). The output encoding is unchanged, so stored hashes still match.
         /// </summary>
-        private static string GetSHA256Hash(string publicKey)
+        private static string GetSHA256Hash(string? publicKey)
         {
-            return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(publicKey)));
+            return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(publicKey!)));
         }
 
         private Guid CreateCryptographicallySecureGuid()

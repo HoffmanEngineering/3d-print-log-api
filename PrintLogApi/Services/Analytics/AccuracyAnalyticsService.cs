@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -27,7 +29,7 @@ namespace PrintLogApi.Services.Analytics
         public AccuracyAnalyticsService(PrintLogContext context) => _context = context;
 
         private sealed record Row(
-            long PrintId, long PrinterId, bool PrinterOwned, string PrinterName,
+            long PrintId, long PrinterId, bool PrinterOwned, string? PrinterName,
             DateTimeOffset? StartDate,
             int EstimatedSeconds, int ActualSeconds,
             long EstimatedMg, long ActualMg);
@@ -98,11 +100,11 @@ namespace PrintLogApi.Services.Analytics
                     // genuine actual/estimate pair on the print itself (PrintProfile keeps them
                     // parallel for exactly this reason), so omitting them would silently shrink
                     // the material sample and bias it toward spool-tracked prints.
-                    EstimatedMg = (long)p.FilamentUsage.Sum(pf =>
+                    EstimatedMg = (long)p.FilamentUsage!.Sum(pf =>
                         pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value : 0)
                         + (p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0
                             ? p.EstimatedFilamentUsageMg.Value : 0),
-                    ActualMg = (long)p.FilamentUsage.Sum(pf =>
+                    ActualMg = (long)p.FilamentUsage!.Sum(pf =>
                         pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value : 0)
                         + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0
                             ? p.FilamentUsageMg.Value : 0),
@@ -181,7 +183,7 @@ namespace PrintLogApi.Services.Analytics
 
         private static IReadOnlyList<AccuracyGroup> GroupAccuracy(
             IReadOnlyList<Row> rows, string scope,
-            Func<Row, string> key, Func<Row, string> label, Func<Row, AccuracySample> sample) =>
+            Func<Row, string> key, Func<Row, string?> label, Func<Row, AccuracySample> sample) =>
             rows
                 .GroupBy(key)
                 .Select(g =>
@@ -216,7 +218,7 @@ namespace PrintLogApi.Services.Analytics
             //
             // Reported rather than silent either way: an empty by-material list with no reason is
             // indistinguishable from "you have never used a tracked spool".
-            var usageRowCount = await scoped.SelectMany(p => p.FilamentUsage).CountAsync(ct);
+            var usageRowCount = await scoped.SelectMany(p => p.FilamentUsage!).CountAsync(ct);
             if (usageRowCount > AnalyticsService.MaxSeriesRows)
             {
                 // coverage.Total is this same scoped count, already read by the caller. Counting
@@ -228,12 +230,12 @@ namespace PrintLogApi.Services.Analytics
             // Flattened with the result selector and filtered OUTSIDE the SelectMany: the
             // inner-filter form is a correlated subquery needing SQL APPLY, unsupported on SQLite.
             var rows = await scoped
-                .SelectMany(p => p.FilamentUsage, (p, pf) => new { p, pf })
+                .SelectMany(p => p.FilamentUsage!, (p, pf) => new { p, pf })
                 .Where(x => x.pf.Filament != null && x.pf.Filament.CreatedById == userId)
                 .Select(x => new
                 {
                     PrintId = x.p.Id,
-                    Key = x.pf.Filament.MaterialType ?? "Unknown",
+                    Key = x.pf.Filament!.MaterialType ?? "Unknown",
                     Estimated = (double)(x.pf.EstimatedAmountMg ?? 0),
                     Actual = (double)(x.pf.AmountMg ?? 0),
                 })

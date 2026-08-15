@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,7 +25,7 @@ namespace PrintLogApi.Controllers
     {
         private readonly TelemetryClient _telemetry;
         private readonly IPrintService _printService;
-        private readonly long[] _allowedUserIds;
+        private readonly long[]? _allowedUserIds;
 
         public FeedController(
             TelemetryClient telemetry,
