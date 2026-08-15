@@ -242,8 +242,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         /// blip would report every instance unhealthy at once and turn a recoverable database
         /// outage into a restart loop across the whole app.
         ///
-        /// "ready" is the one that actually probes SQL Server, for humans and for post-deploy
-        /// verification — where knowing the database is unreachable is the entire point.
+        /// "ready" is the one that actually probes SQL Server — where knowing the database is
+        /// unreachable is the entire point. Nothing polls it automatically today; it is for manual
+        /// checks, and is the endpoint a post-deploy smoke test should call if one is ever added
+        /// to the deploy workflow.
         /// </summary>
         private static void ConfigureHealthChecks(IServiceCollection services)
         {

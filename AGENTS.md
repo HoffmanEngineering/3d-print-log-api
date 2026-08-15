@@ -95,8 +95,9 @@ their init timeout. See `CustomWebApplicationFactory.ConfigureLocalJwt`.
   from rotation and replaces it after a sustained failure, so a check that touched SQL would report
   every instance unhealthy during a database blip and turn a recoverable outage into an app-wide
   restart loop.
-- `/health/ready` — **readiness**. Probes SQL Server and returns per-check JSON, for humans and
-  post-deploy verification. Never point the platform's health check at it.
+- `/health/ready` — **readiness**. Probes SQL Server and returns per-check JSON. Nothing polls it
+  automatically — it is for manual checks, and is what a post-deploy smoke test should call if one
+  is added to `deploy.yml`. Never point the platform's health check at it.
 
 The JSON omits each check's exception and description on purpose — the endpoint is anonymous, and a
 SQL connection failure message carries the server name and often the credentials it tried.

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Xunit;
@@ -48,9 +49,62 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             Assert.Equal("Healthy", root.GetProperty("status").GetString());
 
-            var checks = root.GetProperty("checks").EnumerateArray();
-            var databaseCheck = Assert.Single(checks, c => c.GetProperty("name").GetString() == "database");
+            // Exactly one check, and it is the database one. Asserting only that a "database"
+            // entry exists would not notice an unrelated check leaking into the readiness set.
+            var checks = root.GetProperty("checks").EnumerateArray().ToList();
+            var databaseCheck = Assert.Single(checks);
+            Assert.Equal("database", databaseCheck.GetProperty("name").GetString());
             Assert.Equal("Healthy", databaseCheck.GetProperty("status").GetString());
+        }
+
+        /// <summary>
+        /// Registers a readiness check that fails with an exception carrying a connection-string
+        /// shaped message, so the failure path can be exercised. The real failure — SQL Server
+        /// being unreachable — cannot be reproduced against in-memory SQLite, but the response
+        /// writer does not care why a check failed, only what it discloses.
+        /// </summary>
+        public sealed class FailingReadinessFactory : CustomWebApplicationFactory
+        {
+            public const string SecretDetail =
+                "Server=prod-sql.database.windows.net;User ID=admin;Password=hunter2";
+
+            protected override void ConfigureWebHost(IWebHostBuilder builder)
+            {
+                base.ConfigureWebHost(builder);
+
+                // A distinct name: the real "database" registration cannot be duplicated, and it
+                // does not need to be — the report takes the worst status, so one failing check
+                // is enough to drive the response down the unhealthy path.
+                builder.ConfigureServices(services =>
+                    services.AddHealthChecks().AddCheck(
+                        "failing-dependency",
+                        () => HealthCheckResult.Unhealthy(
+                            description: SecretDetail,
+                            exception: new System.InvalidOperationException(SecretDetail)),
+                        tags: new[] { "ready" }));
+            }
+        }
+
+        [Fact]
+        public async Task Readiness_WhenUnhealthy_Returns503_AndLeaksNoDetail()
+        {
+            using var factory = new FailingReadinessFactory();
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/health/ready");
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal("Unhealthy", document.RootElement.GetProperty("status").GetString());
+
+            // The endpoint is anonymous, so a failing check's exception and description must never
+            // reach the caller — a real SQL failure message carries the server name and often the
+            // credentials it tried.
+            Assert.DoesNotContain("hunter2", body);
+            Assert.DoesNotContain("prod-sql", body);
+            Assert.DoesNotContain("InvalidOperationException", body);
         }
 
         [Fact]
