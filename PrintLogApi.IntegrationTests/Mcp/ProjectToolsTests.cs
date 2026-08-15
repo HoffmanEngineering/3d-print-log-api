@@ -22,7 +22,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("list_projects", new Dictionary<string, object>
+            var result = await client.CallToolAsync("list_projects", new Dictionary<string, object?>
             {
                 ["search"] = "Rocket",
             });
@@ -37,7 +37,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_project", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_project", new Dictionary<string, object?>
             {
                 ["name"] = "Agent Created Project",
                 ["viewStatus"] = "Unlisted",
@@ -55,7 +55,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_project", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_project", new Dictionary<string, object?>
             {
                 ["name"] = "Echo Everything",
                 ["reference"] = "REF-42",
@@ -82,7 +82,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var created = await client.CallToolAsync("create_project", new Dictionary<string, object>
+            var created = await client.CallToolAsync("create_project", new Dictionary<string, object?>
             {
                 ["name"] = "Update Echo Target",
             });
@@ -92,7 +92,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 id = doc.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
             }
 
-            var updated = await client.CallToolAsync("update_project", new Dictionary<string, object>
+            var updated = await client.CallToolAsync("update_project", new Dictionary<string, object?>
             {
                 ["id"] = id,
                 ["reference"] = "REF-99",
@@ -114,7 +114,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            Dictionary<string, object> Args() => new()
+            Dictionary<string, object?> Args() => new()
             {
                 ["name"] = "Idempotent Project",
                 ["idempotencyKey"] = "proj-key-1",
@@ -140,13 +140,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            await client.CallToolAsync("create_project", new Dictionary<string, object>
+            await client.CallToolAsync("create_project", new Dictionary<string, object?>
             {
                 ["name"] = "Conflict Project",
                 ["idempotencyKey"] = "proj-key-2",
             });
 
-            var conflict = await client.CallToolAsync("create_project", new Dictionary<string, object>
+            var conflict = await client.CallToolAsync("create_project", new Dictionary<string, object?>
             {
                 ["name"] = "Conflict Project CHANGED",
                 ["idempotencyKey"] = "proj-key-2",
@@ -166,7 +166,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            Dictionary<string, object> Args() => new() { ["name"] = "Duplicate Project" };
+            Dictionary<string, object?> Args() => new() { ["name"] = "Duplicate Project" };
 
             var first = await client.CallToolAsync("create_project", Args());
             var second = await client.CallToolAsync("create_project", Args());
@@ -184,7 +184,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "update_project",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["id"] = McpTestData.ForeignProjectId,
                     ["name"] = "hijack",

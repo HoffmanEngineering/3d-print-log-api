@@ -35,7 +35,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region Helper Methods
 
-        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string userId = null)
+        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string? userId = null)
         {
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, userId ?? IntegrationTestSeeder.TestUserOAuthId);
@@ -86,7 +86,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             return setting;
         }
 
-        private UserSetting GetUserSettingById(long id)
+        private UserSetting? GetUserSettingById(long id)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -122,7 +122,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
             Assert.NotNull(result);
         }
 
@@ -153,7 +153,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
             Assert.Contains(result, s => s.Id == setting.Id && s.Value == "my-setting-value");
         }
 
@@ -197,7 +197,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
             var foundSetting = result.FirstOrDefault(s => s.Id == setting.Id);
             Assert.NotNull(foundSetting);
             Assert.Equal(settingTypeId, foundSetting.UserSettingTypeId);
@@ -228,7 +228,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(settingTypeId, result.UserSettingTypeId);
             Assert.Equal("new-setting-value", result.Value);
@@ -300,7 +300,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal("", result.Value);
         }
@@ -342,12 +342,12 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act - Create
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
 
             // Act - Get
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var settings = await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions);
+            var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
 
             // Assert
             Assert.Contains(settings, s => s.Id == created.Id && s.Value == "appears-in-get-value");
@@ -378,7 +378,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(setting.Id, result.Id);
             Assert.Equal("updated-value", result.Value);
@@ -501,7 +501,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(request);
 
             // Assert - Verify in database
-            var updated = GetUserSettingById(setting.Id);
+            var updated = GetUserSettingById(setting.Id)!;
             Assert.Equal("after-update", updated.Value);
         }
 
@@ -527,7 +527,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
 
             // Assert
             Assert.True(result.UpdatedDate >= originalUpdatedDate);
@@ -555,7 +555,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var createResponse = await _httpClient.SendAsync(createRequest);
             Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
-            var created = await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
             Assert.Equal("initial-value", created.Value);
 
             // Update the setting
@@ -570,13 +570,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var updateResponse = await _httpClient.SendAsync(updateRequest);
             Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
-            var updated = await updateResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions);
+            var updated = (await updateResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
             Assert.Equal("modified-value", updated.Value);
 
             // Read all settings and verify
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var settings = await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions);
+            var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
 
             var foundSetting = settings.FirstOrDefault(s => s.Id == created.Id);
             Assert.NotNull(foundSetting);

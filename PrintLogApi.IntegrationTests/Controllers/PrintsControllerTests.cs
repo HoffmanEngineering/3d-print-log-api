@@ -44,7 +44,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(dto);
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            return (await response.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
         }
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(newPrint);
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
         }
 
         #region Anonymous/Public Tests
@@ -84,8 +84,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task GetPrintSummary_WithUserId_ReturnsPagedResult()
         {
             // Act
-            var model = await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
-                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}");
+            var model = (await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
+                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}"))!;
 
             // Assert - verify we get a valid paged response
             Assert.NotNull(model);
@@ -131,7 +131,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
 
             // Assert - authenticated user should see their own prints
             Assert.NotNull(model);
@@ -148,14 +148,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
 
             // Assert - verify prints have expected structure
             Assert.NotNull(model);
             Assert.NotEmpty(model.Items);
 
             // Check that seeded test prints exist (there may be other prints from other tests)
-            Assert.True(model.Items.Any(p => p.Title.Contains("Test Print")),
+            Assert.True(model.Items.Any(p => p.Title!.Contains("Test Print")),
                 "Should contain at least one seeded Test Print");
 
             // Verify print structure
@@ -173,7 +173,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
 
             // Assert - pagination should work
             Assert.NotNull(model);
@@ -202,8 +202,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, page1Resp.StatusCode);
             Assert.Equal(HttpStatusCode.OK, page2Resp.StatusCode);
 
-            var page1 = await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
-            var page2 = await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var page1 = (await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+            var page2 = (await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
 
             Assert.NotNull(page1);
             Assert.NotNull(page2);
@@ -244,7 +244,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             var printId = summary.Items.First().Id;
 
             // Act - get the print by ID (anonymous request should work for public prints)
@@ -261,11 +261,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
-            var seededPrint = summary.Items.First(p => p.Title.Contains("Test Print"));
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+            var seededPrint = summary.Items.First(p => p.Title!.Contains("Test Print"));
 
             // Act
-            var print = await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}");
+            var print = (await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}"))!;
 
             // Assert
             Assert.NotNull(print);
@@ -337,7 +337,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var createdPrint = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -469,7 +469,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var created = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var created = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
             Assert.NotNull(created.FilamentUsage);
             Assert.Equal(2, created.FilamentUsage.Count);
 
@@ -545,7 +545,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Arrange - prepare update
             var updateDto = new PutPrintDetailDto
@@ -587,7 +587,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Arrange - prepare update with all fields changed
             var updateDto = new PutPrintDetailDto
@@ -609,7 +609,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var updateResponse = await _httpClient.SendAsync(updateRequest);
-            var updatedPrint = await updateResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var updatedPrint = (await updateResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Assert - PUT endpoint returns CreatedAtAction (201)
             Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -663,7 +663,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             var printId = summary.Items.First().Id;
 
             var updateDto = new PutPrintDetailDto
@@ -693,7 +693,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             var printId = summary.Items.First().Id;
 
             // ID in DTO doesn't match route ID
@@ -739,7 +739,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Act
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
@@ -767,7 +767,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Act - delete the print
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
@@ -786,7 +786,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             var printId = summary.Items.First().Id;
 
             // Act - try to delete without auth
@@ -897,7 +897,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("application/octet-stream", response.Content.Headers.ContentType.MediaType);
+            Assert.Equal("application/octet-stream", response.Content.Headers.ContentType!.MediaType);
         }
 
         [Fact]
@@ -989,7 +989,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(newComment);
 
             var response = await _httpClient.SendAsync(request);
-            var comment = await response.Content.ReadFromJsonAsync<CommentDetailDto>();
+            var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(comment);
@@ -1039,7 +1039,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             commentRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             commentRequest.Content = JsonContent.Create(newComment);
             var commentResponse = await _httpClient.SendAsync(commentRequest);
-            var comment = await commentResponse.Content.ReadFromJsonAsync<CommentDetailDto>();
+            var comment = (await commentResponse.Content.ReadFromJsonAsync<CommentDetailDto>())!;
 
             // Delete the comment
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
@@ -1100,7 +1100,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
         [Fact]
         public async Task GetPublicPrintIds_ReturnsListOfIds()
         {
-            var ids = await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public");
+            var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public"))!;
 
             Assert.NotNull(ids);
             Assert.True(ids.Count > 0, "Should have at least one public print");
@@ -1747,7 +1747,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createReq.Content = JsonContent.Create(printer2Print);
             var createResp = await _httpClient.SendAsync(createReq);
             Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
-            var created = await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var created = (await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Filter by both printers at once; use a large page size so the test is
             // not affected by how many prints previous tests created.
@@ -1758,7 +1758,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             Assert.NotNull(result);
             // Both printers should be represented.
             Assert.Contains(result.Items, p => p.Printer?.Id == IntegrationTestSeeder.TestPrinterId);
@@ -1781,10 +1781,10 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             Assert.NotNull(result);
             Assert.All(result.Items, print =>
-                Assert.Contains(print.FilamentUsage, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
+                Assert.Contains(print.FilamentUsage!, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
         }
 
         #endregion
@@ -1797,7 +1797,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // GET /api/prints/{id}/files is AllowAnonymous
             var response = await _httpClient.GetAsync($"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files");
             response.EnsureSuccessStatusCode();
-            var files = await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>();
+            var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>())!;
             Assert.NotNull(files);
             Assert.Empty(files);
         }
@@ -1863,7 +1863,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
             createResponse.EnsureSuccessStatusCode();
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Anonymous request for files on a private print should be forbidden.
             var response = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}/files");
@@ -1887,7 +1887,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Content = JsonContent.Create(newPrint);
             var createResponse = await _httpClient.SendAsync(createRequest);
             createResponse.EnsureSuccessStatusCode();
-            var createdPrint = await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
 
             // Owner's authenticated request for files on their private print should succeed.
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/{createdPrint.Id}/files");
@@ -1895,7 +1895,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var files = await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>();
+            var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>())!;
             Assert.NotNull(files);
             Assert.Empty(files);
         }
@@ -1989,7 +1989,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-            var result = await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            var result = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
             Assert.NotNull(result.ProjectId);
         }
 
@@ -2002,7 +2002,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             projReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             projReq.Content = JsonContent.Create(projectDto);
             var projResp = await _httpClient.SendAsync(projReq);
-            var project = await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var project = (await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
 
             // Create print assigned to project
             var printDto = new
@@ -2024,7 +2024,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var result = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             Assert.All(result.Items, item => Assert.Equal(project.Id, item.ProjectId));
         }
 
@@ -2063,7 +2063,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
             Assert.NotNull(result);
             Assert.All(result.Items, item => Assert.Contains(item.Type, new[] { "project", "print" }));
         }
@@ -2098,7 +2098,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             Assert.NotNull(result.Paging);
@@ -2114,7 +2114,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             Assert.Contains(result.Items, item => item.Type == "print");
@@ -2144,7 +2144,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             Assert.Contains(result.Items, item => item.Type == "project");
@@ -2160,7 +2160,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             Assert.Equal(2, result.Paging.CurrentPage);
@@ -2177,7 +2177,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             for (int i = 0; i < result.Items.Count - 1; i++)
@@ -2231,7 +2231,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 $"/api/Prints/grouped?pageNumber=1&pageSize=25&filterByStatus={(int)Print.PrintStatus.Success}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
 
             Assert.NotNull(result);
             // The project should appear because it has at least one print matching the filter.

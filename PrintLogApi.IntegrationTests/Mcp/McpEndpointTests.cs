@@ -25,7 +25,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public McpEndpointTests(CustomWebApplicationFactory factory) => _factory = factory;
 
-        private static string McpToken(string subject = "auth0|mcp-endpoint-user", bool withScope = true) =>
+        private static string McpToken(string? subject = "auth0|mcp-endpoint-user", bool withScope = true) =>
             TestJwt.Create(TestJwt.McpAudience, subject: subject,
                 scopes: withScope ? new[] { "read:printdata" } : null);
 
@@ -43,7 +43,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return await McpClient.CreateAsync(transport);
         }
 
-        private HttpRequestMessage RpcPost(string method, string token)
+        private HttpRequestMessage RpcPost(string method, string? token)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
             {
@@ -108,7 +108,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await ConnectAsync(McpToken());
             var result = await client.CallToolAsync(
                 "ping",
-                new Dictionary<string, object> { ["message"] = "hi" });
+                new Dictionary<string, object?> { ["message"] = "hi" });
             var text = result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text;
             Assert.Equal("pong: hi", text);
         }

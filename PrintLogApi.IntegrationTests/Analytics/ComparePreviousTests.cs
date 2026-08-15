@@ -81,8 +81,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
             var zone = TimeZoneInfo.FindSystemTimeZoneById(
                 OperatingSystem.IsWindows() ? "Central Standard Time" : "America/Chicago");
 
-            var localStart = TimeZoneInfo.ConvertTime(previous.FromDate.Value, zone);
-            var localEnd = TimeZoneInfo.ConvertTime(previous.ToDate.Value, zone);
+            var localStart = TimeZoneInfo.ConvertTime(previous.FromDate!.Value, zone);
+            var localEnd = TimeZoneInfo.ConvertTime(previous.ToDate!.Value, zone);
 
             // Both ends land on local midnight, and the window is the same number of LOCAL days.
             Assert.Equal(TimeSpan.Zero, localStart.TimeOfDay);

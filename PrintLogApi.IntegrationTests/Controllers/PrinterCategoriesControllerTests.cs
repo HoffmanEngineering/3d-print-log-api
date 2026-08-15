@@ -102,7 +102,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotEmpty(result);
         }
@@ -131,7 +131,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
             Assert.NotNull(result);
 
             var fdm = result.FirstOrDefault(c => c.Nickname == "FDM");
@@ -153,7 +153,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
             Assert.NotNull(result);
 
             if (result.Count > 1)
@@ -175,7 +175,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
             Assert.NotNull(result);
 
             var fdm = result.FirstOrDefault(c => c.Nickname == "FDM");

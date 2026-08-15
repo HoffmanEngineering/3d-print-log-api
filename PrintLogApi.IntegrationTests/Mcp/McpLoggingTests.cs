@@ -45,7 +45,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public async Task CallingTool_RecordsMcpToolCalled_WithSafeFields()
         {
             await using var client = await _factory.ConnectAsync();
-            await client.CallToolAsync("ping", new Dictionary<string, object> { ["message"] = "hi" });
+            await client.CallToolAsync("ping", new Dictionary<string, object?> { ["message"] = "hi" });
 
             var entry = _factory.Telemetry.Entries.Single(e => e.Tool == "ping");
             Assert.Equal("success", entry.Outcome);

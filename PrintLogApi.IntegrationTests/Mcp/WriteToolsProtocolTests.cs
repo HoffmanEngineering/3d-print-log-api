@@ -58,7 +58,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // confirm what it wrote without get_print (which it cannot call).
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, WriteOnly);
 
-            var result = await client.CallToolAsync("create_print", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_print", new Dictionary<string, object?>
             {
                 ["title"] = "protocol-fields",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -89,7 +89,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            Dictionary<string, object> Args(string title) => new()
+            Dictionary<string, object?> Args(string title) => new()
             {
                 ["title"] = title,
                 ["printerId"] = McpTestData.SearchPrinterId,

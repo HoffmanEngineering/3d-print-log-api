@@ -24,7 +24,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         private static string RawText(CallToolResult result) =>
             result.Content.OfType<TextContentBlock>().First().Text;
 
-        private static Dictionary<string, object> BasicArgs(string name) => new()
+        private static Dictionary<string, object?> BasicArgs(string name) => new()
         {
             ["displayName"] = name,
             ["materialType"] = "PLA",
@@ -97,7 +97,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
 
-            var ok = await client.CallToolAsync("get_material", new Dictionary<string, object>
+            var ok = await client.CallToolAsync("get_material", new Dictionary<string, object?>
             {
                 ["materialId"] = McpTestData.ResinMaterialId,
             });
@@ -108,7 +108,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 Assert.Equal("Weight", doc.RootElement.GetProperty("sourceUnit").GetString());
             }
 
-            var foreign = await client.CallToolAsync("get_material", new Dictionary<string, object>
+            var foreign = await client.CallToolAsync("get_material", new Dictionary<string, object?>
             {
                 ["materialId"] = McpTestData.ForeignMaterialId,
             });
@@ -121,7 +121,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            Dictionary<string, object> Args(string brand)
+            Dictionary<string, object?> Args(string brand)
             {
                 var a = BasicArgs("proto-conflict-material");
                 a["brand"] = brand;

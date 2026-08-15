@@ -63,7 +63,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -81,14 +81,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
 
             // Assert
             Assert.NotNull(model);
             Assert.NotEmpty(model.Items);
 
             // Check that seeded test printers exist
-            Assert.True(model.Items.Any(p => p.Name.Contains("Test Printer")),
+            Assert.True(model.Items.Any(p => p.Name!.Contains("Test Printer")),
                 "Should contain at least one seeded Test Printer");
 
             // Verify printer structure
@@ -108,7 +108,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -126,13 +126,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
 
             // Assert
             Assert.NotNull(model);
             Assert.NotEmpty(model.Items);
             Assert.All(model.Items, p =>
-                Assert.True(p.Make.Contains("Creality") || p.Name.Contains("Creality") || p.Model.Contains("Creality")));
+                Assert.True(p.Make!.Contains("Creality") || p.Name!.Contains("Creality") || p.Model!.Contains("Creality")));
         }
 
         [Fact]
@@ -175,7 +175,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var printer = await response.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var printer = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Assert
             Assert.NotNull(printer);
@@ -266,7 +266,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var createdPrinter = await response.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -343,7 +343,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Arrange - prepare update
             var updateDto = new AddPrinterDTO
@@ -383,7 +383,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Arrange - prepare update with all fields changed
             var updateDto = new AddPrinterDTO
@@ -407,7 +407,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var updateResponse = await _httpClient.SendAsync(updateRequest);
-            var updatedPrinter = await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var updatedPrinter = (await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
@@ -509,7 +509,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Act
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Printers/{createdPrinter.Id}");
@@ -536,7 +536,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Act - delete the printer
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Printers/{createdPrinter.Id}");
@@ -618,7 +618,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var filaments = await response.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filaments = (await response.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
 
             // Assert
             Assert.NotNull(filaments);
@@ -676,7 +676,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Act - unload all filaments
             var unloadRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}/filament/unload");
@@ -708,13 +708,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Verify filament is loaded
             var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
             getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse1 = await _httpClient.SendAsync(getRequest1);
-            var filamentsBefore = await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
             Assert.NotEmpty(filamentsBefore);
 
             // Act - unload all filaments
@@ -726,7 +726,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
             getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse2 = await _httpClient.SendAsync(getRequest2);
-            var filamentsAfter = await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
             Assert.Empty(filamentsAfter);
         }
 
@@ -777,7 +777,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Arrange - update with loaded filament
             var updateDto = new AddPrinterDTO
@@ -821,7 +821,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Arrange - update with loaded filaments
             var updateDto = new AddPrinterDTO
@@ -850,7 +850,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
             getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var filaments = await getResponse.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filaments = (await getResponse.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
 
             Assert.NotNull(filaments);
             Assert.Equal(3, filaments.Count);
@@ -875,7 +875,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Act - try to update with a filament we don't have access to
             var updateDto = new AddPrinterDTO
@@ -921,13 +921,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newPrinter);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdPrinter = await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>();
+            var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
 
             // Verify filament is loaded
             var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
             getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse1 = await _httpClient.SendAsync(getRequest1);
-            var filamentsBefore = await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
             Assert.NotEmpty(filamentsBefore);
 
             // Act - update with empty filaments list
@@ -950,7 +950,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
             getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse2 = await _httpClient.SendAsync(getRequest2);
-            var filamentsAfter = await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>();
+            var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
             Assert.Empty(filamentsAfter);
         }
 

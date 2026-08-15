@@ -37,7 +37,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
             // nondeterminism to something that does not depend on the time at all.
             var date = new DateTimeOffset(2026, 6, 20, 12, 0, 0, TimeSpan.Zero);
 
-            PrinterMaintenance created = null;
+            PrinterMaintenance? created = null;
             try
             {
                 // CREATE
@@ -74,7 +74,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
 
                 // DELETE
                 var beforeDelete = Version();
-                await maintenance.DeleteMaintenanceEntry(await maintenance.GetEntryById(created.Id));
+                await maintenance.DeleteMaintenanceEntry((await maintenance.GetEntryById(created!.Id))!);
                 Assert.NotEqual(beforeDelete, Version());
                 created = null; // deleted by the assertion path itself
             }

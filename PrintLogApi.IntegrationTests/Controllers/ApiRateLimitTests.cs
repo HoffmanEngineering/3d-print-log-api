@@ -29,7 +29,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.ConfigureAppConfiguration((_, cfg) =>
-                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Api:RateLimitPerMinute"] = Limit.ToString(),
                         ["Api:AnonymousRateLimitPerMinute"] = "0",
@@ -49,7 +49,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.ConfigureAppConfiguration((_, cfg) =>
-                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Api:RateLimitPerMinute"] = Limit.ToString(),
                         ["Api:AnonymousRateLimitPerMinute"] = Limit.ToString(),
@@ -67,7 +67,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.ConfigureAppConfiguration((_, cfg) =>
-                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Api:InvalidApiKeyAttemptsPerMinute"] = AttemptLimit.ToString(),
                     }));
@@ -81,7 +81,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.ConfigureAppConfiguration((_, cfg) =>
-                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Api:RateLimitPerMinute"] = "0",
                         ["Api:AnonymousRateLimitPerMinute"] = Limit.ToString(),
@@ -366,7 +366,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
                 for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 3; i++)
                 {
-                    var response = await client.SendAsync(WithKey(publicKey));
+                    var response = await client.SendAsync(WithKey(publicKey!));
                     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 }
             }

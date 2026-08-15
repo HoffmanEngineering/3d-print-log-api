@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return JsonSerializer.Deserialize<Result>(text, JsonOptions)!;
         }
 
-        private static async Task<Result> Get(McpClient client, Dictionary<string, object> args) =>
+        private static async Task<Result> Get(McpClient client, Dictionary<string, object?> args) =>
             Parse(await client.CallToolAsync(ToolName, args));
 
         [Fact]

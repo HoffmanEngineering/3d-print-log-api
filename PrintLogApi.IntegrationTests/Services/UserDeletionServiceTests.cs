@@ -94,7 +94,7 @@ namespace PrintLogApi.IntegrationTests.Services
                 NullLogger<UserDeletionService>.Instance,
                 new TelemetryClient(TelemetryConfiguration.CreateDefault()),
                 new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string>
+                    .AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["PendingUserDeactivationTimeInMinutes"] = "1440"
                     })
@@ -149,7 +149,7 @@ namespace PrintLogApi.IntegrationTests.Services
 
         private class TestAuth0Service : IAuth0Service
         {
-            public Task DeleteUser(string oauthUserId)
+            public Task DeleteUser(string? oauthUserId)
             {
                 return Task.CompletedTask;
             }
@@ -159,9 +159,9 @@ namespace PrintLogApi.IntegrationTests.Services
                 return Task.FromResult("test-token");
             }
 
-            public Task<string> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
+            public Task<string?> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
             {
-                return Task.FromResult<string>(null);
+                return Task.FromResult<string?>(null);
             }
 
             public Task<System.Collections.Generic.IReadOnlyList<PrintLogApi.Models.DTOs.ConnectedAgentDto>> ListMcpGrants(

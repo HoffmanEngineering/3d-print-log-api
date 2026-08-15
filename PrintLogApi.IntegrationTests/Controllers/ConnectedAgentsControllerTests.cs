@@ -16,7 +16,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
     {
         private sealed class FakeAuth0Service : IAuth0Service
         {
-            public string LastListUser;
+            // Null until the fake records a call.
+            public string? LastListUser;
             public (string User, string Grant)? LastRevoke;
             public IReadOnlyList<ConnectedAgentDto> GrantsToReturn = new List<ConnectedAgentDto>();
             public bool ThrowNotFoundOnRevoke;
@@ -37,9 +38,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 return Task.CompletedTask;
             }
 
-            public Task DeleteUser(string oauthUserId) => Task.CompletedTask;
+            public Task DeleteUser(string? oauthUserId) => Task.CompletedTask;
             public Task<string> GetManagementApiBearerToken() => Task.FromResult(string.Empty);
-            public Task<string> GetUserEmail(string oauthUserId, CancellationToken ct) => Task.FromResult<string>(null);
+            public Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct) => Task.FromResult<string?>(null);
         }
 
         private static ConnectedAgentsController CreateController(FakeAuth0Service service, string subject)

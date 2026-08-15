@@ -14,7 +14,8 @@ namespace PrintLogApi.IntegrationTests.Auth0
     public sealed class StubHandler : HttpMessageHandler
     {
         public List<HttpRequestMessage> Requests { get; } = new();
-        public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; }
+        // Always assigned by the test before the harness handles a request.
+        public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } = null!;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -38,7 +39,7 @@ namespace PrintLogApi.IntegrationTests.Auth0
         public static Auth0Service CreateService(StubHandler handler)
         {
             var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string>
+                .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Auth0Management:Domain"] = "test.auth0.com",
                     ["Auth0Management:ClientId"] = "mgmt-client",

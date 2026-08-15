@@ -30,8 +30,8 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public static string Create(
             string audience,
-            string subject = "auth0|mcp-user",
-            IEnumerable<string> scopes = null,
+            string? subject = "auth0|mcp-user",
+            IEnumerable<string>? scopes = null,
             string issuer = Issuer,
             DateTime? expires = null,
             DateTime? notBefore = null)

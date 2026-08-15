@@ -24,7 +24,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Name = name,
         };
 
-        private static Task<CreatePrinterResult> Create(IServiceScope s, PrinterAttributesInput input, string key = null) =>
+        private static Task<CreatePrinterResult> Create(IServiceScope s, PrinterAttributesInput input, string? key = null) =>
             Svc(s).CreatePrinterForMcp(IntegrationTestSeeder.TestUserId, input, key, CancellationToken.None);
 
         [Fact]

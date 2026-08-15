@@ -174,7 +174,7 @@ namespace PrintLogApi.IntegrationTests
             var now = DateTime.UtcNow;
             var baseDate = DateTimeOffset.UtcNow.AddDays(-7);
 
-            Print firstPrint = null;
+            Print? firstPrint = null;
             for (int i = 1; i <= 5; i++)
             {
                 var print = new Print
@@ -205,7 +205,8 @@ namespace PrintLogApi.IntegrationTests
                 throw new Exception($"Expected 5 prints to be seeded, but found {savedCount}");
             }
 
-            return firstPrint;
+            // Assigned unconditionally by the seeding loop above.
+            return firstPrint!;
         }
 
         private static void SeedPrintImages(PrintLogContext context, long printId, long userId)

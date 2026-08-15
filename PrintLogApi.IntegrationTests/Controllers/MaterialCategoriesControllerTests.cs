@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var categories = await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>();
+            var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
 
             // Assert - 4 categories seeded via HasData: filament, powder, resin, wire
             Assert.NotNull(categories);
@@ -57,7 +57,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var categories = await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>();
+            var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
 
             // Assert - should be sorted alphabetically by Nickname
             Assert.NotNull(categories);
@@ -74,7 +74,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var categories = await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>();
+            var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
 
             // Assert - verify filament category properties
             var filament = categories.Single(c => c.Nickname == "filament");

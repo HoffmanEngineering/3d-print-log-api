@@ -61,6 +61,6 @@ namespace PrintLogApi.Services
         /// </para>
         /// </summary>
         Task<PrinterDetailResult> UpdatePrinterForMcp(
-            long userId, long printerId, PrinterAttributesInput input, ISet<string> clear, CancellationToken ct);
+            long userId, long printerId, PrinterAttributesInput input, ISet<string>? clear, CancellationToken ct);
     }
 }

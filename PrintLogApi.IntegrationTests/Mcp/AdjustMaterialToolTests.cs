@@ -22,7 +22,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         // material rather than a shared read-fixture.
         private async Task<Guid> CreateMaterial(McpClient client, string name)
         {
-            await client.CallToolAsync("create_material", new Dictionary<string, object>
+            await client.CallToolAsync("create_material", new Dictionary<string, object?>
             {
                 ["displayName"] = name,
                 ["materialType"] = "PLA",
@@ -44,7 +44,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
             var id = await CreateMaterial(client, "Adjust Down Mat");
 
-            var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object>
+            var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object?>
             {
                 ["materialId"] = id,
                 ["source"] = "Weight",
@@ -69,7 +69,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
             var id = await CreateMaterial(client, "Adjust Length Mat");
 
-            var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object>
+            var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object?>
             {
                 ["materialId"] = id,
                 ["source"] = "Length",
@@ -93,7 +93,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var id = await CreateMaterial(client, "Adjust BelowZero Mat");
 
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "adjust_material_remaining",
-                new Dictionary<string, object> { ["materialId"] = id, ["source"] = "Weight", ["delta"] = -2000.0 });
+                new Dictionary<string, object?> { ["materialId"] = id, ["source"] = "Weight", ["delta"] = -2000.0 });
 
             Assert.True(isError);
         }
@@ -105,7 +105,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var id = await CreateMaterial(client, "Adjust AboveCap Mat");
 
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "adjust_material_remaining",
-                new Dictionary<string, object> { ["materialId"] = id, ["source"] = "Weight", ["delta"] = 500.0 });
+                new Dictionary<string, object?> { ["materialId"] = id, ["source"] = "Weight", ["delta"] = 500.0 });
 
             Assert.True(isError);
         }
@@ -116,7 +116,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "adjust_material_remaining",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["materialId"] = Guid.NewGuid(),
                     ["source"] = "Weight",

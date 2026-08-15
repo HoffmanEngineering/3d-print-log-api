@@ -47,7 +47,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
             var response = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"));
             response.EnsureSuccessStatusCode();
 
-            var body = await response.Content.ReadFromJsonAsync<OverviewResponse>();
+            var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>())!;
             Assert.NotNull(body);
             Assert.NotNull(body.Tiles);
             Assert.NotEqual("Auto", body.Granularity);
@@ -101,8 +101,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
             var mine = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"));
             var spoofed = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC&userId=999999"));
 
-            var a = await mine.Content.ReadFromJsonAsync<OverviewResponse>();
-            var b = await spoofed.Content.ReadFromJsonAsync<OverviewResponse>();
+            var a = (await mine.Content.ReadFromJsonAsync<OverviewResponse>())!;
+            var b = (await spoofed.Content.ReadFromJsonAsync<OverviewResponse>())!;
 
             Assert.Equal(a.Tiles.PrintCount.Value, b.Tiles.PrintCount.Value);
         }
@@ -122,7 +122,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
                 $"/api/analytics/overview?timeZone=UTC&printerIds={Mcp.McpTestData.MetricsPrinterId}"));
             response.EnsureSuccessStatusCode();
 
-            var body = await response.Content.ReadFromJsonAsync<OverviewResponse>();
+            var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>())!;
             Assert.Equal(0, body!.Tiles.PrintCount.Value);
         }
     }
@@ -148,8 +148,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
         [Fact]
         public async Task Overview_AfterAMutation_DoesNotServeTheStaleCachedResult()
         {
-            var before = await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
-                .Content.ReadFromJsonAsync<OverviewResponse>();
+            var before = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
+                .Content.ReadFromJsonAsync<OverviewResponse>())!;
 
             // Any mutating Prints action bumps the user's cache version. Create a print through
             // the API (not the DbContext) so the real invalidation path runs. A TTL-only cache
@@ -167,8 +167,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
             create.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             (await _httpClient.SendAsync(create)).EnsureSuccessStatusCode();
 
-            var after = await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
-                .Content.ReadFromJsonAsync<OverviewResponse>();
+            var after = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
+                .Content.ReadFromJsonAsync<OverviewResponse>())!;
 
             Assert.Equal(before!.Tiles.PrintCount.Value + 1, after!.Tiles.PrintCount.Value);
         }

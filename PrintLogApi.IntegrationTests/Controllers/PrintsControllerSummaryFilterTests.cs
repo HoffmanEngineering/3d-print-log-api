@@ -29,7 +29,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            return (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
         }
 
         [Fact]
@@ -42,7 +42,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // while proving nothing. IntegrationTestSeeder does seed dated prints.
             Assert.NotEmpty(dated);
 
-            var pivot = dated.Min(i => i.StartDate).Value;
+            var pivot = dated.Min(i => i.StartDate)!.Value;
 
             var inclusive = await Get($"pageNumber=1&pageSize=100&fromDate={Q(pivot)}&toDate={Q(pivot.AddSeconds(1))}");
             var exclusive = await Get($"pageNumber=1&pageSize=100&fromDate={Q(pivot.AddSeconds(1))}&toDate={Q(pivot.AddSeconds(2))}");
@@ -109,7 +109,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var dated = all.Items.Where(i => i.StartDate.HasValue).ToList();
             Assert.NotEmpty(dated); // the seeder must have dated prints for this to mean anything
 
-            var pivot = dated.Min(i => i.StartDate).Value;
+            var pivot = dated.Min(i => i.StartDate)!.Value;
             var wide = $"fromDate={Q(pivot.AddDays(-1))}&toDate={Q(pivot.AddDays(1))}";
             var empty = $"fromDate={Q(pivot.AddYears(-50))}&toDate={Q(pivot.AddYears(-49))}";
 

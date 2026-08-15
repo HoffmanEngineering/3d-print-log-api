@@ -541,7 +541,7 @@ namespace PrintLogApi.Services
         }
 
         public async Task<PrinterDetailResult> UpdatePrinterForMcp(
-            long userId, long printerId, PrinterAttributesInput input, ISet<string> clear, CancellationToken ct)
+            long userId, long printerId, PrinterAttributesInput input, ISet<string>? clear, CancellationToken ct)
         {
             clear ??= new HashSet<string>();
 

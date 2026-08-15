@@ -62,7 +62,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 null, null, null, null, null, null, null, null, false, null, None, CancellationToken.None));
             // Re-read: nothing changed (validate-before-mutate).
             var still = await Svc(scope).GetOwnPrintDetailForMcp(IntegrationTestSeeder.TestUserId, id, CancellationToken.None);
-            Assert.Equal("Orig", still.Title);
+            Assert.Equal("Orig", still!.Title);
             Assert.Equal(McpTestData.SearchPrinterId, still.PrinterId);
         }
 
