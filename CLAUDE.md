@@ -201,6 +201,21 @@ gh pr list
 gh pr view --web
 ```
 
+## Health Checks
+
+Two endpoints, both anonymous, with deliberately different jobs:
+
+- `/health` — **liveness**. Process-only, no dependencies. This is the path configured under
+  *App Service → Monitoring → Health check*. It must stay shallow: App Service pulls a failing
+  instance from rotation and replaces it after a sustained failure, so a check that touched SQL
+  would report every instance unhealthy during a database blip and turn a recoverable outage into
+  an app-wide restart loop.
+- `/health/ready` — **readiness**. Probes SQL Server via `AddDbContextCheck` and returns per-check
+  JSON. For humans and post-deploy verification. Never point the platform's health check at it.
+
+The JSON omits each check's exception and description on purpose — the endpoint is anonymous, and
+a SQL connection failure message carries the server name and often the credentials it tried.
+
 ## Deployment
 
 Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on main branch commits.

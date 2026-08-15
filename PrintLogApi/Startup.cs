@@ -5,16 +5,20 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
+using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -141,6 +145,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             });
 
+            ConfigureHealthChecks(services);
+
             // Configure memory cache with size limit
             services.AddMemoryCache(options =>
             {
@@ -226,6 +232,56 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         }));
             });
         }
+
+        /// <summary>
+        /// Two health checks with deliberately different jobs.
+        ///
+        /// "live" answers only "is this process serving requests", and is what Azure App Service
+        /// is meant to poll. It must NOT touch the database: App Service pulls a failing instance
+        /// from rotation and replaces it after a sustained failure, so a check that fails on a SQL
+        /// blip would report every instance unhealthy at once and turn a recoverable database
+        /// outage into a restart loop across the whole app.
+        ///
+        /// "ready" is the one that actually probes SQL Server, for humans and for post-deploy
+        /// verification — where knowing the database is unreachable is the entire point.
+        /// </summary>
+        private static void ConfigureHealthChecks(IServiceCollection services)
+        {
+            services.AddHealthChecks()
+                .AddCheck(LiveCheckName, () => HealthCheckResult.Healthy("Process is serving requests."), tags: [LiveTag])
+                .AddDbContextCheck<PrintLogContext>(ReadyCheckName, tags: [ReadyTag]);
+        }
+
+        /// <summary>
+        /// Writes the readiness report as JSON: overall status plus one entry per check.
+        ///
+        /// Only the check name, status, and duration are emitted. A failing check's Exception and
+        /// Description are deliberately left out — this endpoint is anonymous, and a SQL connection
+        /// failure message carries the server name and often the credentials it tried.
+        /// </summary>
+        private static Task WriteHealthResponse(HttpContext context, HealthReport report)
+        {
+            context.Response.ContentType = "application/json";
+
+            var payload = new
+            {
+                status = report.Status.ToString(),
+                totalDurationMs = report.TotalDuration.TotalMilliseconds,
+                checks = report.Entries.Select(entry => new
+                {
+                    name = entry.Key,
+                    status = entry.Value.Status.ToString(),
+                    durationMs = entry.Value.Duration.TotalMilliseconds,
+                }),
+            };
+
+            return context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+        }
+
+        private const string LiveTag = "live";
+        private const string ReadyTag = "ready";
+        private const string LiveCheckName = "self";
+        private const string ReadyCheckName = "database";
 
         private void ConfigureMcpServer(IServiceCollection services)
         {
@@ -484,6 +540,21 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
+
+                // Liveness: the path to configure under App Service > Monitoring > Health check.
+                // Plain text, no dependencies — see ConfigureHealthChecks for why it stays shallow.
+                endpoints.MapHealthChecks("/health", new HealthCheckOptions
+                {
+                    Predicate = check => check.Tags.Contains(LiveTag),
+                }).AllowAnonymous();
+
+                // Readiness: probes SQL Server and reports per-check detail. Used by people and by
+                // the deploy workflow, not by the platform's own restart logic.
+                endpoints.MapHealthChecks("/health/ready", new HealthCheckOptions
+                {
+                    Predicate = check => check.Tags.Contains(ReadyTag),
+                    ResponseWriter = WriteHealthResponse,
+                }).AllowAnonymous();
 
                 // MCP endpoint (Streamable HTTP, stateless). The endpoint-level "Mcp" policy
                 // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
