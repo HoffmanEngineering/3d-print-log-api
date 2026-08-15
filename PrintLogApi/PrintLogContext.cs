@@ -588,8 +588,9 @@ namespace PrintLogApi
                 .HasIndex(s => s.StripeSubscriptionId)
                 .HasDatabaseName("IX_Subscriptions_StripeSubscriptionId");
 
-            // Provably non-null: fnNaturalSort(string) is declared on this type, so the reflection
-            // lookup cannot miss. A null here would be a compile-time-detectable rename.
+            // Non-null for the current declaration: fnNaturalSort(string) exists on this type.
+            // nameof survives a rename, but not a signature change — altering the parameter list
+            // would still compile and return null here, so keep the two in step.
             modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) })!)
                 .HasName("fnNaturalSort");
 

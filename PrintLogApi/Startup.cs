@@ -159,9 +159,11 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
             services.AddHttpContextAccessor();
             services.AddScoped<IPrincipal>(
-                // IHttpContextAccessor is registered above, and this factory only ever runs while
-                // resolving a scoped service inside a request, so HttpContext is set. Both were
-                // already unguarded dereferences before nullable analysis was enabled.
+                // IHttpContextAccessor is registered above, so the first dereference is safe.
+                // HttpContext is not guaranteed: it would be null if IPrincipal were ever resolved
+                // outside a request. Nothing resolves IPrincipal from DI today, so this factory
+                // does not currently run at all. Both were already unguarded before nullable
+                // analysis was enabled, so the null-forgive changes nothing.
                 (sp) => sp.GetService<IHttpContextAccessor>()!.HttpContext!.User
             );
             services.AddTransient<IUserService, UserService>();

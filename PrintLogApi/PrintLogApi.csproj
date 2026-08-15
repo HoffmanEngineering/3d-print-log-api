@@ -15,9 +15,10 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- CS8632: "?" used outside a nullable annotations context. The 62 existing "T?"
-         annotations are correct and become meaningful when #45 flips Nullable to "enable";
-         under "warnings" they are inert, so the diagnostic carries no information. Delete this
-         suppression as part of #45.
+         annotations are correct and become meaningful when #45 flips Nullable to "enable"; until
+         then they are inert. Note this suppression is project-wide and ongoing, not a one-off:
+         it also silences the diagnostic on annotations added between now and #45, which is a real
+         (if small) loss of signal accepted to keep the build readable. Delete it as part of #45.
          CS8629 is deliberately NOT suppressed: those 54 unguarded Nullable<T>.Value accesses
          are real latent InvalidOperationExceptions, tracked in #39. -->
     <NoWarn>$(NoWarn);1591;CS8632</NoWarn>
