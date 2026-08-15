@@ -230,6 +230,79 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                             Window = TimeSpan.FromMinutes(1),
                             QueueLimit = 0,
                         }));
+
+                // Per-caller rate limiting for the REST controllers. Two separate budgets, because
+                // the two populations behave nothing alike:
+                //
+                //  - Authenticated callers partition on the internal user id, which is exact. This
+                //    is the budget that bounds a runaway slicer plugin or agent loop.
+                //  - Anonymous callers partition on the remote IP. This bounds unauthenticated
+                //    traffic to the public endpoints.
+                //
+                // Note what this policy does NOT cover: a request bearing an invalid API key never
+                // reaches it. ApiKeyMiddleware short-circuits with a 401 and this middleware runs
+                // later in the pipeline, so key guessing is throttled by that middleware's own
+                // per-address failed-attempt guard (Api:InvalidApiKeyAttemptsPerMinute).
+                //
+                // Either budget is disabled by configuring it to 0 or less, which is how the
+                // integration suite opts out (see appsettings.IntegrationTesting.json).
+                options.AddPolicy("api", httpContext =>
+                {
+                    var userId = httpContext.User.GetUserId();
+
+                    // Media endpoints get their own, much larger budget in their own partition.
+                    // A gallery page may hold up to 100 images, and on a cold cache the browser
+                    // requests all of them within a couple of seconds — so a handful of pages is
+                    // normal behaviour that would otherwise look exactly like a flood. Separate
+                    // partitions matter as much as the larger number: a burst of thumbnails must
+                    // not spend the budget the actual data calls on the same page need.
+                    var isMedia = httpContext.GetEndpoint()?.Metadata
+                        .GetMetadata<MediaEndpointAttribute>() is not null;
+
+                    if (userId.HasValue)
+                    {
+                        var authenticatedLimit = isMedia
+                            ? Configuration.GetValue("Api:MediaRateLimitPerMinute", 1200)
+                            : Configuration.GetValue("Api:RateLimitPerMinute", 300);
+
+                        return authenticatedLimit <= 0
+                            ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-user-unlimited")
+                            : System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                                partitionKey: isMedia ? $"api-user-media:{userId.Value}" : $"api-user:{userId.Value}",
+                                _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                                {
+                                    PermitLimit = authenticatedLimit,
+                                    Window = TimeSpan.FromMinutes(1),
+                                    QueueLimit = 0,
+                                });
+                    }
+
+                    var anonymousLimit = isMedia
+                        ? Configuration.GetValue("Api:MediaRateLimitPerMinute", 1200)
+                        : Configuration.GetValue("Api:AnonymousRateLimitPerMinute", 600);
+
+                    if (anonymousLimit <= 0)
+                    {
+                        return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-anon-unlimited");
+                    }
+
+                    // NOTE: this is the socket peer, not necessarily the browser. Nothing in the
+                    // pipeline calls UseForwardedHeaders, so if the App Service front end terminates
+                    // the connection every anonymous caller collapses into one shared bucket. The
+                    // default is set high enough that a shared bucket still clears normal public
+                    // traffic; tune Api:AnonymousRateLimitPerMinute (or set it to 0) rather than
+                    // trusting a client-supplied X-Forwarded-For, which a brute-forcer would rotate.
+                    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                    return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: isMedia ? $"api-anon-media:{ip}" : $"api-anon:{ip}",
+                        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = anonymousLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        });
+                });
             });
         }
 
@@ -541,7 +614,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapControllers();
+                endpoints.MapControllers().RequireRateLimiting("api");
 
                 // Liveness: the path to configure under App Service > Monitoring > Health check.
                 // Plain text, no dependencies — see ConfigureHealthChecks for why it stays shallow.

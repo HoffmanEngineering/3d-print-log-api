@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Subscription;
@@ -104,6 +105,11 @@ namespace PrintLogApi.Controllers
         /// </summary>
         [HttpPost("webhook")]
         [AllowAnonymous]
+        // Exempt from the anonymous IP budget. Stripe delivers every event for every customer from
+        // a small pool of its own addresses, so the whole webhook stream shares one partition — a
+        // billing burst would otherwise 429 itself. Authenticity is already established by the
+        // Stripe-Signature check below, which is the control that matters here.
+        [DisableRateLimiting]
         public async Task<IActionResult> HandleWebhook()
         {
             var json = await new StreamReader(HttpContext.Request.Body, Encoding.UTF8).ReadToEndAsync();
