@@ -174,9 +174,9 @@ namespace PrintLogApi.IntegrationTests
         /// between "MVC attaches [Required] here" and "this endpoint starts returning 400".
         ///
         /// The distinction is not academic. Enumerating on <see cref="ModelMetadata.IsRequired"/>
-        /// alone reported 90 members; exactly 7 of them could take null, and annotating those 7
-        /// turned 59 failing integration tests green. Reporting the other 83 would mean either a
-        /// permanently red test or 83 annotations weakening declarations that are correct as they
+        /// alone reported 90 members; exactly 6 of them could take null, and annotating those 6
+        /// turned 59 failing integration tests green. Reporting the other 84 would mean either a
+        /// permanently red test or 84 annotations weakening declarations that are correct as they
         /// stand -- letting warnings drive annotations, which is the mistake this migration has
         /// avoided throughout.
         ///

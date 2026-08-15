@@ -110,8 +110,9 @@ and starts returning 400, and no compiler diagnostic says so. #41 suppressed thi
 suppression and adopted the behaviour.
 
 The exposure was in **action parameters**, not the DTOs — `[FromQuery] string searchText` and its
-kin, which bind null on every request that omits them. Seven such parameters are now `string?`
-(the four summary endpoints plus the two filament filters), threaded down through
+kin, which bind null on every request that omits them. Six such parameters are now `string?`
+(`searchText` on the filament, printer, print and maintenance summary endpoints, plus
+`filterByMaterialCategoryNickname` and `filterByStorageLocation`), threaded down through
 `IFilamentService`, `IPrinterMaintenanceService` and the two cache-key helpers.
 
 `ImplicitRequiredInferenceTests` is the permanent guard. It reflects over every action and fails
@@ -126,8 +127,8 @@ with the offending member named. Read its comments before adding to it — it re
   new()`).
 - A **route value** is present or the route did not match, so it 404s before validation.
 
-Enumerating on the annotation alone flagged 90 members; 7 could take null. Do not annotate the
-other 83 nullable to quiet a diagnostic — that weakens declarations that are correct.
+Enumerating on the annotation alone flagged 90 members; 6 could take null. Do not annotate the
+other 84 nullable to quiet a diagnostic — that weakens declarations that are correct.
 
 ### Services, MCP tools and controllers
 
