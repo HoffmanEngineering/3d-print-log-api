@@ -42,11 +42,27 @@ than accumulating. The per-file `#nullable enable` headers left over from #42–
 redundant no-ops; a new file does not need one, and the guardrail tests that used to demand one
 are gone.
 
-One carve-out: `<WarningsNotAsErrors>CS8629</WarningsNotAsErrors>`. The 54 unguarded
-`Nullable<T>.Value` accesses are latent `InvalidOperationException`s, not annotation debt — fixing
-one means deciding what should happen when the value is absent, which is a runtime change. They
-stay visible as warnings and are tracked in #39. Delete the line when #39 lands, and **do not add
-to them**: a new CS8629 is invisible against a backdrop of 54.
+No carve-outs remain. #39 resolved all 54 CS8629 sites and removed `<WarningsNotAsErrors>`, so an
+unguarded `Nullable<T>.Value` now fails the build like every other nullable diagnostic.
+
+Fifty of the 54 were provably non-null — the proof existed but sat where C# flow analysis does not
+follow it: a `bool` local, a computed property, a `Where` clause in a prior lambda, or a parameter
+reassignment that reset the state. Those were fixed by **moving the proof** to where the compiler
+sees it (a `[MemberNotNullWhen]` attribute, an `is { } x` pattern, a `Select`+`OfType` unwrap),
+never by suppressing. Four were real bugs: the Length branch of the measurement conversions
+dereferenced `DiameterMm.Value` without the diameter check its Volume and Weight siblings had, so a
+length-measured resin or powder returned a 500 from `POST /api/Prints`.
+
+Three rules came out of that sweep and still apply:
+
+- **Inside an EF expression tree the only permitted fix is `!`.** It is erased at compile time, so
+  the generated SQL is unchanged; a pattern or `OfType` rewrite there changes the translation.
+- **`Select`+`OfType<T>()` is only for an id-only projection.** Where the `Where` unwraps an id as a
+  dictionary or grouping key while the value selector still needs the row, `OfType` discards the
+  rest of the row — those sites take `!` with a comment saying why.
+- **Prefer a throwing fallback to a `when` clause in a `switch` arm.** A `when` that fails silently
+  falls through to the next arm; in the measurement conversions that meant converting millimetres as
+  if they were grams, which is worse than throwing.
 
 Annotations in `Models/` are load-bearing, not cosmetic:
 

@@ -7,7 +7,7 @@
          context on for the generated migrations too and makes the per-file headers redundant
          rather than changing how the app itself compiles.
 
-         Verified at the flip: zero CS86xx warnings other than the CS8629 carve-out below, and
+         Verified at the flip: zero CS86xx warnings, and
          "dotnet ef migrations has-pending-model-changes" green, which is what proves EF Core's
          schema inference did not move. -->
     <Nullable>enable</Nullable>
@@ -26,16 +26,6 @@
     <!-- The ratchet. Without it the migration decays: a new nullable warning is one line in a
          build log nobody reads, and the annotations stop meaning anything within a release or two. -->
     <WarningsAsErrors>nullable</WarningsAsErrors>
-
-    <!-- CS8629 (unguarded Nullable<T>.Value) is carved out of the ratchet rather than suppressed,
-         so the 54 existing occurrences stay visible as warnings while every OTHER nullable
-         diagnostic is an error from today.
-
-         They are real latent InvalidOperationExceptions, not annotation debt, and fixing one means
-         choosing what should happen when the value is absent, a runtime behaviour change, which
-         is exactly what #46 ruled out of the annotation PRs. They are tracked in #39; delete this
-         line when it lands. -->
-    <WarningsNotAsErrors>CS8629</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
