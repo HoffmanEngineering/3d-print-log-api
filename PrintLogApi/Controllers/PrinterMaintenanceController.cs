@@ -51,7 +51,12 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PagedList<PrinterMaintenanceDto>>> GetPrinterMaintenanceEntriesForCurrentUser(
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery] SortRequest<PrinterMaintenanceSortColumn> sortRequest,
-            [FromQuery] string searchText,
+            // Optional filter: absent from the query string means null here today, and must keep
+            // meaning that rather than becoming an implicit [Required] 400 (#45).
+            [FromQuery] string? searchText,
+            // Deliberately NOT nullable. The collection binder supplies an empty array when the
+            // query string omits it, which is why the service can read .Length unguarded. An
+            // implicit [Required] is satisfied by that empty array, so this one is safe as-is.
             [FromQuery] long[] filterByPrinterIds,
             [FromQuery] bool? includeDone,
             [FromQuery] bool? includeNotDone)

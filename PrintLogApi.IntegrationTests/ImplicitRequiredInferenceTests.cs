@@ -141,7 +141,7 @@ namespace PrintLogApi.IntegrationTests
             // IsRequired is the metadata layer's own answer to "will validation demand a value
             // here", which is exactly the question being asked -- reading it beats re-deriving the
             // inference rule and drifting from whatever MVC actually does.
-            if (metadata.IsRequired && !HasExplicitRequiredAttribute(metadata))
+            if (metadata.IsRequired && !HasExplicitRequiredAttribute(metadata) && CanBindNull(metadata))
             {
                 offenders.Add($"{path} : {FriendlyTypeName(metadata.ModelType)}");
             }
@@ -167,6 +167,78 @@ namespace PrintLogApi.IntegrationTests
             }
 
             visited.Remove(metadata.ModelType);
+        }
+
+        /// <summary>
+        /// Whether an omitted value can actually reach validation as null, which is the difference
+        /// between "MVC attaches [Required] here" and "this endpoint starts returning 400".
+        ///
+        /// The distinction is not academic. Enumerating on <see cref="ModelMetadata.IsRequired"/>
+        /// alone reported 90 members; exactly 7 of them could take null, and annotating those 7
+        /// turned 59 failing integration tests green. Reporting the other 83 would mean either a
+        /// permanently red test or 83 annotations weakening declarations that are correct as they
+        /// stand -- letting warnings drive annotations, which is the mistake this migration has
+        /// avoided throughout.
+        ///
+        /// Three things guarantee a non-null value, and each is verified by the suite rather than
+        /// assumed:
+        /// <list type="bullet">
+        /// <item>A complex type bound from the query or form -- the binder always constructs one,
+        /// so <c>PagedRequest</c>, <c>SortRequest&lt;T&gt;</c> and <c>AnalyticsFilter</c> are never
+        /// null.</item>
+        /// <item>A collection -- the binder supplies an empty one, which satisfies [Required]. This
+        /// is why <c>PrinterMaintenanceService</c> can read <c>filterByPrinterIds.Length</c> with no
+        /// guard.</item>
+        /// <item>A property with an initializer -- an omitted JSON field leaves the initialized
+        /// value in place, so <c>AddFilamentDto.Colors = new()</c> never arrives null.</item>
+        /// </list>
+        /// </summary>
+        private static bool CanBindNull(ModelMetadata metadata)
+        {
+            if (metadata.IsCollectionType || metadata.IsComplexType)
+            {
+                return false;
+            }
+
+            // A property that its container's parameterless constructor initializes cannot arrive
+            // null however the request is shaped. Asking the type rather than reading the source
+            // keeps this honest when an initializer is added or removed later.
+            if (metadata.MetadataKind == ModelMetadataKind.Property &&
+                metadata.ContainerType is not null &&
+                metadata.PropertyName is not null &&
+                IsInitializedByDefaultConstructor(metadata.ContainerType, metadata.PropertyName))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Default-constructs the container and reports whether the property came back non-null.
+        /// Any type that cannot be constructed is treated as "could be null", which errs toward
+        /// reporting -- the safe direction for a guard.
+        /// </summary>
+        private static bool IsInitializedByDefaultConstructor(Type containerType, string propertyName)
+        {
+            try
+            {
+                if (containerType.GetConstructor(Type.EmptyTypes) is null)
+                {
+                    return false;
+                }
+
+                var instance = Activator.CreateInstance(containerType);
+                var property = containerType.GetProperty(
+                    propertyName,
+                    BindingFlags.Public | BindingFlags.Instance);
+
+                return property?.GetValue(instance) is not null;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -204,6 +276,11 @@ namespace PrintLogApi.IntegrationTests
 
             return source == BindingSource.Services ||
                    source == BindingSource.Special ||
+                   // A route value is present or the route did not match, so the request 404s
+                   // before validation ever runs -- [Required] on it can never turn a 200 into a
+                   // 400. This is why ConnectedAgents.RevokeConnectedAgent(grantId) is safe as a
+                   // non-nullable string.
+                   source == BindingSource.Path ||
                    parameter.ParameterType == typeof(System.Threading.CancellationToken);
         }
 

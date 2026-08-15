@@ -30,24 +30,6 @@ namespace PrintLogApi.IntegrationTests
         }
 
         /// <summary>
-        /// With nullable annotations active, MVC infers [Required(AllowEmptyStrings = true)] on
-        /// every non-nullable reference property of a bound model. Across ~94 DTO files that turns
-        /// omitted fields into 400s with no compiler diagnostic to warn anyone. The suppression has
-        /// to stay until that change is made deliberately.
-        /// </summary>
-        [Fact]
-        public void ImplicitRequiredForNonNullableReferenceTypes_IsSuppressed()
-        {
-            var options = _factory.Services.GetRequiredService<IOptions<MvcOptions>>().Value;
-
-            Assert.True(
-                options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes,
-                "MVC's implicit [Required] inference must stay suppressed until #45 adopts it " +
-                "deliberately. Removing it before the DTOs are annotated changes request " +
-                "validation with no compiler warning.");
-        }
-
-        /// <summary>
         /// Covers the one class of entity-annotation mistake that CI structurally cannot catch.
         ///
         /// `dotnet-ef migrations has-pending-model-changes` guards scalar properties, because a

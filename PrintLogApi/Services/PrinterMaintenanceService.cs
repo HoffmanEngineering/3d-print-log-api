@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -82,7 +82,9 @@ namespace PrintLogApi.Services
             PrinterMaintenanceSortColumn sortColumn,
             int pageNumber,
             int pageSize,
-            string searchText,
+            // Optional search filter; the IsNullOrWhiteSpace guard below has always handled the
+            // null the controller binds when the query string omits it (#45).
+            string? searchText,
             long[] filterByPrinterIds,
             bool? includeDone = true,
             bool? includeNotDone = true)

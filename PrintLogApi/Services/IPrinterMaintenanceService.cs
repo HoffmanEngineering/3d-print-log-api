@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -16,7 +16,7 @@ namespace PrintLogApi.Services
         Task<List<PrinterMaintenance>> GetEntriesByPrinterId(long printerId);
         Task<PrinterMaintenance?> GetEntryById(Guid id);
         Task<string[]> GetMaintenanceCategories(long userId);
-        Task<PagedList<PrinterMaintenanceDto>> GetPrinterMaintenanceByUser(long userId, SortDirection sortDirection, PrinterMaintenanceSortColumn sortColumn, int pageNumber, int pageSize, string searchText, long[] filterByPrinterIds, bool? includeDone = true, bool? includeNotDone = true);
+        Task<PagedList<PrinterMaintenanceDto>> GetPrinterMaintenanceByUser(long userId, SortDirection sortDirection, PrinterMaintenanceSortColumn sortColumn, int pageNumber, int pageSize, string? searchText, long[] filterByPrinterIds, bool? includeDone = true, bool? includeNotDone = true);
         Task<PrinterMaintenance> UpdateEntry(Guid id, PutPrinterMaintenanceDto dto, long userId);
     }
 }

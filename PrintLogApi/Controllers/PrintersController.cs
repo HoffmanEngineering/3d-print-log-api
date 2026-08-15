@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +71,7 @@ namespace PrintLogApi.Controllers
         [HttpGet("summary")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<PrinterSummarySimpleDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string searchText, [FromQuery] bool includeInactive = false)
+        public async Task<ActionResult<IEnumerable<PrinterSummarySimpleDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string? searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
             if(!userId.HasValue)
@@ -453,7 +453,7 @@ namespace PrintLogApi.Controllers
         /// Generates a unique cache key for printer summary queries based on user and query parameters.
         /// </summary>
         private string GeneratePrinterCacheKey(long userId, string version,
-                                               PagedRequest pagingRequest, string searchText,
+                                               PagedRequest pagingRequest, string? searchText,
                                                bool includeInactive)
         {
             return $"{PRINTER_SUMMARY_CACHE_PREFIX}{userId}_v{version}_" +
