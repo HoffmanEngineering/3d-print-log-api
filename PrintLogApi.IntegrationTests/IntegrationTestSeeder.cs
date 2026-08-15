@@ -29,6 +29,11 @@ namespace PrintLogApi.IntegrationTests
         public static Guid TestFilamentId2 { get; private set; } // Prusament Blue PETG - StorageLocation: "Test Shelf"
         public static Guid TestFilamentId3 { get; private set; } // eSUN Black ABS - StorageLocation: null (unassigned)
 
+        // Anycubic Grey Resin - the "resin" category has HasDiameter = false, so DiameterMm is
+        // deliberately null. This is the state the Length-branch measurement conversions mishandle;
+        // no other seeded filament can express it (the other three all set DiameterMm = 1.75).
+        public static Guid TestResinFilamentId { get; private set; }
+
         public const string TestStorageLocation = "Test Shelf";
 
         public static void Seed(PrintLogContext context)
@@ -44,6 +49,7 @@ namespace PrintLogApi.IntegrationTests
             TestFilamentId1 = filamentIds[0];
             TestFilamentId2 = filamentIds[1];
             TestFilamentId3 = filamentIds[2];
+            TestResinFilamentId = filamentIds[3];
 
             var firstPrint = SeedPrints(context, user.Id, printer.Id);
             TestPrintId = firstPrint.Id;
@@ -94,6 +100,9 @@ namespace PrintLogApi.IntegrationTests
         private static readonly Guid _filament1Id = new Guid("aaaaaaaa-0001-0000-0000-000000000000");
         private static readonly Guid _filament2Id = new Guid("aaaaaaaa-0002-0000-0000-000000000000");
         private static readonly Guid _filament3Id = new Guid("aaaaaaaa-0003-0000-0000-000000000000");
+        // Not aaaaaaaa-0004-...: McpTestData already claims that one, and the MCP fixtures seed
+        // into the same database as this seeder.
+        private static readonly Guid _resinFilamentId = new Guid("aaaaaaaa-0010-0000-0000-000000000000");
 
         private static Guid[] SeedFilaments(PrintLogContext context, long userId)
         {
@@ -102,6 +111,7 @@ namespace PrintLogApi.IntegrationTests
             var filament1Id = _filament1Id;
             var filament2Id = _filament2Id;
             var filament3Id = _filament3Id;
+            var resinFilamentId = _resinFilamentId;
 
             context.Filaments.AddRange(new[]
             {
@@ -162,11 +172,32 @@ namespace PrintLogApi.IntegrationTests
                     IsActive = true,
                     InitialNominalWeightMg = 1000000,
                     Source = Filament.SourceMeasurement.Weight
+                },
+                new Filament
+                {
+                    Id = resinFilamentId,
+                    Brand = "Anycubic",
+                    ColorHex = "808080",
+                    ColorName = "Grey",
+                    CreatedById = userId,
+                    CreatedDate = now,
+                    UpdatedById = userId,
+                    UpdatedDate = now,
+                    // Deliberately null: the "resin" category has HasDiameter = false, so a
+                    // diameter is neither required nor meaningful for it.
+                    DiameterMm = null,
+                    DisplayName = "Anycubic Grey Resin",
+                    MaterialType = "Standard Resin",
+                    MaterialCategoryNickname = "resin",
+                    MaterialDensityGramPerCubicCm = 1.1,
+                    IsActive = true,
+                    InitialNominalWeightMg = 1000000,
+                    Source = Filament.SourceMeasurement.Weight
                 }
             });
             context.SaveChanges();
 
-            return new[] { filament1Id, filament2Id, filament3Id };
+            return new[] { filament1Id, filament2Id, filament3Id, resinFilamentId };
         }
 
         private static Print SeedPrints(PrintLogContext context, long userId, long printerId)

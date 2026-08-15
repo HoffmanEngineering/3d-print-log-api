@@ -48,10 +48,11 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var page = await Get(client, new() { ["pageSize"] = 100 });
 
             Assert.DoesNotContain(page.Items, i => i.Id == McpTestData.InactiveFilamentId);
-            // 3 base seeds + 5 text-matching fixtures + 4 find_material fixtures
+            // 4 base seeds (incl. the diameter-less resin) + 5 text-matching fixtures
+            // + 4 find_material fixtures
             // + 12 AMS spools (Nylon/Amber, unique so they match no other test's filter)
             // + 1 resin (no diameter, used by the usage-convertibility tests).
-            Assert.Equal(25, page.Items.Count);
+            Assert.Equal(26, page.Items.Count);
         }
 
         [Fact]
