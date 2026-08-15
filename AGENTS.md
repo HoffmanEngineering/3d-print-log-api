@@ -78,6 +78,15 @@ is a runtime behaviour change dressed as an annotation.
 Positional records (`Analytics/`, `ConnectedAgentDto`) keep their non-nullable parameters: the
 constructor is the enforcement, and every one of them is built server-side.
 
+The rule is uniform on purpose, and it does over-nullable a handful of properties — the ones with a
+single construction site that provably assigns them (`GetUploadUrlResponse`,
+`GetDownloadUrlResponse`, and the three `Filament*Dto` string arrays). Annotating those accurately
+costs a `= null!` each, which reintroduces exactly the idiom the paragraph above bans and turns a
+rule you can apply by reading one property into one that needs a call-site audit. It buys nothing
+today: no code dereferences those properties, and Swagger does not read nullability
+(`SupportNonNullableReferenceTypes` is off), so the published contract is identical either way.
+Revisit at #45, when NRT-aware schema generation is actually on the table.
+
 ## MCP Server
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes
