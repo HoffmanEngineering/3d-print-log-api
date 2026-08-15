@@ -135,26 +135,35 @@ namespace PrintLogApi.Services
             if (_cache.TryGetValue(LastUsedThrottleKey(hashedKey), out _))
                 return;
 
-            var apiKey = await _context.UserApiKeys
+            // ExecuteUpdateAsync issues a single UPDATE and skips loading and tracking the entity
+            // entirely — this runs on the API-key request path, and the row is only ever read here
+            // to stamp one column. Matches NotificationService and UserDeletionService, which
+            // already use it. A row count of zero means no live key matched, which is the same
+            // condition the previous null check caught.
+            var rowsUpdated = await _context.UserApiKeys
                 .Where(u => u.HashedKey == hashedKey && u.IsDeleted == false)
-                .SingleOrDefaultAsync();
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(u => u.LastUsed, DateTimeOffset.UtcNow));
 
-            if (apiKey == default)
+            if (rowsUpdated == 0)
                 throw new ApiKeyIsNotValidException();
-
-            apiKey.LastUsed = DateTimeOffset.UtcNow;
-            await _context.SaveChangesAsync();
 
             _cache.Set(LastUsedThrottleKey(hashedKey), true, new MemoryCacheEntryOptions()
                 .SetSize(1)
                 .SetAbsoluteExpiration(TimeSpan.FromHours(1)));
         }
 
-        private string GetSHA256Hash(string publicKey)
+        /// <summary>
+        /// Hashes an API key for lookup and storage.
+        ///
+        /// Uses the one-shot static SHA256.HashData rather than SHA256.Create(): this runs on every
+        /// API-key-authenticated request, and the instance form allocated and disposed a hash object
+        /// each time. Matches how the rest of the codebase already hashes (McpUserContext,
+        /// McpRequestFingerprint). The output encoding is unchanged, so stored hashes still match.
+        /// </summary>
+        private static string GetSHA256Hash(string publicKey)
         {
-            using var sha = SHA256.Create();
-            byte[] hashedBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(publicKey));
-            return Convert.ToBase64String(hashedBytes);
+            return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(publicKey)));
         }
 
         private Guid CreateCryptographicallySecureGuid()
