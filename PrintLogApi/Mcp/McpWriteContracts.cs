@@ -94,7 +94,13 @@ namespace PrintLogApi.Mcp
         public string? Brand { get; init; }
         public string? ColorName { get; init; }
         public string? ColorHex { get; init; }
-        public string[]? Colors { get; init; }
+        /// <remarks>
+        /// The ELEMENTS are nullable too. This is built from the tool's <c>string[]? colors</c>
+        /// parameter, which System.Text.Json will happily fill from <c>["ff0000", null]</c>.
+        /// <c>McpMaterialValidation.RequireHex</c> only checks non-null entries, so a null element
+        /// survives validation today — see the note in <c>FilamentService.ResolveColors</c>.
+        /// </remarks>
+        public string?[]? Colors { get; init; }
         public ColorPatternType? ColorPattern { get; init; }
         public FilamentFinishType? FinishType { get; init; }
         public FilamentEffect[]? Effects { get; init; }
@@ -133,7 +139,7 @@ namespace PrintLogApi.Mcp
             Brand = Brand?.Trim(),
             ColorName = ColorName?.Trim(),
             ColorHex = ColorHex?.Trim(),
-            Colors = Colors?.Select(c => c?.Trim()!).ToArray(),
+            Colors = Colors?.Select(c => c?.Trim()).ToArray(),
             StorageLocation = StorageLocation?.Trim(),
             Notes = Notes?.Trim(),
             InertGas = InertGas?.Trim(),

@@ -226,9 +226,15 @@ namespace PrintLogApi.Services
         /// single hex; an empty 'colors' means NO color, which must survive AddFilament's
         /// empty-means-absent backfill — hence resolving both fields together, never one of them.
         /// </summary>
+        /// <remarks>
+        /// The per-element null-forgive is load-bearing and NOT accurate: RequireHex only validates
+        /// non-null entries, so a caller sending <c>["ff0000", null]</c> persists a null inside
+        /// Filament.Colors today. Rejecting or dropping those elements is a runtime behaviour
+        /// change, so it is tracked in #39 rather than smuggled in with an annotation.
+        /// </remarks>
         private static List<string> ResolveColors(MaterialAttributesInput input) =>
             input.Colors != null
-                ? input.Colors.ToList()
+                ? input.Colors.Select(c => c!).ToList()
                 : (input.ColorHex != null ? new List<string> { input.ColorHex } : new List<string>());
 
         private static string? ResolveColorHex(MaterialAttributesInput input)
@@ -590,7 +596,8 @@ namespace PrintLogApi.Services
             }
             else if (input.Colors != null)
             {
-                material.Colors = input.Colors.ToList();
+                // Null elements survive validation here too — see ResolveColors, tracked in #39.
+                material.Colors = input.Colors.Select(c => c!).ToList();
                 material.ColorHex = material.Colors.Count > 0 ? material.Colors[0] : null;
             }
             else if (input.ColorHex != null)
