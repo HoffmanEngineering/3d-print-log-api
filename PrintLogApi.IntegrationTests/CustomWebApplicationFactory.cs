@@ -133,7 +133,7 @@ namespace PrintLogApi.IntegrationTests
         private static void ConfigureLocalJwt(JwtBearerOptions options, string audience)
         {
             options.Authority = null;
-            options.MetadataAddress = null;
+            options.MetadataAddress = null!;
             options.RequireHttpsMetadata = false;
             // The built-in post-configure already created a ConfigurationManager from Authority;
             // clear it so validation uses the in-memory signing key instead of a (slow, failing)
@@ -213,7 +213,7 @@ namespace PrintLogApi.IntegrationTests
         public class TestAuth0Service : IAuth0Service
         {
             /// <summary>The address <see cref="GetUserEmail"/> returns. Null means the account has none.</summary>
-            public string UserEmail { get; set; }
+            public string? UserEmail { get; set; }
 
             /// <summary>When set, the lookup throws — for testing that callers degrade instead of failing.</summary>
             public bool ThrowOnGetUserEmail { get; set; }
@@ -224,7 +224,7 @@ namespace PrintLogApi.IntegrationTests
             /// </summary>
             public bool ThrowCancelledOnGetUserEmail { get; set; }
 
-            public Task DeleteUser(string oauthUserId)
+            public Task DeleteUser(string? oauthUserId)
             {
                 return Task.CompletedTask;
             }
@@ -234,7 +234,7 @@ namespace PrintLogApi.IntegrationTests
                 return Task.FromResult("test-token");
             }
 
-            public Task<string> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
+            public Task<string?> GetUserEmail(string oauthUserId, System.Threading.CancellationToken ct)
             {
                 if (ThrowCancelledOnGetUserEmail)
                 {

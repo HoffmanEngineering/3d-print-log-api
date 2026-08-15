@@ -73,7 +73,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
         /// <summary>
         /// Finds a File record in the database by its path.
         /// </summary>
-        private Models.File FindFileByPathInDb(string filePath)
+        private Models.File? FindFileByPathInDb(string filePath)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -98,8 +98,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task GetUserSummary_ById_ReturnsExpectedData()
         {
             // Act
-            var user = await _httpClient.GetFromJsonAsync<UserSummaryDto>(
-                $"/api/Users/{IntegrationTestSeeder.TestUserId}/summary");
+            var user = (await _httpClient.GetFromJsonAsync<UserSummaryDto>(
+                $"/api/Users/{IntegrationTestSeeder.TestUserId}/summary"))!;
 
             // Assert
             Assert.NotNull(user);
@@ -132,8 +132,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task GetUserById_PublicUser_ReturnsExpectedData()
         {
             // Act
-            var user = await _httpClient.GetFromJsonAsync<UserDetailDto>(
-                $"/api/Users/{IntegrationTestSeeder.TestUserId}");
+            var user = (await _httpClient.GetFromJsonAsync<UserDetailDto>(
+                $"/api/Users/{IntegrationTestSeeder.TestUserId}"))!;
 
             // Assert
             Assert.NotNull(user);
@@ -319,7 +319,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task GetPublicUsers_ReturnsListOfIds()
         {
             // Act
-            var userIds = await _httpClient.GetFromJsonAsync<IEnumerable<long>>("/api/Users/public");
+            var userIds = (await _httpClient.GetFromJsonAsync<IEnumerable<long>>("/api/Users/public"))!;
 
             // Assert
             Assert.NotNull(userIds);
@@ -539,9 +539,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Verify File record was created
-            var filePath = result.Url.Split("userprofile/").Last(); // Extract just the filename
+            var filePath = result.Url!.Split("userprofile/").Last(); // Extract just the filename
             filePath = $"userprofile/{filePath}";
-            var fileRecord = FindFileByPathInDb(filePath);
+            var fileRecord = FindFileByPathInDb(filePath)!;
             Assert.NotNull(fileRecord);
         }
 
@@ -713,9 +713,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Verify File record was created
-            var filePath = result.Url.Split("userprofile/").Last(); // Extract just the filename
+            var filePath = result.Url!.Split("userprofile/").Last(); // Extract just the filename
             filePath = $"userprofile/{filePath}";
-            var fileRecord = FindFileByPathInDb(filePath);
+            var fileRecord = FindFileByPathInDb(filePath)!;
             Assert.NotNull(fileRecord);
         }
 

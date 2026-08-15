@@ -150,7 +150,7 @@ namespace PrintLogApi.IntegrationTests
             var stat = (await response.Content.ReadFromJsonAsync<SinglePrintStat>())!;
 
             // Exact: the metrics user owns nothing but the matrix. 6933 + 1800 + 7200 + 0.
-            Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, int.Parse(stat!.Stat));
+            Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, int.Parse(stat!.Stat!));
         }
 
         [Fact]
@@ -174,7 +174,7 @@ namespace PrintLogApi.IntegrationTests
 
             // Rows: 5000 + 3000 + 9000 + 4000 = 21000.  Legacy: 1000 + 0 = 1000.  Total 22000.
             // The old code produced 20500: it dropped the legacy 1000 and subtracted the legacy -500.
-            Assert.Equal(Mcp.McpTestData.UsersEndpointMaterialTotalMg, long.Parse(stat!.Stat));
+            Assert.Equal(Mcp.McpTestData.UsersEndpointMaterialTotalMg, long.Parse(stat!.Stat!));
         }
 
         [Fact]
@@ -187,7 +187,7 @@ namespace PrintLogApi.IntegrationTests
             // FilamentUsage must be included too: the profile also maps TotalFilamentWeightMg by
             // walking Prints -> FilamentUsage, and an unloaded collection is null, not empty.
             var project = await db.Projects.AsNoTracking()
-                .Include(p => p.Prints)
+                .Include(p => p.Prints!)
                     .ThenInclude(p => p.FilamentUsage)
                 .FirstAsync(p => p.Id == Mcp.McpTestData.MetricsProjectId);
 

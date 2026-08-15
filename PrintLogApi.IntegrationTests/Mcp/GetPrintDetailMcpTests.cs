@@ -56,7 +56,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var svc = s2.ServiceProvider.GetRequiredService<IPrintService>();
             var detail = await svc.GetOwnPrintDetailForMcp(IntegrationTestSeeder.TestUserId, printId, CancellationToken.None);
 
-            Assert.Equal("rt.gcode", detail.FileName);
+            Assert.Equal("rt.gcode", detail!.FileName);
             Assert.Equal("https://x", detail.Url);
             Assert.Equal("Unlisted", detail.ViewStatus);
             Assert.Equal(3300, detail.EstimatedDurationSeconds);

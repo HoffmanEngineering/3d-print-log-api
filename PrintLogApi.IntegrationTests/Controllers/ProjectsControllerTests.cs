@@ -40,7 +40,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 ViewStatus = Project.ProjectViewStatus.Private
             });
             var resp = await _client.SendAsync(req);
-            return await resp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
         }
 
         private async Task<int> UploadImage(Guid projectId)

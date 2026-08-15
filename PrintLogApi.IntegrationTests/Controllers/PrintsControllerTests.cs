@@ -44,7 +44,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(dto);
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            return (await response.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
         }
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(newPrint);
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<PrintDetailDTO>();
+            return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
         }
 
         #region Anonymous/Public Tests
@@ -84,8 +84,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
         public async Task GetPrintSummary_WithUserId_ReturnsPagedResult()
         {
             // Act
-            var model = await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
-                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}");
+            var model = (await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
+                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}"))!;
 
             // Assert - verify we get a valid paged response
             Assert.NotNull(model);
@@ -155,7 +155,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotEmpty(model.Items);
 
             // Check that seeded test prints exist (there may be other prints from other tests)
-            Assert.True(model.Items.Any(p => p.Title.Contains("Test Print")),
+            Assert.True(model.Items.Any(p => p.Title!.Contains("Test Print")),
                 "Should contain at least one seeded Test Print");
 
             // Verify print structure
@@ -262,10 +262,10 @@ namespace PrintLogApi.IntegrationTests.Controllers
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
             var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
-            var seededPrint = summary.Items.First(p => p.Title.Contains("Test Print"));
+            var seededPrint = summary.Items.First(p => p.Title!.Contains("Test Print"));
 
             // Act
-            var print = await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}");
+            var print = (await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}"))!;
 
             // Assert
             Assert.NotNull(print);
@@ -897,7 +897,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("application/octet-stream", response.Content.Headers.ContentType.MediaType);
+            Assert.Equal("application/octet-stream", response.Content.Headers.ContentType!.MediaType);
         }
 
         [Fact]
@@ -1100,7 +1100,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
         [Fact]
         public async Task GetPublicPrintIds_ReturnsListOfIds()
         {
-            var ids = await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public");
+            var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public"))!;
 
             Assert.NotNull(ids);
             Assert.True(ids.Count > 0, "Should have at least one public print");
@@ -1784,7 +1784,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
             Assert.NotNull(result);
             Assert.All(result.Items, print =>
-                Assert.Contains(print.FilamentUsage, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
+                Assert.Contains(print.FilamentUsage!, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
         }
 
         #endregion

@@ -36,7 +36,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region Helper Methods
 
-        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string userId = null)
+        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string? userId = null)
         {
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, userId ?? IntegrationTestSeeder.TestUserOAuthId);
@@ -73,7 +73,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             return entry;
         }
 
-        private PrinterMaintenance GetMaintenanceEntryById(Guid id)
+        private PrinterMaintenance? GetMaintenanceEntryById(Guid id)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -376,7 +376,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
 
             // Assert
-            var persisted = GetMaintenanceEntryById(result.Id);
+            var persisted = GetMaintenanceEntryById(result.Id)!;
             Assert.NotNull(persisted);
             Assert.Equal("Persisted Category", persisted.Category);
             Assert.True(persisted.Done);
@@ -513,7 +513,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(request);
 
             // Assert
-            var updated = GetMaintenanceEntryById(entry.Id);
+            var updated = GetMaintenanceEntryById(entry.Id)!;
             Assert.Equal("After Update", updated.Category);
             Assert.True(updated.Done);
             Assert.Equal("99.99", updated.PriceValue);
@@ -537,7 +537,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify deleted
-            var deleted = GetMaintenanceEntryById(entry.Id);
+            var deleted = GetMaintenanceEntryById(entry.Id)!;
             Assert.Null(deleted);
         }
 
@@ -614,7 +614,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             }
 
             // Verify not deleted
-            var stillExists = GetMaintenanceEntryById(otherUserEntryId);
+            var stillExists = GetMaintenanceEntryById(otherUserEntryId)!;
             Assert.NotNull(stillExists);
         }
 
@@ -667,7 +667,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions))!;
-            Assert.Contains(uniqueCategory, result.Categories);
+            Assert.Contains(uniqueCategory, result.Categories!);
         }
 
         #endregion

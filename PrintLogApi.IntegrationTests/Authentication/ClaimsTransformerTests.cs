@@ -29,7 +29,7 @@ namespace PrintLogApi.IntegrationTests.Authentication
 
             var result = await transformer.TransformAsync(CreatePrincipal("auth|existing"));
 
-            var claim = ((ClaimsIdentity)result.Identity).FindFirst(ClaimTypes.NameIdentifier);
+            var claim = ((ClaimsIdentity)result.Identity!).FindFirst(ClaimTypes.NameIdentifier);
             Assert.NotNull(claim);
             Assert.Equal("42", claim.Value);
         }
@@ -54,7 +54,7 @@ namespace PrintLogApi.IntegrationTests.Authentication
 
             var result = await transformer.TransformAsync(CreatePrincipal("auth|new"));
 
-            var claim = ((ClaimsIdentity)result.Identity).FindFirst(ClaimTypes.NameIdentifier);
+            var claim = ((ClaimsIdentity)result.Identity!).FindFirst(ClaimTypes.NameIdentifier);
             Assert.NotNull(claim);
             Assert.Equal("99", claim.Value);
         }

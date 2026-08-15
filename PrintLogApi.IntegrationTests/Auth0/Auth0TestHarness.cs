@@ -14,7 +14,8 @@ namespace PrintLogApi.IntegrationTests.Auth0
     public sealed class StubHandler : HttpMessageHandler
     {
         public List<HttpRequestMessage> Requests { get; } = new();
-        public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; }
+        // Always assigned by the test before the harness handles a request.
+        public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } = null!;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

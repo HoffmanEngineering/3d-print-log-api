@@ -27,7 +27,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             InitialAmount = 1000,
         };
 
-        private Task<CreateMaterialResult> Create(IServiceScope s, MaterialAttributesInput input, string key = null) =>
+        private Task<CreateMaterialResult> Create(IServiceScope s, MaterialAttributesInput input, string? key = null) =>
             Svc(s).CreateMaterialForMcp(IntegrationTestSeeder.TestUserId, input, key, CancellationToken.None);
 
         [Fact]

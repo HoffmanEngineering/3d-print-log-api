@@ -7,7 +7,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 {
     public class McpHelpersTests
     {
-        private static ClaimsPrincipal PrincipalWithId(string id) =>
+        private static ClaimsPrincipal PrincipalWithId(string? id) =>
             new(new ClaimsIdentity(id == null
                 ? Array.Empty<Claim>()
                 : new[] { new Claim(ClaimTypes.NameIdentifier, id) }));

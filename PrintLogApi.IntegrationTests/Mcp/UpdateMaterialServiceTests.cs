@@ -20,7 +20,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         private static ISet<string> Clear(params string[] n) => new HashSet<string>(n);
         private static readonly ISet<string> None = new HashSet<string>();
 
-        private async Task<Guid> Seed(IServiceScope scope, string name, MaterialAttributesInput extra = null)
+        private async Task<Guid> Seed(IServiceScope scope, string name, MaterialAttributesInput? extra = null)
         {
             var input = new MaterialAttributesInput
             {
@@ -48,7 +48,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return created.Material.Id;
         }
 
-        private Task<MaterialDetail> Update(IServiceScope s, Guid id, MaterialAttributesInput input, ISet<string> clear = null) =>
+        private Task<MaterialDetail> Update(IServiceScope s, Guid id, MaterialAttributesInput input, ISet<string>? clear = null) =>
             Svc(s).UpdateOwnMaterialForMcp(IntegrationTestSeeder.TestUserId, id, input, clear ?? None, CancellationToken.None);
 
         [Fact]

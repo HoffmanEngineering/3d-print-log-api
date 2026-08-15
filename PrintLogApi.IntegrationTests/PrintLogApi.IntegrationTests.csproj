@@ -3,7 +3,13 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
+
+    <!-- Completes the nullable migration (#45/#46). The precision bar here is deliberately lower
+         than PrintLogApi's: a "!" in test setup or an assertion is fine where the test has just
+         created the row it is reading back. What is NOT fine is a nullable warning surviving,
+         because the suite is where a wrong annotation in the app first shows up as a real failure. -->
     <Nullable>enable</Nullable>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

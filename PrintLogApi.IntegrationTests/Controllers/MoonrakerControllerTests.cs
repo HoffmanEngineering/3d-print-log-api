@@ -52,7 +52,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
         /// <summary>
         /// Finds a print by filename directly from the database.
         /// </summary>
-        private Print FindPrintByFileNameInDb(string expectedFileName)
+        private Print? FindPrintByFileNameInDb(string expectedFileName)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -231,7 +231,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - verify a print was created with the expected filename
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.Equal(PrintStatus.Printing, print.Status);
             Assert.Equal(System.IO.Path.GetFileName(filename), print.FileName);
@@ -260,7 +260,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - title should be humanized and title-cased
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.NotNull(print.Title);
             Assert.NotEmpty(print.Title);
@@ -291,7 +291,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - StartDate should be set to approximately now
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.NotNull(print.StartDate);
             Assert.True(print.StartDate >= beforeSend.AddSeconds(-5), "StartDate should be close to current time");
@@ -319,7 +319,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - verify filament usage was created
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.NotNull(print.FilamentUsage);
             Assert.NotEmpty(print.FilamentUsage);
@@ -347,7 +347,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - FileName should be just the file name, not the full path
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.DoesNotContain("subdirectory", print.FileName);
         }
@@ -426,7 +426,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - AllowComments should be true based on user setting
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.True(print.AllowComments);
         }
@@ -455,7 +455,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - ViewStatus should be Public based on user setting
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.Equal(PrintViewStatus.Public, print.ViewStatus);
         }
@@ -484,7 +484,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - should default to false for AllowComments and Private for ViewStatus
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.False(print.AllowComments);
             Assert.Equal(PrintViewStatus.Private, print.ViewStatus);
@@ -513,9 +513,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             // Assert - title should be truncated to 100 characters max
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
-            Assert.True(print.Title.Length <= 100, $"Title should be 100 chars or less, was {print.Title.Length}");
+            Assert.True(print.Title!.Length <= 100, $"Title should be 100 chars or less, was {print.Title!.Length}");
         }
 
         #endregion
@@ -542,7 +542,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
             // Get the created print
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
             Assert.Equal(PrintStatus.Printing, createdPrint.Status);
 
@@ -564,7 +564,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
 
             // Verify the print was updated - need to re-fetch from DB
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Success, updatedPrint.Status);
         }
 
@@ -586,7 +586,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - complete with specific total duration
@@ -604,7 +604,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(completeRequest);
 
             // Assert - PrintTimeInSeconds should come from TotalDuration (rounded)
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(updatedPrint);
             Assert.Equal(3700, updatedPrint.PrintTimeInSeconds);
         }
@@ -627,7 +627,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - complete with filament usage (in mm from Moonraker)
@@ -646,7 +646,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(completeRequest);
 
             // Assert - verify filament usage was updated
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(updatedPrint);
             Assert.NotNull(updatedPrint.FilamentUsage);
             Assert.NotEmpty(updatedPrint.FilamentUsage);
@@ -701,7 +701,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - send error event
@@ -721,7 +721,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Assert
             Assert.Equal(HttpStatusCode.OK, errorResponse.StatusCode);
 
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Failed, updatedPrint.Status);
         }
 
@@ -743,7 +743,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - send error with specific print duration
@@ -761,7 +761,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(errorRequest);
 
             // Assert - error handler uses PrintDuration (not TotalDuration)
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(updatedPrint);
             Assert.Equal(901, updatedPrint.PrintTimeInSeconds);
         }
@@ -811,7 +811,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - send cancelled event
@@ -831,7 +831,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Assert
             Assert.Equal(HttpStatusCode.OK, cancelledResponse.StatusCode);
 
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Failed, updatedPrint.Status);
         }
 
@@ -911,7 +911,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
             // Verify print was created in Printing status
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
             Assert.Equal(PrintStatus.Printing, createdPrint.Status);
 
@@ -931,7 +931,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
 
             // Verify print was updated to Success
-            var completedPrint = FindPrintByFileNameInDb(filename);
+            var completedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Success, completedPrint.Status);
             Assert.Equal(7200, completedPrint.PrintTimeInSeconds);
             Assert.NotNull(completedPrint.FilamentUsage);
@@ -960,7 +960,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startResponse = await _httpClient.SendAsync(startRequest);
             Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Step 2: Error during print
@@ -979,7 +979,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, errorResponse.StatusCode);
 
             // Verify print was updated to Failed
-            var failedPrint = FindPrintByFileNameInDb(filename);
+            var failedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Failed, failedPrint.Status);
             Assert.Equal(2400, failedPrint.PrintTimeInSeconds);
             Assert.NotNull(failedPrint.FilamentUsage);
@@ -1007,7 +1007,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Step 2: Cancel print
@@ -1026,7 +1026,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, cancelledResponse.StatusCode);
 
             // Verify print was updated to Failed (cancelled maps to Failed)
-            var cancelledPrint = FindPrintByFileNameInDb(filename);
+            var cancelledPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Failed, cancelledPrint.Status);
         }
 
@@ -1054,7 +1054,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
             await _httpClient.SendAsync(startRequest);
 
-            var createdPrint = FindPrintByFileNameInDb(filename);
+            var createdPrint = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(createdPrint);
 
             // Act - complete the print on the correct printer
@@ -1073,7 +1073,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
 
             // Assert - the print should be updated
-            var updatedPrint = FindPrintByFileNameInDb(filename);
+            var updatedPrint = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Success, updatedPrint.Status);
         }
 
@@ -1124,7 +1124,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto));
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.NotNull(print);
             Assert.Null(print.EstimatedPrintTimeInSeconds);
         }
@@ -1158,7 +1158,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.Equal(PrintStatus.Success, print.Status);
             Assert.Null(print.PrintTimeInSeconds);
         }
@@ -1193,7 +1193,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var print = FindPrintByFileNameInDb(filename);
+            var print = FindPrintByFileNameInDb(filename)!;
             Assert.Null(print.PrintTimeInSeconds);
         }
 

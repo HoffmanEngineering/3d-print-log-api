@@ -35,7 +35,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region Helper Methods
 
-        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string userId = null)
+        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string? userId = null)
         {
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, userId ?? IntegrationTestSeeder.TestUserOAuthId);
@@ -86,7 +86,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             return setting;
         }
 
-        private UserSetting GetUserSettingById(long id)
+        private UserSetting? GetUserSettingById(long id)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -501,7 +501,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             await _httpClient.SendAsync(request);
 
             // Assert - Verify in database
-            var updated = GetUserSettingById(setting.Id);
+            var updated = GetUserSettingById(setting.Id)!;
             Assert.Equal("after-update", updated.Value);
         }
 

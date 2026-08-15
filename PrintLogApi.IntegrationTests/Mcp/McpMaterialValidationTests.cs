@@ -132,7 +132,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal("Spool", canonical.DisplayName);
             Assert.Equal("Acme", canonical.Brand);
             Assert.Equal("note", canonical.Notes);
-            Assert.Equal("AABBCC", canonical.Colors[0]);
+            Assert.Equal("AABBCC", canonical.Colors![0]);
         }
     }
 }

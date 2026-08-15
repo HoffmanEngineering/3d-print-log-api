@@ -31,7 +31,7 @@ namespace PrintLogApi.IntegrationTests.Authentication
             request.Content = JsonContent.Create(new AddNewApiKeyDto { Description = description });
             var response = await _httpClient.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            return await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            return (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
         }
 
         [Fact]

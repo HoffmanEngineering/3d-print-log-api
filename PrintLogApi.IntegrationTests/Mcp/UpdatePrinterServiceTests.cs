@@ -52,7 +52,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         private static Task<PrinterDetailResult> Update(
-            IServiceScope s, long id, PrinterAttributesInput input, ISet<string> clear = null) =>
+            IServiceScope s, long id, PrinterAttributesInput input, ISet<string>? clear = null) =>
             Svc(s).UpdatePrinterForMcp(IntegrationTestSeeder.TestUserId, id, input, clear, CancellationToken.None);
 
         [Fact]
@@ -248,7 +248,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // of "FFF" (PrintLogContext.cs:417-419), so EF omits the column and the database fills it
             // in. Only an explicit UPDATE reaches the state a pre-default legacy row is actually in.
             await ctx.Printers.Where(p => p.Id == printer.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(p => p.CategoryNickname, (string)null));
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.CategoryNickname, (string?)null));
             ctx.ChangeTracker.Clear();
 
             var result = await Update(scope, printer.Id, new PrinterAttributesInput { Name = "Still Legacy" });

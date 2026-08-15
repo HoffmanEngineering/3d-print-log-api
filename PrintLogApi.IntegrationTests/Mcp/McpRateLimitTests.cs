@@ -105,7 +105,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // MCP (2025-06-18) removed JSON-RPC batching; the SDK's message reader cannot parse a
             // batch array and rejects it, so one transport request never fans out into multiple
             // tool executions (which would bypass the per-request budget).
-            string body = null;
+            string? body = null;
             try
             {
                 var resp = await client.SendAsync(request);

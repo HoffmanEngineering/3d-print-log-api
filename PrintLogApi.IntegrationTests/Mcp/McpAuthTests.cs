@@ -18,7 +18,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public McpAuthTests(CustomWebApplicationFactory factory) => _factory = factory;
 
-        private static HttpRequestMessage Probe(string path, string token = null)
+        private static HttpRequestMessage Probe(string path, string? token = null)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, path);
             if (token != null)

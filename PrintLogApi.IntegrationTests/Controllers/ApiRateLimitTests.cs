@@ -366,7 +366,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
                 for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 3; i++)
                 {
-                    var response = await client.SendAsync(WithKey(publicKey));
+                    var response = await client.SendAsync(WithKey(publicKey!));
                     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 }
             }

@@ -30,9 +30,9 @@ namespace PrintLogApi.IntegrationTests.Controllers
         /// </summary>
         private async Task<long> GetSeededPrintIdAsync()
         {
-            var summary = await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
-                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}");
-            return summary.Items.First().Id;
+            var summary = (await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
+                $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}"))!;
+            return summary.Items!.First().Id;
         }
 
         /// <summary>
@@ -49,7 +49,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<CommentDetailDto>();
+            return (await response.Content.ReadFromJsonAsync<CommentDetailDto>())!;
         }
 
         #region POST Print Comment (Create via PrintsController)

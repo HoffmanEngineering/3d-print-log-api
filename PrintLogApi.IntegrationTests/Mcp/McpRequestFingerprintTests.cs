@@ -9,7 +9,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 {
     public class McpRequestFingerprintTests
     {
-        private static string Fp(string title, string notes, IReadOnlyList<MaterialUsageInput> materials) =>
+        private static string Fp(string title, string? notes, IReadOnlyList<MaterialUsageInput> materials) =>
             McpRequestFingerprint.ComputeCreatePrint(title, 7, Print.PrintStatus.Success, null, 3600, null,
                 notes, null, null, null, null, null, null, materials);
 

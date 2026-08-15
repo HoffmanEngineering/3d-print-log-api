@@ -25,7 +25,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
         public McpEndpointTests(CustomWebApplicationFactory factory) => _factory = factory;
 
-        private static string McpToken(string subject = "auth0|mcp-endpoint-user", bool withScope = true) =>
+        private static string McpToken(string? subject = "auth0|mcp-endpoint-user", bool withScope = true) =>
             TestJwt.Create(TestJwt.McpAudience, subject: subject,
                 scopes: withScope ? new[] { "read:printdata" } : null);
 
@@ -43,7 +43,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return await McpClient.CreateAsync(transport);
         }
 
-        private HttpRequestMessage RpcPost(string method, string token)
+        private HttpRequestMessage RpcPost(string method, string? token)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
             {

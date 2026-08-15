@@ -35,14 +35,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region Helper Methods
 
-        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string userId = null)
+        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string? userId = null)
         {
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, userId ?? IntegrationTestSeeder.TestUserOAuthId);
             return request;
         }
 
-        private Notification CreateTestNotification(string title = null, bool isRead = false)
+        private Notification CreateTestNotification(string? title = null, bool isRead = false)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -65,7 +65,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             return notification;
         }
 
-        private Notification GetNotificationById(Guid id)
+        private Notification? GetNotificationById(Guid id)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -351,7 +351,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify the notification is marked as read
-            var updated = GetNotificationById(notification.Id);
+            var updated = GetNotificationById(notification.Id)!;
             Assert.True(updated.IsRead);
             Assert.NotNull(updated.ReadDate);
         }
@@ -398,7 +398,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
             // Verify the notification is still unread
-            var unchanged = GetNotificationById(notification.Id);
+            var unchanged = GetNotificationById(notification.Id)!;
             Assert.False(unchanged.IsRead);
         }
 
@@ -496,8 +496,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify both notifications are marked as read
-            var updated1 = GetNotificationById(notification1.Id);
-            var updated2 = GetNotificationById(notification2.Id);
+            var updated1 = GetNotificationById(notification1.Id)!;
+            var updated2 = GetNotificationById(notification2.Id)!;
             Assert.True(updated1.IsRead);
             Assert.True(updated2.IsRead);
         }
@@ -620,7 +620,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify valid notification is marked as read
-            var updated = GetNotificationById(validNotification.Id);
+            var updated = GetNotificationById(validNotification.Id)!;
             Assert.True(updated.IsRead);
         }
 
@@ -642,7 +642,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify the notification is deleted
-            var deleted = GetNotificationById(notification.Id);
+            var deleted = GetNotificationById(notification.Id)!;
             Assert.Null(deleted);
         }
 
@@ -688,7 +688,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
             // Verify the notification still exists
-            var stillExists = GetNotificationById(notification.Id);
+            var stillExists = GetNotificationById(notification.Id)!;
             Assert.NotNull(stillExists);
         }
 

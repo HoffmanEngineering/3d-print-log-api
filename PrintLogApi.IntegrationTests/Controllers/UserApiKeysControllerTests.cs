@@ -35,14 +35,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
         #region Helper Methods
 
-        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string userId = null)
+        private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url, string? userId = null)
         {
             var request = new HttpRequestMessage(method, url);
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, userId ?? IntegrationTestSeeder.TestUserOAuthId);
             return request;
         }
 
-        private UserApiKey CreateTestApiKey(string description = null)
+        private UserApiKey CreateTestApiKey(string? description = null)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -67,7 +67,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             return apiKey;
         }
 
-        private UserApiKey GetApiKeyById(Guid id)
+        private UserApiKey? GetApiKeyById(Guid id)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -293,7 +293,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             // Verify the API key is soft-deleted (IsDeleted = true)
-            var deleted = GetApiKeyById(apiKey.Id);
+            var deleted = GetApiKeyById(apiKey.Id)!;
             Assert.True(deleted.IsDeleted);
         }
 
@@ -370,7 +370,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             });
 
             // Verify the API key is not deleted
-            var stillExists = GetApiKeyById(otherUserApiKeyId);
+            var stillExists = GetApiKeyById(otherUserApiKeyId)!;
             Assert.NotNull(stillExists);
             Assert.False(stillExists.IsDeleted);
         }
@@ -464,7 +464,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
             // Verify it's deleted
-            var deleted = GetApiKeyById(created.Id);
+            var deleted = GetApiKeyById(created.Id)!;
             Assert.True(deleted.IsDeleted);
         }
 

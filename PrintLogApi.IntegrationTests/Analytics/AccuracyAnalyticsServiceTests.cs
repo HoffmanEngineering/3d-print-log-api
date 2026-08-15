@@ -70,7 +70,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
             var scalarOnly = await db.Prints.CountAsync(p =>
                 p.CreatedById == Mcp.McpTestData.MetricsUserId &&
                 p.FilamentUsageMg > 0 && p.EstimatedFilamentUsageMg > 0 &&
-                !p.FilamentUsage.Any(pf => pf.AmountMg > 0));
+                !p.FilamentUsage!.Any(pf => pf.AmountMg > 0));
 
             Assert.True(scalarOnly > 0,
                 "seed a print whose material is recorded only as the legacy scalars");
@@ -80,8 +80,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
             var rowOnly = await db.Prints.CountAsync(p =>
                 p.CreatedById == Mcp.McpTestData.MetricsUserId &&
                 !(p.FilamentUsageMg > 0 && p.EstimatedFilamentUsageMg > 0) &&
-                p.FilamentUsage.Any(pf => pf.AmountMg > 0) &&
-                p.FilamentUsage.Any(pf => pf.EstimatedAmountMg > 0));
+                p.FilamentUsage!.Any(pf => pf.AmountMg > 0) &&
+                p.FilamentUsage!.Any(pf => pf.EstimatedAmountMg > 0));
 
             var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
 

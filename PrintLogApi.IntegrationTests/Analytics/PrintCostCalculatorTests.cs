@@ -24,11 +24,13 @@ namespace PrintLogApi.IntegrationTests.Analytics
         {
             var path = Path.Combine(AppContext.BaseDirectory, "tests-fixtures", "cost-fixtures.json");
             var json = File.ReadAllText(path);
+            // The golden corpus is committed alongside this test; if it ever fails to
+            // deserialize, failing loudly here is the correct outcome.
             return JsonSerializer.Deserialize<Fixture>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true,
                 ReadCommentHandling = JsonCommentHandling.Skip,
-            });
+            })!;
         }
 
         public static IEnumerable<object[]> FilamentCaseNames() =>

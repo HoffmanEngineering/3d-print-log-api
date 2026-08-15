@@ -88,7 +88,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotEmpty(model.Items);
 
             // Check that seeded test printers exist
-            Assert.True(model.Items.Any(p => p.Name.Contains("Test Printer")),
+            Assert.True(model.Items.Any(p => p.Name!.Contains("Test Printer")),
                 "Should contain at least one seeded Test Printer");
 
             // Verify printer structure
@@ -132,7 +132,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.NotNull(model);
             Assert.NotEmpty(model.Items);
             Assert.All(model.Items, p =>
-                Assert.True(p.Make.Contains("Creality") || p.Name.Contains("Creality") || p.Model.Contains("Creality")));
+                Assert.True(p.Make!.Contains("Creality") || p.Name!.Contains("Creality") || p.Model!.Contains("Creality")));
         }
 
         [Fact]

@@ -112,7 +112,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             using var scope = _factory.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
             Assert.Single(_factory.EmailSender.Matching(marker));
         }
 
@@ -252,7 +252,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
             }
             finally
             {
@@ -282,7 +282,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
             }
             finally
             {
@@ -318,7 +318,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
             }
             finally
             {
@@ -347,7 +347,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
 
                 // The key must still be usable as a key: a retry replays the committed row rather
                 // than writing a second one.
@@ -361,7 +361,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 Assert.True(retry.IsError != true);
                 using var doc = JsonDocument.Parse(retry.Content.OfType<TextContentBlock>().First().Text);
                 Assert.True(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
-                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note.Contains(marker)));
+                Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
             }
             finally
             {
