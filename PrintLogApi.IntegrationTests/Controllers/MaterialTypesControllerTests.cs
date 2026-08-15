@@ -83,6 +83,28 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
+        public async Task GetMaterialTypes_Authenticated_AllSeededTypesHaveAName()
+        {
+            // Arrange
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/MaterialTypes");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+            // Act
+            var response = await _httpClient.SendAsync(request);
+            var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
+
+            // Assert - Name is the expanded form of Acronym and is what the material
+            // library renders, so a blank one shows up as an empty row to the user.
+            // Asserted over the whole set rather than one type, to catch the next
+            // seeded material that ships without a name.
+            var unnamed = types
+                .Where(t => string.IsNullOrWhiteSpace(t.Name))
+                .Select(t => t.Acronym)
+                .ToList();
+            Assert.Empty(unnamed);
+        }
+
+        [Fact]
         public async Task GetMaterialTypes_AlternateRoute_ReturnsSuccess()
         {
             // Arrange - the controller also responds on /api/Materials

@@ -324,7 +324,7 @@ namespace PrintLogApi
                 {
                     Id = Guid.Parse("3dbc49c5-a493-4e21-a4d5-d94b8c0d53da"),
                     Acronym = "Nylon",
-                    Name = null,
+                    Name = "Polyamide",
                     DensityGramPerCubicCm = 1.14,
                     MaterialCategoryNickname = filamentCategory.Nickname
                 },
