@@ -261,7 +261,9 @@ namespace PrintLogApi.Controllers
                 .ProjectTo< PrintDetailDTO>(_mapper.ConfigurationProvider)
                 .FirstOrDefaultAsync();
 
-            printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
+            // Provably non-null: the existence check above already returned NotFound for this id,
+            // and this projection reads the same row.
+            printDetailDto!.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
             
             return printDetailDto;
         }

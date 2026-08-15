@@ -15,7 +15,9 @@ namespace PrintLogApi.Authentication
             }
 
             // Split the scopes string into an array
-            var scopes = context.User.FindFirst(c => c.Type == "scope" && c.Issuer == requirement.Issuer).Value.Split(' ');
+            // Provably non-null: the HasClaim guard above tests the identical predicate and
+            // returns early when no such claim exists.
+            var scopes = context.User.FindFirst(c => c.Type == "scope" && c.Issuer == requirement.Issuer)!.Value.Split(' ');
 
             // Succeed if the scope array contains the required scope
             if (scopes.Any(s => s == requirement.Scope))

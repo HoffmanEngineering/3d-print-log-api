@@ -185,7 +185,10 @@ namespace PrintLogApi.Controllers
                 FileName = data?.Job?.File?.Name ?? ""
             };
 
-            if (long.TryParse(data.DeviceIdentifier, out long printerId))
+            // `data` is a [FromForm]-bound complex type, which MVC always instantiates, so it is
+            // never null here. The compiler only treats it as maybe-null because the defensive
+            // `data?.` chains above widen its null state. Same reasoning at every `data!` below.
+            if (long.TryParse(data!.DeviceIdentifier, out long printerId))
             {
                 // Check the Printer to make sure the user has access to it.
                 var printer = await _context.Printers
@@ -195,7 +198,10 @@ namespace PrintLogApi.Controllers
                 newPrint.Printer = printer;
 
                 // Check if the user had access to that printer!
-                if (userId != printer.UserId)
+                // Null-forgiven: an unknown printerId already threw here before nullable analysis
+                // was enabled. It still fails closed, just as a 500 rather than a clean error.
+                // Turning that into an explicit not-found is a behaviour change, tracked in #39.
+                if (userId != printer!.UserId)
                 {
                     throw new UserCannotAccessPrinterException();
                 }
@@ -211,7 +217,10 @@ namespace PrintLogApi.Controllers
                 // Determine the Allow Comments settings
                 var lastSelectedAllowCommentsUserSettingTypeId = 3;
                 var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
-                var lastSelectedAllowCommentsValue = setting.Value;
+                // Null-forgiven deliberately: a user with no saved default has no row here, and
+                // the resulting throw is what the catch below turns into the fallback value.
+                // The catch is load-bearing control flow, not defensive padding.
+                var lastSelectedAllowCommentsValue = setting!.Value;
 
                 if (bool.TryParse(lastSelectedAllowCommentsValue, out bool allowComments))
                 {
@@ -233,7 +242,9 @@ namespace PrintLogApi.Controllers
                 // Determine the last view status
                 var defaultViewStatus = 1;
                 var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
-                var viewStatusValue = defaultPrintViewStatusSetting.Value;
+                // Null-forgiven deliberately — see the preceding try block; the catch turns the
+                // missing-row throw into the Private fallback.
+                var viewStatusValue = defaultPrintViewStatusSetting!.Value;
 
                 if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
                 {
@@ -254,7 +265,10 @@ namespace PrintLogApi.Controllers
 
             if (data?.Meta?.Analysis?.filament is not null)
             {
-                var printersLoadedFilament = newPrint.Printer.LoadedFilaments ?? new List<PrinterFilament>();
+                // Provably non-null: Printer is assigned from the query above, and the access
+                // check that follows it already dereferenced the same instance, so a null would
+                // have thrown before reaching this line.
+                var printersLoadedFilament = newPrint.Printer!.LoadedFilaments ?? new List<PrinterFilament>();
 
                 if (data?.Meta?.Analysis?.filament?.tool0 is not null)
                 {
@@ -331,7 +345,7 @@ namespace PrintLogApi.Controllers
             }
 
 
-            newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data.CurrentTime);
+            newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data!.CurrentTime);
 
 
             _context.Prints.Add(newPrint);
@@ -435,7 +449,7 @@ namespace PrintLogApi.Controllers
 
             // Round FIRST, then test positivity: 0.3 rounds to 0, and persisting that 0 would
             // recreate the "looks recorded but isn't" row we are eliminating.
-            var failedElapsed = (int)Math.Round(data.Extra.Time ?? 0.0);
+            var failedElapsed = (int)Math.Round(data!.Extra.Time ?? 0.0);
             print.PrintTimeInSeconds = failedElapsed > 0 ? failedElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;
@@ -547,7 +561,7 @@ namespace PrintLogApi.Controllers
             print.Status = PrintStatus.Success;
 
             // Round FIRST, then test positivity — see HandlePrintFailed.
-            var successElapsed = (int)Math.Round(data.Extra.Time ?? 0.0);
+            var successElapsed = (int)Math.Round(data!.Extra.Time ?? 0.0);
             print.PrintTimeInSeconds = successElapsed > 0 ? successElapsed : (int?)null;
             print.UpdatedById = userId;
             _context.Entry(print).State = EntityState.Modified;

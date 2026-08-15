@@ -588,7 +588,9 @@ namespace PrintLogApi
                 .HasIndex(s => s.StripeSubscriptionId)
                 .HasDatabaseName("IX_Subscriptions_StripeSubscriptionId");
 
-            modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) }))
+            // Provably non-null: fnNaturalSort(string) is declared on this type, so the reflection
+            // lookup cannot miss. A null here would be a compile-time-detectable rename.
+            modelBuilder.HasDbFunction(typeof(PrintLogContext).GetMethod(nameof(fnNaturalSort), new[] { typeof(string) })!)
                 .HasName("fnNaturalSort");
 
             // SQLite doesn't natively support DateTimeOffset comparisons in WHERE clauses.

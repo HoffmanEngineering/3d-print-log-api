@@ -18,9 +18,11 @@ namespace PrintLogApi.Authentication.Handlers
             }
             else
             {
-                if (context.User.Identity.IsAuthenticated)
+                // See PrintViewStatusAuthorizationHandler: null-forgiven to keep the IL identical
+                // rather than converting a pre-existing 500 into a silent authorization denial.
+                if (context.User.Identity!.IsAuthenticated)
                 {
-                    var userId = long.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+                    var userId = long.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
 
                     if (userId == resource?.Id)

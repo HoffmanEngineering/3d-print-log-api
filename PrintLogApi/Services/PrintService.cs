@@ -220,7 +220,10 @@ namespace PrintLogApi.Services
                             // row, so it is safe to keep.
                             Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
                             pf.FilamentId,
-                            Name = pf.Filament.DisplayName,
+                            // Null-forgiven because this is an EF projection: the null nav is
+                            // handled server-side in SQL and never dereferenced in process. The
+                            // Readable flag above is what gates the values on the read side.
+                            Name = pf.Filament!.DisplayName,
                             Brand = pf.Filament.Brand,
                             Material = pf.Filament.MaterialType,
                             Color = pf.Filament.ColorName,
@@ -1022,7 +1025,10 @@ namespace PrintLogApi.Services
             }
             if (materialsProvided)
             {
-                var mids = materials.Select(m => m.MaterialId).ToList();
+                // materialsProvided is the caller's assertion that materials is populated; flow
+                // analysis cannot relate the two parameters. Both dereferences of `materials` in
+                // this method sit behind that flag.
+                var mids = materials!.Select(m => m.MaterialId).ToList();
                 if (mids.Count != mids.Distinct().Count())
                 {
                     throw McpToolException.InvalidArguments("Each material may appear at most once.");
@@ -1071,7 +1077,7 @@ namespace PrintLogApi.Services
             if (materialsProvided)
             {
                 _context.PrintFilament.RemoveRange(print.FilamentUsage);
-                print.FilamentUsage = materials.Select(ToPrintFilament).ToList();
+                print.FilamentUsage = materials!.Select(ToPrintFilament).ToList();
                 await UpdateFilamentUsageWeights(print);
             }
 
@@ -1098,7 +1104,10 @@ namespace PrintLogApi.Services
             updatedPrint.Printer = printer;
 
             // Check if the user had access to that printer!
-            if (userId != printer.UserId)
+            // Null-forgiven: an unknown PrinterId already threw here before nullable analysis was
+            // enabled, and it fails closed either way. Returning a clean not-found instead is a
+            // behaviour change, tracked in #39.
+            if (userId != printer!.UserId)
             {
                 //return BadRequest();
                 throw new UserCannotAccessPrinterException();
@@ -1340,7 +1349,10 @@ namespace PrintLogApi.Services
             }
 
             var selectedImage = await _context.PrintImages.FindAsync(newDefaultImageId);
-            selectedImage.IsDefault = true;
+            // Null-forgiven: an unknown image id already threw here. Note the print existence
+            // check above throws ArgumentNullException but the image is not validated — tracked
+            // in #39 rather than changed in this annotation-only pass.
+            selectedImage!.IsDefault = true;
 
             // Set other defaults to false;
             var otherEntities = await _context.PrintImages.Where(p => p.PrintId == printId && p.IsDefault == true && p.Id != newDefaultImageId).ToListAsync();

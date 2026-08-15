@@ -105,13 +105,15 @@ namespace PrintLogApi.Authentication.Middleware
 
             var address = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+            // GetOrCreate is declared to return TItem? because a factory may return null; ours
+            // always returns a counter, so the result is never null.
             var counter = _cache.GetOrCreate(FailedAttemptCachePrefix + address, entry =>
             {
                 // The shared IMemoryCache is size-limited, so every entry must declare a size.
                 entry.SetSize(1);
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1);
                 return new FailedAttemptCounter();
-            });
+            })!;
 
             return Interlocked.Increment(ref counter.Count) > _maxFailedAttemptsPerMinute;
         }

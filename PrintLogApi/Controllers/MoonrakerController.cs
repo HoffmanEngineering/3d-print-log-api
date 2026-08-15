@@ -87,9 +87,12 @@ namespace PrintLogApi.Controllers
 
             var decodedString = Encoding.UTF8.GetString(encodedJsonString);
 
-            var printEventDto = JsonSerializer.Deserialize<PrintEventDto>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            // Both deserializations return null for a literal "null" payload and then throw on
+            // the following dereference. Null-forgiven to keep this change annotation-only; the
+            // unvalidated webhook payload is tracked in #39.
+            var printEventDto = JsonSerializer.Deserialize<PrintEventDto>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
-            var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message);
+            var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message)!;
 
             try
             {
@@ -165,8 +168,10 @@ namespace PrintLogApi.Controllers
                     .FirstOrDefaultAsync();
                 newPrint.Printer = printer;
 
-                // Check if the user had access to that printer!
-                if (userId != printer.UserId)
+                // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
+                // was enabled. It still fails closed, just as a 500 rather than a clean error.
+                // Turning that into an explicit not-found is a behaviour change, tracked in #39.
+                if (userId != printer!.UserId)
                 {
                     throw new UserCannotAccessPrinterException();
                 }
@@ -204,7 +209,10 @@ namespace PrintLogApi.Controllers
                 // Determine the last view status
                 var defaultViewStatus = 1;
                 var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
-                var viewStatusValue = defaultPrintViewStatusSetting.Value;
+                // Null-forgiven deliberately: a user with no saved default has no row here, and
+                // the resulting throw is what the catch below turns into the Private fallback.
+                // The catch is load-bearing control flow, not defensive padding.
+                var viewStatusValue = defaultPrintViewStatusSetting!.Value;
 
                 if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
                 {
@@ -221,7 +229,10 @@ namespace PrintLogApi.Controllers
                 newPrint.ViewStatus = PrintViewStatus.Private;
             }
 
-            var printersLoadedFilament = newPrint.Printer.LoadedFilaments ?? new List<PrinterFilament>();
+            // Provably non-null: Printer is assigned from the query above, and the access check
+            // that follows it already dereferenced the same instance, so a null would have thrown
+            // before reaching this line.
+            var printersLoadedFilament = newPrint.Printer!.LoadedFilaments ?? new List<PrinterFilament>();
 
 
             newPrint.FilamentUsage.Add(new PrintFilament

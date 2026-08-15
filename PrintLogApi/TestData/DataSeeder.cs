@@ -205,7 +205,8 @@ namespace PrintLogApi.TestData
 
         private static void Save<TModel>(PrintLogContext context)
         {
-            var tableName = context.Model.FindEntityType(typeof(TModel)).GetTableName();
+            // Provably non-null: Save<TModel> is only ever called with mapped entity types.
+            var tableName = context.Model.FindEntityType(typeof(TModel))!.GetTableName();
             context.Database.CreateExecutionStrategy().Execute(() =>
             {
                 using var transaction = context.Database.BeginTransaction();

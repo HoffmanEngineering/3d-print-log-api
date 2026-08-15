@@ -2,6 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Step 1 of the nullable migration (see #46). "warnings" runs the compiler's flow
+         analysis while leaving annotations inert, so EF Core schema inference and MVC's
+         implicit [Required] are unaffected. Flipping this to "enable" is #45, and must not
+         happen before the entity (#42) and DTO (#43) work lands. -->
+    <Nullable>warnings</Nullable>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <UserSecretsId>bfaad655-ddfb-44ba-954d-9a3c77613d90</UserSecretsId>
     <DockerfileRunEnvironmentFiles>3dprintlog.env</DockerfileRunEnvironmentFiles>
@@ -9,7 +14,13 @@
 
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- CS8632: "?" used outside a nullable annotations context. The 62 existing "T?"
+         annotations are correct and become meaningful when #45 flips Nullable to "enable";
+         under "warnings" they are inert, so the diagnostic carries no information. Delete this
+         suppression as part of #45.
+         CS8629 is deliberately NOT suppressed: those 54 unguarded Nullable<T>.Value accesses
+         are real latent InvalidOperationExceptions, tracked in #39. -->
+    <NoWarn>$(NoWarn);1591;CS8632</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -21,7 +21,10 @@ namespace PrintLogApi.Authentication
 
         public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
         {
-            var existingClaimsIdentity = (ClaimsIdentity)principal.Identity;
+            // A principal reaching claims transformation always carries an identity. Casting a
+            // null Identity would succeed and then throw on .Claims below, so the null-forgive
+            // preserves the existing behaviour exactly.
+            var existingClaimsIdentity = (ClaimsIdentity)principal.Identity!;
 
             var authUserId = existingClaimsIdentity.Claims
                 .FirstOrDefault(c => c.Type == ClaimTypes.Upn)?.Value;
