@@ -235,10 +235,17 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Each test authenticates as its own user. Anonymous image requests would all share the
             // one loopback media partition, and these two tests together spend more than the media
             // budget holds.
+            //
+            // The image id deliberately does not resolve. A seeded image id would send the handler
+            // to blob storage, which means Azurite on 127.0.0.1:10000 — present on a dev machine,
+            // absent in CI, where these tests failed with connection refused. Routing and the rate
+            // limiter both run before the handler, so a 404 charges exactly the same budget and the
+            // test becomes hermetic. Matches the existing not-found image tests in
+            // PrintsControllerTests.
             private static HttpRequestMessage Image(string user)
             {
                 var request = new HttpRequestMessage(
-                    HttpMethod.Get, $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/1");
+                    HttpMethod.Get, $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/999999");
                 request.Headers.Add(TestAuthHandler.TestUserIdHeader, user);
                 return request;
             }
