@@ -52,7 +52,23 @@ namespace PrintLogApi
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddControllers();
+            services.AddControllers(options =>
+            {
+                // Scaffolding for the nullable reference type migration (see #46), to be removed
+                // in #45. Once DTOs carry nullable annotations, MVC would otherwise infer an
+                // implicit [Required] on every non-nullable reference property and start
+                // rejecting requests that omit a field -- a 400 where a 200 used to be, with no
+                // compiler warning anywhere to point at it. Suppressing it keeps the annotation
+                // PRs (#42, #43) free of validation side effects, so the change can be reviewed
+                // deliberately when this line is deleted rather than discovered in production.
+                //
+                // This is a no-op today: the project is on Nullable=warnings, so the annotation
+                // context is off and MVC sees no nullability metadata to act on. Landing it ahead
+                // of the annotations rather than with them is a process choice, not a technical
+                // requirement -- it keeps those PRs reviewable as pure annotation diffs, and means
+                // they inherit the guardrail instead of having to remember it.
+                options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
+            });
 
             services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Startup).Assembly));
 

@@ -24,5 +24,21 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      # Runs before the tests: this takes seconds, and a model/migration mismatch is a definitive
+      # blocker, so there is no value in waiting out the suite to hear about it.
+      #
+      # Guards the nullable reference type migration (see #46). Enabling nullable annotations
+      # changes how EF Core infers required/optional columns, and a careless annotation can
+      # silently make a nullable column NOT NULL -- which does not fail the build, it fails the
+      # migration against production data. Useful beyond that migration too: the deploy pipeline
+      # applies migrations to production, so any unmigrated model change belongs here.
+      #
+      # dotnet-ef is pinned in dotnet-tools.json to the same version as the EF Core packages.
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Verify EF model matches migrations
+        run: dotnet tool run dotnet-ef migrations has-pending-model-changes --project PrintLogApi --no-build --configuration Release
+
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
