@@ -26,3 +26,13 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+
+      # Guards the nullable reference type migration (see #46). Enabling nullable annotations
+      # changes how EF Core infers required/optional columns, and a careless annotation can
+      # silently make a nullable column NOT NULL -- which only shows up as a failed migration
+      # against production data. This fails the build instead, on any unmigrated model change.
+      - name: Install EF Core tools
+        run: dotnet tool install --global dotnet-ef --version 10.0.6
+
+      - name: Verify EF model matches migrations
+        run: dotnet ef migrations has-pending-model-changes --project PrintLogApi --no-build --configuration Release
