@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var types = await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>();
+            var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
 
             // Assert - multiple material types seeded via HasData
             Assert.NotNull(types);
@@ -57,7 +57,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var types = await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>();
+            var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
 
             // Assert - should be sorted alphabetically by Acronym
             Assert.NotNull(types);
@@ -74,7 +74,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var types = await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>();
+            var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
 
             // Assert - PLA should be in the seeded data
             var pla = types.Single(t => t.Acronym == "PLA");

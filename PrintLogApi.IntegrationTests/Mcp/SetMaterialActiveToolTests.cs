@@ -22,7 +22,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // InactiveFilamentId is the primary user's, currently inactive. Activate it.
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("set_material_active", new Dictionary<string, object>
+            var result = await client.CallToolAsync("set_material_active", new Dictionary<string, object?>
             {
                 ["materialId"] = McpTestData.InactiveFilamentId,
                 ["isActive"] = true,
@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "set_material_active",
-                new Dictionary<string, object> { ["materialId"] = Guid.NewGuid(), ["isActive"] = false });
+                new Dictionary<string, object?> { ["materialId"] = Guid.NewGuid(), ["isActive"] = false });
 
             Assert.Equal("not_found", code);
         }

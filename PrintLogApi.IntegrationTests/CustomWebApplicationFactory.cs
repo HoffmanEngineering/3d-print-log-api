@@ -57,7 +57,7 @@ namespace PrintLogApi.IntegrationTests
             // Must be ConfigureAppConfiguration, not UseSetting: UseSetting writes host configuration,
             // which appsettings.json is then layered ON TOP of, putting the empty value back.
             builder.ConfigureAppConfiguration(config =>
-                config.AddInMemoryCollection(new Dictionary<string, string>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["FeedbackEmailAddress"] = TestFeedbackEmailAddress,
                 }));

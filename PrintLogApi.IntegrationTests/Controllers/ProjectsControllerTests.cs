@@ -54,7 +54,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{projectId}/images");
             req.Content = form;
             var resp = await _client.SendAsync(req);
-            var image = await resp.Content.ReadFromJsonAsync<ProjectImageDto>();
+            var image = (await resp.Content.ReadFromJsonAsync<ProjectImageDto>())!;
             return image.Id;
         }
 
@@ -64,7 +64,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = AuthenticatedRequest(HttpMethod.Get, "/api/Projects?PageNumber=1&PageSize=10");
             var response = await _client.SendAsync(request);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
             Assert.NotNull(result);
             Assert.NotNull(result.Items);
         }
@@ -83,7 +83,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var response = await _client.SendAsync(request);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var result = (await response.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
             Assert.NotNull(result);
             Assert.Equal("Test Voron Build", result.Name);
             Assert.NotEqual(Guid.Empty, result.Id);
@@ -97,13 +97,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
             createReq.Content = JsonContent.Create(createDto);
             var createResp = await _client.SendAsync(createReq);
-            var created = await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var created = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
 
             // Get
             var getReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects/{created.Id}");
             var getResp = await _client.SendAsync(getReq);
             Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
-            var result = await getResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var result = (await getResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
             Assert.Equal(created.Id, result.Id);
         }
 
@@ -142,7 +142,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var response = await _client.SendAsync(imgReq);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var image = await response.Content.ReadFromJsonAsync<ProjectImageDto>();
+            var image = (await response.Content.ReadFromJsonAsync<ProjectImageDto>())!;
             Assert.Contains($"/api/Projects/{project.Id}/images/{image.Id}",
                 response.Headers.Location?.ToString() ?? "");
         }
@@ -232,7 +232,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _client.SendAsync(searchReq);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
             Assert.Contains(result.Items, p => p.Name == uniqueName);
         }
 
@@ -254,7 +254,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _client.SendAsync(searchReq);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
             Assert.Contains(result.Items, p => p.Reference == uniqueRef);
         }
 
@@ -265,7 +265,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _client.SendAsync(searchReq);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
             Assert.Empty(result.Items);
         }
 
@@ -282,13 +282,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var otherReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
             otherReq.Content = JsonContent.Create(new AddProjectDto { Name = otherName, Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private });
             var otherResp = await _client.SendAsync(otherReq);
-            var otherProject = await otherResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var otherProject = (await otherResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
 
             var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={matchTerm}&PageNumber=1&PageSize=100");
             var response = await _client.SendAsync(searchReq);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>();
+            var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
             Assert.Contains(result.Items, p => p.Name == matchTerm);
             Assert.DoesNotContain(result.Items, p => p.Id == otherProject.Id);
         }
@@ -301,7 +301,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
             createReq.Content = JsonContent.Create(createDto);
             var createResp = await _client.SendAsync(createReq);
-            var project = await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>();
+            var project = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
 
             // Delete
             var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}?deletePrints=false");

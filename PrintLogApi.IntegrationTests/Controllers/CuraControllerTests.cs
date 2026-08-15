@@ -40,7 +40,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
-            var result = await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>();
+            var result = (await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>())!;
             return result.NewSettingId;
         }
 
@@ -83,7 +83,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>();
+            var result = (await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>())!;
 
             // Assert
             Assert.NotNull(result);
@@ -132,7 +132,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var settings = await response.Content.ReadFromJsonAsync<CuraSetting>();
+            var settings = (await response.Content.ReadFromJsonAsync<CuraSetting>())!;
 
             // Assert
             Assert.NotNull(settings);

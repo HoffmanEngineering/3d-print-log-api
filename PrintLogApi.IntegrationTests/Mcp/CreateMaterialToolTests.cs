@@ -23,7 +23,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_material", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_material", new Dictionary<string, object?>
             {
                 ["displayName"] = "Mystery",
                 ["materialType"] = "???",
@@ -46,7 +46,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_material", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_material", new Dictionary<string, object?>
             {
                 ["displayName"] = "Test Grey Resin",
                 ["materialType"] = "Resin",

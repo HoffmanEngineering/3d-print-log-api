@@ -24,7 +24,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.ConfigureAppConfiguration((_, cfg) =>
-                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Mcp:RateLimitPerMinute"] = Limit.ToString(),
                     }));

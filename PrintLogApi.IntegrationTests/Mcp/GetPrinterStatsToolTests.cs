@@ -46,7 +46,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync();
             var stats = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["from"] = FullFrom, ["to"] = FullTo }));
+                new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }));
 
             Assert.Equal(2, stats.Count);
             Assert.Equal(new[] { IntegrationTestSeeder.TestPrinterId, IntegrationTestSeeder.TestPrinterId2 },
@@ -77,7 +77,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync();
             // Narrow window covering only the two rich prints (both on Printer 2).
-            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object>
+            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>
             {
                 ["from"] = McpTestData.RichPrint1Date.AddHours(-1),
                 ["to"] = McpTestData.RichPrint2Date.AddHours(1),
@@ -93,7 +93,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(McpTestData.OtherUserOAuthId);
             var stats = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["from"] = FullFrom, ["to"] = FullTo }));
+                new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }));
 
             Assert.Single(stats);
             Assert.Equal(McpTestData.OtherPrinterId, stats[0].PrinterId);
@@ -121,7 +121,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // "How many prints has this printer done, ever?" previously required looping year by
             // year because the range was mandatory and capped at 366 days.
             await using var client = await _factory.ConnectAsync();
-            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object>()));
+            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>()));
 
             Assert.NotEmpty(stats);
             // The undated search fixtures live on their own printer, so all-time sees it while any
@@ -134,7 +134,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync();
             var stats = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["printerId"] = IntegrationTestSeeder.TestPrinterId2 }));
+                new Dictionary<string, object?> { ["printerId"] = IntegrationTestSeeder.TestPrinterId2 }));
 
             var stat = Assert.Single(stats);
             Assert.Equal(IntegrationTestSeeder.TestPrinterId2, stat.PrinterId);
@@ -145,7 +145,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync();
             var page = ParsePage(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["pageSize"] = 1 }));
+                new Dictionary<string, object?> { ["pageSize"] = 1 }));
 
             Assert.Single(page.Items);
             Assert.True(page.TotalCount > 1);
@@ -164,7 +164,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public async Task PrinterStats_Duration_UsesTheEstimate_AndCountsIt()
         {
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object>()));
+            var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>()));
 
             var printer = Assert.Single(stats);   // the metrics user owns exactly one printer
             Assert.Equal(McpTestData.DurationMatrixTotalSeconds, printer.TotalPrintTimeSeconds);

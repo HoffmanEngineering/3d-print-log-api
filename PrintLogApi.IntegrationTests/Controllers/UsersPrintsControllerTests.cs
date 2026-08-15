@@ -52,7 +52,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotNull(result.Stat);
         }
@@ -70,7 +70,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal("0", result.Stat);
         }
@@ -92,7 +92,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotNull(result.Stat);
         }
@@ -110,7 +110,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal("0", result.Stat);
         }
@@ -132,7 +132,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotNull(result.Stat);
         }

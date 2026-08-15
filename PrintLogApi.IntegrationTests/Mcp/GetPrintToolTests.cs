@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // project and printer names.
             await using var client = await _factory.ConnectAsync();
             var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.CrossOwnerRefPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.CrossOwnerRefPrintId }));
 
             Assert.Null(detail.ProjectName);
             Assert.Null(detail.ProjectId);
@@ -58,7 +58,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // two colours it used, because only an aggregate gram total was returned.
             await using var client = await _factory.ConnectAsync();
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.DualColorPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
 
             var named = detail.MaterialsUsed.Where(m => m.Color != null).ToList();
             Assert.Equal(2, named.Count);
@@ -72,7 +72,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // PrintFilament.FilamentId is nullable. An inner join would silently drop these rows.
             await using var client = await _factory.ConnectAsync();
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.DualColorPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
 
             Assert.Equal(4, detail.MaterialsUsed.Count);
             Assert.Contains(detail.MaterialsUsed, m => m.FilamentId is null && m.Grams > 0);
@@ -85,7 +85,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // would take the zero at face value and break the sum invariant.
             await using var client = await _factory.ConnectAsync();
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.DualColorPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
 
             var estimated = detail.MaterialsUsed.Where(m => m.IsEstimated).ToList();
             Assert.Equal(2, estimated.Count);               // the orphan row and the zero-actual row
@@ -98,7 +98,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // The parts must add up to the whole, or an agent reading both will contradict itself.
             await using var client = await _factory.ConnectAsync();
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.DualColorPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
 
             Assert.False(detail.MaterialsUsedTruncated);
             Assert.Equal(detail.MaterialUsedGrams, detail.MaterialsUsed.Sum(m => m.Grams), 3);
@@ -113,7 +113,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // other user's brand, material and colour.
             await using var client = await _factory.ConnectAsync();
             var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.ForeignSpoolPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.ForeignSpoolPrintId }));
 
             var usage = Assert.Single(detail.MaterialsUsed);
             Assert.Null(usage.FilamentId);
@@ -134,7 +134,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public async Task Creator_CanReadOwnPrint()
         {
             await using var client = await _factory.ConnectAsync();
-            var result = await client.CallToolAsync(ToolName, new Dictionary<string, object> { ["id"] = McpTestData.RichPrintId1 });
+            var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 });
             var (detail, _) = Parse(result);
 
             Assert.Equal(McpTestData.RichPrintId1, detail.Id);
@@ -165,7 +165,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public async Task Detail_ExcludesImagesCommentsAndFiles()
         {
             await using var client = await _factory.ConnectAsync();
-            var result = await client.CallToolAsync(ToolName, new Dictionary<string, object> { ["id"] = McpTestData.RichPrintId1 });
+            var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 });
             var (_, rawJson) = Parse(result);
 
             // fileName/url/allowComments/allowFileDownloads are deliberately exposed (they are the
@@ -182,7 +182,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
 
             Assert.Equal(6933, detail.DurationSeconds);
             Assert.True(detail.DurationIsEstimated);
@@ -194,7 +194,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // A stored 0 IS HasValue, so a ??-coalescing reader reports 0 and suppresses the estimate.
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.ZeroActualPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.ZeroActualPrintId }));
 
             Assert.Equal(1800, detail.DurationSeconds);   // NOT 0
             Assert.True(detail.DurationIsEstimated);
@@ -205,7 +205,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.ActualWinsPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }));
 
             Assert.Equal(7200, detail.DurationSeconds);
             Assert.False(detail.DurationIsEstimated);
@@ -217,7 +217,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             // Null, not 0: reporting 0 would assert a measurement of zero seconds.
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.NoDurationPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.NoDurationPrintId }));
 
             Assert.Null(detail.DurationSeconds);
             Assert.False(detail.DurationIsEstimated);
@@ -228,7 +228,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
 
             Assert.True(detail.MaterialIsEstimated);
             Assert.Contains(detail.MaterialsUsed, m => m.IsEstimated);
@@ -239,7 +239,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
             var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-                new Dictionary<string, object> { ["id"] = McpTestData.ActualWinsPrintId }));
+                new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }));
 
             Assert.False(detail.MaterialIsEstimated);
         }

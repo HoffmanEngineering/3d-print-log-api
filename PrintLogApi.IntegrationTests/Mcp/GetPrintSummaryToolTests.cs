@@ -32,7 +32,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return JsonSerializer.Deserialize<Summary>(text, JsonOptions)!;
         }
 
-        private static async Task<Summary> Get(McpClient client, Dictionary<string, object> args) =>
+        private static async Task<Summary> Get(McpClient client, Dictionary<string, object?> args) =>
             Parse(await client.CallToolAsync(ToolName, args));
 
         private static readonly DateTimeOffset FullFrom = McpTestData.RichPrint2Date.AddDays(-30);

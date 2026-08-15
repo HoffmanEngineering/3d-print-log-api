@@ -23,7 +23,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "x",
                     ["printerId"] = McpTestData.OtherPrinterId, // another user's printer
@@ -42,7 +42,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var loadedFilamentId = new Guid("aaaaaaaa-1002-0000-0000-000000000000");
 
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-            var result = await client.CallToolAsync("create_print", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_print", new Dictionary<string, object?>
             {
                 ["title"] = "Side-effect check",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -50,7 +50,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 ["idempotencyKey"] = "tool-side-effect",
                 ["materials"] = new[]
                 {
-                    new Dictionary<string, object>
+                    new Dictionary<string, object?>
                     {
                         ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
                         ["source"] = "Weight",

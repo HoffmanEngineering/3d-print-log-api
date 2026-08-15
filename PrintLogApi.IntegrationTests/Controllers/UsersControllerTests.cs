@@ -176,7 +176,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var user = await response.Content.ReadFromJsonAsync<UserDetailDto>();
+            var user = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.NotNull(user);
@@ -239,7 +239,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var updatedUser = await response.Content.ReadFromJsonAsync<UserDetailDto>();
+            var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.NotNull(updatedUser);
@@ -283,7 +283,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var updatedUser = await response.Content.ReadFromJsonAsync<UserDetailDto>();
+            var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -510,7 +510,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Assert
             Assert.NotNull(result);
@@ -533,7 +533,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -559,13 +559,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Get the updated user
             var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
             getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var user = await getResponse.Content.ReadFromJsonAsync<UserDetailDto>();
+            var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.NotNull(user);
@@ -684,7 +684,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Assert
             Assert.NotNull(result);
@@ -707,7 +707,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -733,13 +733,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<UserUrlDto>();
+            var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Get the updated user
             var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
             getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var user = await getResponse.Content.ReadFromJsonAsync<UserDetailDto>();
+            var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.NotNull(user);
@@ -834,7 +834,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             firstRequest.Content = firstFormContent;
 
             var firstResponse = await _httpClient.SendAsync(firstRequest);
-            var firstResult = await firstResponse.Content.ReadFromJsonAsync<UserUrlDto>();
+            var firstResult = (await firstResponse.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Act - upload second cover image
             var secondImageContent = CreateTestImageContent();
@@ -846,13 +846,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             secondRequest.Content = secondFormContent;
 
             var secondResponse = await _httpClient.SendAsync(secondRequest);
-            var secondResult = await secondResponse.Content.ReadFromJsonAsync<UserUrlDto>();
+            var secondResult = (await secondResponse.Content.ReadFromJsonAsync<UserUrlDto>())!;
 
             // Get the user - should have the second image URL
             var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
             getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var user = await getResponse.Content.ReadFromJsonAsync<UserDetailDto>();
+            var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
 
             // Assert
             Assert.NotNull(user.CoverPicture);

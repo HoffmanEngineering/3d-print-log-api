@@ -108,7 +108,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await ConnectAsync(McpToken());
             var result = await client.CallToolAsync(
                 "ping",
-                new Dictionary<string, object> { ["message"] = "hi" });
+                new Dictionary<string, object?> { ["message"] = "hi" });
             var text = result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text;
             Assert.Equal("pong: hi", text);
         }

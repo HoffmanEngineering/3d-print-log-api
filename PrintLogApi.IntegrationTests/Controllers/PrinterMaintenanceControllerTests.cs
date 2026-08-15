@@ -205,7 +205,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(entry.Id, result.Id);
             Assert.Equal("Get By Id Test", result.Category);
@@ -326,7 +326,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal("New Maintenance", result.Category);
             Assert.Equal("New maintenance description", result.Description);
@@ -373,7 +373,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
 
             // Assert
             var persisted = GetMaintenanceEntryById(result.Id);
@@ -412,7 +412,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
             Assert.Equal("Updated Category", result.Category);
             Assert.True(result.Done);
         }
@@ -635,7 +635,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotNull(result.Categories);
         }
@@ -666,7 +666,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions))!;
             Assert.Contains(uniqueCategory, result.Categories);
         }
 
@@ -692,7 +692,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             var createResponse = await _httpClient.SendAsync(createRequest);
             Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
-            var created = await createResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var created = (await createResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
 
             // Update
             var updateDto = new PutPrinterMaintenanceDto
@@ -714,7 +714,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Verify update
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance/{created.Id}");
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var updated = await getResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions);
+            var updated = (await getResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
             Assert.Equal("Workflow Test Updated", updated.Category);
             Assert.True(updated.Done);
 

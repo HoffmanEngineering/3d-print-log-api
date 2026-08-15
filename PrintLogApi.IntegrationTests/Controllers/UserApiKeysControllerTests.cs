@@ -97,7 +97,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
             Assert.NotNull(result);
         }
 
@@ -126,7 +126,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Contains(result, k => k.Id == activeKey.Id && !k.IsDeleted);
         }
@@ -143,7 +143,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
             var key = result.FirstOrDefault(k => k.Id == apiKey.Id);
             Assert.NotNull(key);
             Assert.Equal("Details Test Key", key.Description);
@@ -167,7 +167,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal("New Test API Key", result.Description);
             Assert.NotEqual(Guid.Empty, result.Id);
@@ -202,7 +202,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotEqual(Guid.Empty, result.Id);
             Assert.False(string.IsNullOrEmpty(result.PublicKey));
@@ -221,7 +221,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.NotEqual(Guid.Empty, result.Id);
         }
@@ -247,8 +247,8 @@ namespace PrintLogApi.IntegrationTests.Controllers
             Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
             Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
 
-            var result1 = await response1.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
-            var result2 = await response2.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var result1 = (await response1.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+            var result2 = (await response2.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
 
             Assert.NotEqual(result1.PublicKey, result2.PublicKey);
             Assert.NotEqual(result1.Id, result2.Id);
@@ -264,12 +264,12 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act - Create key
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
 
             // Act - Get keys
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var keys = await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
 
             // Assert
             Assert.Contains(keys, k => k.Id == created.Id && k.Description == "Appears In Get Test");
@@ -416,7 +416,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Verify it appears in the list
             var getRequest1 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
             var getResponse1 = await _httpClient.SendAsync(getRequest1);
-            var keys1 = await getResponse1.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var keys1 = (await getResponse1.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
             Assert.Contains(keys1, k => k.Id == apiKey.Id);
 
             // Delete the key
@@ -426,7 +426,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Act - Get keys again
             var getRequest2 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
             var getResponse2 = await _httpClient.SendAsync(getRequest2);
-            var keys2 = await getResponse2.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var keys2 = (await getResponse2.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
 
             // Assert - Deleted key should not appear (or be marked as deleted)
             var deletedKey = keys2.FirstOrDefault(k => k.Id == apiKey.Id);
@@ -448,14 +448,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var createResponse = await _httpClient.SendAsync(createRequest);
             Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
 
-            var created = await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions);
+            var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
             Assert.NotNull(created);
             Assert.False(string.IsNullOrEmpty(created.PublicKey));
 
             // Verify it appears in the list
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
             var getResponse = await _httpClient.SendAsync(getRequest);
-            var keys = await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions);
+            var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
             Assert.Contains(keys, k => k.Id == created.Id);
 
             // Delete the key

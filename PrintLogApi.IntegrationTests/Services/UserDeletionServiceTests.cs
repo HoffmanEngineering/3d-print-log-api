@@ -94,7 +94,7 @@ namespace PrintLogApi.IntegrationTests.Services
                 NullLogger<UserDeletionService>.Instance,
                 new TelemetryClient(TelemetryConfiguration.CreateDefault()),
                 new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string>
+                    .AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["PendingUserDeactivationTimeInMinutes"] = "1440"
                     })

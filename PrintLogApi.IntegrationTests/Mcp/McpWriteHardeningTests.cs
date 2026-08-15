@@ -43,7 +43,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "deputy",
                     ["printerId"] = McpTestData.SearchPrinterId,     // caller's printer
@@ -62,7 +62,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var before = cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
 
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-            var result = await client.CallToolAsync("create_print", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_print", new Dictionary<string, object?>
             {
                 ["title"] = "cache-bump",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -80,7 +80,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var first = await client.CallToolAsync("create_print", new Dictionary<string, object>
+            var first = await client.CallToolAsync("create_print", new Dictionary<string, object?>
             {
                 ["title"] = "to-delete",
                 ["printerId"] = McpTestData.SearchPrinterId,
@@ -100,7 +100,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             // Replaying the key after its print was deleted must be rejected, never silently re-created.
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "to-delete",
                     ["printerId"] = McpTestData.SearchPrinterId,
@@ -117,7 +117,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "zero-dur",
                     ["printerId"] = McpTestData.SearchPrinterId,
@@ -134,7 +134,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var rows = Enumerable.Range(0, 51).Select(_ => new Dictionary<string, object>
+            var rows = Enumerable.Range(0, 51).Select(_ => new Dictionary<string, object?>
             {
                 ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
                 ["source"] = "Weight",
@@ -142,7 +142,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             }).ToArray();
 
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "too-many-rows",
                     ["printerId"] = McpTestData.SearchPrinterId,
@@ -160,7 +160,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "huge-amount",
                     ["printerId"] = McpTestData.SearchPrinterId,
@@ -168,7 +168,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                     ["idempotencyKey"] = "harden-huge",
                     ["materials"] = new[]
                     {
-                        new Dictionary<string, object>
+                        new Dictionary<string, object?>
                         {
                             ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
                             ["source"] = "Length",
@@ -185,14 +185,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var row = new Dictionary<string, object>
+            var row = new Dictionary<string, object?>
             {
                 ["materialId"] = IntegrationTestSeeder.TestFilamentId1,
                 ["source"] = "Weight",
                 ["amount"] = 5.0,
             };
             var isError = await McpDataWebApplicationFactory.IsToolError(client, "create_print",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["title"] = "dupe-mat",
                     ["printerId"] = McpTestData.SearchPrinterId,

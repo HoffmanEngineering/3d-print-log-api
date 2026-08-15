@@ -50,7 +50,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         }
 
         /// <summary>Returns true if the tool call surfaced an error (via IsError result or McpException).</summary>
-        public static async Task<bool> IsToolError(McpClient client, string tool, Dictionary<string, object> arguments)
+        public static async Task<bool> IsToolError(McpClient client, string tool, Dictionary<string, object?> arguments)
         {
             try
             {
@@ -67,7 +67,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         /// Returns the tool error code ("forbidden"/"not_found"/"error") or null when the call
         /// succeeded. Authorization failures surface as an <see cref="McpException"/> ("forbidden").
         /// </summary>
-        public static async Task<string> ToolErrorCode(McpClient client, string tool, Dictionary<string, object> arguments)
+        public static async Task<string> ToolErrorCode(McpClient client, string tool, Dictionary<string, object?> arguments)
         {
             try
             {

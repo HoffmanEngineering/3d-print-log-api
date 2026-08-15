@@ -85,7 +85,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var comment = await response.Content.ReadFromJsonAsync<CommentDetailDto>();
+            var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>())!;
 
             // Assert
             Assert.NotNull(comment);

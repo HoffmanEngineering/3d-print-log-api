@@ -213,7 +213,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.True(result.UnreadCount >= 0);
         }
@@ -243,7 +243,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(expectedCount, result.UnreadCount);
         }
@@ -264,7 +264,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(notification.Id, result.Id);
             Assert.Equal("Get Valid Test", result.Title);
@@ -324,7 +324,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions);
+            var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
             Assert.NotNull(result);
             Assert.Equal(notification.Id, result.Id);
             Assert.Equal(notification.Title, result.Title);
@@ -760,7 +760,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
             var getResponse = await _httpClient.SendAsync(getRequest);
             Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
-            var detail = await getResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions);
+            var detail = (await getResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
             Assert.False(detail.IsRead);
 
             // Mark as read
@@ -771,7 +771,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Verify it's read
             var verifyRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
             var verifyResponse = await _httpClient.SendAsync(verifyRequest);
-            var verifiedDetail = await verifyResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions);
+            var verifiedDetail = (await verifyResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
             Assert.True(verifiedDetail.IsRead);
             Assert.NotNull(verifiedDetail.ReadDate);
 
@@ -795,7 +795,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Get initial unread count
             var countRequest1 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
             var countResponse1 = await _httpClient.SendAsync(countRequest1);
-            var count1 = await countResponse1.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions);
+            var count1 = (await countResponse1.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
             var initialCount = count1.UnreadCount;
 
             // Mark as read
@@ -805,7 +805,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Get updated unread count
             var countRequest2 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
             var countResponse2 = await _httpClient.SendAsync(countRequest2);
-            var count2 = await countResponse2.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions);
+            var count2 = (await countResponse2.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
 
             // Verify count decreased
             Assert.Equal(initialCount - 1, count2.UnreadCount);

@@ -49,7 +49,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
 
             // Verify counts match
             Assert.NotNull(model);

@@ -24,7 +24,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(McpTestData.OtherUserOAuthId, ReadWrite);
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(client, "update_print",
-                new Dictionary<string, object> { ["id"] = McpTestData.RichPrintId1, ["status"] = "Failed" });
+                new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1, ["status"] = "Failed" });
 
             Assert.Equal("not_found", code);
         }
@@ -36,7 +36,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             // Omitting projectId must leave the assignment intact.
-            await client.CallToolAsync("update_print", new Dictionary<string, object>
+            await client.CallToolAsync("update_print", new Dictionary<string, object?>
             {
                 ["id"] = McpTestData.ProjectPrintId,
                 ["notes"] = "touch",
@@ -44,7 +44,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Assert.Equal(McpTestData.ProjectId, ProjectIdOf(McpTestData.ProjectPrintId));
 
             // Naming projectId in 'clear' must remove it.
-            await client.CallToolAsync("update_print", new Dictionary<string, object>
+            await client.CallToolAsync("update_print", new Dictionary<string, object?>
             {
                 ["id"] = McpTestData.ProjectPrintId,
                 ["clear"] = new[] { "projectId" },

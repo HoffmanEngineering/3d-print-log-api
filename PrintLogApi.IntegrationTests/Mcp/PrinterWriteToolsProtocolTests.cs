@@ -24,7 +24,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         private static string RawText(CallToolResult result) =>
             result.Content.OfType<TextContentBlock>().First().Text;
 
-        private static Dictionary<string, object> BasicArgs(string name) => new()
+        private static Dictionary<string, object?> BasicArgs(string name) => new()
         {
             ["make"] = "Bambu",
             ["model"] = "X1C",
@@ -109,7 +109,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            Dictionary<string, object> Args(string make)
+            Dictionary<string, object?> Args(string make)
             {
                 var a = BasicArgs("proto-conflict-printer");
                 a["make"] = make;
@@ -149,7 +149,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 id = doc.RootElement.GetProperty("printer").GetProperty("id").GetInt64();
             }
 
-            var updated = await client.CallToolAsync("update_printer", new Dictionary<string, object>
+            var updated = await client.CallToolAsync("update_printer", new Dictionary<string, object?>
             {
                 ["id"] = id,
                 ["name"] = "proto-update-renamed",
@@ -181,7 +181,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 id = doc.RootElement.GetProperty("printer").GetProperty("id").GetInt64();
             }
 
-            var result = await client.CallToolAsync("update_printer", new Dictionary<string, object>
+            var result = await client.CallToolAsync("update_printer", new Dictionary<string, object?>
             {
                 ["id"] = id,
                 ["clear"] = new[] { "nozzleDiameter" }, // real field is nozzleDiameterMm
@@ -194,7 +194,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         public async Task UpdatePrinter_ForeignPrinter_IsNotFound()
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-            var result = await client.CallToolAsync("update_printer", new Dictionary<string, object>
+            var result = await client.CallToolAsync("update_printer", new Dictionary<string, object?>
             {
                 ["id"] = McpTestData.OtherPrinterId,
                 ["name"] = "Hijacked",

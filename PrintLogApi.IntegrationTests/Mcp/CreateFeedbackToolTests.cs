@@ -35,7 +35,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var marker = Marker();
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Suggestion",
                 ["note"] = $"Please add a dark mode {marker}",
@@ -66,7 +66,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var marker = Marker();
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, WriteOnly);
 
-            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Bug",
                 ["note"] = $"The spool weight resets {marker}",
@@ -88,7 +88,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             var marker = Marker();
             var key = Guid.NewGuid().ToString();
-            var args = new Dictionary<string, object>
+            var args = new Dictionary<string, object?>
             {
                 ["type"] = "Question",
                 ["note"] = $"How do I export? {marker}",
@@ -122,7 +122,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var key = Guid.NewGuid().ToString();
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var first = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var first = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Question",
                 ["note"] = $"Original {Marker()}",
@@ -130,7 +130,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             });
             Assert.True(first.IsError != true);
 
-            var second = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var second = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Question",
                 ["note"] = $"Completely different {Marker()}",
@@ -149,7 +149,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             Assert.True(await McpDataWebApplicationFactory.IsToolError(client, "create_feedback",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["type"] = "Bug",
                     ["note"] = "no key supplied",
@@ -164,7 +164,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             Assert.True(await McpDataWebApplicationFactory.IsToolError(client, "create_feedback",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["type"] = "Bug",
                     ["note"] = note,
@@ -178,7 +178,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
             Assert.True(await McpDataWebApplicationFactory.IsToolError(client, "create_feedback",
-                new Dictionary<string, object>
+                new Dictionary<string, object?>
                 {
                     ["type"] = "Other",
                     ["note"] = new string('x', 5001),
@@ -192,7 +192,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         {
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = 99,
                 ["note"] = "an undefined type",
@@ -215,7 +215,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             _factory.Auth0.UserEmail = "account-holder@example.test";
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Suggestion",
                 ["note"] = $"notify me {marker}",
@@ -239,7 +239,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             {
                 await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
                 {
                     ["type"] = "Bug",
                     ["note"] = $"auth0 is down {marker}",
@@ -271,7 +271,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             {
                 await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
                 {
                     ["type"] = "Other",
                     ["note"] = $"smtp is down {marker}",
@@ -305,7 +305,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             {
                 await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
                 {
                     ["type"] = "Bug",
                     ["note"] = $"auth0 cancelled {marker}",
@@ -336,7 +336,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             {
                 await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
                 {
                     ["type"] = "Other",
                     ["note"] = $"send cancelled {marker}",
@@ -352,7 +352,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 // The key must still be usable as a key: a retry replays the committed row rather
                 // than writing a second one.
                 _factory.EmailSender.ThrowCancelledOnSend = false;
-                var retry = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+                var retry = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
                 {
                     ["type"] = "Other",
                     ["note"] = $"send cancelled {marker}",
@@ -375,7 +375,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             var marker = Marker();
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object>
+            var result = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
             {
                 ["type"] = "Other",
                 ["note"] = $"   padded {marker}   ",

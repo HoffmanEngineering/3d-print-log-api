@@ -48,7 +48,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -66,7 +66,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -95,7 +95,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -113,7 +113,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.NotNull(model);
@@ -148,7 +148,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
@@ -185,7 +185,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
@@ -219,7 +219,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
@@ -253,7 +253,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(model);
@@ -272,7 +272,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var filamentId = summary.Items.First().Id;
 
             // Act
@@ -291,14 +291,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var hatchboxFilament = summary.Items.First(f => f.Brand == "Hatchbox");
 
             // Act
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{hatchboxFilament.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.NotNull(filament);
@@ -317,7 +317,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var filamentId = summary.Items.First().Id;
 
             // Act - no auth header
@@ -404,7 +404,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var createdFilament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var createdFilament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -465,7 +465,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Content = JsonContent.Create(newFilament);
 
             var response = await _httpClient.SendAsync(request);
-            var created = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             Assert.NotNull(created);
@@ -499,7 +499,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdFilament = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Arrange - prepare update (using FilamentDetailDto for PUT)
             var updateDto = new FilamentDetailDto
@@ -546,7 +546,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdFilament = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Arrange - prepare update with changed fields
             var updateDto = new FilamentDetailDto
@@ -570,7 +570,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var updateResponse = await _httpClient.SendAsync(updateRequest);
-            var updatedFilament = await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var updatedFilament = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -592,7 +592,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var filamentId = summary.Items.First().Id;
 
             var updateDto = new FilamentDetailDto
@@ -621,7 +621,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var filamentId = summary.Items.First().Id;
 
             // ID in DTO doesn't match route ID
@@ -689,7 +689,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Old client sends update with only ColorHex (no Colors)
             var updateDto = new FilamentDetailDto
@@ -709,7 +709,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             updateRequest.Content = JsonContent.Create(updateDto);
 
             var updateResponse = await _httpClient.SendAsync(updateRequest);
-            var updated = await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var updated = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
             Assert.NotNull(updated);
@@ -743,7 +743,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdFilament = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Act
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{createdFilament.Id}");
@@ -774,7 +774,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var createdFilament = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Act - delete the filament
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{createdFilament.Id}");
@@ -795,7 +795,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
             summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-            var summary = await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
             var filamentId = summary.Items.First().Id;
 
             // Act - no auth header
@@ -835,7 +835,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -859,7 +859,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -883,7 +883,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -901,7 +901,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
 
             // Act
             var response = await _httpClient.SendAsync(request);
-            var model = await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>();
+            var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -924,7 +924,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(filament);
@@ -958,7 +958,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Content = JsonContent.Create(newFilament);
 
             var response = await _httpClient.SendAsync(createRequest);
-            var created = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             Assert.NotNull(created);
@@ -1060,13 +1060,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Act
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.NotNull(filament);
@@ -1092,13 +1092,13 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Act
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.NotNull(filament);
@@ -1125,7 +1125,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             var updateDto = new FilamentDetailDto
             {
@@ -1160,7 +1160,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert
             Assert.NotNull(filament);
@@ -1187,7 +1187,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Create a print that uses 200,000 mg (actual weight) of that filament
             var newPrint = new AddPrintDTO
@@ -1217,7 +1217,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Assert - 1,000,000 nominal - 200,000 used = 800,000
             Assert.NotNull(filament);
@@ -1244,7 +1244,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             createRequest.Content = JsonContent.Create(newFilament);
             var createResponse = await _httpClient.SendAsync(createRequest);
-            var created = await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             // Act - PUT a bogus FilamentRemaining that the server must ignore
             var updateDto = new FilamentDetailDto
@@ -1271,7 +1271,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
             request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             var response = await _httpClient.SendAsync(request);
-            var filament = await response.Content.ReadFromJsonAsync<FilamentDetailDto>();
+            var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
 
             Assert.NotNull(filament);
             Assert.Equal(1000000, filament.FilamentRemaining);

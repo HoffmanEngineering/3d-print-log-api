@@ -54,12 +54,12 @@ namespace PrintLogApi.IntegrationTests.Mcp
             return JsonSerializer.Deserialize<T>(text, JsonOptions)!;
         }
 
-        private static async Task<PageResult> List(McpClient client, Dictionary<string, object> args) =>
+        private static async Task<PageResult> List(McpClient client, Dictionary<string, object?> args) =>
             Parse<PageResult>(await client.CallToolAsync(ListToolName, args));
 
         private static async Task<PrinterDetail> Get(McpClient client, long id) =>
             Parse<PrinterDetail>(await client.CallToolAsync(
-                GetToolName, new Dictionary<string, object> { ["id"] = id }));
+                GetToolName, new Dictionary<string, object?> { ["id"] = id }));
 
         [Fact]
         public async Task ListPrinters_ReturnsOnlyCallersPrinters()

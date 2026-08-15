@@ -38,7 +38,7 @@ namespace PrintLogApi.IntegrationTests.Auth0
         public static Auth0Service CreateService(StubHandler handler)
         {
             var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string>
+                .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Auth0Management:Domain"] = "test.auth0.com",
                     ["Auth0Management:ClientId"] = "mgmt-client",

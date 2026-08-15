@@ -30,7 +30,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                 IntegrationTestSeeder.TestUserOAuthId, new[] { "read:printdata" });
 
             var code = await McpDataWebApplicationFactory.ToolErrorCode(
-                client, "whoami", new Dictionary<string, object>());
+                client, "whoami", new Dictionary<string, object?>());
 
             Assert.Equal("forbidden", code);
         }
@@ -41,7 +41,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(
                 IntegrationTestSeeder.TestUserOAuthId, new[] { "read:printdata", "write:printdata" });
 
-            var result = await client.CallToolAsync("whoami", new Dictionary<string, object>());
+            var result = await client.CallToolAsync("whoami", new Dictionary<string, object?>());
 
             Assert.True(result.IsError != true);
         }
