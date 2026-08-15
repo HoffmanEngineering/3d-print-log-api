@@ -1,4 +1,6 @@
-﻿using PrintLogApi.Models.DTOs.Comments;
+﻿#nullable enable
+
+using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Printer;
 using System;
 using System.Collections.Generic;
@@ -11,13 +13,13 @@ namespace PrintLogApi.Models.DTOs.Print
     {
         public long Id { get; set; }
 
-        public string Title { get; set; }
+        public string? Title { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 
         public long PrinterId { get; set; }
 
-        public PrinterSummary Printer { get; set; }
+        public PrinterSummary? Printer { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public int? EstimatedFilamentUsageMg { get; set; }
@@ -27,17 +29,17 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public int? FilamentUsageMg { get; set; }
 
-        public string FilamentType { get; set; }
+        public string? FilamentType { get; set; }
 
-        public ICollection<PrintFilamentSummaryDto> FilamentUsage { get; set; }
+        public ICollection<PrintFilamentSummaryDto>? FilamentUsage { get; set; }
 
         [StringLength(50000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
-        public string Url { get; set; }
+        public string? Url { get; set; }
 
         [MaxLength(1000)]
-        public string FileName { get; set; }
+        public string? FileName { get; set; }
 
         public long CreatedByUserId { get; set; }
 
@@ -51,8 +53,8 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public Guid? ProjectId { get; set; }
 
-        public ICollection<PrintImageDto> Images { get; set; }
+        public ICollection<PrintImageDto>? Images { get; set; }
 
-        public ICollection<CommentDetailDto> Comments { get; set; }
+        public ICollection<CommentDetailDto>? Comments { get; set; }
     }
 }

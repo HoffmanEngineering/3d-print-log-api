@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 using PrintLogApi.Models.DTOs.PrinterCategory;
 
@@ -11,18 +13,18 @@ namespace PrintLogApi.Models.DTOs.Printer
     {
         public long Id { get; set; }
 
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
-        public string Make { get; set; }
+        public string? Make { get; set; }
 
-        public string Model { get; set; }
+        public string? Model { get; set; }
 
         public bool IsActive { get; set; }
 
         public double? WattageW { get; set; }
 
-        public PrinterCategoryDto Category { get; set; }
+        public PrinterCategoryDto? Category { get; set; }
 
-        public ICollection<PrinterFilamentForSummaryDto> LoadedFilaments { get; set; }
+        public ICollection<PrinterFilamentForSummaryDto>? LoadedFilaments { get; set; }
     }
 }

@@ -38,7 +38,8 @@ running against the database while migrations execute.
 
 Mid-migration (see #46). The project is on `<Nullable>warnings</Nullable>`, so the annotation
 context is off *except* in files carrying an explicit `#nullable enable` — currently everything in
-`PrintLogApi/Models/` (the EF entities). Annotations there are load-bearing, not cosmetic:
+`PrintLogApi/Models/` (the EF entities) and `PrintLogApi/Models/DTOs/`. Annotations in `Models/`
+are load-bearing, not cosmetic:
 
 **On an entity, a `?` is a database column decision.** EF Core infers required/optional from the
 annotation, so dropping a `?` silently makes a nullable column NOT NULL. That does not fail the
@@ -56,6 +57,26 @@ Two conventions in `Models/`:
   change. Revisit it deliberately, on its own, if wanted.
 - **Required reference navigations and required scalars use `= null!`**, which keeps the property
   non-nullable for EF while staying a no-op at runtime (the field was already null).
+
+### DTOs
+
+Every reference-typed property under `Models/DTOs/` is nullable. That is deliberate and applies to
+responses as well as requests:
+
+- **A request DTO is not a domain model.** It is deserialized across a trust boundary, so the
+  declared type says nothing about what actually arrives. Non-nullable there would only remove the
+  compiler's warning, not the null. Enforce required-ness with validation, never with the
+  annotation.
+- **Response DTOs mirror the entity they are mapped from**, and the entities are nullable almost
+  everywhere, so nearly every response property is nullable on the merits too.
+
+Do **not** reach for `= null!` or `required` here. `= null!` is for framework-initialized members;
+on a DTO it asserts something about deserialized data that nothing enforces. `required` is worse —
+`System.Text.Json` *enforces* it, so adding one turns a tolerated missing field into a 400, which
+is a runtime behaviour change dressed as an annotation.
+
+Positional records (`Analytics/`, `ConnectedAgentDto`) keep their non-nullable parameters: the
+constructor is the enforcement, and every one of them is built server-side.
 
 ## MCP Server
 

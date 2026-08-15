@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using static PrintLogApi.Models.Project;
 
@@ -6,8 +8,8 @@ namespace PrintLogApi.Models.DTOs.Project
     public class ProjectSummaryDto
     {
         public Guid Id { get; set; }
-        public string Name { get; set; }
-        public string Reference { get; set; }
+        public string? Name { get; set; }
+        public string? Reference { get; set; }
         public ProjectStatus Status { get; set; }
         public ProjectViewStatus ViewStatus { get; set; }
         public DateTimeOffset CreatedDate { get; set; }

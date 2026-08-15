@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -18,12 +20,12 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// </summary>
         [StringLength(255)]
         [Required(AllowEmptyStrings = false)]
-        public string DisplayName { get; set; }
+        public string? DisplayName { get; set; }
 
         [StringLength(255)]
-        public string Brand { get; set; }
+        public string? Brand { get; set; }
 
-        public string MaterialCategoryNickname { get; set; }
+        public string? MaterialCategoryNickname { get; set; }
 
 
         /// <summary>
@@ -31,7 +33,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// </summary>
         [StringLength(255)]
         [Required(AllowEmptyStrings = false)]
-        public string MaterialType { get; set; }
+        public string? MaterialType { get; set; }
 
         /// <summary>
         /// The Density of the Material
@@ -39,9 +41,9 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double MaterialDensityGramPerCubicCm { get; set; }
 
         [StringLength(255)]
-        public string ColorName { get; set; }
+        public string? ColorName { get; set; }
         [StringLength(6)]
-        public string ColorHex { get; set; }
+        public string? ColorHex { get; set; }
         public double? DiameterMm { get; set; }
 
         /// <summary>
@@ -95,27 +97,27 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// The location (either URL, or physical location where the filament was purchased)
         /// </summary>
         [StringLength(1000)]
-        public string PurchaseLocation { get; set; }
+        public string? PurchaseLocation { get; set; }
         [StringLength(256)]
-        public string PurchasePriceValue { get; set; }
+        public string? PurchasePriceValue { get; set; }
         /// <summary>
         /// The Currency Marker (ie, USD)
         /// </summary>
         [StringLength(256)]
-        public string PurchasePriceCurrency { get; set; }
+        public string? PurchasePriceCurrency { get; set; }
         /// <summary>
         /// Any notes about the purchase price
         /// </summary>
         [StringLength(1000)]
-        public string PurchaseNotes { get; set; }
+        public string? PurchaseNotes { get; set; }
         /// <summary>
         /// Where is this filament stored?
         /// </summary>
         [StringLength(256)]
-        public string StorageLocation { get; set; }
+        public string? StorageLocation { get; set; }
 
         [StringLength(1000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         public bool IsFavorite { get; set; }
 
@@ -139,7 +141,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// What inert gas should be used?
         /// </summary>
         [StringLength(255)]
-        public string InertGas { get; set; }
+        public string? InertGas { get; set; }
 
         /// <summary>
         /// The percentage of new powder when mixing with old powder.
@@ -148,7 +150,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         [Range(0.0, 1.0)]
         public double? MaterialRefreshRatio { get; set; }
 
-        public ICollection<FilamentAdjustmentDto> FilamentAdjustments { get; set; }
+        public ICollection<FilamentAdjustmentDto>? FilamentAdjustments { get; set; }
 
         public ColorPatternType ColorPattern { get; set; } = ColorPatternType.Solid;
         public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;

@@ -1,10 +1,12 @@
-﻿namespace PrintLogApi.Models.DTOs.Filament
+﻿#nullable enable
+
+namespace PrintLogApi.Models.DTOs.Filament
 {
     public class PrinterMaintenanceCategoriesDto
     {
         /// <summary>
         /// A list of categories
         /// </summary>
-        public string[] Categories { get; set; }
+        public string[]? Categories { get; set; }
     }
 }

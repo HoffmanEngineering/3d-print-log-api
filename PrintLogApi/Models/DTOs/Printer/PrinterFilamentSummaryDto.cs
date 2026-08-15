@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using PrintLogApi.Models.DTOs.Filament;
 
 namespace PrintLogApi.Models.DTOs.Printer
@@ -7,6 +9,6 @@ namespace PrintLogApi.Models.DTOs.Printer
     {
         public Guid Id { get; set; }
 
-        public FilamentSummaryDto Filament { get; set; }
+        public FilamentSummaryDto? Filament { get; set; }
     }
 }

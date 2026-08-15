@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.ComponentModel.DataAnnotations;
 
 namespace PrintLogApi.Models.DTOs.Subscription
@@ -5,6 +7,6 @@ namespace PrintLogApi.Models.DTOs.Subscription
     public class CreateCheckoutSessionDto
     {
         [Required]
-        public string PlanId { get; set; }
+        public string? PlanId { get; set; }
     }
 }

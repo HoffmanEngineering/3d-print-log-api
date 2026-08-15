@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.ComponentModel.DataAnnotations;
 
 using static PrintLogApi.Models.User;
@@ -12,18 +14,18 @@ namespace PrintLogApi.Models.DTOs
         /// <summary>
         /// URL pointing to the user's profile picture.
         /// </summary>
-        public string ProfilePicture { get; set; }
+        public string? ProfilePicture { get; set; }
 
         /// <summary>
         /// URL pointing to the user's cover picture.
         /// </summary>
-        public string CoverPicture { get; set; }
+        public string? CoverPicture { get; set; }
 
         [StringLength(30, MinimumLength = 1)]
-        public string DisplayName { get; set; }
+        public string? DisplayName { get; set; }
 
         [StringLength(1000)]
-        public string Bio { get; set; }
+        public string? Bio { get; set; }
 
         /// <summary>
         ///   If present, the datetime that the user started the deactivation process.

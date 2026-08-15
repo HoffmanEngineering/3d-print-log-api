@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using PrintLogApi;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Xunit;
 
@@ -109,6 +110,63 @@ namespace PrintLogApi.IntegrationTests
                 $"Only {checkedCount} annotated reference navigations were checked; the entity " +
                 "models are expected to contribute far more. Did PrintLogApi/Models lose its " +
                 "'#nullable enable' headers?");
+        }
+
+        /// <summary>
+        /// A new DTO file added without a `#nullable enable` header is invisible: it compiles, it
+        /// passes review, and its properties are silently nullable-oblivious until #45 flips the
+        /// project and they all become non-nullable at once — reinstating the implicit-[Required]
+        /// problem across whatever was missed. Reflection can see that state (Unknown), so assert
+        /// there is none.
+        ///
+        /// Deliberately narrow: it checks that the annotation context is ON, not what any given
+        /// property was annotated as. Nullability per property is a judgement call recorded in
+        /// AGENTS.md, not something to freeze in a test.
+        ///
+        /// One case it cannot see: deleting `#nullable enable` from a file whose every property
+        /// already carries an explicit `?`. An explicitly written `?` emits nullable metadata even
+        /// in an oblivious context, so those properties still read as Nullable. The case that
+        /// matters — a property declared with no `?` and no context — is caught.
+        /// </summary>
+        [Fact]
+        public void EveryDtoProperty_HasAnAnnotationContext()
+        {
+            var nullabilityContext = new NullabilityInfoContext();
+            var oblivious = new List<string>();
+            var checkedCount = 0;
+
+            var dtoTypes = typeof(Startup).Assembly
+                .GetTypes()
+                .Where(t => t.Namespace is not null
+                            && t.Namespace.StartsWith("PrintLogApi.Models.DTOs", System.StringComparison.Ordinal));
+
+            foreach (var type in dtoTypes)
+            {
+                foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    if (property.PropertyType.IsValueType)
+                    {
+                        continue;
+                    }
+
+                    checkedCount++;
+
+                    if (nullabilityContext.Create(property).ReadState == NullabilityState.Unknown)
+                    {
+                        oblivious.Add($"{type.FullName}.{property.Name}");
+                    }
+                }
+            }
+
+            Assert.True(
+                oblivious.Count == 0,
+                "These DTO properties are in a nullable-oblivious context. The declaring file is " +
+                "missing its '#nullable enable' header:\n" + string.Join("\n", oblivious));
+
+            Assert.True(
+                checkedCount >= 200,
+                $"Only {checkedCount} reference-typed DTO properties were found; PrintLogApi/Models/DTOs " +
+                "is expected to contribute far more. Did the assertion above go vacuous?");
         }
     }
 }

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Extensions;
 using static PrintLogApi.Models.FilamentAdjustment;
@@ -61,7 +63,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double? VolumeMl { get; set; }
 
         [StringLength(1000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         public DateTime CreatedDate { get; set; }
 

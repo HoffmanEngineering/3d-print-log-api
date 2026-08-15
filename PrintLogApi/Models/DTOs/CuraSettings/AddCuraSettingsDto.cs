@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -11,11 +13,11 @@ namespace PrintLogApi.Models.DTOs.CuraSettings
     public class AddCuraSettingsDto
     {
         [StringLength(100)]
-        public string CuraVersion { get; set; }
+        public string? CuraVersion { get; set; }
 
         [StringLength(100)]
-        public string PluginVersion { get; set; }
+        public string? PluginVersion { get; set; }
 
-        public dynamic Settings { get; set; }
+        public dynamic? Settings { get; set; }
     }
 }

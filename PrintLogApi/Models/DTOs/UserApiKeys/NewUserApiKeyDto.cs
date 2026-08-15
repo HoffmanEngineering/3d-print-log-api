@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -15,12 +17,12 @@ namespace PrintLogApi.Models.DTOs.UserApiKeys
         public Guid Id { get; set; }
 
         [StringLength(1000)]
-        public string Description { get; set; }
+        public string? Description { get; set; }
 
         /// <summary>
         ///  The new api key that was generated. This is the only time the API can return the public key
         /// </summary>
-        public string PublicKey { get; set; }
+        public string? PublicKey { get; set; }
 
     }
 }

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace PrintLogApi.Models.DTOs.Project
@@ -7,6 +9,6 @@ namespace PrintLogApi.Models.DTOs.Project
         public int Id { get; set; }
         public bool IsDefault { get; set; }
         public int DisplayOrder { get; set; }
-        public string Url { get; set; }
+        public string? Url { get; set; }
     }
 }

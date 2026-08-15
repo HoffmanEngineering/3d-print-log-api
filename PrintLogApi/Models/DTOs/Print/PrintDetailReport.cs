@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -10,13 +12,13 @@ namespace PrintLogApi.Models.DTOs.Print
     public class PrintDetailReport
     {
         public DateTimeOffset? StartDate { get; set; }
-        public string Title { get; set; }       
+        public string? Title { get; set; }       
 
-        public string PrinterName { get; set; }
+        public string? PrinterName { get; set; }
 
-        public string PrinterMake { get; set; }
+        public string? PrinterMake { get; set; }
 
-        public string PrinterModel { get; set; }
+        public string? PrinterModel { get; set; }
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
         public double? EstimatedFilamentUsageG { get; set; }
@@ -26,11 +28,11 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         public double? FilamentUsageG { get; set; }
 
-        public string FilamentType { get; set; }
+        public string? FilamentType { get; set; }
 
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
-        public string Url { get; set; }
+        public string? Url { get; set; }
 
 
         public PrintStatus Status { get; set; }
