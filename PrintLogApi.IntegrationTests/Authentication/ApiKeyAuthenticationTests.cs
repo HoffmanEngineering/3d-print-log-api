@@ -1,9 +1,12 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using Xunit;
 
@@ -53,6 +56,65 @@ namespace PrintLogApi.IntegrationTests.Authentication
             var response = await _httpClient.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ApiKey_OnUse_StampsLastUsed()
+        {
+            var key = await GenerateApiKey("Last Used Test");
+
+            // A freshly generated key has never been used.
+            Assert.Null(GetLastUsed(key.Id));
+
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+            request.Headers.Add("X-Api-Key", key.PublicKey);
+            var response = await _httpClient.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var lastUsed = GetLastUsed(key.Id);
+            Assert.NotNull(lastUsed);
+            Assert.InRange(
+                lastUsed.Value,
+                DateTimeOffset.UtcNow.AddMinutes(-5),
+                DateTimeOffset.UtcNow.AddMinutes(1));
+        }
+
+        [Fact]
+        public async Task ApiKey_SecondUseWithinThrottleWindow_DoesNotRestamp()
+        {
+            var key = await GenerateApiKey("Last Used Throttle Test");
+
+            var first = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+            first.Headers.Add("X-Api-Key", key.PublicKey);
+            Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first)).StatusCode);
+
+            var stampedAt = GetLastUsed(key.Id);
+            Assert.NotNull(stampedAt);
+
+            // The write is throttled to once an hour per key by a memory-cache guard, so a second
+            // use must not issue another UPDATE. This is what keeps a chatty integration from
+            // writing to the same row on every single request.
+            var second = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+            second.Headers.Add("X-Api-Key", key.PublicKey);
+            Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second)).StatusCode);
+
+            Assert.Equal(stampedAt, GetLastUsed(key.Id));
+        }
+
+        /// <summary>
+        /// Reads LastUsed straight from a fresh context. The stamp is written by ExecuteUpdateAsync,
+        /// which bypasses the change tracker, so a context that had already loaded the row would
+        /// hand back its stale copy.
+        /// </summary>
+        private DateTimeOffset? GetLastUsed(Guid keyId)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+            return context.UserApiKeys
+                .AsNoTracking()
+                .Single(k => k.Id == keyId)
+                .LastUsed;
         }
 
         [Fact]
