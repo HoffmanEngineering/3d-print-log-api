@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -24,14 +26,14 @@ namespace PrintLogApi.Models
         public FeedbackType Type { get; set; }
 
         [MaxLength(1000)]
-        public string Email { get; set; }
+        public string? Email { get; set; }
 
         [MaxLength(5000)]
-        public string Note { get; set; }
+        public string? Note { get; set; }
 
         public DateTimeOffset? ResolvedDate { get; set; }
 
         [MaxLength(1000)]
-        public string ResolvedNote { get; set; }
+        public string? ResolvedNote { get; set; }
     }
 }

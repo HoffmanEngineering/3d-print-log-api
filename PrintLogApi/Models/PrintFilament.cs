@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -22,12 +24,12 @@ namespace PrintLogApi.Models
 
         public long PrintId { get; set; }
 
-        public Print Print { get; set; }
+        public Print Print { get; set; } = null!;
 
         public Guid? FilamentId { get; set; }
 
         // Can be null
-        public Filament Filament { get; set; }
+        public Filament? Filament { get; set; }
 
         public int? EstimatedAmountMg { get; set; }
         public int? AmountMg { get; set; }
@@ -63,6 +65,6 @@ namespace PrintLogApi.Models
         public SourceMeasurement Source {  get; set; }
 
         [StringLength(1000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
     }
 }

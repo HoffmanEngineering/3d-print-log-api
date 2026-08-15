@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -27,7 +29,7 @@ namespace PrintLogApi.Models
         public Guid Id { get; set; }
 
         public Guid FilamentId { get; set; }
-        public Filament Filament { get; set; }
+        public Filament Filament { get; set; } = null!;
 
         public SourceMeasurement Source {  get; set; }
 
@@ -76,7 +78,7 @@ namespace PrintLogApi.Models
         public double? VolumeMl { get; set; }
 
         [StringLength(1000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
     }
 }

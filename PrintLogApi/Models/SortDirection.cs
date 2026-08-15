@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models
+﻿#nullable enable
+
+namespace PrintLogApi.Models
 {
     public enum SortDirection
     {

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -18,11 +20,11 @@ namespace PrintLogApi.Models
 
         public long PrinterId { get; set; }
 
-        public Printer Printer { get; set; }
+        public Printer Printer { get; set; } = null!;
 
         public Guid FilamentId { get; set; }
 
-        public Filament Filament { get; set; }
+        public Filament Filament { get; set; } = null!;
 
         /// <summary>
         /// When the filament was loaded.

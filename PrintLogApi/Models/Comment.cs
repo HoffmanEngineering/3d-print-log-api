@@ -1,4 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿#nullable enable
+
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PrintLogApi.Models
@@ -10,7 +12,7 @@ namespace PrintLogApi.Models
         public long Id { get; set; }
 
         [StringLength(2000)]
-        public string Body { get; set; }
+        public string? Body { get; set; }
 
     }
 }

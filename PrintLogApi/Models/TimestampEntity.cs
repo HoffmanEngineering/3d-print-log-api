@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
@@ -14,13 +16,13 @@ namespace PrintLogApi.Models
 
         public long CreatedById { get; set; }
         [ForeignKey("CreatedById")]
-        public User CreatedBy { get; set; }
+        public User CreatedBy { get; set; } = null!;
 
         public DateTime UpdatedDate { get; set; }
 
 
         public long UpdatedById { get; set; }
         [ForeignKey("UpdatedById")]
-        public User UpdatedBy {get; set;}
+        public User UpdatedBy {get; set;} = null!;
     }
 }
