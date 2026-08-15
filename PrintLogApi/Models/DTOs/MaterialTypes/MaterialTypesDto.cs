@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 
 namespace PrintLogApi.Models.DTOs.Materials
 {
@@ -6,11 +8,11 @@ namespace PrintLogApi.Models.DTOs.Materials
     {
         public Guid Id { get; set; }
 
-        public string Acronym { get; set; }
+        public string? Acronym { get; set; }
 
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
-        public string MaterialCategoryNickname { get; set; }
+        public string? MaterialCategoryNickname { get; set; }
 
         /// <summary>
         /// The Density of the Material

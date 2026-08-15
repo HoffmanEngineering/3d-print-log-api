@@ -1,19 +1,21 @@
-﻿using System.Text.Json.Serialization;
+﻿#nullable enable
+
+using System.Text.Json.Serialization;
 
 namespace PrintLogApi.Models.DTOs
 {
     public class Jwt
     {
         [JsonPropertyName("access_token")]
-        public string AccessToken { get; set; }
+        public string? AccessToken { get; set; }
 
         [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
 
         [JsonPropertyName("scope")]
-        public string Scope { get; set; }
+        public string? Scope { get; set; }
 
         [JsonPropertyName("token_type")]
-        public string TokenType { get; set; }
+        public string? TokenType { get; set; }
     }
 }

@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -12,18 +14,18 @@ namespace PrintLogApi.Models.DTOs.Printer
 
         [MaxLength(50)]
         [Required(AllowEmptyStrings = false)]
-        public string Make { get; set; }
+        public string? Make { get; set; }
 
         [MaxLength(50)]
         [Required(AllowEmptyStrings = false)]
-        public string Model { get; set; }
+        public string? Model { get; set; }
 
         [MaxLength(100)]
         [Required(AllowEmptyStrings = false)]
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
         [MaxLength(1000)]
-        public string Description { get; set; }
+        public string? Description { get; set; }
 
         [Range(0, double.MaxValue, ErrorMessage = "Only positive number allowed")]
         public double? NozzleDiameter { get; set; }
@@ -37,7 +39,7 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// <summary>
         /// The collection of currently loaded filament for this printer.
         /// </summary>
-        public ICollection<AddPrinterFilamentDto> LoadedFilaments { get; set; }
+        public ICollection<AddPrinterFilamentDto>? LoadedFilaments { get; set; }
 
         public bool IsActive { get; set; }
 
@@ -45,7 +47,7 @@ namespace PrintLogApi.Models.DTOs.Printer
         /// <summary>
         /// Nickname of the Printer Category for this printer (ie, FDM, FFF, etc)
         /// </summary>
-        public string Category { get; set; }
+        public string? Category { get; set; }
 
         public double? BedWidthMm { get; set; }
         public double? BedHeightMm { get; set; }

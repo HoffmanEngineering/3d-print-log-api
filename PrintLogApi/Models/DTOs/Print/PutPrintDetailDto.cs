@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
@@ -20,7 +22,7 @@ namespace PrintLogApi.Models.DTOs.Print
         /// </summary>
         [Required(AllowEmptyStrings = false)]
         [StringLength(100)]
-        public string Title { get; set; }
+        public string? Title { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 
@@ -54,21 +56,21 @@ namespace PrintLogApi.Models.DTOs.Print
         /// The non-tracked Filament Type. Used before the FilamentUsage collection was added.
         /// </summary>
         [Obsolete("FilamentType is deprecated, use the FilamentUsage collection instead.")]
-        public string FilamentType { get; set; }
+        public string? FilamentType { get; set; }
 
         /// <summary>
         /// The collection of Filament Usage information.
         /// </summary>
-        public ICollection<PutPrintFilamentSummaryDto> FilamentUsage { get; set; }
+        public ICollection<PutPrintFilamentSummaryDto>? FilamentUsage { get; set; }
 
         [StringLength(50000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         [StringLength(1000)]
-        public string Url { get; set; }
+        public string? Url { get; set; }
 
         [MaxLength(1000)]
-        public string FileName { get; set; }
+        public string? FileName { get; set; }
 
         /// <summary>
         /// Whether or not comments are allowed on this print.
@@ -93,7 +95,7 @@ namespace PrintLogApi.Models.DTOs.Print
         /// Create a new project inline and assign this print to it. Ignored if ProjectId is set.
         /// </summary>
         [MaxLength(100)]
-        public string NewProjectName { get; set; }
+        public string? NewProjectName { get; set; }
 
     }
 }

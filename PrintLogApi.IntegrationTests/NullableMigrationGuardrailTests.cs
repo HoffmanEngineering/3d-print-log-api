@@ -3,7 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using PrintLogApi;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests
@@ -110,5 +113,121 @@ namespace PrintLogApi.IntegrationTests
                 "models are expected to contribute far more. Did PrintLogApi/Models lose its " +
                 "'#nullable enable' headers?");
         }
+
+        /// <summary>
+        /// A new DTO file added without a `#nullable enable` header is invisible: it compiles, it
+        /// passes review, and its properties are silently nullable-oblivious until #45 flips the
+        /// project and they all become non-nullable at once — reinstating the implicit-[Required]
+        /// problem across whatever was missed. Reflection can see that state (Unknown), so assert
+        /// there is none.
+        ///
+        /// Deliberately narrow: it checks that the annotation context is ON, not what any given
+        /// property was annotated as. Nullability per property is a judgement call recorded in
+        /// AGENTS.md, not something to freeze in a test.
+        ///
+        /// This assertion alone is NOT sufficient, which is why
+        /// <see cref="EveryDtoFile_EnablesTheNullableAnnotationContext"/> exists alongside it.
+        /// Reflection cannot see a deleted header on a file whose every property already carries an
+        /// explicit `?` — an explicitly written `?` emits nullable metadata even in an oblivious
+        /// context, so those properties still read as Nullable. That is most of this directory, so
+        /// the header has to be checked in source. What this test adds on top is reach: it covers
+        /// DTO types declared outside `Models/DTOs/`, which a directory scan never sees.
+        /// </summary>
+        [Fact]
+        public void EveryDtoProperty_HasAnAnnotationContext()
+        {
+            var nullabilityContext = new NullabilityInfoContext();
+            var oblivious = new List<string>();
+            var checkedCount = 0;
+
+            var dtoTypes = typeof(Startup).Assembly
+                .GetTypes()
+                .Where(t => t.Namespace is not null
+                            && t.Namespace.StartsWith("PrintLogApi.Models.DTOs", System.StringComparison.Ordinal));
+
+            foreach (var type in dtoTypes)
+            {
+                foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    if (property.PropertyType.IsValueType)
+                    {
+                        continue;
+                    }
+
+                    checkedCount++;
+
+                    if (nullabilityContext.Create(property).ReadState == NullabilityState.Unknown)
+                    {
+                        oblivious.Add($"{type.FullName}.{property.Name}");
+                    }
+                }
+            }
+
+            Assert.True(
+                oblivious.Count == 0,
+                "These DTO properties are in a nullable-oblivious context. The declaring file is " +
+                "missing its '#nullable enable' header:\n" + string.Join("\n", oblivious));
+
+            Assert.True(
+                checkedCount >= 200,
+                $"Only {checkedCount} reference-typed DTO properties were found; PrintLogApi/Models/DTOs " +
+                "is expected to contribute far more. Did the assertion above go vacuous?");
+        }
+
+        /// <summary>
+        /// The file-level half of the guardrail, and the one that actually holds.
+        ///
+        /// Deleting a `#nullable enable` header is invisible to reflection once the file's
+        /// properties carry explicit `?` annotations — the metadata survives the header, so the
+        /// sibling test above goes quiet while the file is silently back in an oblivious context.
+        /// The next property added to it is then unannotated by default, and at #45 it flips to
+        /// non-nullable along with everything else. Source is the only place that state is
+        /// visible, so read it.
+        ///
+        /// Checks the whole file, not just the first line: a `#nullable disable` further down
+        /// re-opens exactly the hole this is closing.
+        /// </summary>
+        [Fact]
+        public void EveryDtoFile_EnablesTheNullableAnnotationContext()
+        {
+            var dtoDirectory = Path.Combine(RepositoryRoot(), "PrintLogApi", "Models", "DTOs");
+            Assert.True(Directory.Exists(dtoDirectory), $"DTO directory not found at {dtoDirectory}.");
+
+            var files = Directory.GetFiles(dtoDirectory, "*.cs", SearchOption.AllDirectories);
+            var offenders = new List<string>();
+
+            foreach (var file in files)
+            {
+                var source = File.ReadAllText(file);
+                var relative = Path.GetRelativePath(dtoDirectory, file);
+
+                if (!source.Contains("#nullable enable", System.StringComparison.Ordinal))
+                {
+                    offenders.Add($"{relative}: missing '#nullable enable'");
+                }
+                else if (source.Contains("#nullable disable", System.StringComparison.Ordinal))
+                {
+                    offenders.Add($"{relative}: contains '#nullable disable'");
+                }
+            }
+
+            Assert.True(
+                offenders.Count == 0,
+                "Every file under PrintLogApi/Models/DTOs must opt into the nullable annotation " +
+                "context until #45 turns it on project-wide:\n" + string.Join("\n", offenders));
+
+            Assert.True(
+                files.Length >= 90,
+                $"Only {files.Length} DTO source files were found under {dtoDirectory}; ~94 are " +
+                "expected. Did the path resolution break and make this test vacuous?");
+        }
+
+        /// <summary>
+        /// Resolves the repo root from this file's compile-time path rather than the working
+        /// directory, which for a test run is the output folder and varies between local runs,
+        /// `dotnet test`, and CI.
+        /// </summary>
+        private static string RepositoryRoot([CallerFilePath] string thisFile = "") =>
+            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, ".."));
     }
 }

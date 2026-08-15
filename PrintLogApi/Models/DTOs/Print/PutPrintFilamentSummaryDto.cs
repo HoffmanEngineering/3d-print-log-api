@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using static PrintLogApi.Models.PrintFilament;
 
 namespace PrintLogApi.Models.DTOs.Print
@@ -73,6 +75,6 @@ namespace PrintLogApi.Models.DTOs.Print
         /// <summary>
         /// Any notes for this filament usage.
         /// </summary>
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
     }
 }

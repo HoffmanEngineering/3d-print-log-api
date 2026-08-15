@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -18,29 +20,29 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// Common name for the roll of filament.
         /// </summary>
         [StringLength(255)]
-        public string DisplayName { get; set; }
+        public string? DisplayName { get; set; }
 
         [StringLength(255)]
-        public string Brand { get; set; }
+        public string? Brand { get; set; }
 
         /// <summary>
         /// The material Type, ie PLA, PETG, ABS.
         /// </summary>
         [StringLength(255)]
-        public string MaterialType { get; set; }
+        public string? MaterialType { get; set; }
 
         [StringLength(255)]
-        public string ColorName { get; set; }
+        public string? ColorName { get; set; }
 
         [StringLength(6)]
-        public string ColorHex { get; set; }
+        public string? ColorHex { get; set; }
 
         public ColorPatternType ColorPattern { get; set; }
 
-        public List<string> Colors { get; set; }
+        public List<string>? Colors { get; set; }
 
         public FilamentFinishType FinishType { get; set; }
 
-        public List<FilamentEffect> Effects { get; set; }
+        public List<FilamentEffect>? Effects { get; set; }
     }
 }

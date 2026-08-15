@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -12,18 +14,18 @@ namespace PrintLogApi.Models.DTOs.User
         /// <summary>
         /// URL pointing to the user's profile picture.
         /// </summary>
-        public string ProfilePicture { get; set; }
+        public string? ProfilePicture { get; set; }
 
         /// <summary>
         /// URL pointing to the user's cover picture.
         /// </summary>
-        public string CoverPicture { get; set; }
+        public string? CoverPicture { get; set; }
 
         [StringLength(30, MinimumLength = 1)]
-        public string DisplayName { get; set; }
+        public string? DisplayName { get; set; }
 
         [StringLength(1000)]
-        public string Bio { get; set; }
+        public string? Bio { get; set; }
 
         public ProfileViewStatus ViewStatus { get; set; }
     }

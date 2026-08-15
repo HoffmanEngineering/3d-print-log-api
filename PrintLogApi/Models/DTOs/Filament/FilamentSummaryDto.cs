@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -17,22 +19,22 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// Common name for the roll of filament.
         /// </summary>
         [StringLength(255)]
-        public string DisplayName { get; set; }
+        public string? DisplayName { get; set; }
 
         [StringLength(255)]
-        public string Brand { get; set; }
+        public string? Brand { get; set; }
 
 
         /// <summary>
         /// The material Type, ie PLA, PETG, ABS.
         /// </summary>
         [StringLength(255)]
-        public string MaterialType { get; set; }
+        public string? MaterialType { get; set; }
 
         /// <summary>
         /// The material category (ie, filament, resin, etc).
         /// </summary>
-        public MaterialCategoryDto MaterialCategory { get; set; }
+        public MaterialCategoryDto? MaterialCategory { get; set; }
 
         /// <summary>
         /// The Density of the Material
@@ -40,9 +42,9 @@ namespace PrintLogApi.Models.DTOs.Filament
         public double MaterialDensityGramPerCubicCm { get; set; }
 
         [StringLength(255)]
-        public string ColorName { get; set; }
+        public string? ColorName { get; set; }
         [StringLength(6)]
-        public string ColorHex { get; set; }
+        public string? ColorHex { get; set; }
 
         /// <summary>
         /// The user's recommended temperature
@@ -51,7 +53,7 @@ namespace PrintLogApi.Models.DTOs.Filament
         public bool IsActive { get; set; }
 
         [StringLength(1000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         public DateTime CreatedDate { get; set; }
 
@@ -64,14 +66,14 @@ namespace PrintLogApi.Models.DTOs.Filament
         /// Any notes about the purchase price
         /// </summary>
         [StringLength(1000)]
-        public string PurchasePriceValue { get; set; }
+        public string? PurchasePriceValue { get; set; }
 
         public long? InitialNominalWeightMg { get; set; }
 
         public double? DiameterMm { get; set; }
 
-        public PrinterSummaryWithoutCategory LoadedInPrinter { get; set; }
-        public string StorageLocation { get; set; }
+        public PrinterSummaryWithoutCategory? LoadedInPrinter { get; set; }
+        public string? StorageLocation { get; set; }
 
         public bool IsFavorite { get; set; }
 

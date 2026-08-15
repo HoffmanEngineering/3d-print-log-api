@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Print;
@@ -18,22 +20,22 @@ namespace PrintLogApi.Models.DTOs.Print
         public int? FilamentUsageMg { get; set; }
 
         [StringLength(100)]
-        public string FilamentType { get; set; }
+        public string? FilamentType { get; set; }
 
-        public ICollection<PrintFilamentSummaryDto> FilamentUsage { get; set; }
+        public ICollection<PrintFilamentSummaryDto>? FilamentUsage { get; set; }
 
         [StringLength(50000)]
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
 
         [StringLength(1000)]
-        public string Url { get; set; }
+        public string? Url { get; set; }
 
         [Required(AllowEmptyStrings = false)]
         [StringLength(100)]
-        public string Title { get; set; }
+        public string? Title { get; set; }
 
         [MaxLength(1000)]
-        public string FileName { get; set; }
+        public string? FileName { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 
@@ -52,6 +54,6 @@ namespace PrintLogApi.Models.DTOs.Print
         /// Create a new project inline and assign this print to it. Ignored if ProjectId is set.
         /// </summary>
         [MaxLength(100)]
-        public string NewProjectName { get; set; }
+        public string? NewProjectName { get; set; }
     }
 }

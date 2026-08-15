@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Print
+﻿#nullable enable
+
+namespace PrintLogApi.Models.DTOs.Print
 {
     public class PrintImageDto
     {

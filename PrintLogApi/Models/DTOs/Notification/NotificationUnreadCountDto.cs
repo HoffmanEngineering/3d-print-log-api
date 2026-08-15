@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PrintLogApi.Models.DTOs.Notification
 {
     public class NotificationUnreadCountDto

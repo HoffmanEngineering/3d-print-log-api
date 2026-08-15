@@ -1,4 +1,6 @@
-﻿using PrintLogApi.Models.DTOs.Comments;
+﻿#nullable enable
+
+using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.DTOs.User;
 using System;
@@ -12,11 +14,11 @@ namespace PrintLogApi.Models.DTOs.Print
 
         public long Id { get; set; }
 
-        public string Title { get; set; }
+        public string? Title { get; set; }
 
-        public UserSummaryDto CreatedBy { get; set; }
+        public UserSummaryDto? CreatedBy { get; set; }
 
-        public PrinterSummary Printer { get; set; }
+        public PrinterSummary? Printer { get; set; }
 
         public DateTimeOffset? StartDate { get; set; }
 

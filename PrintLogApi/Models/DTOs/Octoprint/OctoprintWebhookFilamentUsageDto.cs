@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Octoprint
+﻿#nullable enable
+
+namespace PrintLogApi.Models.DTOs.Octoprint
 {
     public class OctoprintWebhookFilamentUsageDto
     {

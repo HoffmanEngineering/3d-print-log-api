@@ -1,5 +1,8 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -119,7 +122,7 @@ namespace PrintLogApi.Models.DTOs.Analytics
         /// <summary>
         /// Resolves an IANA id, falling back to the Windows id on hosts without ICU IANA support.
         /// </summary>
-        public bool TryResolveTimeZone(out TimeZoneInfo zone)
+        public bool TryResolveTimeZone([MaybeNullWhen(false)] out TimeZoneInfo zone)
         {
             zone = null;
             if (string.IsNullOrWhiteSpace(TimeZone)) return false;
