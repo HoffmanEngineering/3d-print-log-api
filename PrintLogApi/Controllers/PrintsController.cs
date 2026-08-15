@@ -261,7 +261,11 @@ namespace PrintLogApi.Controllers
                 .ProjectTo< PrintDetailDTO>(_mapper.ConfigurationProvider)
                 .FirstOrDefaultAsync();
 
-            printDetailDto.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
+            // Not provably non-null: the existence check above and this projection are separate
+            // queries, so a delete in between yields null here. The null-forgive preserves the
+            // pre-existing NullReferenceException rather than papering over the race; closing it
+            // properly is a behaviour change, tracked in #39.
+            printDetailDto!.Comments = printDetailDto.Comments.OrderBy(c => c.CreatedDate).ToList();
             
             return printDetailDto;
         }

@@ -112,7 +112,11 @@ namespace PrintLogApi.Services
             {
                 var url = $"{ManagementBaseUrl}/grants" +
                     $"?user_id={Uri.EscapeDataString(authUserId)}" +
-                    $"&audience={Uri.EscapeDataString(mcpAudience)}" +
+                    // Null-forgiven to match Startup's treatment of the same key: an absent
+                    // Auth0:McpIdentifier is a deployment misconfiguration, and it already threw
+                    // here. Validating configuration at startup is a behaviour change, not part
+                    // of this annotation pass.
+                    $"&audience={Uri.EscapeDataString(mcpAudience!)}" +
                     $"&per_page=100&page={page}&include_totals=true";
 
                 var json = await SendManagementAsync(HttpMethod.Get, url, ct);

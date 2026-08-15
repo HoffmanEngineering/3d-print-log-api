@@ -224,7 +224,10 @@ namespace PrintLogApi.Mcp
             var clearFields = McpWriteValidation.RequireAllowedClearFields(clear, ClearablePrintFields);
 
             var materialsProvided = materials != null;
-            if (materialsProvided)
+            // Tested directly rather than via materialsProvided so flow analysis can narrow
+            // `materials` inside the block. The two conditions are the same test; materialsProvided
+            // is still what gets passed to the service below.
+            if (materials is not null)
             {
                 if (materials.Length > MaxMaterialRows)
                 {

@@ -1322,7 +1322,10 @@ namespace PrintLogApi.Services
                 materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
             }
 
-            updatedFilament.MaterialCategoryNickname = materialCategory.Nickname;
+            // Null-forgiven: the "filament" fallback lookup above can itself return null if that
+            // seeded category is missing, which already threw here. The existing "Todo, throw
+            // error?" comment marks the same gap; it is tracked in #39.
+            updatedFilament.MaterialCategoryNickname = materialCategory!.Nickname;
             updatedFilament.MaterialCategory = materialCategory;
 
             UpdateFilamentMeasurements(updatedFilament);

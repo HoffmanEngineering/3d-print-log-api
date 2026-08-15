@@ -205,7 +205,10 @@ namespace PrintLogApi.TestData
 
         private static void Save<TModel>(PrintLogContext context)
         {
-            var tableName = context.Model.FindEntityType(typeof(TModel)).GetTableName();
+            // Non-null for every current caller: Save<TModel> is only invoked with mapped entity
+            // types. Nothing in the signature enforces that, so a future unmapped TModel returns
+            // null here.
+            var tableName = context.Model.FindEntityType(typeof(TModel))!.GetTableName();
             context.Database.CreateExecutionStrategy().Execute(() =>
             {
                 using var transaction = context.Database.BeginTransaction();

@@ -33,7 +33,9 @@ namespace PrintLogApi.Services
             _auth0Service = auth0Service;
             _blobStorageService = blobStorageService;
 
-            _deactivationTimeInMinutes = int.Parse(config["PendingUserDeactivationTimeInMinutes"], CultureInfo.InvariantCulture);
+            // Null-forgiven: an absent PendingUserDeactivationTimeInMinutes is a deployment
+            // misconfiguration that already threw here, at service construction.
+            _deactivationTimeInMinutes = int.Parse(config["PendingUserDeactivationTimeInMinutes"]!, CultureInfo.InvariantCulture);
         }
 
         /// <inheritdoc/>

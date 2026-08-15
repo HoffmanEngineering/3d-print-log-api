@@ -159,7 +159,12 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
             services.AddHttpContextAccessor();
             services.AddScoped<IPrincipal>(
-                (sp) => sp.GetService<IHttpContextAccessor>().HttpContext.User
+                // IHttpContextAccessor is registered above, so the first dereference is safe.
+                // HttpContext is not guaranteed: it would be null if IPrincipal were ever resolved
+                // outside a request. Nothing resolves IPrincipal from DI today, so this factory
+                // does not currently run at all. Both were already unguarded before nullable
+                // analysis was enabled, so the null-forgive changes nothing.
+                (sp) => sp.GetService<IHttpContextAccessor>()!.HttpContext!.User
             );
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IPrintService, PrintService>();
@@ -473,7 +478,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     options.ForwardForbid = "McpBearer";
                 })
                 // RFC 9728 protected-resource metadata for the dedicated MCP resource.
-                .AddMcp("McpChallenge", null, options =>
+                // null displayName is the supported "no display name" value; the SDK's parameter
+                // is simply not annotated as nullable.
+                .AddMcp("McpChallenge", null!, options =>
                 {
                     options.ResourceMetadata = new ProtectedResourceMetadata
                     {
@@ -645,7 +652,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         public void Apply(OpenApiOperation operation, OperationFilterContext context)
         {
             var hasAuthorize =
-              context.MethodInfo.DeclaringType.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
+              // DeclaringType is never null for a controller action method.
+              context.MethodInfo.DeclaringType!.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
               || context.MethodInfo.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any();
 
             if (hasAuthorize)
