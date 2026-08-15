@@ -114,8 +114,11 @@ namespace PrintLogApi.Services
             // An explicit range covers dated prints inside it. All-time covers EVERY print, including
             // undated ones — which is why the undated block below exists to reconcile the two.
             var hasRange = from.HasValue && to.HasValue;
-            var inScope = hasRange
-                ? owned.Where(p => p.StartDate >= from.Value && p.StartDate <= to.Value)
+            // Same condition as hasRange, written as a pattern so the compiler carries the two
+            // dates into the lambda. hasRange itself stays: the undated query below still needs it
+            // as a plain bool.
+            var inScope = from is { } rangeStart && to is { } rangeEnd
+                ? owned.Where(p => p.StartDate >= rangeStart && p.StartDate <= rangeEnd)
                 : owned;
 
             var filtered = status.HasValue ? inScope.Where(p => p.Status == status.Value) : inScope;

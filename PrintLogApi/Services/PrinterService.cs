@@ -500,16 +500,16 @@ namespace PrintLogApi.Services
 
             // Reads only its OWN target field. A record scoped to this tool with no CreatedPrinterId
             // is dangling, whatever else it may carry.
-            var printerId = record.CreatedPrinterId;
-            var exists = printerId.HasValue && await _context.Printers
-                .AnyAsync(p => p.Id == printerId.Value && p.UserId == userId, ct);
-            if (!exists)
+            // Short-circuit order is load-bearing: the null test stays on the left so the query is
+            // still skipped entirely when the id is absent.
+            if (record.CreatedPrinterId is not { } printerId
+                || !await _context.Printers.AnyAsync(p => p.Id == printerId && p.UserId == userId, ct))
             {
                 throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
             }
 
             return new CreatePrinterResult(
-                await GetPrinterForMcp(userId, printerId.Value, ct), WasReplayed: true);
+                await GetPrinterForMcp(userId, printerId, ct), WasReplayed: true);
         }
 
         /// <summary>

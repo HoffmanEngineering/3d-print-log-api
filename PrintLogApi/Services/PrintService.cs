@@ -773,15 +773,15 @@ namespace PrintLogApi.Services
             // The record is scoped by ToolName, so a create_print row always carries a print id. A
             // null here means the row is corrupt, not that another tool owns it — treat it exactly
             // like a dangling reference rather than dereferencing it.
-            var createdPrintId = record.CreatedPrintId;
-            var exists = createdPrintId.HasValue && await _context.Prints
-                .AnyAsync(p => p.Id == createdPrintId.Value && p.CreatedById == userId, ct);
-            if (!exists)
+            // Short-circuit order is load-bearing: the null test stays on the left so the query is
+            // still skipped entirely when the id is absent.
+            if (record.CreatedPrintId is not { } createdPrintId
+                || !await _context.Prints.AnyAsync(p => p.Id == createdPrintId && p.CreatedById == userId, ct))
             {
                 throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
             }
 
-            return await BuildCreatePrintResult(createdPrintId.Value, wasReplayed: true, userId, ct);
+            return await BuildCreatePrintResult(createdPrintId, wasReplayed: true, userId, ct);
         }
 
         /// <summary>
