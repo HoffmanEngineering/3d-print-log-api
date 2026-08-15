@@ -36,11 +36,17 @@ running against the database while migrations execute.
 
 ## Nullable Reference Types
 
-Mid-migration (see #46). The project is on `<Nullable>warnings</Nullable>`, so the annotation
-context is off *except* in files carrying an explicit `#nullable enable` — which, since #44, is
-every source file in `PrintLogApi/` outside `Migrations/`. **A new file must carry the header**;
-`NullableMigrationGuardrailTests` fails the build if one does not, because an oblivious file is
-invisible until #45 flips the project and turns all of its properties non-nullable at once.
+The migration (#46) is **done**. `PrintLogApi` is on `<Nullable>enable</Nullable>` with
+`<WarningsAsErrors>nullable</WarningsAsErrors>`, so a new nullable warning fails the build rather
+than accumulating. The per-file `#nullable enable` headers left over from #42–#44 are now
+redundant no-ops; a new file does not need one, and the guardrail tests that used to demand one
+are gone.
+
+One carve-out: `<WarningsNotAsErrors>CS8629</WarningsNotAsErrors>`. The 54 unguarded
+`Nullable<T>.Value` accesses are latent `InvalidOperationException`s, not annotation debt — fixing
+one means deciding what should happen when the value is absent, which is a runtime change. They
+stay visible as warnings and are tracked in #39. Delete the line when #39 lands, and **do not add
+to them**: a new CS8629 is invisible against a backdrop of 54.
 
 Annotations in `Models/` are load-bearing, not cosmetic:
 
@@ -93,7 +99,35 @@ costs a `= null!` each, which reintroduces exactly the idiom the paragraph above
 rule you can apply by reading one property into one that needs a call-site audit. It buys nothing
 today: no code dereferences those properties, and Swagger does not read nullability
 (`SupportNonNullableReferenceTypes` is off), so the published contract is identical either way.
-Revisit at #45, when NRT-aware schema generation is actually on the table.
+Still true after the flip: `SupportNonNullableReferenceTypes` remains off, so Swagger publishes the
+same contract either way. Revisit if NRT-aware schema generation is ever turned on.
+
+### Bound parameters and MVC's implicit `[Required]`
+
+With the annotation context on, MVC attaches an implicit `[Required(AllowEmptyStrings = true)]` to
+every non-nullable **reference** type it binds. A request that omits that value stops binding null
+and starts returning 400, and no compiler diagnostic says so. #41 suppressed this; #45 removed the
+suppression and adopted the behaviour.
+
+The exposure was in **action parameters**, not the DTOs — `[FromQuery] string searchText` and its
+kin, which bind null on every request that omits them. Seven such parameters are now `string?`
+(the four summary endpoints plus the two filament filters), threaded down through
+`IFilamentService`, `IPrinterMaintenanceService` and the two cache-key helpers.
+
+`ImplicitRequiredInferenceTests` is the permanent guard. It reflects over every action and fails
+with the offending member named. Read its comments before adding to it — it reports only what can
+*actually* bind null, which is a narrower set than "would get a `[Required]`":
+
+- A **complex type bound from the query** is always constructed by the binder, so `PagedRequest`,
+  `SortRequest<T>` and `AnalyticsFilter` are never null.
+- A **collection** binds empty, which satisfies `[Required]`. This is why
+  `PrinterMaintenanceService` reads `filterByPrinterIds.Length` unguarded.
+- A **property with an initializer** keeps it when the field is omitted (`AddFilamentDto.Colors =
+  new()`).
+- A **route value** is present or the route did not match, so it 404s before validation.
+
+Enumerating on the annotation alone flagged 90 members; 7 could take null. Do not annotate the
+other 83 nullable to quiet a diagnostic — that weakens declarations that are correct.
 
 ### Services, MCP tools and controllers
 
