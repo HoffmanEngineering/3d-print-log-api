@@ -150,7 +150,9 @@ namespace PrintLogApi.Services.Analytics
                 .Select(x => new
                 {
                     PrintId = x.p.Id,
-                    FilamentId = x.pf.FilamentId.Value,
+                    // Guarded by the Where above; same expression tree as the x.pf.Filament! on the
+                    // next line, so the same rule applies - ! only, or the translation changes.
+                    FilamentId = x.pf.FilamentId!.Value,
                     x.pf.Filament!.DisplayName,
                     x.pf.Filament.Brand,
                     x.pf.Filament.MaterialType,

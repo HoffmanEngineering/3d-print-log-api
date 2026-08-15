@@ -589,8 +589,8 @@ namespace PrintLogApi.Services
             }
 
             var filamentIdsToCheck = newPrint.FilamentUsage!
-                .Where(f => f.FilamentId.HasValue)
-                .Select(f => f.FilamentId.Value);
+                .Select(f => f.FilamentId)
+                .OfType<Guid>();
 
             if (!await _filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
             {
@@ -965,7 +965,10 @@ namespace PrintLogApi.Services
         {
             var materialIds = await _context.PrintFilament.AsNoTracking()
                 .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
-                .Select(pf => pf.FilamentId.Value)
+                // Guarded by the Where above. This is an EF expression tree translated to SQL and
+                // never dereferenced in process, so ! is the only permitted fix here - an OfType
+                // or pattern rewrite would change the translation.
+                .Select(pf => pf.FilamentId!.Value)
                 .Distinct()
                 .ToListAsync(ct);
 
@@ -1123,8 +1126,8 @@ namespace PrintLogApi.Services
             }
 
             var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage!
-                .Where(f => f.FilamentId.HasValue)
-                .Select(f => f.FilamentId.Value);
+                .Select(f => f.FilamentId)
+                .OfType<Guid>();
 
             if (!await _filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
             {
@@ -1557,8 +1560,10 @@ namespace PrintLogApi.Services
                     .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
                     .ToListAsync();
                 filteredGroupLookup = groups
+                    // Non-null by the Where; the group is still needed for the value selector, so
+                    // a Select+OfType unwrap here would discard FilteredPrintCount.
                     .Where(g => g.ProjectId.HasValue)
-                    .ToDictionary(g => g.ProjectId.Value, g => g.FilteredPrintCount);
+                    .ToDictionary(g => g.ProjectId!.Value, g => g.FilteredPrintCount);
             }
             else
             {
@@ -1723,9 +1728,11 @@ namespace PrintLogApi.Services
                     .AsNoTracking()
                     .ToListAsync();
                 projectPrintStats = printStatsRows
+                    // Non-null by the Where; the row is still needed for the value selector, so
+                    // a Select+OfType unwrap here would discard the three statistics.
                     .Where(r => r.ProjectId.HasValue)
                     .ToDictionary(
-                        r => r.ProjectId.Value,
+                        r => r.ProjectId!.Value,
                         r => (r.PrintCount, r.TotalPrintTime, r.TotalEstPrintTime));
 
                 var defaultImageRows = await _context.ProjectImages
@@ -1755,8 +1762,8 @@ namespace PrintLogApi.Services
                     .ToListAsync();
 
                 var uniqueFilamentIds = filamentUsageRows
-                    .Where(r => r.FilamentId.HasValue)
-                    .Select(r => r.FilamentId.Value)
+                    .Select(r => r.FilamentId)
+                    .OfType<Guid>()
                     .Distinct()
                     .ToList();
                 var filamentEntities = uniqueFilamentIds.Count > 0
@@ -1819,8 +1826,10 @@ namespace PrintLogApi.Services
                     pr => pr.Id,
                     pr => _mapper.Map<PrinterSummary>(pr));
                 projectPrinterLookup = printerMapRows
+                    // Non-null by the Where; the row is still needed inside the group projection
+                    // below, so a Select+OfType unwrap here would discard PrinterId.
                     .Where(r => r.ProjectId.HasValue)
-                    .GroupBy(r => r.ProjectId.Value)
+                    .GroupBy(r => r.ProjectId!.Value)
                     .ToDictionary(
                         g => g.Key,
                         g => g.Select(r =>
