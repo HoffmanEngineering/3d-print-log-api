@@ -63,8 +63,10 @@ namespace PrintLogApi
                 // deliberately when this line is deleted rather than discovered in production.
                 //
                 // This is a no-op today: the project is on Nullable=warnings, so the annotation
-                // context is off and MVC sees no nullability metadata to act on. It has to land
-                // BEFORE the annotations, not alongside them.
+                // context is off and MVC sees no nullability metadata to act on. Landing it ahead
+                // of the annotations rather than with them is a process choice, not a technical
+                // requirement -- it keeps those PRs reviewable as pure annotation diffs, and means
+                // they inherit the guardrail instead of having to remember it.
                 options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
             });
 
