@@ -861,13 +861,25 @@ namespace PrintLogApi.Services
                     // will already have been rejected as not_found. Fail closed here regardless.
                     throw McpToolException.NotFound("Material not found.");
                 }
-                if (row.Source.HasValue)
+                // Restated here rather than relied upon from PrintLogWriteTools.ValidateUsageRow:
+                // that runs in the tool layer, and this service is reachable without it. Without
+                // this, a half-populated pair reaches the dereferences below and throws
+                // InvalidOperationException instead of reporting invalid_arguments.
+                if (row.Source.HasValue != row.Amount.HasValue)
                 {
-                    RequireConvertible(row.Source.Value, row.Amount.Value, f);
+                    throw McpToolException.InvalidArguments("A material row's source and amount must be provided together.");
                 }
-                if (row.EstimatedSource.HasValue)
+                if (row.EstimatedSource.HasValue != row.EstimatedAmount.HasValue)
                 {
-                    RequireConvertible(row.EstimatedSource.Value, row.EstimatedAmount.Value, f);
+                    throw McpToolException.InvalidArguments("A material row's estimatedSource and estimatedAmount must be provided together.");
+                }
+                if (row.Source is { } source && row.Amount is { } amount)
+                {
+                    RequireConvertible(source, amount, f);
+                }
+                if (row.EstimatedSource is { } estimatedSource && row.EstimatedAmount is { } estimatedAmount)
+                {
+                    RequireConvertible(estimatedSource, estimatedAmount, f);
                 }
             }
         }
@@ -896,8 +908,15 @@ namespace PrintLogApi.Services
             double mg = source switch
             {
                 // amountInSourceUnit is mm here; GetAmountMgFromLength expects meters -> divide once.
+                // requiresDiameter is exactly `source == Length`, so the guard above already threw
+                // unless DiameterMm was present. Stated as a throwing fallback rather than a `when`
+                // clause: a `when` would fall through to the Weight arm below and convert
+                // millimetres as if they were grams, which is worse than failing.
                 McpMeasurementSource.Length => GetAmountMgFromLength(
-                    amountInSourceUnit / 1000.0, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
+                    amountInSourceUnit / 1000.0,
+                    f.DiameterMm ?? throw new InvalidOperationException(
+                        "A Length source reached conversion without a diameter; the guard above should have rejected it."),
+                    f.MaterialDensityGramPerCubicCm),
                 McpMeasurementSource.Volume => GetAmountMgFromVolume(
                     amountInSourceUnit, f.MaterialDensityGramPerCubicCm),
                 _ => Math.Round(amountInSourceUnit * 1000.0), // g -> mg

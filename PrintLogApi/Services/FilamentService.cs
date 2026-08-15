@@ -261,6 +261,13 @@ namespace PrintLogApi.Services
                 throw McpToolException.InvalidArguments("densityGramPerCubicCm is required.");
             }
 
+            // Captured here, before the Canonicalize() reassignment below resets what the compiler
+            // knows about `input`. Safe to read pre-canonicalisation: Canonicalize only trims string
+            // properties, so these three value types pass through its `with` untouched.
+            var source = input.Source.Value;
+            var density = input.DensityGramPerCubicCm.Value;
+            var initialAmount = input.InitialAmount.Value;
+
             // Canonicalize ONCE, before both hashing and persistence. Anything the fingerprint
             // normalizes away must also be normalized in what we store, or the hash asserts an
             // equivalence the database contradicts.
@@ -291,9 +298,7 @@ namespace PrintLogApi.Services
             }
 
             var category = await RequireCategory(input.MaterialCategoryNickname, input.DiameterMm, ct);
-            var source = input.Source.Value;
-            var density = input.DensityGramPerCubicCm.Value;
-            RequireRepresentableCapacity(source, input.InitialAmount.Value, density, input.DiameterMm);
+            RequireRepresentableCapacity(source, initialAmount, density, input.DiameterMm);
 
             var dto = new AddFilamentDto
             {
@@ -344,13 +349,13 @@ namespace PrintLogApi.Services
             switch (source)
             {
                 case McpMeasurementSource.Weight:
-                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
+                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(initialAmount, "initialAmount");
                     break;
                 case McpMeasurementSource.Length:
-                    dto.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
+                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
                     break;
                 case McpMeasurementSource.Volume:
-                    dto.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
+                    dto.InitialNominalVolumeMl = initialAmount; // ml
                     break;
             }
 
@@ -656,20 +661,22 @@ namespace PrintLogApi.Services
             }
 
             // --- Capacity. The source names the authoritative field; the fill derives the rest. ---
-            if (input.Source.HasValue)
+            // The && is not a weakening: the mismatch check earlier in this method has already
+            // rejected a request carrying one of the pair without the other, so Source non-null
+            // implies InitialAmount non-null here.
+            if (input.Source is { } source && input.InitialAmount is { } initialAmount)
             {
-                var source = input.Source.Value;
                 material.Source = (Filament.SourceMeasurement)(int)source;
                 switch (source)
                 {
                     case McpMeasurementSource.Weight:
-                        material.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
+                        material.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(initialAmount, "initialAmount");
                         break;
                     case McpMeasurementSource.Length:
-                        material.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
+                        material.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
                         break;
                     case McpMeasurementSource.Volume:
-                        material.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
+                        material.InitialNominalVolumeMl = initialAmount; // ml
                         break;
                 }
             }
