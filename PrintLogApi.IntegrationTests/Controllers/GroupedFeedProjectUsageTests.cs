@@ -52,26 +52,47 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 UpdatedDate = now,
             });
 
-            // Two usage rows on one print: one carries a filament id, one does not. Only the
-            // first may reach the lookup - the projection requires BOTH ProjectId and FilamentId.
-            db.Prints.Add(new Print
-            {
-                Title = "Grouped Feed Print",
-                StartDate = DateTimeOffset.UtcNow.AddDays(-1),
-                Status = Print.PrintStatus.Success,
-                ViewStatus = Print.PrintViewStatus.Public,
-                PrinterId = IntegrationTestSeeder.TestPrinterId,
-                ProjectId = ProjectId,
-                CreatedById = IntegrationTestSeeder.TestUserId,
-                CreatedDate = now,
-                UpdatedById = IntegrationTestSeeder.TestUserId,
-                UpdatedDate = now,
-                FilamentUsage = new List<PrintFilament>
+            // Two prints in the project, three usage rows between them, spanning two filaments -
+            // and one row with no filament id at all. The projection groups by project and sums
+            // per filament, so this is the smallest fixture that pins the grouping rather than
+            // just the happy path: a restructure that merged the two filaments, dropped one, or
+            // let the id-less row through would all show up here.
+            db.Prints.AddRange(
+                new Print
                 {
-                    new() { FilamentId = IntegrationTestSeeder.TestFilamentId1, Source = PrintFilament.SourceMeasurement.Weight, AmountMg = 25000 },
-                    new() { FilamentId = null, Source = PrintFilament.SourceMeasurement.Weight, AmountMg = 9000 },
+                    Title = "Grouped Feed Print A",
+                    StartDate = DateTimeOffset.UtcNow.AddDays(-2),
+                    Status = Print.PrintStatus.Success,
+                    ViewStatus = Print.PrintViewStatus.Public,
+                    PrinterId = IntegrationTestSeeder.TestPrinterId,
+                    ProjectId = ProjectId,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedDate = now,
+                    FilamentUsage = new List<PrintFilament>
+                    {
+                        new() { FilamentId = IntegrationTestSeeder.TestFilamentId1, Source = PrintFilament.SourceMeasurement.Weight, AmountMg = 25000 },
+                        new() { FilamentId = null, Source = PrintFilament.SourceMeasurement.Weight, AmountMg = 9000 },
+                    },
                 },
-            });
+                new Print
+                {
+                    Title = "Grouped Feed Print B",
+                    StartDate = DateTimeOffset.UtcNow.AddDays(-1),
+                    Status = Print.PrintStatus.Success,
+                    ViewStatus = Print.PrintViewStatus.Public,
+                    PrinterId = IntegrationTestSeeder.TestPrinterId,
+                    ProjectId = ProjectId,
+                    CreatedById = IntegrationTestSeeder.TestUserId,
+                    CreatedDate = now,
+                    UpdatedById = IntegrationTestSeeder.TestUserId,
+                    UpdatedDate = now,
+                    FilamentUsage = new List<PrintFilament>
+                    {
+                        new() { FilamentId = IntegrationTestSeeder.TestFilamentId2, Source = PrintFilament.SourceMeasurement.Weight, AmountMg = 7000 },
+                    },
+                });
 
             db.SaveChanges();
         }
@@ -89,25 +110,43 @@ namespace PrintLogApi.IntegrationTests.Controllers
         }
 
         [Fact]
-        public async Task GroupedFeed_ProjectUsage_CarriesTheRowWithBothIds()
+        public async Task GroupedFeed_ProjectUsage_GroupsBothFilamentsUnderTheProject()
         {
             var item = await GetProjectItem();
 
-            var usage = Assert.Single(item.FilamentUsage!);
-            Assert.Equal(IntegrationTestSeeder.TestFilamentId1, usage.Id);
-            Assert.Equal(25000, usage.AmountMg);
+            // Exactly two: the two filaments, aggregated across both prints. The third usage row
+            // has no filament id and must not appear - the projection requires BOTH ids.
+            var usage = item.FilamentUsage!.ToList();
+            Assert.Equal(2, usage.Count);
+            Assert.Equal(
+                new[] { IntegrationTestSeeder.TestFilamentId1, IntegrationTestSeeder.TestFilamentId2 }.OrderBy(g => g),
+                usage.Select(u => u.Id).OrderBy(g => g));
         }
 
         [Fact]
-        public async Task GroupedFeed_ProjectUsage_ResolvesTheFilamentEntity()
+        public async Task GroupedFeed_ProjectUsage_KeepsEachFilamentsAmountSeparate()
         {
             var item = await GetProjectItem();
 
-            // The lookup is keyed on the same unwrapped id, so a projection that lost or
-            // mismatched it would leave this null.
-            var usage = Assert.Single(item.FilamentUsage!);
-            Assert.NotNull(usage.Filament);
-            Assert.Equal(IntegrationTestSeeder.TestFilamentId1, usage.Filament!.Id);
+            // A restructure that grouped on the wrong key would merge these into one row, or
+            // attach the wrong total to each id.
+            var usage = item.FilamentUsage!.ToList();
+            Assert.Equal(25000, usage.Single(u => u.Id == IntegrationTestSeeder.TestFilamentId1).AmountMg);
+            Assert.Equal(7000, usage.Single(u => u.Id == IntegrationTestSeeder.TestFilamentId2).AmountMg);
+        }
+
+        [Fact]
+        public async Task GroupedFeed_ProjectUsage_ResolvesEachFilamentEntity()
+        {
+            var item = await GetProjectItem();
+
+            // The entity lookup is keyed on the same unwrapped id, so a projection that lost or
+            // mismatched it would leave these null or cross-wired.
+            foreach (var usage in item.FilamentUsage!)
+            {
+                Assert.NotNull(usage.Filament);
+                Assert.Equal(usage.Id, usage.Filament!.Id);
+            }
         }
     }
 }

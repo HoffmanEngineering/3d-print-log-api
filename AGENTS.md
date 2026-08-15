@@ -53,6 +53,18 @@ never by suppressing. Four were real bugs: the Length branch of the measurement 
 dereferenced `DiameterMm.Value` without the diameter check its Volume and Weight siblings had, so a
 length-measured resin or powder returned a 500 from `POST /api/Prints`.
 
+Two caller-visible changes came with that, beyond the four:
+
+- `RequireMcpConvertibleUsage` now rejects a half-populated `source`/`amount` pair itself. The check
+  existed only in `PrintLogWriteTools.ValidateUsageRow`, and `IPrintService` is reachable without
+  the tool layer — so a direct caller got an `InvalidOperationException` where it now gets
+  `invalid_arguments`.
+- `FilamentService`'s Length branch **clears** the derived fields when the material tracks no
+  diameter, matching its own Volume and Weight siblings. On an update path that removes a
+  previously-stored `InitialNominalWeightMg`/`VolumeMl` rather than leaving it stale.
+  `PrintService`'s siblings simply skip, so its Length branch does too. The asymmetry follows each
+  file's existing convention deliberately.
+
 Three rules came out of that sweep and still apply:
 
 - **Inside an EF expression tree the only permitted fix is `!`.** It is erased at compile time, so
