@@ -1784,14 +1784,19 @@ namespace PrintLogApi.Services
                     : new List<Filament>();
                 var filamentEntityLookup = filamentEntities.ToDictionary(f => f.Id);
                 projectFilamentUsageLookup = filamentUsageRows
-                    .Where(r => r.ProjectId.HasValue && r.FilamentId.HasValue)
-                    .GroupBy(r => r.ProjectId.Value)
+                    // Both ids are proved once, up front, so nothing below needs .Value. A Where
+                    // cannot do this job: it proves TWO members at a time, and flow analysis does
+                    // not carry either of them into the lambdas that follow.
+                    .SelectMany(r => r.ProjectId is { } projectId && r.FilamentId is { } filamentId
+                        ? new[] { (ProjectId: projectId, FilamentId: filamentId, r.TotalAmountMg) }
+                        : Array.Empty<(Guid ProjectId, Guid FilamentId, long TotalAmountMg)>())
+                    .GroupBy(r => r.ProjectId)
                     .ToDictionary(
                         g => g.Key,
                         g => g.Select(r => new PrintFilamentSummaryDto
                         {
-                            Id = r.FilamentId.Value,
-                            Filament = filamentEntityLookup.TryGetValue(r.FilamentId.Value, out var fil)
+                            Id = r.FilamentId,
+                            Filament = filamentEntityLookup.TryGetValue(r.FilamentId, out var fil)
                                 ? _mapper.Map<FilamentSummaryDto>(fil)
                                 : null,
                             AmountMg = (int?)r.TotalAmountMg,
