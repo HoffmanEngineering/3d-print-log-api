@@ -490,6 +490,7 @@ namespace PrintLogApi.Controllers
         [AllowAnonymous]
         [HttpGet("{printId}/image/{imageId}")]
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
+        [MediaEndpoint]
         public async Task<IActionResult> GetImage(long printId, int imageId)
         {
             // Optimized query: only load the specific image and minimal print data needed for authorization

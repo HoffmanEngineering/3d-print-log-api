@@ -36,6 +36,27 @@ namespace PrintLogApi.IntegrationTests.Controllers
             }
         }
 
+        /// <summary>
+        /// A factory where the general per-user budget is tiny but the media budget is roomy —
+        /// the shape of the production config, exaggerated so it can be exercised in a few calls.
+        /// </summary>
+        public sealed class LowGeneralHighMediaFactory : CustomWebApplicationFactory
+        {
+            public const int MediaLimit = 10;
+
+            protected override void ConfigureWebHost(IWebHostBuilder builder)
+            {
+                builder.ConfigureAppConfiguration((_, cfg) =>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    {
+                        ["Api:RateLimitPerMinute"] = Limit.ToString(),
+                        ["Api:AnonymousRateLimitPerMinute"] = Limit.ToString(),
+                        ["Api:MediaRateLimitPerMinute"] = MediaLimit.ToString(),
+                    }));
+                base.ConfigureWebHost(builder);
+            }
+        }
+
         /// <summary>A factory with a tiny anonymous budget and per-user limiting left off.</summary>
         public sealed class LowAnonymousLimitFactory : CustomWebApplicationFactory
         {
@@ -177,6 +198,66 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 var authenticated = await client.SendAsync(
                     Authenticated(IntegrationTestSeeder.TestUserOAuthId));
                 Assert.NotEqual(HttpStatusCode.TooManyRequests, authenticated.StatusCode);
+            }
+        }
+
+        /// <summary>
+        /// Image endpoints are fanned out by the browser: a gallery page of 100 prints requests 100
+        /// images in a burst, so they must not be counted against the same budget as the data calls
+        /// on that page. These tests pin both halves of that — the larger ceiling, and the separate
+        /// partition.
+        /// </summary>
+        public class MediaBudget : IClassFixture<LowGeneralHighMediaFactory>
+        {
+            private readonly LowGeneralHighMediaFactory _factory;
+
+            public MediaBudget(LowGeneralHighMediaFactory factory) => _factory = factory;
+
+            // Each test authenticates as its own user. Anonymous image requests would all share the
+            // one loopback media partition, and these two tests together spend more than the media
+            // budget holds.
+            private static HttpRequestMessage Image(string user)
+            {
+                var request = new HttpRequestMessage(
+                    HttpMethod.Get, $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/1");
+                request.Headers.Add(TestAuthHandler.TestUserIdHeader, user);
+                return request;
+            }
+
+            [Fact]
+            public async Task ImageRequests_GetTheLargerMediaBudget()
+            {
+                var client = _factory.CreateClient();
+                var user = AddUser(_factory, "auth0|rate-limit-media-exhaust");
+
+                // Well past the general budget: this is the burst that a single uncached gallery
+                // page produces, and it must survive.
+                for (var i = 0; i < LowGeneralHighMediaFactory.MediaLimit; i++)
+                {
+                    var response = await client.SendAsync(Image(user));
+                    Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
+                }
+
+                // The media budget is still a budget.
+                var exhausted = await client.SendAsync(Image(user));
+                Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+            }
+
+            [Fact]
+            public async Task ImageBurst_DoesNotSpendTheGeneralBudget()
+            {
+                var client = _factory.CreateClient();
+                var user = AddUser(_factory, "auth0|rate-limit-media-partition");
+
+                // A burst of images large enough to have blown the general budget several times.
+                for (var i = 0; i < Limit * 2; i++)
+                {
+                    await client.SendAsync(Image(user));
+                }
+
+                // The data calls on the same page are untouched, because media partitions apart.
+                var data = await client.SendAsync(Authenticated(user));
+                Assert.Equal(HttpStatusCode.OK, data.StatusCode);
             }
         }
 

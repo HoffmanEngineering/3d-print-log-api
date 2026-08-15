@@ -240,14 +240,25 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 {
                     var userId = httpContext.User.GetUserId();
 
+                    // Media endpoints get their own, much larger budget in their own partition.
+                    // A gallery page may hold up to 100 images, and on a cold cache the browser
+                    // requests all of them within a couple of seconds — so a handful of pages is
+                    // normal behaviour that would otherwise look exactly like a flood. Separate
+                    // partitions matter as much as the larger number: a burst of thumbnails must
+                    // not spend the budget the actual data calls on the same page need.
+                    var isMedia = httpContext.GetEndpoint()?.Metadata
+                        .GetMetadata<MediaEndpointAttribute>() is not null;
+
                     if (userId.HasValue)
                     {
-                        var authenticatedLimit = Configuration.GetValue("Api:RateLimitPerMinute", 300);
+                        var authenticatedLimit = isMedia
+                            ? Configuration.GetValue("Api:MediaRateLimitPerMinute", 1200)
+                            : Configuration.GetValue("Api:RateLimitPerMinute", 300);
 
                         return authenticatedLimit <= 0
                             ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-user-unlimited")
                             : System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                                partitionKey: $"api-user:{userId.Value}",
+                                partitionKey: isMedia ? $"api-user-media:{userId.Value}" : $"api-user:{userId.Value}",
                                 _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                                 {
                                     PermitLimit = authenticatedLimit,
@@ -256,7 +267,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                                 });
                     }
 
-                    var anonymousLimit = Configuration.GetValue("Api:AnonymousRateLimitPerMinute", 600);
+                    var anonymousLimit = isMedia
+                        ? Configuration.GetValue("Api:MediaRateLimitPerMinute", 1200)
+                        : Configuration.GetValue("Api:AnonymousRateLimitPerMinute", 600);
 
                     if (anonymousLimit <= 0)
                     {
@@ -272,7 +285,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
                     return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                        partitionKey: $"api-anon:{ip}",
+                        partitionKey: isMedia ? $"api-anon-media:{ip}" : $"api-anon:{ip}",
                         _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
                             PermitLimit = anonymousLimit,

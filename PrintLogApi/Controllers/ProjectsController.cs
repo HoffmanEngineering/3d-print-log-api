@@ -155,6 +155,7 @@ namespace PrintLogApi.Controllers
         [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [MediaEndpoint]
         public async Task<IActionResult> GetProjectImage(Guid id, int imageId)
         {
             var userId = User.GetUserId();
