@@ -218,14 +218,27 @@ a SQL connection failure message carries the server name and often the credentia
 
 ## Deployment
 
-Azure Pipelines deploys to Azure App Service (`3d-print-log-api-prod`) on main branch commits.
+Two GitHub Actions workflows, with different triggers:
 
-The pipeline has two stages:
+- **`.github/workflows/ci.yml`** — runs on every push to `main` and every PR targeting `main`.
+  Restore, build, test. It does not deploy.
+- **`.github/workflows/deploy.yml`** — runs **only on pushing a `v*` tag**. Merging to `main` does
+  not release; tag a commit to deploy it.
 
-1. **Build** — builds, tests, publishes the app, generates a SQL migration script artifact for review, and builds an `efbundle` for applying migrations.
-2. **Deploy** — waits for manual approval (email sent to csh.hoffman@gmail.com), then runs the `efbundle` against the production database before deploying the app.
+The deploy workflow has two jobs:
 
-The `migration-script` artifact is available in the pipeline run's Artifacts panel and should be reviewed before approving the deployment.
+1. **build** — builds, tests, publishes the app, generates a SQL migration script artifact for
+   review, and builds an `efbundle` for applying migrations.
+2. **deploy** — gated on the `production` GitHub Environment, so it waits for a required reviewer
+   to approve before running the `efbundle` against the production database and deploying to Azure
+   App Service. Reviewers are configured in *Settings → Environments → production*.
+
+The `migration-script` artifact is on the workflow run's summary page and should be reviewed before
+approving.
+
+Deployment reads three repository secrets: `AZURE_WEBAPP_NAME` and `AZURE_WEBAPP_PUBLISH_PROFILE`
+for the App Service target, and `DB_CONNECTION_STRING` for the migration bundle. The build job uses
+a separate `DB_CONNECTION_STRING_MIGRATIONS_READER` to determine the last applied migration.
 
 To generate a migration script manually (e.g. for emergency patching):
 ```bash
