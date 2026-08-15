@@ -974,9 +974,12 @@ namespace PrintLogApi.Services
             FilamentSummarySortColumn sortColumn,
             int pageNumber,
             int pageSize,
-            string searchText,
-            string filterByMaterialCategoryNickname,
-            string filterByStorageLocation,
+            // All three are optional filters the controller binds from the query string, so null
+            // is the normal "not filtering on this" case -- the guards below have always handled
+            // it. The annotation records that rather than changing it (#45).
+            string? searchText,
+            string? filterByMaterialCategoryNickname,
+            string? filterByStorageLocation,
             bool? includeInactive,
             bool? showFavoritesOnly,
             bool? showLoadedFilamentOnly,

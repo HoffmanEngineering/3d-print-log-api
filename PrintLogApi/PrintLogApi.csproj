@@ -2,11 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Step 1 of the nullable migration (see #46). "warnings" runs the compiler's flow
-         analysis while leaving annotations inert, so EF Core schema inference and MVC's
-         implicit [Required] are unaffected. Flipping this to "enable" is #45, and must not
-         happen before the entity (#42) and DTO (#43) work lands. -->
-    <Nullable>warnings</Nullable>
+    <!-- The nullable migration (#46) is complete. Every source file outside Migrations/ already
+         carried an explicit "#nullable enable" from #42-#44, so this flip turns the annotation
+         context on for the generated migrations too and makes the per-file headers redundant
+         rather than changing how the app itself compiles.
+
+         Verified at the flip: zero CS86xx warnings other than the CS8629 carve-out below, and
+         "dotnet ef migrations has-pending-model-changes" green, which is what proves EF Core's
+         schema inference did not move. -->
+    <Nullable>enable</Nullable>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <UserSecretsId>bfaad655-ddfb-44ba-954d-9a3c77613d90</UserSecretsId>
     <DockerfileRunEnvironmentFiles>3dprintlog.env</DockerfileRunEnvironmentFiles>
@@ -14,14 +18,24 @@
 
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- CS8632: "?" used outside a nullable annotations context. The 62 existing "T?"
-         annotations are correct and become meaningful when #45 flips Nullable to "enable"; until
-         then they are inert. Note this suppression is project-wide and ongoing, not a one-off:
-         it also silences the diagnostic on annotations added between now and #45, which is a real
-         (if small) loss of signal accepted to keep the build readable. Delete it as part of #45.
-         CS8629 is deliberately NOT suppressed: those 54 unguarded Nullable<T>.Value accesses
-         are real latent InvalidOperationExceptions, tracked in #39. -->
-    <NoWarn>$(NoWarn);1591;CS8632</NoWarn>
+    <!-- CS8632 ("?" outside a nullable annotations context) is gone from this list: the context is
+         now on project-wide, so the diagnostic can no longer fire and suppressing it would only
+         hide a future "#nullable disable". -->
+    <NoWarn>$(NoWarn);1591</NoWarn>
+
+    <!-- The ratchet. Without it the migration decays: a new nullable warning is one line in a
+         build log nobody reads, and the annotations stop meaning anything within a release or two. -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+
+    <!-- CS8629 (unguarded Nullable<T>.Value) is carved out of the ratchet rather than suppressed,
+         so the 54 existing occurrences stay visible as warnings while every OTHER nullable
+         diagnostic is an error from today.
+
+         They are real latent InvalidOperationExceptions, not annotation debt, and fixing one means
+         choosing what should happen when the value is absent, a runtime behaviour change, which
+         is exactly what #46 ruled out of the annotation PRs. They are tracked in #39; delete this
+         line when it lands. -->
+    <WarningsNotAsErrors>CS8629</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

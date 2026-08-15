@@ -98,7 +98,12 @@ namespace PrintLogApi.Controllers
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<PagedList<PrintSummaryDTO>>> GetPrintSummary(
             [FromQuery] PagedRequest pagingRequest,
-            [FromQuery, MaxLength(50)] string searchText,
+            // Optional filters: absent from the query string means null here today, and must keep
+            // meaning that rather than becoming an implicit [Required] 400 (#45). The nullable
+            // siblings further down already say the same thing with a `= null` default.
+            [FromQuery, MaxLength(50)] string? searchText,
+            // The collection filters stay non-nullable: the binder supplies an empty sequence when
+            // the query string omits them, and an implicit [Required] is satisfied by that.
             [FromQuery] IEnumerable<long> filterByPrinterIds,
             [FromQuery] SortRequest<PrintSummarySortColumn> sortRequest,
             [FromQuery] IEnumerable<Guid> filterByFilamentIds,
@@ -1119,7 +1124,7 @@ namespace PrintLogApi.Controllers
         /// Generates a unique cache key for print summary queries based on user and query parameters.
         /// </summary>
         private string GenerateCacheKey(long userId, long? currentUserId, string version,
-                                        PagedRequest pagingRequest, string searchText,
+                                        PagedRequest pagingRequest, string? searchText,
                                         IEnumerable<long> filterByPrinterIds,
                                         IEnumerable<Guid> filterByFilamentIds,
                                         SortRequest<PrintSummarySortColumn> sortRequest,

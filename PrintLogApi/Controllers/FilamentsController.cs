@@ -51,9 +51,12 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PagedList<FilamentSummaryDto>>> GetFilamentSummariesForUser(
             [FromQuery] PagedRequest pagingRequest,
             [FromQuery] SortRequest<FilamentSummarySortColumn> sortRequest,
-            [FromQuery] string searchText,
-            [FromQuery] string filterByMaterialCategoryNickname,
-            [FromQuery] string filterByStorageLocation,
+            // Nullable because that is what binding already produces: every one of these is
+            // optional, and a request that omits the query string binds null here today. Left
+            // non-nullable they would pick up MVC's implicit [Required] and 400 instead (#45).
+            [FromQuery] string? searchText,
+            [FromQuery] string? filterByMaterialCategoryNickname,
+            [FromQuery] string? filterByStorageLocation,
             [FromQuery] bool? includeInactive,
             [FromQuery] bool? showFavoritesOnly,
             [FromQuery] bool? showLoadedFilamentOnly,
