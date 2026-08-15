@@ -224,6 +224,62 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                             Window = TimeSpan.FromMinutes(1),
                             QueueLimit = 0,
                         }));
+
+                // Per-caller rate limiting for the REST controllers. Two separate budgets, because
+                // the two populations behave nothing alike:
+                //
+                //  - Authenticated callers partition on the internal user id, which is exact. This
+                //    is the budget that bounds a runaway slicer plugin or agent loop.
+                //  - Anonymous callers partition on the remote IP. This is the budget that bounds
+                //    API-key guessing: an invalid key is rejected by ApiKeyMiddleware before any
+                //    NameIdentifier is attached, so a brute-force attempt lands here, not above.
+                //
+                // Either budget is disabled by configuring it to 0 or less, which is how the
+                // integration suite opts out (see appsettings.IntegrationTesting.json).
+                options.AddPolicy("api", httpContext =>
+                {
+                    var userId = httpContext.User.GetUserId();
+
+                    if (userId.HasValue)
+                    {
+                        var authenticatedLimit = Configuration.GetValue("Api:RateLimitPerMinute", 300);
+
+                        return authenticatedLimit <= 0
+                            ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-user-unlimited")
+                            : System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                                partitionKey: $"api-user:{userId.Value}",
+                                _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                                {
+                                    PermitLimit = authenticatedLimit,
+                                    Window = TimeSpan.FromMinutes(1),
+                                    QueueLimit = 0,
+                                });
+                    }
+
+                    var anonymousLimit = Configuration.GetValue("Api:AnonymousRateLimitPerMinute", 600);
+
+                    if (anonymousLimit <= 0)
+                    {
+                        return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-anon-unlimited");
+                    }
+
+                    // NOTE: this is the socket peer, not necessarily the browser. Nothing in the
+                    // pipeline calls UseForwardedHeaders, so if the App Service front end terminates
+                    // the connection every anonymous caller collapses into one shared bucket. The
+                    // default is set high enough that a shared bucket still clears normal public
+                    // traffic; tune Api:AnonymousRateLimitPerMinute (or set it to 0) rather than
+                    // trusting a client-supplied X-Forwarded-For, which a brute-forcer would rotate.
+                    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                    return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: $"api-anon:{ip}",
+                        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = anonymousLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        });
+                });
             });
         }
 
@@ -483,7 +539,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapControllers();
+                endpoints.MapControllers().RequireRateLimiting("api");
 
                 // MCP endpoint (Streamable HTTP, stateless). The endpoint-level "Mcp" policy
                 // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
