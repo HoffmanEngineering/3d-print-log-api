@@ -230,9 +230,13 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 //
                 //  - Authenticated callers partition on the internal user id, which is exact. This
                 //    is the budget that bounds a runaway slicer plugin or agent loop.
-                //  - Anonymous callers partition on the remote IP. This is the budget that bounds
-                //    API-key guessing: an invalid key is rejected by ApiKeyMiddleware before any
-                //    NameIdentifier is attached, so a brute-force attempt lands here, not above.
+                //  - Anonymous callers partition on the remote IP. This bounds unauthenticated
+                //    traffic to the public endpoints.
+                //
+                // Note what this policy does NOT cover: a request bearing an invalid API key never
+                // reaches it. ApiKeyMiddleware short-circuits with a 401 and this middleware runs
+                // later in the pipeline, so key guessing is throttled by that middleware's own
+                // per-address failed-attempt guard (Api:InvalidApiKeyAttemptsPerMinute).
                 //
                 // Either budget is disabled by configuring it to 0 or less, which is how the
                 // integration suite opts out (see appsettings.IntegrationTesting.json).

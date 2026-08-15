@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -52,6 +54,22 @@ namespace PrintLogApi.IntegrationTests.Controllers
                         ["Api:RateLimitPerMinute"] = Limit.ToString(),
                         ["Api:AnonymousRateLimitPerMinute"] = Limit.ToString(),
                         ["Api:MediaRateLimitPerMinute"] = MediaLimit.ToString(),
+                    }));
+                base.ConfigureWebHost(builder);
+            }
+        }
+
+        /// <summary>A factory with a tiny allowance for rejected API keys.</summary>
+        public sealed class LowInvalidKeyLimitFactory : CustomWebApplicationFactory
+        {
+            public const int AttemptLimit = 3;
+
+            protected override void ConfigureWebHost(IWebHostBuilder builder)
+            {
+                builder.ConfigureAppConfiguration((_, cfg) =>
+                    cfg.AddInMemoryCollection(new Dictionary<string, string>
+                    {
+                        ["Api:InvalidApiKeyAttemptsPerMinute"] = AttemptLimit.ToString(),
                     }));
                 base.ConfigureWebHost(builder);
             }
@@ -143,10 +161,11 @@ namespace PrintLogApi.IntegrationTests.Controllers
                     await client.SendAsync(Authenticated(spender));
                 }
 
-                // A different subject still has a full budget. Any non-429 proves the partition
-                // held; the endpoint's own status code is beside the point here.
+                // A different subject still has a full budget. Assert success rather than merely
+                // "not 429" — a 401 or 404 would satisfy the weaker check without the partition
+                // having held at all.
                 var other = await client.SendAsync(Authenticated(otherUserOAuthId));
-                Assert.NotEqual(HttpStatusCode.TooManyRequests, other.StatusCode);
+                Assert.Equal(HttpStatusCode.OK, other.StatusCode);
             }
         }
 
@@ -244,6 +263,28 @@ namespace PrintLogApi.IntegrationTests.Controllers
             }
 
             [Fact]
+            public async Task ProjectImages_AlsoGetTheMediaBudget()
+            {
+                var client = _factory.CreateClient();
+                var user = AddUser(_factory, "auth0|rate-limit-project-media");
+
+                // The project image endpoint carries [MediaEndpoint] too. It is a separate action
+                // on a separate controller, so the annotation has to be verified separately —
+                // covering only the print image endpoint would not catch a missing one here. The
+                // project id need not exist: routing and the limiter both run before the handler,
+                // so a 404 still proves which budget was charged.
+                for (var i = 0; i < Limit * 2; i++)
+                {
+                    var request = new HttpRequestMessage(
+                        HttpMethod.Get, $"/api/Projects/{System.Guid.NewGuid()}/images/1");
+                    request.Headers.Add(TestAuthHandler.TestUserIdHeader, user);
+
+                    var response = await client.SendAsync(request);
+                    Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
+                }
+            }
+
+            [Fact]
             public async Task ImageBurst_DoesNotSpendTheGeneralBudget()
             {
                 var client = _factory.CreateClient();
@@ -258,6 +299,69 @@ namespace PrintLogApi.IntegrationTests.Controllers
                 // The data calls on the same page are untouched, because media partitions apart.
                 var data = await client.SendAsync(Authenticated(user));
                 Assert.Equal(HttpStatusCode.OK, data.StatusCode);
+            }
+        }
+
+        /// <summary>
+        /// A rejected API key never reaches the "api" policy — ApiKeyMiddleware short-circuits with
+        /// a 401 long before UseRateLimiter — so key guessing is throttled by that middleware's own
+        /// per-address guard. Without it, every guess reaches the database lookup for free.
+        /// </summary>
+        public class InvalidApiKeyThrottling : IClassFixture<LowInvalidKeyLimitFactory>
+        {
+            private readonly LowInvalidKeyLimitFactory _factory;
+
+            public InvalidApiKeyThrottling(LowInvalidKeyLimitFactory factory) => _factory = factory;
+
+            private static HttpRequestMessage WithKey(string key)
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+                request.Headers.Add("X-Api-Key", key);
+                return request;
+            }
+
+            [Fact]
+            public async Task RepeatedInvalidKeys_AreEventuallyThrottled()
+            {
+                var client = _factory.CreateClient();
+
+                var responses = new List<HttpResponseMessage>();
+                for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 1; i++)
+                {
+                    responses.Add(await client.SendAsync(WithKey("INVALIDKEY00000000000000000000000")));
+                }
+
+                // Rejections up to the allowance still read as ordinary auth failures.
+                Assert.All(
+                    responses.Take(LowInvalidKeyLimitFactory.AttemptLimit),
+                    r => Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode));
+
+                var throttled = responses[LowInvalidKeyLimitFactory.AttemptLimit];
+                Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
+                Assert.NotNull(throttled.Headers.RetryAfter);
+            }
+
+            [Fact]
+            public async Task ValidKeys_DoNotAccumulateAgainstTheAllowance()
+            {
+                var client = _factory.CreateClient();
+
+                // Mint a real key, then use it well past the failed-attempt allowance. Only
+                // rejections count, so a busy legitimate integration must never be throttled.
+                var create = new HttpRequestMessage(HttpMethod.Post, "/api/UserApiKeys");
+                create.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+                create.Content = JsonContent.Create(new { Description = "Rate limit allowance test" });
+                var created = await client.SendAsync(create);
+                Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+
+                var publicKey = (await created.Content.ReadFromJsonAsync<JsonElement>())
+                    .GetProperty("publicKey").GetString();
+
+                for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 3; i++)
+                {
+                    var response = await client.SendAsync(WithKey(publicKey));
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                }
             }
         }
 
@@ -281,7 +385,10 @@ namespace PrintLogApi.IntegrationTests.Controllers
                         "/api/Subscription/webhook",
                         new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
 
-                    Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
+                    // Assert the exact status the unsigned payload should produce, not just
+                    // "not 429": the endpoint 404ing or 500ing would pass a NotEqual check while
+                    // proving nothing about the exemption.
+                    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
                 }
             }
         }
