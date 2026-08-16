@@ -18,11 +18,13 @@
          same executable, and there is no external VSTest host to attach a datacollector to. -->
     <OutputType>Exe</OutputType>
 
-    <!-- Makes `dotnet test` drive the executable through MTP's protocol instead of handing the
-         assembly to VSTest. The repo-root dotnet.config selects the same runner for the whole
-         repo; this property is the per-project half, and both are set so that neither a stray
-         `dotnet test PrintLogApi.IntegrationTests.csproj` from another directory nor a future
-         second test project can silently fall back to VSTest. -->
+    <!-- Opts this project into MTP's `dotnet test` integration. Its partner is the
+         "test": { "runner": "Microsoft.Testing.Platform" } key in the repo-root global.json, which
+         makes the same choice for every project at once; this is the per-project half.
+
+         An earlier revision of this comment pointed at a root dotnet.config instead. That file was
+         written, tested, and deleted: the [dotnet.test.runner] section the preview documentation
+         describes is not read by the 10.0.1xx SDK band, and `dotnet test -h` names global.json. -->
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 

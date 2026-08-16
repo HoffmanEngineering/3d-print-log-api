@@ -336,6 +336,10 @@ three are VSTest components. Three facts follow, and each is a trap:
 - **Platform options go after a `--`.** `--coverage`, `--filter-class`, `--filter-method` and the
   rest belong to the executable, not the CLI. CI's
   `dotnet test --no-build --configuration Release --verbosity normal` is unchanged and still works.
+- **A run that executes zero tests exits 8, not 0.** Verified by running a filter that matches
+  nothing. This is strictly better than what VSTest did, and it is the property that makes the
+  runner-selection trap above survivable: a misconfiguration cannot present as a green CI run that
+  tested nothing. Do not add anything that swallows the test step's exit code.
 - **The test project's `Properties/launchSettings.json` is gone, and must not come back.**
   `dotnet test` now *launches* the project, so it applied that file's launch profile — which was
   Web SDK scaffolding nobody had looked at, and set `ASPNETCORE_ENVIRONMENT=Development` plus an
