@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services;
+﻿namespace PrintLogApi.Services;
 
 /// <summary>
 /// A write-only pass-through that records how many bytes reached the wrapped stream.
