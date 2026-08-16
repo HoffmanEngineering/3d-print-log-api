@@ -67,8 +67,9 @@ public class AnalyticsController(
 
         filter ??= new AnalyticsFilter();
         // The injected clock, not the parameterless overload: Normalize()'s clamp ceiling
-        // becomes part of the cache key below, so a test running on a fake clock would
+        // becomes part of the cache key below, so a test running on a substituted clock would
         // otherwise key its entries off the real wall clock and stop being reproducible.
+        // PinnedClockAnalyticsTests.Controller_Clamps... fails if this reverts.
         filter.Normalize(timeProvider.GetUtcNow());
 
         var errors = filter.Validate();

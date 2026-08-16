@@ -31,23 +31,30 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
 
     public async Task<OverviewResponse> GetOverview(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per aggregate would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
+
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
         var granularity = filter.ResolveGranularity();
 
-        var current = await Aggregate(userId, filter, filter.FromDate, filter.ToDate, zone, granularity, ct);
+        var current = await Aggregate(
+            userId, filter, filter.FromDate, filter.ToDate, zone, granularity, now, ct);
 
         // PreviousWindow, not TimeBucketer.PreviousWindow: the latter subtracts a UTC span,
         // which lands an hour off local midnight whenever the range crosses a DST boundary.
         // The other five tabs use this helper, and one screen must not show the same delta
         // computed two ways.
         AggregateResult? previous = null;
-        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is not null)
         {
             previous = await Aggregate(
                 userId, previousFilter, previousFilter.FromDate, previousFilter.ToDate,
-                zone, granularity, ct);
+                zone, granularity, now, ct);
         }
 
         return new OverviewResponse(
@@ -79,7 +86,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
     private async Task<AggregateResult> Aggregate(
         long userId, AnalyticsFilter filter,
         DateTimeOffset? from, DateTimeOffset? to,
-        TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
+        TimeZoneInfo zone, AnalyticsGranularity granularity, DateTimeOffset now, CancellationToken ct)
     {
         var hasRange = from.HasValue && to.HasValue;
         var scoped = AnalyticsQueryScope.Scope(
@@ -108,7 +115,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
         var (series, seriesTruncated) = await BuildSeries(
-            scoped, counts, from, to, zone, granularity, timeProvider.GetUtcNow(), ct);
+            scoped, counts, from, to, zone, granularity, now, ct);
         var (cost, costExclusions, currency, priciest) = await ComputeCost(userId, scoped, ct);
         var highlights = await BuildHighlights(scoped, userId, priciest, ct);
 

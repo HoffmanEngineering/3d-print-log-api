@@ -27,12 +27,18 @@ public sealed class CostAnalyticsService(PrintLogContext context, TimeProvider t
 
     public async Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
-        var current = await Compute(userId, filter, ct);
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per computation would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
 
-        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
+        var current = await Compute(userId, filter, now, ct);
+
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, ct);
+        var previous = await Compute(userId, previousFilter, now, ct);
 
         // Only the SCALAR tiles carry a delta. A bucket-by-bucket delta on a series is a
         // different chart, not a delta, and the spec asks for tile deltas.
@@ -46,13 +52,14 @@ public sealed class CostAnalyticsService(PrintLogContext context, TimeProvider t
         };
     }
 
-    private async Task<CostsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+    /// <param name="now">
+    /// The caller's single clock read. A filter with no ToDate means "up to now", so this is
+    /// what closes the window — it is a parameter rather than a field read so that the two
+    /// computations behind one response cannot disagree about when "now" was.
+    /// </param>
+    private async Task<CostsResponse> Compute(
+        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
     {
-        // One clock read per computation. A filter with no ToDate means "up to now", and
-        // reading the clock separately in each helper that closes that window lets two of
-        // them disagree by the width of a query.
-        var now = timeProvider.GetUtcNow();
-
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
         var granularity = filter.ResolveGranularity();

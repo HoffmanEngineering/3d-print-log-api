@@ -75,12 +75,18 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
 
     public async Task<MaterialsResponse> GetMaterials(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
-        var current = await Compute(userId, filter, ct);
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per computation would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
 
-        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
+        var current = await Compute(userId, filter, now, ct);
+
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, ct);
+        var previous = await Compute(userId, previousFilter, now, ct);
 
         // The two waste figures are this tab's scalar tiles. Burn rate and runway are
         // deliberately excluded: both already describe a trailing window, so a delta against
@@ -98,13 +104,18 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
         };
     }
 
-    private async Task<MaterialsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+    /// <param name="now">
+    /// The caller's single clock read. A filter with no ToDate means "up to now", so this is
+    /// what closes the window — it is a parameter rather than a field read so that the two
+    /// computations behind one response cannot disagree about when "now" was.
+    /// </param>
+    private async Task<MaterialsResponse> Compute(
+        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
     {
-        // One clock read per computation. A filter with no ToDate means "up to now", and the
-        // burn-rate window Runway measures is anchored to the same instant the series ends
-        // at — reading the clock twice lets a spool's runway be computed against a window the
-        // chart beside it does not show.
-        var now = timeProvider.GetUtcNow();
+        // `now` is the caller's single clock read (see the entry point above). The burn-rate
+        // window Runway measures is anchored to the same instant the series ends at, so a
+        // second read here could give a spool a runway computed against a window the chart
+        // beside it does not show.
 
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;

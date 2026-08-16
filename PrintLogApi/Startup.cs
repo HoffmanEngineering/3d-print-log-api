@@ -186,7 +186,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // to construct its fixture relative to the real current date can only assert what is
         // true on most days — a streak that lapses at a month boundary, or a burn rate whose
         // trailing window straddles one, is not expressible at all. Singleton because
-        // TimeProvider.System is stateless; tests substitute a FakeTimeProvider.
+        // TimeProvider.System is stateless; the integration suite REPLACES this registration
+        // with a SettableTimeProvider (see PinnedClockDataFactory) rather than adding a second
+        // one, so this stays the single source of "now" for the whole app.
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
         services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();

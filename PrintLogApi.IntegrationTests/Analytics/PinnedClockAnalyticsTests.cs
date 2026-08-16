@@ -12,14 +12,14 @@ namespace PrintLogApi.IntegrationTests.Analytics;
 /// answer and the only way to supply it was to be running on the right day.
 ///
 /// These tests move the CLOCK and leave the fixture alone, which is the point: the rows are
-/// identical in all three assertions below and only "now" differs, so a failure can only be a
+/// identical at every instant probed below and only "now" differs, so a failure can only be a
 /// date-math change. Constructing an equivalent fixture relative to the real today would prove
 /// the same arithmetic against data that also moved.
 /// </summary>
 /// <remarks>
 /// The fixture's clock is mutable shared state, so these tests must not interleave. They
 /// cannot: xunit parallelizes across test COLLECTIONS, and a class with no explicit collection
-/// is its own — the two facts below run one after the other. Keep it that way; adding a
+/// is its own — the facts below run one after another. Keep it that way; adding a
 /// [Collection] shared with another class would break the isolation silently.
 /// </remarks>
 public class PinnedClockAnalyticsTests : IClassFixture<PinnedClockDataFactory>
@@ -111,5 +111,50 @@ public class PinnedClockAnalyticsTests : IClassFixture<PinnedClockDataFactory>
         // 30 days becomes 75.
         Assert.Equal(30.0, before.RunwayDays!.Value, 6);
         Assert.Equal(75.0, after.RunwayDays!.Value, 6);
+    }
+
+    /// <summary>
+    /// The two tests above call the service directly and normalize the filter themselves, so
+    /// neither would notice the CONTROLLER going back to ambient time. This one goes over
+    /// HTTP and pins the one thing the controller's own clock read decides: the ceiling
+    /// <c>Normalize</c> clamps a future <c>toDate</c> to, which is also what lands in the
+    /// cache key.
+    ///
+    /// It is decisive rather than merely consistent. The requested <c>toDate</c> is AFTER the
+    /// pinned clock but BEFORE the real one, so an ambient-clock controller would not clamp it
+    /// at all and would echo the requested date straight back.
+    /// </summary>
+    [Fact]
+    public async Task Controller_ClampsAFutureToDateAgainstTheInjectedClock_NotTheWallClock()
+    {
+        var pinned = PinnedClockDataFactory.Pinned;
+        _factory.Clock.SetUtcNow(pinned);
+
+        var from = pinned.AddDays(-30);
+        var requestedTo = pinned.AddDays(10);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(
+            TestAuthHandler.TestUserIdHeader, PinnedClockDataFactory.PinnedUserOAuthId);
+
+        var response = await client.GetAsync(
+            "/api/Analytics/activity"
+            + $"?fromDate={Uri.EscapeDataString(from.ToString("O"))}"
+            + $"&toDate={Uri.EscapeDataString(requestedTo.ToString("O"))}"
+            + "&timeZone=UTC");
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<ActivityResponse>();
+        Assert.NotNull(body);
+
+        // ClampCeiling rounds UP to the next whole UTC hour, so a midday pinned clock gives
+        // 13:00. Asserted through the public helper rather than as a literal so the two cannot
+        // drift apart, and against a literal too so a change to the helper is not silently
+        // absorbed by both sides of the assertion.
+        Assert.Equal(AnalyticsFilter.ClampCeiling(pinned), body.To);
+        Assert.Equal(new DateTimeOffset(2025, 6, 18, 13, 0, 0, TimeSpan.Zero), body.To);
+
+        // And it is genuinely a clamp, not a passthrough that happens to match.
+        Assert.NotEqual(requestedTo, body.To);
     }
 }

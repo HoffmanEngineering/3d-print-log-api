@@ -163,13 +163,20 @@ response-size metric, so no byte count is distorted.
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
-`Services/Analytics/` takes `TimeProvider` by injection and reads it exactly **once per
-computation**, threading the resulting `DateTimeOffset` into the private helpers rather than letting
-each read the clock for itself. That is not tidiness: a filter with no `ToDate` means "up to now",
-several helpers close that window independently, and two reads a query apart could disagree — a
-runway computed against a window the chart beside it does not show. `AnalyticsController` passes the
-same injected clock to `AnalyticsFilter.Normalize(now)`, because the clamp ceiling that call
-produces becomes part of the cache key.
+`Services/Analytics/` takes `TimeProvider` by injection and reads it exactly **once per request**,
+at the public entry point, threading the resulting `DateTimeOffset` down through `Compute` /
+`Aggregate` into the private helpers rather than letting each read the clock for itself.
+
+That is not tidiness. A filter with no `ToDate` means "up to now"; several helpers close that
+window independently, and a `ComparePrevious` request computes two windows, so a per-helper read
+lets one response measure its two halves against two different instants — a runway computed against
+a window the chart beside it does not show. Keep new code to the same rule: `now` is a parameter
+below the entry point, never a fresh `timeProvider.GetUtcNow()`.
+
+`AnalyticsController` passes the same injected clock to `AnalyticsFilter.Normalize(now)`, because
+the clamp ceiling that call produces becomes part of the cache key.
+`PinnedClockAnalyticsTests.Controller_ClampsAFutureToDateAgainstTheInjectedClock_NotTheWallClock`
+fails if that reverts to the parameterless overload — it was checked by reverting it.
 
 `PreviousWindow.For` takes a `now` it barely uses; the comment there explains why it is threaded
 anyway. Do not "simplify" it back to a parameterless `Normalize()`.
