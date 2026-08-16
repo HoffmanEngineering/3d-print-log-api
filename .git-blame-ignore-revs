@@ -17,6 +17,15 @@
 # exists for — but neither is whitespace, so do not let the looser bar in and then apply it to a
 # commit that genuinely wrote something.
 #
+# The fourth entry stretches it once more, and this is as far as it goes. A primary-constructor
+# conversion re-spells the *references* too — `_context` becomes `context` on every line that used
+# it — so lines deep inside method bodies change, which none of the first three do. It qualifies on
+# one condition, and only this condition: the rename is total and mechanical. Every occurrence of
+# one identifier within one class is rewritten, the identifier still denotes the same object, and
+# nothing else on the line moves. A commit that renames some occurrences, or renames a thing into a
+# different thing, has written code and does not belong here no matter how mechanical it looked.
+# The dependency removals that sweep uncovered are a separate commit for exactly that reason.
+#
 # This is also why the encoding work is three commits rather than one: the commit that *wrote*
 # .gitattributes and .editorconfig is deliberately kept out of the two sweeps, so ignoring the
 # sweeps does not also hide the authorship of the policy itself.
@@ -41,3 +50,10 @@ c2e4180fa37b3f4490ca67b434564b69e556a1be
 # `namespace` line and de-indents the whole body, and deleted the usings made redundant by
 # <ImplicitUsings>enable</ImplicitUsings>. Produced by `dotnet format`; nothing else changed.
 a387d199edf291dc83c30844166b31d1ed1db2d3
+
+# refactor: adopt primary constructors for DI-only constructors
+# 47 files. Moved each DI-only constructor into the class declaration and dropped the `_` prefix
+# from the captured parameters, which rewrites every reference to them. Purely mechanical: the one
+# judgement call the sweep surfaced -- nine injected dependencies nothing read -- is 22780c2, which
+# is deliberately not listed here.
+0cb202821ec748ebbe76dd73361ab15c2b6e697e
