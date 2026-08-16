@@ -35,10 +35,21 @@ jobs:
           name: app
           path: ./publish
 
+      # Restores dotnet-ef from dotnet-tools.json, which pins it to the same version as the EF Core
+      # packages. This step previously ran `dotnet tool install --global dotnet-ef`, which ignores
+      # that pin and installs whatever is newest.
+      #
+      # That mattered more here than anywhere else in the repo: the tool restored by this job
+      # generates the migration script a reviewer approves AND the efbundle that is executed against
+      # the production database. A dotnet-ef newer than the app's EF Core version is exactly the
+      # drift the manifest exists to prevent, in the one place where the blast radius is production
+      # data. ci.yml already did this correctly; the release path did not.
+      - name: Restore tools
+        run: dotnet tool restore
+
       - name: Generate migration SQL script
         run: |
-          dotnet tool install --global dotnet-ef
-          MIGRATIONS_JSON=$(dotnet ef migrations list --project PrintLogApi \
+          MIGRATIONS_JSON=$(dotnet tool run dotnet-ef migrations list --project PrintLogApi \
             --connection "$DB_CONNECTION_STRING_MIGRATIONS_READER" \
             --json --no-build --configuration Release 2>&1) || true
           echo "Raw migrations output: $MIGRATIONS_JSON"
@@ -51,7 +62,7 @@ jobs:
             echo "ERROR: Could not determine last applied migration" >&2
             exit 1
           fi
-          dotnet ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
+          dotnet tool run dotnet-ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
             --output migrations.sql --idempotent --no-build --configuration Release
         env:
           DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
@@ -65,7 +76,7 @@ jobs:
       - name: Build migrations bundle
         run: |
           dotnet restore PrintLogApi/PrintLogApi.csproj --runtime linux-x64
-          dotnet ef migrations bundle --project PrintLogApi --runtime linux-x64 \
+          dotnet tool run dotnet-ef migrations bundle --project PrintLogApi --runtime linux-x64 \
             --output ./efbundle
 
       - name: Upload migrations bundle artifact
