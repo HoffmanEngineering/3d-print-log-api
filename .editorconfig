@@ -1,4 +1,12 @@
 # To learn more about .editorconfig see https://aka.ms/editorconfigdocs
+
+# Stops the search here. Without this, EditorConfig keeps walking up parent directories looking for
+# more .editorconfig files, so the effective settings depend on where the repo happens to be cloned
+# — an .editorconfig in a parent folder would silently apply here, and CI (which checks out under
+# /home/runner/work) would resolve differently from a developer's machine. That desync would show up
+# as an unreproducible CI formatting failure.
+root = true
+
 ###############################
 # Core EditorConfig Options   #
 ###############################
@@ -24,6 +32,17 @@ charset = utf-8
 [*.{md,json,sql}]
 end_of_line = lf
 charset = utf-8
+
+# Project and Windows-tooling files. These mirror .gitattributes so the two layers cannot disagree,
+# but note the enforcement is editor-only: `dotnet format` reads the C#/VB compilation, so it never
+# sees these files and the CI gate cannot catch drift in them. .gitattributes is what actually holds
+# their line endings.
+[*.{csproj,vbproj,props,targets,config,resx,sln}]
+end_of_line = crlf
+charset = utf-8-bom
+
+[*.{ps1,psm1}]
+end_of_line = crlf
 ###############################
 # .NET Coding Conventions     #
 ###############################
