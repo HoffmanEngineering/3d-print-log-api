@@ -28,7 +28,9 @@ namespace PrintLogApi
 
         public DbSet<PrintComment> PrintComments { get; set; }
 
-        public DbSet<File> Files { get; set; }
+        // Qualified because ImplicitUsings brings System.IO into scope, which makes a bare "File"
+        // ambiguous with System.IO.File. Matches how PrintImageService already spells it.
+        public DbSet<Models.File> Files { get; set; }
 
         public DbSet<Filament> Filaments { get; set; }
 
