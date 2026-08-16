@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Installs exactly the SDK global.json asks for, so the root global.json is the single source
       # of truth rather than something CI can disagree with. This matters for the format gate below:
