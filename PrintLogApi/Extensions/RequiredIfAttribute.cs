@@ -1,7 +1,7 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System;
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
-using System;
 
 namespace PrintLogApi.Extensions
 {

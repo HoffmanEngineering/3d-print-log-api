@@ -1,8 +1,8 @@
-﻿using PrintLogApi.Models.DTOs.Comments;
+﻿using System;
+using System.Collections.Generic;
+using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.DTOs.User;
-using System;
-using System.Collections.Generic;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print

@@ -1,8 +1,8 @@
-﻿using AutoMapper;
+﻿using System;
+using System.Linq;
+using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
-using System;
-using System.Linq;
 
 namespace PrintLogApi.Profiles
 {

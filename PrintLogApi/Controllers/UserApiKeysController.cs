@@ -6,10 +6,10 @@ using AutoMapper;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using PrintLogApi.Services;
-using PrintLogApi.Extensions;
-using PrintLogApi.Exceptions;
 
 namespace PrintLogApi.Controllers
 {

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
@@ -11,13 +12,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
-using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using PrintLogApi.Users;
-using System.Globalization;
 
 namespace PrintLogApi.Controllers
 {

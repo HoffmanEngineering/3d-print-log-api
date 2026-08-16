@@ -1,7 +1,7 @@
 ﻿using AutoMapper;
-using PrintLogApi.Models.DTOs.Materials;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.MaterialCategory;
+using PrintLogApi.Models.DTOs.Materials;
 
 namespace PrintLogApi.Profiles
 {

@@ -7,9 +7,9 @@ using AutoMapper.QueryableExtensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
-using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
