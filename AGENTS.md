@@ -29,14 +29,14 @@ invalidate, or callers keep reading stale summaries.
 ### Output caching was evaluated and declined (#66)
 
 `AddOutputCache` is deliberately **not** in the pipeline. It was proposed to skip the JSON
-serialization that every `IMemoryCache` *hit* still pays, and it was measured rather than argued
+serialization that every `IMemoryCache` _hit_ still pays, and it was measured rather than argued
 about. Do not add it back without new numbers.
 
 The reason it loses is that response compression, added in the same change, moved the goalposts.
 A cache hit's remaining cost is serialize-then-compress, and brotli at quality 1 costs ~0.15 ms on
 a 52 KB summary — the same order as the serialization output caching would remove. So the ceiling
 on the win is roughly half of an already-sub-millisecond step, on endpoints whose expensive part
-(the SQL aggregation) is *already* skipped by the existing cache. Caching the compressed bytes
+(the SQL aggregation) is _already_ skipped by the existing cache. Caching the compressed bytes
 instead would beat that, but only by varying on `Accept-Encoding` on top of everything below.
 
 What it would cost to get there:
@@ -47,7 +47,7 @@ What it would cost to get there:
   policy that deliberately disables that check — and then re-deriving the tenant in the cache key
   by hand. A mistake there is a cross-user data leak, not a stale read.
 - **`GetPrintSummary` is `[AllowAnonymous]` and takes a `userId` query parameter**, so its response
-  varies by *both* the target user and the caller. The key would need both, plus the target user's
+  varies by _both_ the target user and the caller. The key would need both, plus the target user's
   version GUID, plus `Accept-Encoding`.
 - **A second, untracked memory budget.** `IMemoryCache` here is capped at 8192 units
   (`Startup.ConfigureServices`). The output cache store has its own default 100 MB limit that the
@@ -92,7 +92,7 @@ it, and `/mcp` negotiates that content type. `ResponseCompressionTests` pins tha
 negotiation, the compression levels, and that compressed bytes decode back to the uncompressed
 response. One test there is load-bearing in a way that is easy to miss: `Compression_AppliesOverHttps`
 drives an `https://` base address, because every other test runs over plain HTTP where compression
-happens whatever `EnableForHttps` says — revert that option and it is the *only* test that fails.
+happens whatever `EnableForHttps` says — revert that option and it is the _only_ test that fails.
 
 One thing `UseHttpMetrics` readers should know: the codec runs during the endpoint's `WriteAsync`
 calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
@@ -155,7 +155,7 @@ ground truth for what is already deployed. CI runs
 
 Two conventions in `Models/`:
 
-- **Collection navigations are nullable** (`ICollection<T>?`), *not* initialized to an empty
+- **Collection navigations are nullable** (`ICollection<T>?`), _not_ initialized to an empty
   collection. This deviates from the usual EF guidance on purpose: an unloaded navigation really is
   null today, and initializing it would change "not loaded" from a `NullReferenceException` into a
   silent empty result. That is a runtime behaviour change, and it does not belong in an annotation
@@ -177,7 +177,7 @@ responses as well as requests:
 
 Do **not** reach for `= null!` or `required` here. `= null!` is for framework-initialized members;
 on a DTO it asserts something about deserialized data that nothing enforces. `required` is worse —
-`System.Text.Json` *enforces* it, so adding one turns a tolerated missing field into a 400, which
+`System.Text.Json` _enforces_ it, so adding one turns a tolerated missing field into a 400, which
 is a runtime behaviour change dressed as an annotation.
 
 Positional records (`Analytics/`, `ConnectedAgentDto`) keep their non-nullable parameters: the
@@ -212,14 +212,14 @@ kin, which bind null on every request that omits them. Six such parameters are n
 
 `ImplicitRequiredInferenceTests` is the permanent guard. It reflects over every action and fails
 with the offending member named. Read its comments before adding to it — it reports only what can
-*actually* bind null, which is a narrower set than "would get a `[Required]`":
+_actually_ bind null, which is a narrower set than "would get a `[Required]`":
 
 - A **complex type bound from the query** is always constructed by the binder, so `PagedRequest`,
   `SortRequest<T>` and `AnalyticsFilter` are never null.
 - A **collection** binds empty, which satisfies `[Required]`. This is why
   `PrinterMaintenanceService` reads `filterByPrinterIds.Length` unguarded.
 - A **property with an initializer** keeps it when the field is omitted (`AddFilamentDto.Colors =
-  new()`).
+new()`).
 - A **route value** is present or the route did not match, so it 404s before validation.
 
 Enumerating on the annotation alone flagged 90 members; 6 could take null. Do not annotate the
@@ -238,12 +238,12 @@ nothing about behaviour changed. Four idioms account for nearly all of it.
   one to be strict about; never `return null!` to keep a return type non-nullable. Note that some
   MCP reads throw `McpToolException.NotFound` instead of returning null (`GetPrinterForMcp`) —
   read the body, do not assume from the name.
-- **`string?` on an optional parameter.** A `= null` default *is* the annotation; so is a body that
+- **`string?` on an optional parameter.** A `= null` default _is_ the annotation; so is a body that
   starts `x = x?.Trim()` or guards with `if (x == null)`.
 - **`(await Foo(id))!` after a write**, where `Foo` re-reads a row the same method just persisted.
   Always commented, so the reason survives the next reader.
 
-Anything that needs a real null *guard* rather than an annotation is a commented `!` pointing at
+Anything that needs a real null _guard_ rather than an annotation is a commented `!` pointing at
 **#57** (`grep -rn "#57" --include=*.cs` — 14 sites in 9 files). Those are deferred behaviour
 changes, not annotation debt: unvalidated webhook payloads, unknown ids that 500 where they should
 404, null elements surviving `Colors` validation. Each preserves a pre-existing
@@ -257,8 +257,8 @@ token-derived, never a tool argument, and a foreign or missing id returns a unif
 rather than an existence oracle.
 
 Authorization is two-layered, and **the endpoint is the weaker layer**. The `"Mcp"` policy requires
-a mapped internal user plus *at least one* data scope, so a read-only token legitimately reaches
-`/mcp`. The read/write split is enforced per tool *class* by the SDK's authorization filter
+a mapped internal user plus _at least one_ data scope, so a read-only token legitimately reaches
+`/mcp`. The read/write split is enforced per tool _class_ by the SDK's authorization filter
 (`AddAuthorizationFilters()`), which also hides write tools from a read-only token's `tools/list`.
 Write-tool denial rests entirely on that filter — never assume the endpoint blocks it.
 
@@ -295,17 +295,17 @@ into a 400.
 closure off the context's own generated `JsonTypeInfo<T>` properties — so it needs no maintenance
 when a root's graph changes — and compares member names, order, types, accessors and required-ness
 against the reflection resolver for all ~100 types. The endpoint test additionally pairs each root
-with a URL that produces one and asserts the body is byte-identical either way; that pairing *is*
+with a URL that produces one and asserts the body is byte-identical either way; that pairing _is_
 hand-maintained, so a new `[JsonSerializable]` root needs a new row in `HotResponses()`.
 
 Worth knowing when judging how much test coverage a change here needs: a resolver supplies metadata
 only. Converters are shared by both paths, so the two cannot disagree on how a `decimal`, `DateOnly`
-or `DateTimeOffset` is *formatted* — only on which members exist, their names and their order.
+or `DateTimeOffset` is _formatted_ — only on which members exist, their names and their order.
 Fixture variety in values proves nothing here; structural comparison proves everything.
 
 Two non-obvious facts, both verified rather than assumed:
 
-- **MVC serializes through a *copy* of the registered options.**
+- **MVC serializes through a _copy_ of the registered options.**
   `SystemTextJsonOutputFormatter` substitutes `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` when
   `JsonOptions` leaves `Encoder` null, which this app does. So a real response body escapes `+` and
   `<` differently from anything serialized with the options DI hands out, and a test that compares
@@ -343,7 +343,7 @@ their init timeout. See `CustomWebApplicationFactory.ConfigureLocalJwt`.
 
 ## Health Checks
 
-- `/health` — **liveness**, and the path configured under *App Service → Monitoring → Health check*.
+- `/health` — **liveness**, and the path configured under _App Service → Monitoring → Health check_.
   Process-only, no dependencies, and it must stay that way: App Service pulls a failing instance
   from rotation and replaces it after a sustained failure, so a check that touched SQL would report
   every instance unhealthy during a database blip and turn a recoverable outage into an app-wide
@@ -354,6 +354,10 @@ their init timeout. See `CustomWebApplicationFactory.ConfigureLocalJwt`.
 
 The JSON omits each check's exception and description on purpose — the endpoint is anonymous, and a
 SQL connection failure message carries the server name and often the credentials it tried.
+
+## UTF-8 and BOM file formatting
+
+Writing a new .cs file with the Write tool produces no BOM, so it will fail the ci everytime. Running `dotnet format` before committing a new file avoids the round-trip.
 
 ## Deployment
 
