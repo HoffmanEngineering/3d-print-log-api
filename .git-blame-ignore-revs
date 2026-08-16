@@ -1,0 +1,27 @@
+# Commits that rewrote many files without changing their *content* — line endings, encoding,
+# whitespace. Listing one here keeps `git blame` pointing at whoever last wrote the line rather than
+# at the sweep that reflowed it.
+#
+# The bar is content, not behaviour. A commit can leave behaviour identical and still be the true
+# author of the lines it added, and ignoring that one hides real authorship. So a commit belongs
+# here only if every file it touches is byte-identical to its parent once whitespace and the BOM are
+# discarded. Both entries below were verified that way, file by file, before being added.
+#
+# This is also why the encoding work is three commits rather than one: the commit that *wrote*
+# .gitattributes and .editorconfig is deliberately kept out of the two sweeps, so ignoring the
+# sweeps does not also hide the authorship of the policy itself.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub reads this file automatically, so blame in the web UI already skips these.
+
+# build: renormalize existing files to the .gitattributes policy
+# Line endings only, via `git add --renormalize`, across 380 files. This one matters most: the
+# stored blob changed on every line of every formerly-CRLF file, so without this entry blame on
+# ~360 files would point here for all of their lines.
+c2e4180fa37b3f4490ca67b434564b69e556a1be
+
+# style: normalize encoding and whitespace to the .editorconfig
+# Added the UTF-8 BOM to 233 files and reformatted 15 to match .editorconfig braces/indentation.
+1389bbf886be80373f3b407148ae57220c459eff

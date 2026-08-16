@@ -21,6 +21,19 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
+      # Fails on any file whose line endings, UTF-8 BOM or whitespace drift from .editorconfig.
+      # Runs before the build because it takes seconds and needs no compilation.
+      #
+      # This is the enforced half of the encoding policy. .gitattributes covers line endings at the
+      # Git layer, but Git has no concept of a BOM, so `charset = utf-8-bom` is only real if
+      # something applies it -- this step is that something. Reproduce a failure locally with
+      # `dotnet format whitespace` and commit the result.
+      #
+      # Scoped to `whitespace` deliberately: the full `dotnet format` would also enforce the style
+      # and analyzer rules in .editorconfig, which this codebase does not currently satisfy.
+      - name: Verify formatting and encoding
+        run: dotnet format whitespace --verify-no-changes --verbosity diagnostic
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
