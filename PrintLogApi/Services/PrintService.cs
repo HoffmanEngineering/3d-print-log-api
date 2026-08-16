@@ -473,7 +473,7 @@ public sealed class PrintService(
                         .ToListAsync();
     }
 
-    public async Task<Stream> GeneratePrintReportAsCsvForUser(long userId)
+    public async Task WritePrintReportAsCsvForUser(long userId, Stream destination, CancellationToken cancellationToken = default)
     {
         var prints = context.Prints
                         .Where(p => p.CreatedById == userId)
@@ -481,27 +481,36 @@ public sealed class PrintService(
                         .ProjectTo<PrintDetailReport>(mapper.ConfigurationProvider)
                         .AsNoTracking();
 
-
-        List<PrintDetailReport> reportCSVModels = await prints.ToListAsync();
-        var printCount = reportCSVModels.Count;
-
-        var stream = new MemoryStream();
+        // Streamed row-by-row rather than materialized: the export used to hold the whole result
+        // set as a List and a second copy as a MemoryStream, so peak memory grew with the user's
+        // print count and the buffer landed on the large object heap. Nothing is buffered beyond
+        // the writer's own buffer now, which is why the metrics below are tallied as we go.
+        var printCount = 0L;
+        var counting = new ByteCountingStream(destination);
 
         using (var operation = telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
-        using (var writeFile = new StreamWriter(stream, leaveOpen: true))
-        using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
+        await using (var writeFile = new StreamWriter(counting, leaveOpen: true))
+        await using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
         {
             csv.Context.RegisterClassMap<PrintDetailReportMap>();
-            csv.WriteRecords(reportCSVModels);
 
+            // WriteRecords emits the header from the type even for an empty sequence, so it is
+            // written unconditionally here to keep an empty export byte-identical to before.
+            csv.WriteHeader<PrintDetailReport>();
+            await csv.NextRecordAsync();
+
+            await foreach (var report in prints.AsAsyncEnumerable().WithCancellation(cancellationToken))
+            {
+                csv.WriteRecord(report);
+                await csv.NextRecordAsync();
+                printCount++;
+            }
+
+            await csv.FlushAsync();
         }
-        stream.Position = 0; //reset stream
 
-        var lengthInBytes = stream.Length;
-        var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", lengthInBytes } };
+        var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", counting.BytesWritten } };
         telemetry.TrackEvent("PrintReportExport", metrics: metrics);
-
-        return stream;
     }
 
     public async Task<Print?> GetPrintById(long id)

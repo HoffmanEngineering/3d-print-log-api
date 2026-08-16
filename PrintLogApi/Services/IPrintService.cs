@@ -58,7 +58,13 @@ public interface IPrintService
 
     Task<Comment> AddPrintComment(Print print, string commentBody, long userId);
     Task DeletePrint(Print existingPrint);
-    Task<Stream> GeneratePrintReportAsCsvForUser(long userId);
+    /// <summary>
+    /// Writes the user's print report as CSV directly to <paramref name="destination"/>, streaming
+    /// the rows so peak memory stays flat regardless of how many prints the user has. The caller
+    /// owns <paramref name="destination"/> and it is left open; for the export endpoint that is the
+    /// response body, so headers must be set before this is awaited.
+    /// </summary>
+    Task WritePrintReportAsCsvForUser(long userId, Stream destination, CancellationToken cancellationToken = default);
     Task<Print?> GetPrintById(long id);
     Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
     Task<List<long>> GetPublicPrintIds();

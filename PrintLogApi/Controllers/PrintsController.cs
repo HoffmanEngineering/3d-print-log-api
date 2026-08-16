@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Net.Http.Headers;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -254,7 +255,7 @@ public class PrintsController(
     /// <response code="401">Returned when no user is currently authenticated.</response>
     [HttpGet("csv")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAllPrintDetailsAsCsv()
+    public async Task<IActionResult> GetAllPrintDetailsAsCsv(CancellationToken cancellationToken)
     {
         long? currentUserId = User.GetUserId();
 
@@ -263,9 +264,19 @@ public class PrintsController(
             return Unauthorized();
         }
 
-        var stream = await printService.GeneratePrintReportAsCsvForUser(currentUserId.Value);
+        // Written straight to the response body instead of returning a File() result: the service
+        // streams rows as it reads them, so there is no Stream to hand back. The headers therefore
+        // have to be set before the first byte goes out. Content type stays application/octet-stream
+        // — text/csv is arguably more correct but is a caller-visible change (see #65).
+        var contentDisposition = new ContentDispositionHeaderValue("attachment");
+        contentDisposition.SetHttpFileName("PrintReports.csv");
 
-        return File(stream, "application/octet-stream", "PrintReports.csv");
+        Response.ContentType = "application/octet-stream";
+        Response.Headers.ContentDisposition = contentDisposition.ToString();
+
+        await printService.WritePrintReportAsCsvForUser(currentUserId.Value, Response.Body, cancellationToken);
+
+        return new EmptyResult();
     }
 
 
