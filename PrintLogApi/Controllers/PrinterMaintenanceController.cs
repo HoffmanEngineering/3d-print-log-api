@@ -65,10 +65,10 @@ namespace PrintLogApi.Controllers
                 return Unauthorized("Please login before requesting filaments.");
             }
 
-            return await _printerMaintenanceService.GetPrinterMaintenanceByUser(currentUserId.Value, 
-                sortRequest.SortDirection, 
-                sortRequest.SortColumn, 
-                pagingRequest.PageNumber, 
+            return await _printerMaintenanceService.GetPrinterMaintenanceByUser(currentUserId.Value,
+                sortRequest.SortDirection,
+                sortRequest.SortColumn,
+                pagingRequest.PageNumber,
                 pagingRequest.PageSize,
                 searchText,
                 filterByPrinterIds,
@@ -226,7 +226,8 @@ namespace PrintLogApi.Controllers
             try
             {
                 await _printerMaintenanceService.DeleteMaintenanceEntry(existingEntry);
-            } catch (Exception)
+            }
+            catch (Exception)
             {
                 return BadRequest("Entry cannot be deleted");
             }

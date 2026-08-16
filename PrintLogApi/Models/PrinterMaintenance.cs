@@ -14,12 +14,12 @@ namespace PrintLogApi.Models
         public long PrinterId { get; set; }
         public Printer Printer { get; set; } = null!;
 
-        public bool Done {  get; set; }
+        public bool Done { get; set; }
 
         public DateTimeOffset Date { get; set; }
 
         [MaxLength(256)]
-        public string? Category {  get; set; }
+        public string? Category { get; set; }
 
         [MaxLength(1000)]
         public string? Description { get; set; }

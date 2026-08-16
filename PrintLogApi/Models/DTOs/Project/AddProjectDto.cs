@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Project;
 
 namespace PrintLogApi.Models.DTOs.Project

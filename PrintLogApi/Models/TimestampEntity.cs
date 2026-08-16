@@ -21,6 +21,6 @@ namespace PrintLogApi.Models
 
         public long UpdatedById { get; set; }
         [ForeignKey("UpdatedById")]
-        public User UpdatedBy {get; set;} = null!;
+        public User UpdatedBy { get; set; } = null!;
     }
 }

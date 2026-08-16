@@ -17,7 +17,7 @@ namespace PrintLogApi.Models
         /// </summary>
         public PagedList()
         {
-            Paging = new PageInfo(1,1,1);
+            Paging = new PageInfo(1, 1, 1);
             Items = new List<T>();
         }
 

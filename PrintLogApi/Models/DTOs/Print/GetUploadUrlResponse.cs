@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Print
+﻿namespace PrintLogApi.Models.DTOs.Print
 {
     public class GetUploadUrlResponse
     {

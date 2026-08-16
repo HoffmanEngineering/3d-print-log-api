@@ -24,9 +24,9 @@ namespace PrintLogApi.Profiles
                 .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
                 .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => (src.InitialNominalWeightMg ?? 0)
                                                                                     - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
-                                                                                                                    (long) p.AmountMg :
+                                                                                                                    (long)p.AmountMg :
                                                                                                                     p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
-                                                                                                                    (long) p.EstimatedAmountMg : (long)0)
+                                                                                                                    (long)p.EstimatedAmountMg : (long)0)
                                                                                     + src.FilamentAdjustments!.Sum(adj => adj.AmountMg)))
                 .ForMember(dest => dest.FilamentLengthRemainingInM, src => src.MapFrom(src => src.DiameterMm > 0 && src.MaterialDensityGramPerCubicCm > 0 ? (((src.InitialNominalWeightMg ?? 0)
                                                                                     - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
@@ -51,7 +51,7 @@ namespace PrintLogApi.Profiles
             CreateMap<FilamentSummaryDto, Filament>();
 
             CreateMap<AddFilamentDto, Filament>()
-                .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament" ))
+                .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))
                 .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight))
                 .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
                 .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))

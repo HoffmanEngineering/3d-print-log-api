@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
@@ -531,25 +531,25 @@ namespace PrintLogApi.Mcp
             double? bedWidthMm, double? bedDepthMm, double? bedHeightMm,
             double? screenResolutionXPixels, double? screenResolutionYPixels,
             bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive) => new()
-        {
-            Make = make,
-            Model = model,
-            Name = name,
-            Description = description,
-            CategoryNickname = categoryNickname,
-            NozzleDiameterMm = nozzleDiameterMm,
-            FilamentDiameterMm = filamentDiameterMm,
-            BeamDiameterMm = beamDiameterMm,
-            BedWidthMm = bedWidthMm,
-            BedDepthMm = bedDepthMm,
-            BedHeightMm = bedHeightMm,
-            ScreenResolutionXPixels = screenResolutionXPixels,
-            ScreenResolutionYPixels = screenResolutionYPixels,
-            HasHeatedBed = hasHeatedBed,
-            HasHeatedChamber = hasHeatedChamber,
-            WattageW = wattageW,
-            IsActive = isActive,
-        };
+            {
+                Make = make,
+                Model = model,
+                Name = name,
+                Description = description,
+                CategoryNickname = categoryNickname,
+                NozzleDiameterMm = nozzleDiameterMm,
+                FilamentDiameterMm = filamentDiameterMm,
+                BeamDiameterMm = beamDiameterMm,
+                BedWidthMm = bedWidthMm,
+                BedDepthMm = bedDepthMm,
+                BedHeightMm = bedHeightMm,
+                ScreenResolutionXPixels = screenResolutionXPixels,
+                ScreenResolutionYPixels = screenResolutionYPixels,
+                HasHeatedBed = hasHeatedBed,
+                HasHeatedChamber = hasHeatedChamber,
+                WattageW = wattageW,
+                IsActive = isActive,
+            };
 
         // Destructive = false: the change is a bounded, reversible delta on one quantity — the
         // inverse delta restores it. Idempotent = false: replaying it applies the delta twice.

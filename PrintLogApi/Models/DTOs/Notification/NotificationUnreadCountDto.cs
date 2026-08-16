@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Notification
+﻿namespace PrintLogApi.Models.DTOs.Notification
 {
     public class NotificationUnreadCountDto
     {

@@ -1056,10 +1056,10 @@ namespace PrintLogApi.Services
                 {
                     filamentsBase = filamentsBase.Where(f => f.DisplayName!.Contains(text) || f.Brand!.Contains(text) || f.ColorName!.Contains(text) || f.MaterialType!.Contains(text) || f.Notes!.Contains(text));
                 }
-                
+
             }
 
-            
+
 
             // Filter out inactives unless specified
             if (!includeInactive.HasValue || includeInactive.Value == false)
@@ -1078,11 +1078,13 @@ namespace PrintLogApi.Services
                 if (sortDirection == SortDirection.Asc)
                 {
                     filamentsBase = filamentsBase.OrderBy(f => PrintLogContext.fnNaturalSort(f.DisplayName!)).ThenBy(f => f.CreatedDate).ThenBy(f => f.Id);
-                } else
+                }
+                else
                 {
                     filamentsBase = filamentsBase.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.DisplayName!)).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
-            } else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
+            }
+            else if (sortColumn == FilamentSummarySortColumn.FilamentRemaining)
             {
                 if (sortDirection == SortDirection.Asc)
                 {
@@ -1092,7 +1094,8 @@ namespace PrintLogApi.Services
                 {
                     filamentsBase = filamentsBase.OrderByDescending(f => f.FilamentRemaining).ThenByDescending(f => f.DisplayName).ThenByDescending(f => f.CreatedDate).ThenByDescending(f => f.Id);
                 }
-            } else if (sortColumn == FilamentSummarySortColumn.MaterialType)
+            }
+            else if (sortColumn == FilamentSummarySortColumn.MaterialType)
             {
                 if (sortDirection == SortDirection.Asc)
                 {
@@ -1150,7 +1153,7 @@ namespace PrintLogApi.Services
             return await _context.Filaments
                     .Where(f => f.Id == id)
                     .Include(f => f.FilamentAdjustments)
-                    .Include(f=> f.PrintFilaments)
+                    .Include(f => f.PrintFilaments)
                     .Include(f => f.MaterialCategory)
                     .AsSplitQuery()
                     .SingleOrDefaultAsync();
@@ -1253,7 +1256,8 @@ namespace PrintLogApi.Services
                     if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
                     {
                         adjustment.LengthInM = GetLengthInMetersFromVolume(adjustment.VolumeMl.Value, diameterMm);
-                    } else
+                    }
+                    else
                     {
                         adjustment.LengthInM = null;
                     }
@@ -1306,7 +1310,8 @@ namespace PrintLogApi.Services
                         filament.InitialNominalVolumeMl = null;
                     }
                 }
-            } else if (filament.Source == Filament.SourceMeasurement.Volume)
+            }
+            else if (filament.Source == Filament.SourceMeasurement.Volume)
             {
                 if (filament.InitialNominalVolumeMl.HasValue)
                 {
@@ -1321,7 +1326,8 @@ namespace PrintLogApi.Services
                         filament.InitialNominalLengthM = null;
                     }
                 }
-            } else
+            }
+            else
             {
 
                 if (filament.InitialNominalWeightMg.HasValue)
@@ -1420,7 +1426,7 @@ namespace PrintLogApi.Services
         {
             return await _context.Filaments
                 .Where(f => f.CreatedById == userId)
-                .Where(f => f.StorageLocation != null && f.StorageLocation != "" )
+                .Where(f => f.StorageLocation != null && f.StorageLocation != "")
                 .Select(f => f.StorageLocation!)
                 .Distinct()
                 .OrderBy(s => s)

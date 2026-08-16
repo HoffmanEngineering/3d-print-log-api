@@ -52,7 +52,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<CommentDetailDto>> PutComment([FromRoute] long id, [FromBody] EditCommentDto edittedComment)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

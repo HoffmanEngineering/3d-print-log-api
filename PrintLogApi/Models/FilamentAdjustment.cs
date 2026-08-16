@@ -10,7 +10,7 @@ namespace PrintLogApi.Models
     /// <summary>
     /// A way to adjust the amount of filament left on a spool.
     /// </summary>
-    public class FilamentAdjustment: TimestampEntity
+    public class FilamentAdjustment : TimestampEntity
     {
         /// <summary>
         /// Which field is the user-entered "source"
@@ -29,7 +29,7 @@ namespace PrintLogApi.Models
         public Guid FilamentId { get; set; }
         public Filament Filament { get; set; } = null!;
 
-        public SourceMeasurement Source {  get; set; }
+        public SourceMeasurement Source { get; set; }
 
         /// <summary>
         /// An amount to adjust the weight of a filament.

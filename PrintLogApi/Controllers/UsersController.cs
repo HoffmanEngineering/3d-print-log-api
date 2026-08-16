@@ -93,7 +93,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -169,7 +169,7 @@ namespace PrintLogApi.Controllers
         [HttpDelete("pending-deactivation")]
         [AllowAnonymous]
         public async Task<ActionResult> ProcessPendingDeactivations()
-        { 
+        {
             await _userDeletionService.DeletePendingDeactivatedUsers();
 
             return Ok();
@@ -211,7 +211,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -320,7 +320,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -381,7 +381,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

@@ -68,7 +68,7 @@ namespace PrintLogApi.Controllers
                     return StatusCode(StatusCodes.Status403Forbidden, "Cannot view settings linked to another user.");
                 }
             }
-            else 
+            else
             {
                 _telemetry.TrackEvent("CuraSettingsFirstLoad");
 

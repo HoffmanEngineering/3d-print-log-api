@@ -68,7 +68,7 @@ namespace PrintLogApi.Controllers
             }
 
             var newKey = await _userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
-    
+
 
             return newKey;
         }
@@ -91,15 +91,17 @@ namespace PrintLogApi.Controllers
             {
                 await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
                 return NoContent();
-            } catch (DoesNotExistException)
+            }
+            catch (DoesNotExistException)
             {
                 return NotFound("Active API Key Not Found");
-            } catch (UserCannotAccessApiKeyException)
+            }
+            catch (UserCannotAccessApiKeyException)
             {
                 return Forbid("User does not have access to specified API Key");
             }
-            
-            
+
+
         }
     }
 }

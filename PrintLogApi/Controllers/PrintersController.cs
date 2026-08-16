@@ -72,7 +72,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<IEnumerable<PrinterSummarySimpleDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string? searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -278,7 +278,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PrinterDetailDto>> PostPrinter(AddPrinterDTO printer)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

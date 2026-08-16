@@ -2,7 +2,7 @@
 
 namespace PrintLogApi.Exceptions
 {
-    public class UserCannotAccessPrinterException: Exception
+    public class UserCannotAccessPrinterException : Exception
     {
         public UserCannotAccessPrinterException(string message) : base(message)
         {

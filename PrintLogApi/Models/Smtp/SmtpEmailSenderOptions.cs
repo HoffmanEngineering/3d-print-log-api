@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.Smtp
+﻿namespace PrintLogApi.Models.Smtp
 {
     public class SmtpEmailSenderOptions
     {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using PrintLogApi.Models.DTOs.User;
 
 namespace PrintLogApi.Models.DTOs.Notification

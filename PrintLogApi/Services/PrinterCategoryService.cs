@@ -6,7 +6,7 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.Services
 {
-    public class PrinterCategoryService: IPrinterCategoryService
+    public class PrinterCategoryService : IPrinterCategoryService
     {
 
         private readonly PrintLogContext _context;
@@ -25,7 +25,8 @@ namespace PrintLogApi.Services
                 .SingleOrDefaultAsync();
         }
 
-        public async Task<bool> exists(string nickname) {
+        public async Task<bool> exists(string nickname)
+        {
 
             var exists = await _context.PrinterCategories.AnyAsync(p => p.Nickname == nickname);
 

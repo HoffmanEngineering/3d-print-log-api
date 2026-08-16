@@ -49,10 +49,10 @@ namespace PrintLogApi.TestData
 
         private static List<Filament> GetTestFilament()
         {
-             List<Filament> testFilament = new List<Filament>()
-             {
+            List<Filament> testFilament = new List<Filament>()
+            {
 
-             };
+            };
 
             for (int i = 1; i <= 10000; i++)
             {
@@ -85,9 +85,9 @@ namespace PrintLogApi.TestData
                 };
 
                 testFilament.Add(filament);
-                    }
+            }
 
-                    return testFilament;
+            return testFilament;
         }
 
         private static List<Project> GetTestProjects()

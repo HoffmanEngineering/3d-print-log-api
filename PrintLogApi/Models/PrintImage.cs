@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace PrintLogApi.Models
 {
-    public class PrintImage: TimestampEntity
+    public class PrintImage : TimestampEntity
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

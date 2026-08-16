@@ -5,7 +5,7 @@ using PrintLogApi.Models.DTOs.MaterialCategory;
 
 namespace PrintLogApi.Profiles
 {
-    public class MaterialCategoryProfile: Profile
+    public class MaterialCategoryProfile : Profile
     {
         public MaterialCategoryProfile()
         {

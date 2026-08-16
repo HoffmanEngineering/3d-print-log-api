@@ -214,7 +214,7 @@ namespace PrintLogApi.Controllers
             }
 
 
-            if(!await _filamentService.CanUserAccessFilament(userId.Value, id))
+            if (!await _filamentService.CanUserAccessFilament(userId.Value, id))
             {
                 return Forbid();
             }
@@ -222,7 +222,8 @@ namespace PrintLogApi.Controllers
             try
             {
                 await _filamentService.DeleteFilament(id);
-            } catch (FilamentIsInUseException)
+            }
+            catch (FilamentIsInUseException)
             {
                 return BadRequest("This Filament is used in a Print and cannot be deleted. Try editing the Filament and marking it as Inactive instead.");
             }

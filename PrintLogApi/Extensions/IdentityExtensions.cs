@@ -22,11 +22,13 @@ namespace PrintLogApi.Extensions
             try
             {
                 return long.Parse(claim.Value, CultureInfo.InvariantCulture);
-            } catch             {
+            }
+            catch
+            {
                 return null;
             }
 
-            
+
         }
     }
 }

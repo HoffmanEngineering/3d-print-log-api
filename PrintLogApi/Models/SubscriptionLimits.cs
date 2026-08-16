@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models
+﻿namespace PrintLogApi.Models
 {
     /// <summary>
     /// Subscription tier limits shared across services.

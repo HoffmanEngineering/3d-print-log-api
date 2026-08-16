@@ -10,7 +10,7 @@ namespace PrintLogApi.Models.DTOs.Print
     public class PrintDetailReport
     {
         public DateTimeOffset? StartDate { get; set; }
-        public string? Title { get; set; }       
+        public string? Title { get; set; }
 
         public string? PrinterName { get; set; }
 

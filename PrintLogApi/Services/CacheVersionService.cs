@@ -21,19 +21,19 @@ namespace PrintLogApi.Services
         public string GetUserCacheVersion(long userId)
         {
             var key = $"{VERSION_PREFIX}{userId}";
-            
+
             if (!_cache.TryGetValue(key, out string? version))
             {
                 version = Guid.NewGuid().ToString("N");
-                
+
                 var cacheOptions = new MemoryCacheEntryOptions()
                     .SetSize(1) // Small size for version tracking
                     .SetSlidingExpiration(TimeSpan.FromHours(24))
                     .SetAbsoluteExpiration(TimeSpan.FromDays(7));
-                
+
                 _cache.Set(key, version, cacheOptions);
             }
-            
+
             // Null-forgiven: nothing ever caches a null under this key - the miss branch above
             // assigns one, and InvalidateUserCache only ever stores a fresh GUID.
             return version!;
@@ -44,12 +44,12 @@ namespace PrintLogApi.Services
         {
             var key = $"{VERSION_PREFIX}{userId}";
             var newVersion = Guid.NewGuid().ToString("N");
-            
+
             var cacheOptions = new MemoryCacheEntryOptions()
                 .SetSize(1)
                 .SetSlidingExpiration(TimeSpan.FromHours(24))
                 .SetAbsoluteExpiration(TimeSpan.FromDays(7));
-            
+
             _cache.Set(key, newVersion, cacheOptions);
         }
     }

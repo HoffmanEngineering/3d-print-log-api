@@ -1,4 +1,4 @@
-namespace PrintLogApi.Mcp
+﻿namespace PrintLogApi.Mcp
 {
     /// <summary>
     /// Records MCP tool invocations. Implementations must emit only non-sensitive fields:
