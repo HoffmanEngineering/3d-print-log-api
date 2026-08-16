@@ -1,0 +1,70 @@
+version: 2
+
+# Nothing watched package versions before this file existed, which is why the NuGet audit warnings
+# on restore (MailKit, SQLitePCLRaw, NuGet.Packaging/Protocol) accumulated unnoticed.
+#
+# Central package management makes this cheap: every NuGet version lives in
+# Directory.Packages.props, so Dependabot edits one file instead of hunting through project files.
+#
+# NOT covered here, and easy to assume otherwise:
+#   - dotnet-tools.json. Dependabot has no ecosystem for .NET local tool manifests, so the dotnet-ef
+#     pin is still a manual bump -- and it must move with the EF Core versions below.
+#   - The production runtime. The app is published framework-dependent and runs on whatever .NET
+#     stack Azure App Service is configured for, which is not in this repository at all.
+#   - PrintLogApi/Dockerfile. Add a `docker` ecosystem entry if that is wanted; note it only affects
+#     local docker-compose, since deploy.yml publishes rather than building the image.
+
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+    groups:
+      # The EF Core, ASP.NET and related Microsoft packages are versioned in lockstep with the
+      # target framework. Splitting them across PRs produces combinations that were never tested
+      # together -- and a partial EF Core bump is the one most likely to break a migration.
+      dotnet-framework:
+        patterns:
+          - "Microsoft.AspNetCore.*"
+          - "Microsoft.EntityFrameworkCore.*"
+          - "Microsoft.Extensions.*"
+          - "Microsoft.VisualStudio.Web.CodeGeneration.*"
+          - "System.*"
+
+      # The app hosts the MCP server and the integration suite drives it with the SDK client. The
+      # two halves speak a versioned protocol revision to each other, so they must move together.
+      mcp-sdk:
+        patterns:
+          - "ModelContextProtocol"
+          - "ModelContextProtocol.*"
+
+      # xUnit, the runner and coverlet are coupled through the test platform.
+      test-tooling:
+        patterns:
+          - "xunit"
+          - "xunit.*"
+          - "coverlet.*"
+          - "Microsoft.NET.Test.Sdk"
+
+    ignore:
+      # A major bump of these tracks the target framework, so it is a .NET major upgrade
+      # (TargetFramework, global.json, dotnet-tools.json, the App Service stack setting), not a
+      # dependency bump. Doing it as an automated PR would bump EF Core past the TFM in isolation.
+      # Security patches still arrive, because those are patch/minor releases.
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+
+  # Catches pinned action versions going stale, including any security advisory against an action
+  # that runs with repository secrets -- deploy.yml passes production database credentials to steps
+  # in this workflow.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
