@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.DTOs.Octoprint
+﻿namespace PrintLogApi.Models.DTOs.Octoprint
 {
     public class OctoprintWebhookMetaDto
     {

@@ -1,5 +1,3 @@
-#nullable enable
-
 using System.ComponentModel.DataAnnotations;
 
 namespace PrintLogApi.Models.DTOs.Subscription

@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 
 namespace PrintLogApi.Models.DTOs.Materials
 {

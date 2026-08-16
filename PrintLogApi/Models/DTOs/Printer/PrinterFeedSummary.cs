@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.DTOs.Printer
+﻿namespace PrintLogApi.Models.DTOs.Printer
 {
     public class PrinterFeedSummary
     {

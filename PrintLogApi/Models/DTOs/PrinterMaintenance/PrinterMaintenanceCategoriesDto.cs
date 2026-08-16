@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.DTOs.Filament
+﻿namespace PrintLogApi.Models.DTOs.Filament
 {
     public class PrinterMaintenanceCategoriesDto
     {

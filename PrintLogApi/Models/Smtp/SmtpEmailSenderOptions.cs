@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace PrintLogApi.Models.Smtp
 {
     public class SmtpEmailSenderOptions

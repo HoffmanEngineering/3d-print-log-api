@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace PrintLogApi.Enums
 {
     public enum ColorPatternType

@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using PrintLogApi.Models.DTOs.Comments;
+﻿using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.DTOs.User;
 using System;

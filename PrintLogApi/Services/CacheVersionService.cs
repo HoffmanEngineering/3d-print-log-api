@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace PrintLogApi.Services

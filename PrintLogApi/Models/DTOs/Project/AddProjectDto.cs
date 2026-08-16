@@ -1,5 +1,3 @@
-#nullable enable
-
 using System.ComponentModel.DataAnnotations;
 using static PrintLogApi.Models.Project;
 

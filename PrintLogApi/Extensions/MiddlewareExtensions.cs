@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using Microsoft.AspNetCore.Builder;
 using PrintLogApi.Authentication.Middleware;
 using PrintLogApi.Middleware;

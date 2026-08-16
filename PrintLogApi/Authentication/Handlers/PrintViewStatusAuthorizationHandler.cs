@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using PrintLogApi.Models;
@@ -23,7 +21,7 @@ namespace PrintLogApi.Authentication.Handlers
                 // Both dereferences are null-forgiven rather than guarded so the generated IL is
                 // unchanged: a null Identity or a missing NameIdentifier claim already threw here
                 // before nullable analysis was turned on. Replacing either with a null check would
-                // silently turn a 500 into an authorization denial. Tracked in #39.
+                // silently turn a 500 into an authorization denial. Tracked in #57.
                 if (context.User.Identity!.IsAuthenticated)
                 {
                     var userId = long.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);

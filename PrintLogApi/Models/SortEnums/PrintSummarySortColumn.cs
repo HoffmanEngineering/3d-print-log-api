@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.SortEnums
+﻿namespace PrintLogApi.Models.SortEnums
 {
     public enum PrintSummarySortColumn
     {

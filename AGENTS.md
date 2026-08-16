@@ -36,24 +36,20 @@ running against the database while migrations execute.
 
 ## Nullable Reference Types
 
-The migration (#46) is **done**. `PrintLogApi` is on `<Nullable>enable</Nullable>` with
+The migration (#46) is **done and closed**. Both projects are on `<Nullable>enable</Nullable>` with
 `<WarningsAsErrors>nullable</WarningsAsErrors>`, so a new nullable warning fails the build rather
-than accumulating. The per-file `#nullable enable` headers left over from #42–#44 are now
-redundant no-ops; a new file does not need one, and the guardrail tests that used to demand one
-are gone.
+than accumulating. There are no carve-outs and no per-file `#nullable` directives outside
+`Migrations/` (where EF's generated `#nullable disable` stays) — the project setting is the single
+source of truth, so do not add a header to a new file.
 
-No carve-outs remain. #39 resolved all 54 CS8629 sites and removed `<WarningsNotAsErrors>`, so an
-unguarded `Nullable<T>.Value` now fails the build like every other nullable diagnostic.
+When a nullable warning fires on a value you know is non-null, the fix is to **move the proof** to
+where C# flow analysis sees it — a `[MemberNotNullWhen]` attribute, an `is { } x` pattern, a
+`Select`+`OfType` unwrap — never to suppress it. Most of the CS8629 sweep in #39 was exactly that:
+the proof already existed, but it sat in a `bool` local, a computed property, or a `Where` clause in
+a prior lambda.
 
-Fifty of the 54 were provably non-null — the proof existed but sat where C# flow analysis does not
-follow it: a `bool` local, a computed property, a `Where` clause in a prior lambda, or a parameter
-reassignment that reset the state. Those were fixed by **moving the proof** to where the compiler
-sees it (a `[MemberNotNullWhen]` attribute, an `is { } x` pattern, a `Select`+`OfType` unwrap),
-never by suppressing. Four were real bugs: the Length branch of the measurement conversions
-dereferenced `DiameterMm.Value` without the diameter check its Volume and Weight siblings had, so a
-length-measured resin or powder returned a 500 from `POST /api/Prints`.
-
-Two caller-visible changes came with that, beyond the four:
+Two caller-visible behaviour changes came out of that sweep. Both are still true and neither is
+obvious from the code:
 
 - `RequireMcpConvertibleUsage` now rejects a half-populated `source`/`amount` pair itself. The check
   existed only in `PrintLogWriteTools.ValidateUsageRow`, and `IPrintService` is reachable without
@@ -65,7 +61,7 @@ Two caller-visible changes came with that, beyond the four:
   `PrintService`'s siblings simply skip, so its Length branch does too. The asymmetry follows each
   file's existing convention deliberately.
 
-Three rules came out of that sweep and still apply:
+Three rules bound how far that rewriting goes, and they still apply:
 
 - **Inside an EF expression tree the only permitted fix is `!`.** It is erased at compile time, so
   the generated SQL is unchanged; a pattern or `OfType` rewrite there changes the translation.
@@ -127,8 +123,7 @@ costs a `= null!` each, which reintroduces exactly the idiom the paragraph above
 rule you can apply by reading one property into one that needs a call-site audit. It buys nothing
 today: no code dereferences those properties, and Swagger does not read nullability
 (`SupportNonNullableReferenceTypes` is off), so the published contract is identical either way.
-Still true after the flip: `SupportNonNullableReferenceTypes` remains off, so Swagger publishes the
-same contract either way. Revisit if NRT-aware schema generation is ever turned on.
+Revisit if NRT-aware schema generation is ever turned on.
 
 ### Bound parameters and MVC's implicit `[Required]`
 
@@ -176,8 +171,12 @@ nothing about behaviour changed. Four idioms account for nearly all of it.
 - **`(await Foo(id))!` after a write**, where `Foo` re-reads a row the same method just persisted.
   Always commented, so the reason survives the next reader.
 
-Anything that needs a real null *guard* rather than an annotation goes to #39, and the `!` carries
-a comment saying so. Several already existed before this step; match their wording.
+Anything that needs a real null *guard* rather than an annotation is a commented `!` pointing at
+**#57** (`grep -rn "#57" --include=*.cs` — 14 sites in 9 files). Those are deferred behaviour
+changes, not annotation debt: unvalidated webhook payloads, unknown ids that 500 where they should
+404, null elements surviving `Colors` validation. Each preserves a pre-existing
+`NullReferenceException` on purpose, so fixing one is caller-visible and needs its own test. Match
+their wording if you add another.
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes
 tools to agents in two classes: `PrintLogReadTools` (`McpRead`, `read:printdata`) and

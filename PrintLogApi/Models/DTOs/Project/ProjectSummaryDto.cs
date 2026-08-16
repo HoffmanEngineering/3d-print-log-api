@@ -1,5 +1,3 @@
-#nullable enable
-
 using System;
 using static PrintLogApi.Models.Project;
 

@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using AutoMapper;
+﻿using AutoMapper;
 using PrintLogApi.Models.DTOs.Materials;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.MaterialCategory;

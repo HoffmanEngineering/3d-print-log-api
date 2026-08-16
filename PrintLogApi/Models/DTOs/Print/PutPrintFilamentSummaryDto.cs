@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using static PrintLogApi.Models.PrintFilament;
 
 namespace PrintLogApi.Models.DTOs.Print

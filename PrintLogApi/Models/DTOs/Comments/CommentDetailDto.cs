@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using PrintLogApi.Models.DTOs.User;
+﻿using PrintLogApi.Models.DTOs.User;
 using System;
 using System.Collections.Generic;
 using System.Linq;

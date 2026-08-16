@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.DTOs.Moonraker
+﻿namespace PrintLogApi.Models.DTOs.Moonraker
 {
     public class PrintEventDto
     {

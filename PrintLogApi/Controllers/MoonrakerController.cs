@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -91,7 +89,7 @@ namespace PrintLogApi.Controllers
 
             // Both deserializations return null for a literal "null" payload and then throw on
             // the following dereference. Null-forgiven to keep this change annotation-only; the
-            // unvalidated webhook payload is tracked in #39.
+            // unvalidated webhook payload is tracked in #57.
             var printEventDto = JsonSerializer.Deserialize<PrintEventDto>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
             var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message!)!;
@@ -172,7 +170,7 @@ namespace PrintLogApi.Controllers
 
                 // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
                 // was enabled. It still fails closed, just as a 500 rather than a clean error.
-                // Turning that into an explicit not-found is a behaviour change, tracked in #39.
+                // Turning that into an explicit not-found is a behaviour change, tracked in #57.
                 if (userId != printer!.UserId)
                 {
                     throw new UserCannotAccessPrinterException();

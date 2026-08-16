@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
@@ -274,7 +272,7 @@ namespace PrintLogApi.Controllers
             // Not provably non-null: the existence check above and this projection are separate
             // queries, so a delete in between yields null here. The null-forgive preserves the
             // pre-existing NullReferenceException rather than papering over the race; closing it
-            // properly is a behaviour change, tracked in #39.
+            // properly is a behaviour change, tracked in #57.
             printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
             
             return printDetailDto;

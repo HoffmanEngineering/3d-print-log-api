@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
@@ -154,7 +152,7 @@ namespace PrintLogApi.Controllers
 
             // Return if the printer does not belong to the user making the request.
             // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
-            // was enabled, and it fails closed either way. Tracked in #39.
+            // was enabled, and it fails closed either way. Tracked in #57.
             if (printer!.UserId != userId)
             {
                 return Forbid();
@@ -219,7 +217,7 @@ namespace PrintLogApi.Controllers
 
             // Null-forgiven: a missing id already threw here before nullable analysis was
             // enabled, and it fails closed either way. Turning it into a clean 404, as the
-            // sibling action does, is a behaviour change - tracked in #39.
+            // sibling action does, is a behaviour change - tracked in #57.
             if (existingEntry!.CreatedById != userId)
             {
                 return Forbid();
