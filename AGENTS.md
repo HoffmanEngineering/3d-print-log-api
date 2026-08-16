@@ -206,6 +206,34 @@ No hard-delete tools. Every write invalidates `ICacheVersionService` after commi
 See the `adding-an-mcp-tool` skill before adding or changing a tool — it carries the checklist, the
 domain rules, and the known gaps.
 
+## JSON serialization
+
+`PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume
+responses: the two cached summary lists and the six analytics tabs. It is **partial by design** and
+is `Insert`ed at position 0 of `JsonSerializerOptions.TypeInfoResolverChain`, with ASP.NET Core's
+`DefaultJsonTypeInfoResolver` still behind it. Assigning `TypeInfoResolver` instead would drop that
+fallback, and the failure surfaces on some unrelated endpoint rather than at the edit.
+
+Adding a `[JsonSerializable]` root is the whole change — the generator walks the type graph, so
+nested types need no attribute. Do **not** add `required` or `[JsonRequired]` to make a type fit;
+see the DTO rules above, both are enforced by `System.Text.Json` and turn a tolerated missing field
+into a 400. `JsonSourceGenerationTests` pairs each root with the endpoint that produces one and
+asserts the generated payload is byte-identical to the reflection-produced one.
+
+Two non-obvious facts, both verified rather than assumed:
+
+- **MVC serializes through a *copy* of the registered options.**
+  `SystemTextJsonOutputFormatter` substitutes `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` when
+  `JsonOptions` leaves `Encoder` null, which this app does. So a real response body escapes `+` and
+  `<` differently from anything serialized with the options DI hands out, and a test that compares
+  the two must reproduce the copy.
+- **The generated fast-path writer is unreachable here, and that is fine.** It requires
+  `Encoder` to be null, which the copy above rules out for every MVC response. What the context
+  buys is the metadata path — compile-time property discovery and build-time member accessors in
+  place of runtime reflection and IL emit. The `[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]`
+  on the context is not what enables that; it only keeps `Default.Options` from being PascalCase
+  for anyone serializing through the context directly.
+
 ## Integration Testing
 
 `WebApplicationFactory` over an in-memory SQLite database. See

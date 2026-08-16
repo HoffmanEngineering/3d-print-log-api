@@ -16,6 +16,7 @@ using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -38,7 +39,17 @@ public class Startup
     // This method gets called by the runtime. Use this method to add services to the container.
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddControllers();
+        services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                // Insert, not assign: the chain already holds ASP.NET Core's
+                // DefaultJsonTypeInfoResolver, and the source-generated context covers only the
+                // hot response types (#67). Prepending keeps reflection as the fallback for
+                // everything else. Assigning TypeInfoResolver here would drop that fallback and
+                // break every endpoint whose payload is not listed in the context.
+                options.JsonSerializerOptions.TypeInfoResolverChain.Insert(
+                    0, PrintLogJsonSerializerContext.Default);
+            });
 
         services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Startup).Assembly));
 
