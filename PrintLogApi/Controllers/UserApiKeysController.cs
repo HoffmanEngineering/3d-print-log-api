@@ -1,6 +1,4 @@
-﻿using AutoMapper;
-using Microsoft.ApplicationInsights;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -18,16 +16,12 @@ namespace PrintLogApi.Controllers;
 public class UserApiKeysController : ControllerBase
 {
     private readonly IUserApiKeyService _userApiKeyService;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
 
 
 
-    public UserApiKeysController(IUserApiKeyService userApiKeyService, IMapper mapper, TelemetryClient telemetry)
+    public UserApiKeysController(IUserApiKeyService userApiKeyService)
     {
         _userApiKeyService = userApiKeyService;
-        _mapper = mapper;
-        _telemetry = telemetry;
 
     }
 

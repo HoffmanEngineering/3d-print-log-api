@@ -1,5 +1,4 @@
-﻿using Microsoft.ApplicationInsights;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.Services;
@@ -8,12 +7,10 @@ public class PrinterCategoryService : IPrinterCategoryService
 {
 
     private readonly PrintLogContext _context;
-    private readonly TelemetryClient _telemetry;
 
-    public PrinterCategoryService(PrintLogContext context, TelemetryClient telemetry)
+    public PrinterCategoryService(PrintLogContext context)
     {
         _context = context;
-        _telemetry = telemetry;
     }
 
     public async Task<PrinterCategory?> get(string nickname)

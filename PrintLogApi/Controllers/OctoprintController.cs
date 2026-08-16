@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using Microsoft.ApplicationInsights;
+﻿using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,10 +20,8 @@ namespace PrintLogApi.Controllers;
 public class OctoprintController : ControllerBase
 {
     private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
     private readonly TelemetryClient _telemetry;
     private readonly ILogger _logger;
-    private readonly IUserApiKeyService _userApiKeyService;
     private readonly IPrintService _printService;
     private readonly INotificationService _notificationService;
     private readonly IBlobStorageService _blobStorageService;
@@ -33,20 +30,16 @@ public class OctoprintController : ControllerBase
     private readonly string printImageContainerName = "printimages";
 
     public OctoprintController(PrintLogContext context,
-                               IMapper mapper,
                                TelemetryClient telemetry,
                                ILogger<OctoprintController> logger,
-                               IUserApiKeyService userApiKeyService,
                                IPrintService printService,
                                INotificationService notificationService,
                                IBlobStorageService blobStorageService,
                                ICacheVersionService cacheVersionService)
     {
         _context = context;
-        _mapper = mapper;
         _telemetry = telemetry;
         _logger = logger;
-        _userApiKeyService = userApiKeyService;
         _printService = printService;
         _notificationService = notificationService;
         _blobStorageService = blobStorageService;

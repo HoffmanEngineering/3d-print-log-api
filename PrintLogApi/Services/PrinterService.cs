@@ -10,18 +10,15 @@ public class PrinterService : IPrinterService
 {
     private readonly PrintLogContext _context;
     private readonly TelemetryClient _telemetry;
-    private readonly IPrinterCategoryService _printerCategoryService;
     private readonly ICacheVersionService _cacheVersionService;
 
     public PrinterService(
         PrintLogContext context,
         TelemetryClient telemetry,
-        IPrinterCategoryService printerCategoryService,
         ICacheVersionService cacheVersionService)
     {
         _context = context;
         _telemetry = telemetry;
-        _printerCategoryService = printerCategoryService;
         _cacheVersionService = cacheVersionService;
     }
 

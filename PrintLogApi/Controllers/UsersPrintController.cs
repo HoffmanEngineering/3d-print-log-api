@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models.DTOs.Print;
@@ -16,14 +15,10 @@ namespace PrintLogApi.Controllers;
 public class UsersPrintsController : ControllerBase
 {
     private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly IAuthorizationService _authorizationService;
 
-    public UsersPrintsController(PrintLogContext context, IMapper mapper, IAuthorizationService authorizationService)
+    public UsersPrintsController(PrintLogContext context)
     {
         _context = context;
-        _mapper = mapper;
-        _authorizationService = authorizationService;
 
     }
 
