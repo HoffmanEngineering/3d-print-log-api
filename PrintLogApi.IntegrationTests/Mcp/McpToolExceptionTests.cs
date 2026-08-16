@@ -1,16 +1,15 @@
 ﻿using PrintLogApi.Mcp;
 using Xunit;
 
-namespace PrintLogApi.IntegrationTests.Mcp
+namespace PrintLogApi.IntegrationTests.Mcp;
+
+public class McpToolExceptionTests
 {
-    public class McpToolExceptionTests
+    [Fact]
+    public void Conflict_HasStableCode()
     {
-        [Fact]
-        public void Conflict_HasStableCode()
-        {
-            var ex = McpToolException.Conflict("reused key with different arguments");
-            Assert.Equal("conflict", ex.Code);
-            Assert.Equal("reused key with different arguments", ex.Message);
-        }
+        var ex = McpToolException.Conflict("reused key with different arguments");
+        Assert.Equal("conflict", ex.Code);
+        Assert.Equal("reused key with different arguments", ex.Message);
     }
 }

@@ -1,26 +1,21 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations.Schema;
 
-namespace PrintLogApi.Models
+namespace PrintLogApi.Models;
+
+public class TimestampEntity
 {
-    public class TimestampEntity
-    {
 
-        public DateTime CreatedDate { get; set; }
+    public DateTime CreatedDate { get; set; }
 
 
-        public long CreatedById { get; set; }
-        [ForeignKey("CreatedById")]
-        public User CreatedBy { get; set; } = null!;
+    public long CreatedById { get; set; }
+    [ForeignKey("CreatedById")]
+    public User CreatedBy { get; set; } = null!;
 
-        public DateTime UpdatedDate { get; set; }
+    public DateTime UpdatedDate { get; set; }
 
 
-        public long UpdatedById { get; set; }
-        [ForeignKey("UpdatedById")]
-        public User UpdatedBy { get; set; } = null!;
-    }
+    public long UpdatedById { get; set; }
+    [ForeignKey("UpdatedById")]
+    public User UpdatedBy { get; set; } = null!;
 }

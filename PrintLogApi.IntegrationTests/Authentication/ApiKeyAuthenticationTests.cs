@@ -1,145 +1,138 @@
-﻿using System;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Json;
+﻿using System.Net;
 using System.Text.Json;
-using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using Xunit;
 
-namespace PrintLogApi.IntegrationTests.Authentication
+namespace PrintLogApi.IntegrationTests.Authentication;
+
+public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFactory>
 {
-    public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFactory>
+    private readonly HttpClient _httpClient;
+    private readonly CustomWebApplicationFactory _factory;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    public ApiKeyAuthenticationTests(CustomWebApplicationFactory factory)
     {
-        private readonly HttpClient _httpClient;
-        private readonly CustomWebApplicationFactory _factory;
-        private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+        _factory = factory;
+        _httpClient = factory.CreateClient();
+    }
 
-        public ApiKeyAuthenticationTests(CustomWebApplicationFactory factory)
-        {
-            _factory = factory;
-            _httpClient = factory.CreateClient();
-        }
+    private async Task<NewUserApiKeyDto> GenerateApiKey(string description = "Test Key")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/UserApiKeys");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddNewApiKeyDto { Description = description });
+        var response = await _httpClient.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+    }
 
-        private async Task<NewUserApiKeyDto> GenerateApiKey(string description = "Test Key")
-        {
-            var request = new HttpRequestMessage(HttpMethod.Post, "/api/UserApiKeys");
-            request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-            request.Content = JsonContent.Create(new AddNewApiKeyDto { Description = description });
-            var response = await _httpClient.SendAsync(request);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            return (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
-        }
+    [Fact]
+    public async Task ApiKey_ValidKey_AuthenticatesRequest()
+    {
+        var key = await GenerateApiKey("Auth Test Key");
 
-        [Fact]
-        public async Task ApiKey_ValidKey_AuthenticatesRequest()
-        {
-            var key = await GenerateApiKey("Auth Test Key");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        request.Headers.Add("X-Api-Key", key.PublicKey);
 
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            request.Headers.Add("X-Api-Key", key.PublicKey);
+        var response = await _httpClient.SendAsync(request);
 
-            var response = await _httpClient.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        }
+    [Fact]
+    public async Task ApiKey_InvalidKey_ReturnsUnauthorized()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        request.Headers.Add("X-Api-Key", "INVALIDKEY00000000000000000000000");
 
-        [Fact]
-        public async Task ApiKey_InvalidKey_ReturnsUnauthorized()
-        {
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            request.Headers.Add("X-Api-Key", "INVALIDKEY00000000000000000000000");
+        var response = await _httpClient.SendAsync(request);
 
-            var response = await _httpClient.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        }
+    [Fact]
+    public async Task ApiKey_OnUse_StampsLastUsed()
+    {
+        var key = await GenerateApiKey("Last Used Test");
 
-        [Fact]
-        public async Task ApiKey_OnUse_StampsLastUsed()
-        {
-            var key = await GenerateApiKey("Last Used Test");
+        // A freshly generated key has never been used.
+        Assert.Null(GetLastUsed(key.Id));
 
-            // A freshly generated key has never been used.
-            Assert.Null(GetLastUsed(key.Id));
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        request.Headers.Add("X-Api-Key", key.PublicKey);
+        var response = await _httpClient.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            request.Headers.Add("X-Api-Key", key.PublicKey);
-            var response = await _httpClient.SendAsync(request);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var lastUsed = GetLastUsed(key.Id);
+        Assert.NotNull(lastUsed);
+        Assert.InRange(
+            lastUsed.Value,
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow.AddMinutes(1));
+    }
 
-            var lastUsed = GetLastUsed(key.Id);
-            Assert.NotNull(lastUsed);
-            Assert.InRange(
-                lastUsed.Value,
-                DateTimeOffset.UtcNow.AddMinutes(-5),
-                DateTimeOffset.UtcNow.AddMinutes(1));
-        }
+    [Fact]
+    public async Task ApiKey_SecondUseWithinThrottleWindow_DoesNotRestamp()
+    {
+        var key = await GenerateApiKey("Last Used Throttle Test");
 
-        [Fact]
-        public async Task ApiKey_SecondUseWithinThrottleWindow_DoesNotRestamp()
-        {
-            var key = await GenerateApiKey("Last Used Throttle Test");
+        var first = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        first.Headers.Add("X-Api-Key", key.PublicKey);
+        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first)).StatusCode);
 
-            var first = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            first.Headers.Add("X-Api-Key", key.PublicKey);
-            Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first)).StatusCode);
+        var stampedAt = GetLastUsed(key.Id);
+        Assert.NotNull(stampedAt);
 
-            var stampedAt = GetLastUsed(key.Id);
-            Assert.NotNull(stampedAt);
+        // The write is throttled to once an hour per key by a memory-cache guard, so a second
+        // use must not issue another UPDATE. This is what keeps a chatty integration from
+        // writing to the same row on every single request.
+        var second = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        second.Headers.Add("X-Api-Key", key.PublicKey);
+        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second)).StatusCode);
 
-            // The write is throttled to once an hour per key by a memory-cache guard, so a second
-            // use must not issue another UPDATE. This is what keeps a chatty integration from
-            // writing to the same row on every single request.
-            var second = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            second.Headers.Add("X-Api-Key", key.PublicKey);
-            Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second)).StatusCode);
+        Assert.Equal(stampedAt, GetLastUsed(key.Id));
+    }
 
-            Assert.Equal(stampedAt, GetLastUsed(key.Id));
-        }
+    /// <summary>
+    /// Reads LastUsed straight from a fresh context. The stamp is written by ExecuteUpdateAsync,
+    /// which bypasses the change tracker, so a context that had already loaded the row would
+    /// hand back its stale copy.
+    /// </summary>
+    private DateTimeOffset? GetLastUsed(Guid keyId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
-        /// <summary>
-        /// Reads LastUsed straight from a fresh context. The stamp is written by ExecuteUpdateAsync,
-        /// which bypasses the change tracker, so a context that had already loaded the row would
-        /// hand back its stale copy.
-        /// </summary>
-        private DateTimeOffset? GetLastUsed(Guid keyId)
-        {
-            using var scope = _factory.Services.CreateScope();
-            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return context.UserApiKeys
+            .AsNoTracking()
+            .Single(k => k.Id == keyId)
+            .LastUsed;
+    }
 
-            return context.UserApiKeys
-                .AsNoTracking()
-                .Single(k => k.Id == keyId)
-                .LastUsed;
-        }
+    [Fact]
+    public async Task ApiKey_AfterDeactivation_ReturnsUnauthorized()
+    {
+        // Generate a key and use it once to warm the cache
+        var key = await GenerateApiKey("Deactivation Cache Test");
 
-        [Fact]
-        public async Task ApiKey_AfterDeactivation_ReturnsUnauthorized()
-        {
-            // Generate a key and use it once to warm the cache
-            var key = await GenerateApiKey("Deactivation Cache Test");
+        var warmupRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        warmupRequest.Headers.Add("X-Api-Key", key.PublicKey);
+        var warmupResponse = await _httpClient.SendAsync(warmupRequest);
+        Assert.Equal(HttpStatusCode.OK, warmupResponse.StatusCode);
 
-            var warmupRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            warmupRequest.Headers.Add("X-Api-Key", key.PublicKey);
-            var warmupResponse = await _httpClient.SendAsync(warmupRequest);
-            Assert.Equal(HttpStatusCode.OK, warmupResponse.StatusCode);
+        // Deactivate the key
+        var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/UserApiKeys/{key.Id}");
+        deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-            // Deactivate the key
-            var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/UserApiKeys/{key.Id}");
-            deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-            var deleteResponse = await _httpClient.SendAsync(deleteRequest);
-            Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+        // The deactivated key must not authenticate even though it was recently cached
+        var secondRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        secondRequest.Headers.Add("X-Api-Key", key.PublicKey);
+        var secondResponse = await _httpClient.SendAsync(secondRequest);
 
-            // The deactivated key must not authenticate even though it was recently cached
-            var secondRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
-            secondRequest.Headers.Add("X-Api-Key", key.PublicKey);
-            var secondResponse = await _httpClient.SendAsync(secondRequest);
-
-            Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
-        }
+        Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
     }
 }

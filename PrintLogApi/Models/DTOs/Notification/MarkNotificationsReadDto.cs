@@ -1,12 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
-namespace PrintLogApi.Models.DTOs.Notification
+namespace PrintLogApi.Models.DTOs.Notification;
+
+public class MarkNotificationsReadDto
 {
-    public class MarkNotificationsReadDto
-    {
-        [Required]
-        public List<Guid>? NotificationIds { get; set; }
-    }
+    [Required]
+    public List<Guid>? NotificationIds { get; set; }
 }

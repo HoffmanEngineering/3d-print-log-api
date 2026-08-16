@@ -1,9 +1,6 @@
-﻿using System.Threading.Tasks;
+﻿namespace PrintLogApi.Services;
 
-namespace PrintLogApi.Services
+public interface IEmailSender
 {
-    public interface IEmailSender
-    {
-        Task SendEmailAsync(string email, string subject, string message);
-    }
+    Task SendEmailAsync(string email, string subject, string message);
 }

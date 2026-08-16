@@ -1,10 +1,9 @@
-﻿namespace PrintLogApi.Models.DTOs.Filament
+﻿namespace PrintLogApi.Models.DTOs.Filament;
+
+public class FilamentStorageLocationDto
 {
-    public class FilamentStorageLocationDto
-    {
-        /// <summary>
-        /// A list of storage locations
-        /// </summary>
-        public string[]? StorageLocations { get; set; }
-    }
+    /// <summary>
+    /// A list of storage locations
+    /// </summary>
+    public string[]? StorageLocations { get; set; }
 }

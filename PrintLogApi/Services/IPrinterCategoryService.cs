@@ -1,11 +1,9 @@
-﻿using System.Threading.Tasks;
-using PrintLogApi.Models;
+﻿using PrintLogApi.Models;
 
-namespace PrintLogApi.Services
+namespace PrintLogApi.Services;
+
+public interface IPrinterCategoryService
 {
-    public interface IPrinterCategoryService
-    {
-        Task<bool> exists(string nickname);
-        Task<PrinterCategory?> get(string nickname);
-    }
+    Task<bool> exists(string nickname);
+    Task<PrinterCategory?> get(string nickname);
 }

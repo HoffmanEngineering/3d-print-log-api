@@ -1,10 +1,9 @@
-﻿namespace PrintLogApi.Models.DTOs.Filament
+﻿namespace PrintLogApi.Models.DTOs.Filament;
+
+public class PrinterMaintenanceCategoriesDto
 {
-    public class PrinterMaintenanceCategoriesDto
-    {
-        /// <summary>
-        /// A list of categories
-        /// </summary>
-        public string[]? Categories { get; set; }
-    }
+    /// <summary>
+    /// A list of categories
+    /// </summary>
+    public string[]? Categories { get; set; }
 }

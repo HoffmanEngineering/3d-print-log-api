@@ -1,11 +1,9 @@
-﻿using System.Threading.Tasks;
-using PrintLogApi.Models.DTOs.Comments;
+﻿using PrintLogApi.Models.DTOs.Comments;
 
-namespace PrintLogApi.Services
+namespace PrintLogApi.Services;
+
+public interface ICommentService
 {
-    public interface ICommentService
-    {
-        Task DeleteCommentById(long id);
-        Task<CommentDetailDto?> GetCommentDetailById(long id);
-    }
+    Task DeleteCommentById(long id);
+    Task<CommentDetailDto?> GetCommentDetailById(long id);
 }

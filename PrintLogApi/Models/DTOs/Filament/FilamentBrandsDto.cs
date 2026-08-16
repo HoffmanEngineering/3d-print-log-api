@@ -1,10 +1,9 @@
-﻿namespace PrintLogApi.Models.DTOs.Filament
+﻿namespace PrintLogApi.Models.DTOs.Filament;
+
+public class FilamentBrandsDto
 {
-    public class FilamentBrandsDto
-    {
-        /// <summary>
-        /// A list of filament brands
-        /// </summary>
-        public string[]? Brands { get; set; }
-    }
+    /// <summary>
+    /// A list of filament brands
+    /// </summary>
+    public string[]? Brands { get; set; }
 }

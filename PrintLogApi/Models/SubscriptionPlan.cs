@@ -1,9 +1,8 @@
-﻿namespace PrintLogApi.Models
+﻿namespace PrintLogApi.Models;
+
+public enum SubscriptionPlan
 {
-    public enum SubscriptionPlan
-    {
-        Free = 0,
-        ProMonthly = 1,
-        ProAnnual = 2
-    }
+    Free = 0,
+    ProMonthly = 1,
+    ProAnnual = 2
 }

@@ -1,11 +1,8 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-using PrintLogApi.Models.DTOs.Analytics;
+﻿using PrintLogApi.Models.DTOs.Analytics;
 
-namespace PrintLogApi.Services.Analytics
+namespace PrintLogApi.Services.Analytics;
+
+public interface ICostAnalyticsService
 {
-    public interface ICostAnalyticsService
-    {
-        Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct);
-    }
+    Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct);
 }

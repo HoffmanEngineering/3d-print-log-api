@@ -1,14 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
 
-namespace PrintLogApi.Models.DTOs.UserApiKeys
+namespace PrintLogApi.Models.DTOs.UserApiKeys;
+
+public class AddNewApiKeyDto
 {
-    public class AddNewApiKeyDto
-    {
-        [StringLength(1000)]
-        public string? Description { get; set; }
-    }
+    [StringLength(1000)]
+    public string? Description { get; set; }
 }

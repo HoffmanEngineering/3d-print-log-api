@@ -1,11 +1,8 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-using PrintLogApi.Models.DTOs.Analytics;
+﻿using PrintLogApi.Models.DTOs.Analytics;
 
-namespace PrintLogApi.Services.Analytics
+namespace PrintLogApi.Services.Analytics;
+
+public interface IPrinterAnalyticsService
 {
-    public interface IPrinterAnalyticsService
-    {
-        Task<PrintersResponse> GetPrinters(long userId, AnalyticsFilter filter, CancellationToken ct);
-    }
+    Task<PrintersResponse> GetPrinters(long userId, AnalyticsFilter filter, CancellationToken ct);
 }

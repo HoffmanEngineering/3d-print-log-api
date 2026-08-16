@@ -2,14 +2,13 @@
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.PrinterCategory;
 
-namespace PrintLogApi.Profiles
+namespace PrintLogApi.Profiles;
+
+public class PrinterCategoryProfile : Profile
 {
-    public class PrinterCategoryProfile : Profile
+    public PrinterCategoryProfile()
     {
-        public PrinterCategoryProfile()
-        {
-            CreateMap<PrinterCategory, PrinterCategoryDto>()
-                .ReverseMap();
-        }
+        CreateMap<PrinterCategory, PrinterCategoryDto>()
+            .ReverseMap();
     }
 }

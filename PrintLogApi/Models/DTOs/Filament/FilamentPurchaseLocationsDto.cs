@@ -1,10 +1,9 @@
-﻿namespace PrintLogApi.Models.DTOs.Filament
+﻿namespace PrintLogApi.Models.DTOs.Filament;
+
+public class FilamentPurchaseLocationsDto
 {
-    public class FilamentPurchaseLocationsDto
-    {
-        /// <summary>
-        /// A list of purchase locations
-        /// </summary>
-        public string[]? PurchaseLocations { get; set; }
-    }
+    /// <summary>
+    /// A list of purchase locations
+    /// </summary>
+    public string[]? PurchaseLocations { get; set; }
 }

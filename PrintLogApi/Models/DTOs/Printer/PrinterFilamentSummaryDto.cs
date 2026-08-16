@@ -1,12 +1,10 @@
-﻿using System;
-using PrintLogApi.Models.DTOs.Filament;
+﻿using PrintLogApi.Models.DTOs.Filament;
 
-namespace PrintLogApi.Models.DTOs.Printer
+namespace PrintLogApi.Models.DTOs.Printer;
+
+public class PrinterFilamentSummaryDto
 {
-    public class PrinterFilamentSummaryDto
-    {
-        public Guid Id { get; set; }
+    public Guid Id { get; set; }
 
-        public FilamentSummaryDto? Filament { get; set; }
-    }
+    public FilamentSummaryDto? Filament { get; set; }
 }

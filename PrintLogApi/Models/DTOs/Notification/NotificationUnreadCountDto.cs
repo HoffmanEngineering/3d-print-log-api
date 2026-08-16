@@ -1,7 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Notification
+﻿namespace PrintLogApi.Models.DTOs.Notification;
+
+public class NotificationUnreadCountDto
 {
-    public class NotificationUnreadCountDto
-    {
-        public int UnreadCount { get; set; }
-    }
+    public int UnreadCount { get; set; }
 }
