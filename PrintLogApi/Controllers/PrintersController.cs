@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -6,15 +7,14 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
-using PrintLogApi.Extensions;
 using PrintLogApi.Services;
-using System;
-using Microsoft.AspNetCore.Http;
 
 namespace PrintLogApi.Controllers
 {
@@ -72,7 +72,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<IEnumerable<PrinterSummarySimpleDto>>> GetPrinterSummary([FromQuery] PagedRequest pagingRequest, [FromQuery] string? searchText, [FromQuery] bool includeInactive = false)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -278,7 +278,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<PrinterDetailDto>> PostPrinter(AddPrinterDTO printer)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

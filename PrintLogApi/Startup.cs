@@ -11,9 +11,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -77,8 +77,9 @@ namespace PrintLogApi
 
             services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { 
-                    Title = "3D Print Log Api", 
+                c.SwaggerDoc("v1", new OpenApiInfo
+                {
+                    Title = "3D Print Log Api",
                     Version = "v1",
                     Description = @"HTTP API powering <https://3dprintlog.com>, allowing users to manage their prints, printers, and filaments.
 
@@ -115,7 +116,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         Implicit = new OpenApiOAuthFlow
                         {
                             AuthorizationUrl = new Uri($"https://{Configuration["Auth0:Domain"]}/authorize"),
-                            
+
                             Scopes = new Dictionary<string, string>
                             {
                                 {"api1", "Demo API - full access"}
@@ -130,7 +131,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 c.AddSecurityDefinition("apikey", new OpenApiSecurityScheme
                 {
                     Type = SecuritySchemeType.ApiKey,
-                    
+
                     In = ParameterLocation.Header,
                     Name = "X-Api-Key"
                 });
@@ -667,7 +668,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 {
                     operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
                 }
-                
+
 
                 operation.Security = new List<OpenApiSecurityRequirement>
             {

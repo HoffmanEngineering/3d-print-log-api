@@ -1,15 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using PrintLogApi.Models.DTOs.Filament;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
+using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
 using Xunit;
@@ -213,10 +213,10 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Items within each page are in ascending title order.
             for (int i = 0; i < page1.Items.Count - 1; i++)
                 Assert.True(string.Compare(page1.Items[i].Title, page1.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
-                    $"Page 1 item[{i}]='{page1.Items[i].Title}' should come before item[{i+1}]='{page1.Items[i+1].Title}'");
+                    $"Page 1 item[{i}]='{page1.Items[i].Title}' should come before item[{i + 1}]='{page1.Items[i + 1].Title}'");
             for (int i = 0; i < page2.Items.Count - 1; i++)
                 Assert.True(string.Compare(page2.Items[i].Title, page2.Items[i + 1].Title, StringComparison.OrdinalIgnoreCase) <= 0,
-                    $"Page 2 item[{i}]='{page2.Items[i].Title}' should come before item[{i+1}]='{page2.Items[i+1].Title}'");
+                    $"Page 2 item[{i}]='{page2.Items[i].Title}' should come before item[{i + 1}]='{page2.Items[i + 1].Title}'");
 
             // Last item on page 1 must sort <= first item on page 2.
             Assert.True(
@@ -2009,8 +2009,14 @@ namespace PrintLogApi.IntegrationTests.Controllers
             {
                 title = "Filtered Print",
                 printerId = IntegrationTestSeeder.TestPrinterId,
-                status = 3, viewStatus = 3, allowComments = false,
-                filamentUsage = Array.Empty<object>(), filamentType = "", notes = "", url = "", fileName = "",
+                status = 3,
+                viewStatus = 3,
+                allowComments = false,
+                filamentUsage = Array.Empty<object>(),
+                filamentType = "",
+                notes = "",
+                url = "",
+                fileName = "",
                 projectId = project.Id
             };
             var printReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");

@@ -48,7 +48,7 @@ namespace PrintLogApi.Models
         public Printer Printer { get; set; } = null!;
 
         public int? EstimatedPrintTimeInSeconds { get; set; }
-        public int? EstimatedFilamentUsageMg  { get; set; }
+        public int? EstimatedFilamentUsageMg { get; set; }
         public int? PrintTimeInSeconds { get; set; }
 
         public ICollection<PrintFilament>? FilamentUsage { get; set; }

@@ -9,13 +9,14 @@ namespace PrintLogApi.Profiles
 {
     public class PrinterMaintenanceProfile : Profile
     {
-        public PrinterMaintenanceProfile() {
+        public PrinterMaintenanceProfile()
+        {
             CreateMap<PrinterMaintenance, PrinterMaintenanceDto>().ReverseMap();
 
             CreateMap<AddPrinterMaintenanceDto, PrinterMaintenance>();
 
             CreateMap<PutPrinterMaintenanceDto, PrinterMaintenance>();
-        
+
         }
     }
 }

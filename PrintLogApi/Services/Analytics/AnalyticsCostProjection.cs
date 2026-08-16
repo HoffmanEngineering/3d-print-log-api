@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -145,21 +145,21 @@ namespace PrintLogApi.Services.Analytics
                     Rows = p.FilamentUsage!
                         .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
                         .Select(pf => new
-                    {
-                        pf.Filament!.PurchasePriceValue,
-                        pf.Filament.PurchasePriceCurrency,
-                        pf.Filament.InitialNominalWeightMg,
-                        pf.Filament.MaterialDensityGramPerCubicCm,
-                        pf.Filament.DiameterMm,
-                        Source = (int)pf.Source,
-                        AmountMg = (double?)pf.AmountMg,
-                        pf.LengthInM,
-                        pf.VolumeMl,
-                        EstimatedSource = (int)pf.EstimatedSource,
-                        EstimatedAmountMg = (double?)pf.EstimatedAmountMg,
-                        pf.EstimatedLengthInM,
-                        pf.EstimatedVolumeMl,
-                    }).ToList(),
+                        {
+                            pf.Filament!.PurchasePriceValue,
+                            pf.Filament.PurchasePriceCurrency,
+                            pf.Filament.InitialNominalWeightMg,
+                            pf.Filament.MaterialDensityGramPerCubicCm,
+                            pf.Filament.DiameterMm,
+                            Source = (int)pf.Source,
+                            AmountMg = (double?)pf.AmountMg,
+                            pf.LengthInM,
+                            pf.VolumeMl,
+                            EstimatedSource = (int)pf.EstimatedSource,
+                            EstimatedAmountMg = (double?)pf.EstimatedAmountMg,
+                            pf.EstimatedLengthInM,
+                            pf.EstimatedVolumeMl,
+                        }).ToList(),
                 })
                 .ToListAsync(ct);
 

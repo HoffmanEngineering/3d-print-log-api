@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.Stripe
+﻿namespace PrintLogApi.Models.Stripe
 {
     public class StripeOptions
     {

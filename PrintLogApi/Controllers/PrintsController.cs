@@ -175,7 +175,7 @@ namespace PrintLogApi.Controllers
             return result;
         }
 
-        
+
         /// <summary>
         /// Get Print Statistics for the current user.
         /// </summary>
@@ -197,7 +197,7 @@ namespace PrintLogApi.Controllers
             return printStats;
         }
 
-        
+
 
         /// <summary>
         /// Returns a chronologically interleaved list of project rows and standalone print rows for the current user,
@@ -266,7 +266,7 @@ namespace PrintLogApi.Controllers
                     .ThenInclude(pf => pf.Filament)
                 .Where(p => p.Id == id)
                 .AsNoTracking()
-                .ProjectTo< PrintDetailDTO>(_mapper.ConfigurationProvider)
+                .ProjectTo<PrintDetailDTO>(_mapper.ConfigurationProvider)
                 .FirstOrDefaultAsync();
 
             // Not provably non-null: the existence check above and this projection are separate
@@ -274,7 +274,7 @@ namespace PrintLogApi.Controllers
             // pre-existing NullReferenceException rather than papering over the race; closing it
             // properly is a behaviour change, tracked in #57.
             printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
-            
+
             return printDetailDto;
         }
 
@@ -346,16 +346,18 @@ namespace PrintLogApi.Controllers
                 _cacheVersionService.InvalidateUserCache(userId.Value);
 
                 return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
-            } catch (UserCannotAccessPrinterException)
+            }
+            catch (UserCannotAccessPrinterException)
             {
                 return BadRequest();
-            } catch (DoesNotExistException)
+            }
+            catch (DoesNotExistException)
             {
                 return NotFound();
-            }          
+            }
 
 
-            
+
         }
 
         /// <summary>
@@ -393,11 +395,12 @@ namespace PrintLogApi.Controllers
             try
             {
                 var updatedPrint = await _printService.UpdatePrintStatus(id, newStatus, userId.Value);
-                
+
                 _cacheVersionService.InvalidateUserCache(userId.Value);
-                
+
                 return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
-            } catch (DoesNotExistException)
+            }
+            catch (DoesNotExistException)
             {
                 return NotFound();
             }
@@ -434,14 +437,16 @@ namespace PrintLogApi.Controllers
                 _cacheVersionService.InvalidateUserCache(userId.Value);
 
                 return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
-            } catch (UserCannotAccessPrinterException)
+            }
+            catch (UserCannotAccessPrinterException)
             {
                 return BadRequest("Selected printer does not belong to currently logged in user.");
-            } catch (UserCannotAccessFilamentException)
+            }
+            catch (UserCannotAccessFilamentException)
             {
                 return BadRequest("Selected filament does not belong to currently logged in user.");
             }
-            
+
         }
 
 
@@ -483,10 +488,10 @@ namespace PrintLogApi.Controllers
 
             _cacheVersionService.InvalidateUserCache(userId.Value);
 
-            var properties = new Dictionary<string, string> { 
-                { "PrintId", existingPrint.Id.ToString() }, 
-                { "UserId", userId.ToString()! }, 
-                { "PrintCreated", existingPrint.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }  
+            var properties = new Dictionary<string, string> {
+                { "PrintId", existingPrint.Id.ToString() },
+                { "UserId", userId.ToString()! },
+                { "PrintCreated", existingPrint.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
             };
             _telemetry.TrackEvent("PrintDeleted", properties);
 
@@ -508,8 +513,8 @@ namespace PrintLogApi.Controllers
             // Optimized query: only load the specific image and minimal print data needed for authorization
             var imageData = await _context.PrintImages
                 .Where(pi => pi.PrintId == printId && pi.Id == imageId)
-                .Select(pi => new 
-                { 
+                .Select(pi => new
+                {
                     pi.File,
                     PrintViewStatus = pi.Print.ViewStatus,
                     PrintCreatedById = pi.Print.CreatedById
@@ -524,7 +529,7 @@ namespace PrintLogApi.Controllers
 
             // Simplified authorization check without loading full print entity
             var userId = User.GetUserId();
-            if (imageData.PrintViewStatus == Print.PrintViewStatus.Private && 
+            if (imageData.PrintViewStatus == Print.PrintViewStatus.Private &&
                 (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
             {
                 return Forbid();
@@ -537,7 +542,8 @@ namespace PrintLogApi.Controllers
                 new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName!, out var contentType);
                 return File(printImageDto.File!, contentType ?? "application/octet-stream");
 
-            } catch (DoesNotExistException)
+            }
+            catch (DoesNotExistException)
             {
                 return NotFound();
             }
@@ -572,7 +578,7 @@ namespace PrintLogApi.Controllers
             }
 
             await _printService.SetDefaultImage(printId, imageId);
-            
+
             return Ok();
         }
 

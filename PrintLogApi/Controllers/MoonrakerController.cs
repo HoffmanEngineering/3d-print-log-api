@@ -328,7 +328,8 @@ namespace PrintLogApi.Controllers
                     print.FilamentUsage!.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
 
 
-                } else
+                }
+                else
                 {
                     print.FilamentUsage!.Add(new PrintFilament
                     {

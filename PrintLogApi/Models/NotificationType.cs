@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models
+﻿namespace PrintLogApi.Models
 {
     public enum NotificationType
     {

@@ -27,7 +27,7 @@ namespace PrintLogApi.Models
         /// </summary>
         public double DensityGramPerCubicCm { get; set; }
 
-        public string? MaterialCategoryNickname {  get; set; }
+        public string? MaterialCategoryNickname { get; set; }
         public MaterialCategory? MaterialCategory { get; set; }
     }
 }

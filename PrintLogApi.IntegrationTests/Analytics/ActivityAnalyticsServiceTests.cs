@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -86,15 +86,21 @@ namespace PrintLogApi.IntegrationTests.Analytics
 
             var before = await Get(new AnalyticsFilter
             {
-                TimeZone = "UTC", FromDate = boundary.AddDays(-30), ToDate = boundary,
+                TimeZone = "UTC",
+                FromDate = boundary.AddDays(-30),
+                ToDate = boundary,
             });
             var after = await Get(new AnalyticsFilter
             {
-                TimeZone = "UTC", FromDate = boundary, ToDate = boundary.AddDays(30),
+                TimeZone = "UTC",
+                FromDate = boundary,
+                ToDate = boundary.AddDays(30),
             });
             var whole = await Get(new AnalyticsFilter
             {
-                TimeZone = "UTC", FromDate = boundary.AddDays(-30), ToDate = boundary.AddDays(30),
+                TimeZone = "UTC",
+                FromDate = boundary.AddDays(-30),
+                ToDate = boundary.AddDays(30),
             });
 
             Assert.Equal(
@@ -184,7 +190,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
         {
             var response = await Get(new AnalyticsFilter
             {
-                TimeZone = "UTC", PrinterIds = { long.MaxValue },
+                TimeZone = "UTC",
+                PrinterIds = { long.MaxValue },
             });
 
             Assert.Equal(0, response.Series.Sum(b => b.Count));

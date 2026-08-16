@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using PrintLogApi.Models.DTOs.Analytics;
 using Xunit;
 

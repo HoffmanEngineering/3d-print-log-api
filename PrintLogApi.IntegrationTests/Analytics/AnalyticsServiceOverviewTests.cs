@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -205,8 +205,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
             //
             // The exact number is the point. A count of 1 here would mean the reasons had been
             // collapsed into a distinct list, which is what this test exists to prevent.
-            var rateMissing = Assert.Single(
-                exclusions.Where(e => e.Reason == ExclusionReason.RateMissing));
+            var rateMissing = Assert.Single(exclusions, e => e.Reason == ExclusionReason.RateMissing);
 
             Assert.Equal(3, rateMissing.Count);
         }

@@ -7,9 +7,9 @@ using AutoMapper.QueryableExtensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
-using PrintLogApi.Extensions;
 
 namespace PrintLogApi.Controllers
 {
@@ -44,7 +44,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<IEnumerable<UserSettingDto>>> GetCurrentUsersSettings()
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -67,7 +67,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserSettingDto>> UpdateUserSetting([FromBody] UpdateUserSettingDto updateSettingDto)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -119,7 +119,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserSettingDto>> CreateUserSetting([FromBody] AddUserSettingDto newSettingDto)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

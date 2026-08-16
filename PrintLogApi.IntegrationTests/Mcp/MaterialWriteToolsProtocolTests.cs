@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -43,14 +43,14 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.DoesNotContain(tools, t => t.Name == "add_material");
 
-            var create = Assert.Single(tools.Where(t => t.Name == "create_material"));
+            var create = Assert.Single(tools, t => t.Name == "create_material");
             Assert.False(create.ProtocolTool.Annotations?.DestructiveHint);
 
-            var update = Assert.Single(tools.Where(t => t.Name == "update_material"));
+            var update = Assert.Single(tools, t => t.Name == "update_material");
             // A capacity rebase changes a baseline; it never deletes the material or its history.
             Assert.False(update.ProtocolTool.Annotations?.DestructiveHint);
 
-            var get = Assert.Single(tools.Where(t => t.Name == "get_material"));
+            var get = Assert.Single(tools, t => t.Name == "get_material");
             Assert.True(get.ProtocolTool.Annotations?.ReadOnlyHint);
         }
 

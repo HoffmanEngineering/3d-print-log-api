@@ -1,11 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using PrintLogApi.Models;
-using PrintLogApi.Services;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using PrintLogApi.Models;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.TestData
 {
@@ -49,10 +49,10 @@ namespace PrintLogApi.TestData
 
         private static List<Filament> GetTestFilament()
         {
-             List<Filament> testFilament = new List<Filament>()
-             {
+            List<Filament> testFilament = new List<Filament>()
+            {
 
-             };
+            };
 
             for (int i = 1; i <= 10000; i++)
             {
@@ -85,9 +85,9 @@ namespace PrintLogApi.TestData
                 };
 
                 testFilament.Add(filament);
-                    }
+            }
 
-                    return testFilament;
+            return testFilament;
         }
 
         private static List<Project> GetTestProjects()
@@ -212,9 +212,9 @@ namespace PrintLogApi.TestData
             context.Database.CreateExecutionStrategy().Execute(() =>
             {
                 using var transaction = context.Database.BeginTransaction();
-                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} ON;");
+                context.Database.ExecuteSql($"SET IDENTITY_INSERT {tableName} ON;");
                 context.SaveChanges();
-                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} OFF;");
+                context.Database.ExecuteSql($"SET IDENTITY_INSERT {tableName} OFF;");
                 transaction.Commit();
             });
         }

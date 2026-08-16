@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Globalization;
 using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Logging;

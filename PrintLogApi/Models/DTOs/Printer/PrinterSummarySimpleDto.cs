@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using PrintLogApi.Models.DTOs.PrinterCategory;
 
 namespace PrintLogApi.Models.DTOs.Printer

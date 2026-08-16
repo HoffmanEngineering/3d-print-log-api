@@ -44,7 +44,7 @@ namespace PrintLogApi.Profiles
                                                                         .Select(i => i.Id)
                                                                         .FirstOrDefault()))
                 .ForMember(dest => dest.CreatedBy, opt => opt.MapFrom(src => src.CreatedBy))
-                .ForMember(dest => dest.CreatedDate, opt => opt.MapFrom(src => (DateTimeOffset) DateTime.SpecifyKind(src.CreatedDate, DateTimeKind.Utc)))
+                .ForMember(dest => dest.CreatedDate, opt => opt.MapFrom(src => (DateTimeOffset)DateTime.SpecifyKind(src.CreatedDate, DateTimeKind.Utc)))
                 .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments!.Select(c => c.Comment).Count()));
 
             CreateMap<Print, PrintDetailDTO>()

@@ -45,7 +45,7 @@ namespace PrintLogApi.Models
         /// <summary>
         /// The estimated length of filament used in meters.
         /// </summary>
-        public double? EstimatedVolumeMl{ get; set; }
+        public double? EstimatedVolumeMl { get; set; }
 
         /// <summary>
         /// The actual volume of filament used in milliliters
@@ -60,7 +60,7 @@ namespace PrintLogApi.Models
         /// <summary>
         /// The source of truth for the actual sections
         /// </summary>
-        public SourceMeasurement Source {  get; set; }
+        public SourceMeasurement Source { get; set; }
 
         [StringLength(1000)]
         public string? Notes { get; set; }

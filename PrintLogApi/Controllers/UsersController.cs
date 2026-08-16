@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
@@ -11,13 +12,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
-using PrintLogApi.Extensions;
 using PrintLogApi.Services;
 using PrintLogApi.Users;
-using System.Globalization;
 
 namespace PrintLogApi.Controllers
 {
@@ -93,7 +93,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -169,7 +169,7 @@ namespace PrintLogApi.Controllers
         [HttpDelete("pending-deactivation")]
         [AllowAnonymous]
         public async Task<ActionResult> ProcessPendingDeactivations()
-        { 
+        {
             await _userDeletionService.DeletePendingDeactivatedUsers();
 
             return Ok();
@@ -211,7 +211,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -320,7 +320,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }
@@ -381,7 +381,7 @@ namespace PrintLogApi.Controllers
         public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
         {
             var userId = User.GetUserId();
-            if(!userId.HasValue)
+            if (!userId.HasValue)
             {
                 return Unauthorized();
             }

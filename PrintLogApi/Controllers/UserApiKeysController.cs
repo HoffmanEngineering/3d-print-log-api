@@ -6,10 +6,10 @@ using AutoMapper;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using PrintLogApi.Services;
-using PrintLogApi.Extensions;
-using PrintLogApi.Exceptions;
 
 namespace PrintLogApi.Controllers
 {
@@ -68,7 +68,7 @@ namespace PrintLogApi.Controllers
             }
 
             var newKey = await _userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
-    
+
 
             return newKey;
         }
@@ -91,15 +91,17 @@ namespace PrintLogApi.Controllers
             {
                 await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
                 return NoContent();
-            } catch (DoesNotExistException)
+            }
+            catch (DoesNotExistException)
             {
                 return NotFound("Active API Key Not Found");
-            } catch (UserCannotAccessApiKeyException)
+            }
+            catch (UserCannotAccessApiKeyException)
             {
                 return Forbid("User does not have access to specified API Key");
             }
-            
-            
+
+
         }
     }
 }

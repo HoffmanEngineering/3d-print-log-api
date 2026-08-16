@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,7 +9,6 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 using PrintLogApi.Services;
 using Xunit;
-using System.Net.Http.Headers;
 
 namespace PrintLogApi.IntegrationTests.Controllers
 {

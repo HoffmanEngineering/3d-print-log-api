@@ -1,8 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
 namespace PrintLogApi.Models
 {
@@ -17,7 +17,7 @@ namespace PrintLogApi.Models
         /// </summary>
         public PagedList()
         {
-            Paging = new PageInfo(1,1,1);
+            Paging = new PageInfo(1, 1, 1);
             Items = new List<T>();
         }
 

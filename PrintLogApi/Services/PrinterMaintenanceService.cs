@@ -126,10 +126,12 @@ namespace PrintLogApi.Services
                     if (includeDone.Value == includeNotDone.Value)
                     {
                         // Do Nothing with the query
-                    } else if (includeDone.Value == true)
+                    }
+                    else if (includeDone.Value == true)
                     {
                         maintenanceBaseQuery = maintenanceBaseQuery.Where(f => f.Done == true);
-                    } else
+                    }
+                    else
                     {
                         maintenanceBaseQuery = maintenanceBaseQuery.Where(f => f.Done == false);
                     }
@@ -169,7 +171,8 @@ namespace PrintLogApi.Services
                         maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => PrintLogContext.fnNaturalSort(f.Category!)).ThenByDescending(f => f.Date).ThenByDescending(f => f.Id);
                     }
                 }
-            } else
+            }
+            else
             {
                 if (sortDirection == SortDirection.Asc)
                 {
@@ -178,7 +181,7 @@ namespace PrintLogApi.Services
                 else
                 {
                     maintenanceBaseQuery = maintenanceBaseQuery.OrderByDescending(f => f.Date).ThenByDescending(f => f.Category).ThenByDescending(f => f.Id);
-                    }
+                }
             }
 
             return await PagedList<PrinterMaintenanceDto>.CreateAsync(maintenanceBaseQuery, pageNumber, pageSize);

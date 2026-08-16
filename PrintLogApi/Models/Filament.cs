@@ -62,7 +62,7 @@ namespace PrintLogApi.Models
         /// <summary>
         /// Which measurement is the source. Ie, should measurements be based on weight, volume, etc?
         /// </summary>
-        public SourceMeasurement Source {  get; set; }
+        public SourceMeasurement Source { get; set; }
 
         /// <summary>
         /// The initial volume of the material in millileters 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
@@ -723,23 +723,23 @@ namespace PrintLogApi.IntegrationTests.Mcp
             Print MatrixPrint(
                 string title, int? actual, int? estimated, int? amountMg, int? estimatedAmountMg,
                 int? legacyActualMg = null, int? legacyEstimatedMg = null, Guid? filamentId = null) => new()
-            {
-                Title = title,
-                StartDate = now,                     // dated, so ranged queries see them too
-                Status = Print.PrintStatus.Success,
-                ViewStatus = Print.PrintViewStatus.Private,
-                PrinterId = metricsPrinter.Id,
-                ProjectId = metricsProject.Id,
-                CreatedById = MetricsUserId,
-                CreatedDate = now,
-                UpdatedById = MetricsUserId,
-                UpdatedDate = now,
-                PrintTimeInSeconds = actual,
-                EstimatedPrintTimeInSeconds = estimated,
-                // Legacy scalars: read ONLY by /api/Users/{id}/total-filament-usage, never by MCP.
-                FilamentUsageMg = legacyActualMg,
-                EstimatedFilamentUsageMg = legacyEstimatedMg,
-                FilamentUsage = new List<PrintFilament>
+                {
+                    Title = title,
+                    StartDate = now,                     // dated, so ranged queries see them too
+                    Status = Print.PrintStatus.Success,
+                    ViewStatus = Print.PrintViewStatus.Private,
+                    PrinterId = metricsPrinter.Id,
+                    ProjectId = metricsProject.Id,
+                    CreatedById = MetricsUserId,
+                    CreatedDate = now,
+                    UpdatedById = MetricsUserId,
+                    UpdatedDate = now,
+                    PrintTimeInSeconds = actual,
+                    EstimatedPrintTimeInSeconds = estimated,
+                    // Legacy scalars: read ONLY by /api/Users/{id}/total-filament-usage, never by MCP.
+                    FilamentUsageMg = legacyActualMg,
+                    EstimatedFilamentUsageMg = legacyEstimatedMg,
+                    FilamentUsage = new List<PrintFilament>
                 {
                     // Source is explicit because the enum has no 0 member: leaving it at default(0)
                     // makes PrintCostCalculator.ToGrams return null for every row, so the whole
@@ -755,7 +755,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
                         EstimatedSource = PrintFilament.SourceMeasurement.Weight,
                     },
                 },
-            };
+                };
 
             // Mirrors real production states, not invented ones:
             //  - EstimatedOnly: production print 402378 (OrcaSlicer uploader) — never completed, so the

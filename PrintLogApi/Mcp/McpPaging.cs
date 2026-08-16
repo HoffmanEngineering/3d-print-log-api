@@ -1,4 +1,4 @@
-namespace PrintLogApi.Mcp
+﻿namespace PrintLogApi.Mcp
 {
     /// <summary>
     /// Bounded paging for MCP tools. Page size defaults to 25 and is hard-capped at 100

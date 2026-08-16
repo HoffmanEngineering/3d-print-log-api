@@ -31,11 +31,11 @@ namespace PrintLogApi.Models
         /// </summary>
         public bool HasDiameter { get; set; }
 
-        public bool ShowNozzleTemperature {  get; set; }
+        public bool ShowNozzleTemperature { get; set; }
 
         public bool ShowBedTemperature { get; set; }
 
-        public bool ShowMeltingTemperature {  get; set; }
+        public bool ShowMeltingTemperature { get; set; }
 
         public bool ShowRecommendedInitialLayerTimeInSeconds { get; set; }
 
@@ -44,7 +44,7 @@ namespace PrintLogApi.Models
         /// <summary>
         /// The percentage of new powder when mixing with old powder
         /// </summary>
-        public bool ShowMaterialRefreshRatio {  get; set; }
+        public bool ShowMaterialRefreshRatio { get; set; }
 
         public bool ShowInertGas { get; set; }
 

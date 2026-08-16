@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -344,7 +344,8 @@ namespace PrintLogApi.IntegrationTests.Analytics
         {
             var response = await Get(new AnalyticsFilter
             {
-                TimeZone = "UTC", FilamentIds = { Guid.NewGuid() },
+                TimeZone = "UTC",
+                FilamentIds = { Guid.NewGuid() },
             });
 
             Assert.Empty(response.ByType);

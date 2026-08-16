@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -159,7 +159,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [InlineData("")]
         [InlineData("   ")]
         [InlineData(null)]
-        public async Task Create_BlankOrMissingName_IsRejected(string name)
+        public async Task Create_BlankOrMissingName_IsRejected(string? name)
         {
             using var scope = _factory.Services.CreateScope();
             var ex = await Assert.ThrowsAsync<McpToolException>(
@@ -171,7 +171,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [InlineData("")]
         [InlineData("   ")]
         [InlineData(null)]
-        public async Task Create_BlankOrMissingMake_IsRejected(string make)
+        public async Task Create_BlankOrMissingMake_IsRejected(string? make)
         {
             using var scope = _factory.Services.CreateScope();
             var ex = await Assert.ThrowsAsync<McpToolException>(
@@ -183,7 +183,7 @@ namespace PrintLogApi.IntegrationTests.Mcp
         [InlineData("")]
         [InlineData("   ")]
         [InlineData(null)]
-        public async Task Create_BlankOrMissingModel_IsRejected(string model)
+        public async Task Create_BlankOrMissingModel_IsRejected(string? model)
         {
             using var scope = _factory.Services.CreateScope();
             var ex = await Assert.ThrowsAsync<McpToolException>(

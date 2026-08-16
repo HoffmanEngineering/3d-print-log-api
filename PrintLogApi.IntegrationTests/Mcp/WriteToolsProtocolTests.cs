@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -35,10 +35,10 @@ namespace PrintLogApi.IntegrationTests.Mcp
 
             Assert.DoesNotContain(tools, t => t.Name == "log_print");
 
-            var create = Assert.Single(tools.Where(t => t.Name == "create_print"));
+            var create = Assert.Single(tools, t => t.Name == "create_print");
             Assert.True(create.ProtocolTool.Annotations?.IdempotentHint);
 
-            var update = Assert.Single(tools.Where(t => t.Name == "update_print"));
+            var update = Assert.Single(tools, t => t.Name == "update_print");
             Assert.True(update.ProtocolTool.Annotations?.DestructiveHint);
         }
 
