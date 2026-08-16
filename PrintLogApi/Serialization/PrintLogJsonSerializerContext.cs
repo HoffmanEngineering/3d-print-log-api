@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 using PrintLogApi.Models.DTOs.Print;
