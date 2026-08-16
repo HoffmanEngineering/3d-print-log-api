@@ -15,7 +15,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.x'
+          # Same pin as ci.yml. A release must not be built with a different SDK than the one CI
+          # validated the commit against.
+          global-json-file: global.json
 
       - name: Restore dependencies
         run: dotnet restore
