@@ -13,10 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Installs exactly the SDK global.json asks for, so the root global.json is the single source
+      # of truth rather than something CI can disagree with. This matters for the format gate below:
+      # it runs the style and analyzer passes, which are implemented by the SDK's bundled analyzers,
+      # so a floating 'dotnet-version: 10.x' could turn that gate red on a PR that changed nothing.
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.x'
+          global-json-file: global.json
 
       - name: Restore dependencies
         run: dotnet restore

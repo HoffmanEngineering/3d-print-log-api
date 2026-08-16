@@ -1,0 +1,53 @@
+﻿<Project>
+
+  <!-- Repo-wide build settings. Imported automatically by every project under this directory,
+       including any project added later - which is the point. Settings that have to hold for
+       the whole repo to stay correct belong here, not copied into each .csproj where a new
+       project silently starts without them. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- The nullable migration (#46) is complete. Every source file outside Migrations/ already
+         carried an explicit "#nullable enable" from #42-#44, so this flip turns the annotation
+         context on for the generated migrations too and makes the per-file headers redundant
+         rather than changing how the app itself compiles.
+
+         Verified at the flip: zero CS86xx warnings, and
+         "dotnet ef migrations has-pending-model-changes" green, which is what proves EF Core's
+         schema inference did not move. -->
+    <Nullable>enable</Nullable>
+
+    <!-- The ratchet. Without it the migration decays: a new nullable warning is one line in a
+         build log nobody reads, and the annotations stop meaning anything within a release or two.
+
+         This is the setting that most needs to be repo-wide rather than per-project. A new project
+         that starts without it does not fail - it just quietly opts out of the invariant, and
+         nothing reports that it did.
+
+         Note this is an assignment, not an append, and that is deliberate - but it now behaves
+         differently than the identical line did inside the .csproj, because of WHERE it is
+         evaluated:
+
+           - Microsoft.NET.Sdk.CSharp.props does an unconditional
+             `<WarningsAsErrors>$(WarningsAsErrors);NU1605</WarningsAsErrors>`.
+           - Directory.Build.props is imported by Microsoft.Common.props, BEFORE that SDK file.
+             The SDK therefore appends to "nullable", and NU1605 survives.
+           - A .csproj body is evaluated AFTER the SDK props. The old per-project line assigned
+             over the SDK's value and silently discarded NU1605.
+
+         So moving the property here turned NU1605 (package downgrade) from a warning into a build
+         error. That is the SDK's intended behaviour, which the old placement was accidentally
+         defeating, and it is a useful guard now that versions are centralized: a transitive
+         downgrade is exactly the kind of drift Directory.Packages.props exists to catch. Recorded
+         because it is the one effective-build change in the commit that introduced this file, and
+         a future NU1605 failure would otherwise look inexplicable.
+
+         Do NOT "fix" this by writing $(WarningsAsErrors);nullable here - at this point in
+         evaluation the variable is empty, so that would just prepend a stray semicolon. -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

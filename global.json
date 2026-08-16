@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/global.json",
+  "comment": [
+    "Pins the SDK feature band (10.0.1xx) so the CI format gate is reproducible.",
+    "",
+    "ci.yml runs `dotnet format --verify-no-changes` with the style AND analyzer passes. Those",
+    "passes are implemented by the SDK's bundled analyzers, so a new SDK can turn that gate red on",
+    "a PR that changed nothing relevant. Without a pin, `dotnet-version: 10.x` in ci.yml means the",
+    "SDK can change under us at any time.",
+    "",
+    "rollForward is `latestPatch`, NOT `latestFeature`. latestPatch stays inside the 10.0.1xx",
+    "feature band and takes servicing patches only; latestFeature would allow 10.0.2xx, and new or",
+    "retuned analyzers ship in feature bands. latestFeature would therefore reintroduce the exact",
+    "drift this file exists to prevent. Issue #62 said latestFeature; that was wrong for the stated",
+    "goal.",
+    "",
+    "Bumping the feature band is a deliberate act: change `version` here, run `dotnet format`, and",
+    "commit any resulting changes with the bump."
+  ],
+  "sdk": {
+    "version": "10.0.102",
+    "rollForward": "latestPatch"
+  }
+}
