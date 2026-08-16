@@ -231,7 +231,7 @@ namespace PrintLogApi.Services
 
             // Check if the user had access to that printer!
             // Null-forgiven: an unknown PrinterId already threw here before nullable analysis was
-            // enabled, and it fails closed either way. Tracked in #39.
+            // enabled, and it fails closed either way. Tracked in #57.
             if (userId != printer!.UserId)
             {
                 //return BadRequest();

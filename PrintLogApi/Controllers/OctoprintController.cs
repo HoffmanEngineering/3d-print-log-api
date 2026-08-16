@@ -200,7 +200,7 @@ namespace PrintLogApi.Controllers
                 // Check if the user had access to that printer!
                 // Null-forgiven: an unknown printerId already threw here before nullable analysis
                 // was enabled. It still fails closed, just as a 500 rather than a clean error.
-                // Turning that into an explicit not-found is a behaviour change, tracked in #39.
+                // Turning that into an explicit not-found is a behaviour change, tracked in #57.
                 if (userId != printer!.UserId)
                 {
                     throw new UserCannotAccessPrinterException();

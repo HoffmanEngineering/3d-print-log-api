@@ -235,7 +235,7 @@ namespace PrintLogApi.Services
         /// The per-element null-forgive is load-bearing and NOT accurate: RequireHex only validates
         /// non-null entries, so a caller sending <c>["ff0000", null]</c> persists a null inside
         /// Filament.Colors today. Rejecting or dropping those elements is a runtime behaviour
-        /// change, so it is tracked in #39 rather than smuggled in with an annotation.
+        /// change, so it is tracked in #57 rather than smuggled in with an annotation.
         /// </remarks>
         private static List<string> ResolveColors(MaterialAttributesInput input) =>
             input.Colors != null
@@ -606,7 +606,7 @@ namespace PrintLogApi.Services
             }
             else if (input.Colors != null)
             {
-                // Null elements survive validation here too — see ResolveColors, tracked in #39.
+                // Null elements survive validation here too — see ResolveColors, tracked in #57.
                 material.Colors = input.Colors.Select(c => c!).ToList();
                 material.ColorHex = material.Colors.Count > 0 ? material.Colors[0] : null;
             }
@@ -1375,7 +1375,7 @@ namespace PrintLogApi.Services
 
             // Null-forgiven: the "filament" fallback lookup above can itself return null if that
             // seeded category is missing, which already threw here. The existing "Todo, throw
-            // error?" comment marks the same gap; it is tracked in #39.
+            // error?" comment marks the same gap; it is tracked in #57.
             updatedFilament.MaterialCategoryNickname = materialCategory!.Nickname;
             updatedFilament.MaterialCategory = materialCategory;
 

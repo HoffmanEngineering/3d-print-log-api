@@ -171,12 +171,12 @@ nothing about behaviour changed. Four idioms account for nearly all of it.
 - **`(await Foo(id))!` after a write**, where `Foo` re-reads a row the same method just persisted.
   Always commented, so the reason survives the next reader.
 
-Anything that needs a real null *guard* rather than an annotation was left as a commented `!`
-pointing at #39. Note that #39 shipped only the CS8629 `.Value` sites and is now closed, so those
-~14 comments (`grep -rn "#39" --include=*.cs`) point at a closed issue while the behaviour changes
-they describe — unvalidated webhook payloads, implicit-not-found paths, null elements surviving
-validation — are still unmade. Re-point them if a follow-up issue is opened; match their wording if
-you add another.
+Anything that needs a real null *guard* rather than an annotation is a commented `!` pointing at
+**#57** (`grep -rn "#57" --include=*.cs` — 14 sites in 9 files). Those are deferred behaviour
+changes, not annotation debt: unvalidated webhook payloads, unknown ids that 500 where they should
+404, null elements surviving `Colors` validation. Each preserves a pre-existing
+`NullReferenceException` on purpose, so fixing one is caller-visible and needs its own test. Match
+their wording if you add another.
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes
 tools to agents in two classes: `PrintLogReadTools` (`McpRead`, `read:printdata`) and

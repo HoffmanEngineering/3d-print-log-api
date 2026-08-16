@@ -102,7 +102,7 @@ namespace PrintLogApi.Controllers
 
             // Deserialize returns null for a literal "null" body, which then throws on the
             // dereference below. Null-forgiven rather than guarded to keep this change
-            // annotation-only; the unvalidated webhook payload is tracked in #39.
+            // annotation-only; the unvalidated webhook payload is tracked in #57.
             var settings = JsonSerializer.Deserialize<CuraSetting>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
             var newSettings = new CuraSetting()

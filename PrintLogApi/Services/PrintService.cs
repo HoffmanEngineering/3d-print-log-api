@@ -1133,7 +1133,7 @@ namespace PrintLogApi.Services
             // Check if the user had access to that printer!
             // Null-forgiven: an unknown PrinterId already threw here before nullable analysis was
             // enabled, and it fails closed either way. Returning a clean not-found instead is a
-            // behaviour change, tracked in #39.
+            // behaviour change, tracked in #57.
             if (userId != printer!.UserId)
             {
                 //return BadRequest();
@@ -1388,7 +1388,7 @@ namespace PrintLogApi.Services
             var selectedImage = await _context.PrintImages.FindAsync(newDefaultImageId);
             // Null-forgiven: an unknown image id already threw here. Note the print existence
             // check above throws ArgumentNullException but the image is not validated — tracked
-            // in #39 rather than changed in this annotation-only pass.
+            // in #57 rather than changed in this annotation-only pass.
             selectedImage!.IsDefault = true;
 
             // Set other defaults to false;
