@@ -338,10 +338,22 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     ///
     /// Brotli quality 1 (Fastest) already matches what gzip only reaches at Optimal, so paying
     /// for a higher brotli level buys nothing — and SmallestSize costs 600x the CPU for three
-    /// percentage points, which on a request thread is a self-inflicted outage. Gzip is the
-    /// asymmetric one: it is the fallback for the shrinking set of clients that do not offer
-    /// brotli, and there 0.2 ms to send 35% fewer bytes is worth taking. Hence Fastest for
-    /// brotli and Optimal for gzip; the asymmetry is the measurement, not an oversight.
+    /// percentage points, which on a request thread is a self-inflicted outage.
+    ///
+    /// Both providers are therefore on Fastest, including gzip, where the tempting choice is
+    /// Optimal: it sends 35% fewer bytes for 0.2 ms more. That trade was taken and then
+    /// reversed, because the two populations it applies to are not the same. Gzip is only
+    /// reached by clients that do not offer brotli — a shrinking set of real users — but it is
+    /// also whichever codec an attacker names in Accept-Encoding, and they will always name the
+    /// expensive one. Paying 3x the CPU on a path selected mostly by adversaries is the wrong
+    /// side of that trade, and gzip Fastest still removes ~86% of the bytes.
+    ///
+    /// That reasoning is bounded by response size, and response size here is not bounded:
+    /// PagedRequest.PageSize is an unconstrained int that flows into Take(), so a caller can
+    /// ask any of the paged endpoints for an arbitrarily large body. Compression is not the
+    /// origin of that (the SQL and the serialization on that path cost far more than any
+    /// codec) and capping it is a caller-visible change that belongs in its own issue — but it
+    /// is the reason not to spend extra CPU per byte here.
     ///
     /// Brotli is registered first so it wins when a client offers both at equal quality.
     ///
@@ -362,7 +374,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         });
 
         services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
-        services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Optimal);
+        services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
     }
 
     /// <summary>
@@ -639,23 +651,30 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // slow query — not just analytics, where the abort race was first noticed.
         app.UseClientAbortHandling();
 
-        // Inside the abort handler, and outside everything else.
+        // Outside every middleware that writes a response body, which is the actual constraint:
+        // this swaps IHttpResponseBodyFeature for a wrapper, so anything that has already
+        // started writing would bypass it. That puts it above routing, endpoints, Swagger and
+        // /metrics, and below the HTTPS redirect (no point compressing a 307 with no body).
         //
-        // Inside, because the compression middleware finishes the compressed frame in a finally
-        // block as the stack unwinds. If the caller has already hung up, that final flush throws
-        // — and it throws from a frame the abort handler only covers when it sits outside this
-        // call. Registering compression above UseClientAbortHandling would reintroduce exactly
-        // the 500s that middleware exists to suppress, on the slow analytics responses most
-        // likely to be abandoned mid-flight.
-        //
-        // Outside the rest, so it covers every response including Swagger and /metrics, and so
-        // no other middleware has already written to the body stream it needs to wrap.
+        // It also sits inside UseClientAbortHandling so that anything thrown while finalizing
+        // the compressed frame passes back through that handler. Do not read more into that
+        // than it says. ResponseCompressionMiddleware calls FinishCompressionAsync inside its
+        // try, NOT in a finally (verified against dotnet/aspnetcore release/10.0), so when a
+        // downstream abort throws, finalization is skipped and compression adds no exception of
+        // its own. The case this ordering covers is the narrower one where the handler ran to
+        // completion but the socket is already gone. Even then the coverage is partial:
+        // ClientAbortMiddleware matches only OperationCanceledException and
+        // InvalidOperationException, so an IOException surfacing from a dead-socket write would
+        // still escape. Widening that is a change to that middleware, not to this line.
         //
         // Ordering against UseHttpMetrics was checked (issue #66 raised it): prometheus-net 8's
         // UseHttpMetrics records request counts, in-flight gauge and duration — it has no
-        // response-size metric, so nothing downstream observes a byte count that compression
-        // could distort. Duration is measured inside compression and therefore excludes it; the
-        // measured 0.15 ms is well under the noise floor of these handlers.
+        // response-size metric, so no recorded byte count can be distorted by compression.
+        // Duration is a different story and worth stating accurately: the codec runs during the
+        // WriteAsync calls the endpoint makes, which happen while UseHttpMetrics is still
+        // awaiting, so request duration INCLUDES compression. Only the trailing finalization
+        // falls outside it. At the measured 0.15 ms that is under the noise floor of these
+        // handlers, but a dashboard reading duration is not reading pure handler latency.
         app.UseResponseCompression();
 
         app.UseCors(builder =>

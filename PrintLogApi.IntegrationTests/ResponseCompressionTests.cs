@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -110,14 +111,43 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public void Compression_IsEnabledOverHttps()
+    public async Task Compression_AppliesOverHttps()
     {
-        var options = _factory.Services.GetRequiredService<IOptions<ResponseCompressionOptions>>().Value;
+        // The assertion that matters, and the one the other tests cannot make: every other case
+        // here runs over http://localhost, where compression happens regardless of the
+        // EnableForHttps setting. Production is entirely HTTPS (UseHttpsRedirection), so a
+        // regression that reverted EnableForHttps to its framework default would leave all nine
+        // other tests green while compression silently never ran for a single real user.
+        // Pointing the client at an https base address makes HttpContext.Request.IsHttps true,
+        // which is the exact condition the option gates on.
+        var httpsClient = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+        });
 
-        // Not the framework default. Everything outside Development is behind
-        // UseHttpsRedirection, so leaving this false would ship compression that never runs.
-        // See Startup.ConfigureResponseCompression for the BREACH analysis behind the decision.
-        Assert.True(options.EnableForHttps);
+        var request = new HttpRequestMessage(HttpMethod.Get, SummaryPath);
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
+
+        var response = await httpsClient.SendAsync(request);
+
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.RequestMessage!.RequestUri!.Scheme == Uri.UriSchemeHttps);
+        Assert.Equal("br", Assert.Single(response.Content.Headers.ContentEncoding));
+    }
+
+    [Fact]
+    public void Compression_UsesFastestOnBothProviders()
+    {
+        var brotli = _factory.Services.GetRequiredService<IOptions<BrotliCompressionProviderOptions>>().Value;
+        var gzip = _factory.Services.GetRequiredService<IOptions<GzipCompressionProviderOptions>>().Value;
+
+        // Levels are a CPU-per-request decision, not a preference. Brotli SmallestSize measured
+        // 600x the CPU of Fastest for three percentage points of size, and gzip is the codec an
+        // attacker names when they want the expensive path — see the measurements in
+        // Startup.ConfigureResponseCompression before raising either.
+        Assert.Equal(CompressionLevel.Fastest, brotli.Level);
+        Assert.Equal(CompressionLevel.Fastest, gzip.Level);
     }
 
     [Fact]

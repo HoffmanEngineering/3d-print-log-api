@@ -64,6 +64,13 @@ Brotli and Gzip, wired in `Startup.ConfigureResponseCompression` and placed in t
 immediately **inside** `UseClientAbortHandling`. Both of those details carry reasoning that is not
 obvious and is written out in full at those two sites — read them before changing either.
 
+The binding ordering constraint is that compression replaces `IHttpResponseBodyFeature`, so it must
+sit outside anything that writes a body. Its position relative to `UseClientAbortHandling` is the
+weaker half of the decision and the comment there says so explicitly: `FinishCompressionAsync` runs
+inside the middleware's `try`, **not** a `finally`, so a downstream abort skips finalization
+entirely. Do not restate the old "flush throws from a finally" rationale — it was wrong, and it was
+checked against `dotnet/aspnetcore` `release/10.0`.
+
 The two things most likely to be "tidied" into a regression:
 
 - **`EnableForHttps = true` is not the framework default.** It is a considered BREACH decision that
@@ -71,13 +78,25 @@ The two things most likely to be "tidied" into a regression:
   ambient credentials. **If cookie or session authentication is ever added, this must be revisited
   before that ships** — start at `POST /api/UserApiKeys`, the one response that returns a secret
   alongside caller-supplied text.
-- **The compression levels are asymmetric on purpose** — brotli `Fastest`, gzip `Optimal`. The
-  measurements are in the doc comment. `CompressionLevel.SmallestSize` for brotli is a 600x CPU
-  increase for three percentage points; never use it on a request thread.
+- **Both providers are on `CompressionLevel.Fastest`, and raising either is a CPU decision, not a
+  tuning preference.** The measurements are in the doc comment. Brotli `SmallestSize` is a 600x CPU
+  increase for three percentage points — never use it on a request thread. Gzip `Optimal` is the
+  more tempting one (35% fewer bytes for 0.2 ms) and was deliberately rejected: gzip is reached
+  only by clients that cannot do brotli, but it is also whichever codec an attacker names in
+  `Accept-Encoding`, so the extra CPU is spent mostly on adversaries. That trade is only as good as
+  the bound on response size, and there is none — `PagedRequest.PageSize` is an unconstrained `int`
+  that flows into `Take()`. Capping it is a caller-visible change and belongs in its own issue.
 
 `text/event-stream` is deliberately absent from `MimeTypes`: compressing a streaming body buffers
 it, and `/mcp` negotiates that content type. `ResponseCompressionTests` pins that, the encoding
-negotiation, and that compressed bytes decode back to the uncompressed response.
+negotiation, the compression levels, and that compressed bytes decode back to the uncompressed
+response. One test there is load-bearing in a way that is easy to miss: `Compression_AppliesOverHttps`
+drives an `https://` base address, because every other test runs over plain HTTP where compression
+happens whatever `EnableForHttps` says — revert that option and it is the *only* test that fails.
+
+One thing `UseHttpMetrics` readers should know: the codec runs during the endpoint's `WriteAsync`
+calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
+response-size metric, so no byte count is distorted.
 
 ## Database
 
