@@ -1,10 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace PrintLogApi.Models.DTOs.Comments
+namespace PrintLogApi.Models.DTOs.Comments;
+
+public class EditCommentDto
 {
-    public class EditCommentDto
-    {
-        [StringLength(2000)]
-        public string? Body { get; set; }
-    }
+    [StringLength(2000)]
+    public string? Body { get; set; }
 }

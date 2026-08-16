@@ -1,10 +1,7 @@
-﻿using System;
+﻿namespace PrintLogApi.Models.DTOs.Print;
 
-namespace PrintLogApi.Models.DTOs.Print
+public class GetDownloadUrlResponse
 {
-    public class GetDownloadUrlResponse
-    {
-        public string? Url { get; set; }
-        public DateTimeOffset ExpiresAt { get; set; }
-    }
+    public string? Url { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
 }

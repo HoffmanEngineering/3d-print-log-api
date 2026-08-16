@@ -1,10 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace PrintLogApi.Models.DTOs.Subscription
+namespace PrintLogApi.Models.DTOs.Subscription;
+
+public class CreateCheckoutSessionDto
 {
-    public class CreateCheckoutSessionDto
-    {
-        [Required]
-        public string? PlanId { get; set; }
-    }
+    [Required]
+    public string? PlanId { get; set; }
 }

@@ -1,25 +1,23 @@
-﻿using System;
-using System.Runtime.Serialization;
+﻿using System.Runtime.Serialization;
 
-namespace PrintLogApi.Services
+namespace PrintLogApi.Services;
+
+[Serializable]
+internal class FilamentIsInUseException : Exception
 {
-    [Serializable]
-    internal class FilamentIsInUseException : Exception
+    public FilamentIsInUseException()
     {
-        public FilamentIsInUseException()
-        {
-        }
+    }
 
-        public FilamentIsInUseException(string message) : base(message)
-        {
-        }
+    public FilamentIsInUseException(string message) : base(message)
+    {
+    }
 
-        public FilamentIsInUseException(string message, Exception innerException) : base(message, innerException)
-        {
-        }
+    public FilamentIsInUseException(string message, Exception innerException) : base(message, innerException)
+    {
+    }
 
-        protected FilamentIsInUseException(SerializationInfo info, StreamingContext context) : base(info, context)
-        {
-        }
+    protected FilamentIsInUseException(SerializationInfo info, StreamingContext context) : base(info, context)
+    {
     }
 }

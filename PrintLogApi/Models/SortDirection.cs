@@ -1,8 +1,7 @@
-﻿namespace PrintLogApi.Models
+﻿namespace PrintLogApi.Models;
+
+public enum SortDirection
 {
-    public enum SortDirection
-    {
-        Asc = 1,
-        Desc = 2
-    }
+    Asc = 1,
+    Desc = 2
 }

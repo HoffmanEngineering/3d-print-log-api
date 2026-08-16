@@ -1,8 +1,7 @@
-﻿namespace PrintLogApi.Models.SortEnums
+﻿namespace PrintLogApi.Models.SortEnums;
+
+public enum PrinterMaintenanceSortColumn
 {
-    public enum PrinterMaintenanceSortColumn
-    {
-        Date = 1,
-        Category = 2,
-    }
+    Date = 1,
+    Category = 2,
 }

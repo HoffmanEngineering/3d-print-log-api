@@ -1,11 +1,10 @@
-﻿using System.Threading.Tasks;
-using PrintLogApi.Models;
-using PrintLogApi.Models.DTOs.Print;
+﻿using PrintLogApi.Models.DTOs.Print;
 
-namespace PrintLogApi.Services
+namespace PrintLogApi.Services;
+
+public interface IPrintImageService
 {
-    public interface IPrintImageService
-    {
-        Task<PrintImageFileDto> DownloadPrintFile(File file);
-    }
+    // Qualified because ImplicitUsings brings System.IO into scope, which makes a bare "File"
+    // ambiguous with System.IO.File. Matches how PrintImageService already spells it.
+    Task<PrintImageFileDto> DownloadPrintFile(Models.File file);
 }

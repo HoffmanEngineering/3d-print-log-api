@@ -1,44 +1,42 @@
 ﻿using System.Security.Claims;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using PrintLogApi.Models;
 
-namespace PrintLogApi.Authentication.Handlers
+namespace PrintLogApi.Authentication.Handlers;
+
+public class UserProfileViewStatusAuthorizationHandler :
+AuthorizationHandler<PublicOrUnlistedUserProfileRequirement, User>
 {
-    public class UserProfileViewStatusAuthorizationHandler :
-    AuthorizationHandler<PublicOrUnlistedUserProfileRequirement, User>
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context,
+                                                   PublicOrUnlistedUserProfileRequirement requirement,
+                                                   User resource)
     {
-        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context,
-                                                       PublicOrUnlistedUserProfileRequirement requirement,
-                                                       User resource)
+        if (resource?.ViewStatus == User.ProfileViewStatus.Public || resource?.ViewStatus == User.ProfileViewStatus.Unlisted)
         {
-            if (resource?.ViewStatus == User.ProfileViewStatus.Public || resource?.ViewStatus == User.ProfileViewStatus.Unlisted)
-            {
-                context.Succeed(requirement);
-            }
-            else
-            {
-                // See PrintViewStatusAuthorizationHandler: null-forgiven to keep the IL identical
-                // rather than converting a pre-existing 500 into a silent authorization denial.
-                if (context.User.Identity!.IsAuthenticated)
-                {
-                    var userId = long.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-
-
-                    if (userId == resource?.Id)
-                    {
-                        context.Succeed(requirement);
-                    }
-                }
-
-            }
-
-
-
-            return Task.CompletedTask;
+            context.Succeed(requirement);
         }
-    }
+        else
+        {
+            // See PrintViewStatusAuthorizationHandler: null-forgiven to keep the IL identical
+            // rather than converting a pre-existing 500 into a silent authorization denial.
+            if (context.User.Identity!.IsAuthenticated)
+            {
+                var userId = long.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
-    public class PublicOrUnlistedUserProfileRequirement : IAuthorizationRequirement { }
+
+                if (userId == resource?.Id)
+                {
+                    context.Succeed(requirement);
+                }
+            }
+
+        }
+
+
+
+        return Task.CompletedTask;
+    }
 }
+
+public class PublicOrUnlistedUserProfileRequirement : IAuthorizationRequirement { }
 

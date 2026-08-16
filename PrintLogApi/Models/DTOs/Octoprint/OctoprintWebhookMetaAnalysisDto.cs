@@ -1,7 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Octoprint
+﻿namespace PrintLogApi.Models.DTOs.Octoprint;
+
+public class OctoprintWebhookMetaAnalysisDto
 {
-    public class OctoprintWebhookMetaAnalysisDto
-    {
-        public OctoprintWebhookMetaAnalysisFilamentDto? filament { get; set; }
-    }
+    public OctoprintWebhookMetaAnalysisFilamentDto? filament { get; set; }
 }

@@ -7,6 +7,16 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+
+    <!-- The SDK injects the usual namespace set (System, System.Linq, System.Threading.Tasks, and
+         for the Web SDK the ASP.NET ones) as global usings, so the hand-maintained preamble at the
+         top of every file is redundant. See #63.
+
+         This is only half the change: enabling it does not delete anything. IDE0005 in
+         .editorconfig is what makes `dotnet format` strip the now-redundant lines, and what stops
+         them growing back. Both projects use the Web SDK, so the injected set is identical for
+         each - do not assume that holds for a project added later with a different SDK. -->
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <PropertyGroup>

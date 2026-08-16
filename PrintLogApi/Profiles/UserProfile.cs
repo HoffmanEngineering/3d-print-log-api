@@ -3,17 +3,16 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
 
-namespace PrintLogApi.Profiles
+namespace PrintLogApi.Profiles;
+
+public class UserProfile : Profile
 {
-    public class UserProfile : Profile
+    public UserProfile()
     {
-        public UserProfile()
-        {
-            CreateMap<User, UserDetailDto>();
-            CreateMap<User, UserSummaryDto>();
+        CreateMap<User, UserDetailDto>();
+        CreateMap<User, UserSummaryDto>();
 
-            CreateMap<UpdateUserDetailDto, User>();
-        }
-
+        CreateMap<UpdateUserDetailDto, User>();
     }
+
 }

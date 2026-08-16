@@ -1,7 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Moonraker
+﻿namespace PrintLogApi.Models.DTOs.Moonraker;
+
+public class PrintEventDto
 {
-    public class PrintEventDto
-    {
-        public string? Message { get; set; }
-    }
+    public string? Message { get; set; }
 }

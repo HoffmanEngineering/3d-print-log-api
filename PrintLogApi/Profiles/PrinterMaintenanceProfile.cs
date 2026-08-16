@@ -1,23 +1,19 @@
-﻿using System;
-using System.Linq;
-using AutoMapper;
+﻿using AutoMapper;
 using PrintLogApi.Models;
-using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.PrinterMaintenance;
 
-namespace PrintLogApi.Profiles
+namespace PrintLogApi.Profiles;
+
+public class PrinterMaintenanceProfile : Profile
 {
-    public class PrinterMaintenanceProfile : Profile
+    public PrinterMaintenanceProfile()
     {
-        public PrinterMaintenanceProfile()
-        {
-            CreateMap<PrinterMaintenance, PrinterMaintenanceDto>().ReverseMap();
+        CreateMap<PrinterMaintenance, PrinterMaintenanceDto>().ReverseMap();
 
-            CreateMap<AddPrinterMaintenanceDto, PrinterMaintenance>();
+        CreateMap<AddPrinterMaintenanceDto, PrinterMaintenance>();
 
-            CreateMap<PutPrinterMaintenanceDto, PrinterMaintenance>();
+        CreateMap<PutPrinterMaintenanceDto, PrinterMaintenance>();
 
-        }
     }
 }
 

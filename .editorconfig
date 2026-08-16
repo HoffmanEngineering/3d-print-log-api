@@ -78,6 +78,14 @@ dotnet_style_prefer_auto_properties = true:silent
 dotnet_style_prefer_conditional_expression_over_assignment = true:silent
 dotnet_style_prefer_conditional_expression_over_return = true:silent
 
+# Everything above this line is the stock C# 8-era Visual Studio template, which predates the keys
+# below. "C# 8-era" is about when the template was written, not what it covers - it is missing some
+# C# 8 preferences too, so the additions here span C# 8 (index/range, simple `using`) through C# 12
+# (collection expressions). A preference that is not declared cannot be enforced by the CI format
+# gate, which is the same failure mode that let `charset = utf-8-bom` sit true on paper and false in
+# 233 files. See #63.
+dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
+
 dotnet_code_quality.CA2007.exclude_async_void_methods = true
 
 ###############################
@@ -121,6 +129,27 @@ csharp_style_deconstructed_variable_declaration = true:suggestion
 csharp_prefer_simple_default_expression = true:suggestion
 csharp_style_pattern_local_over_anonymous_function = true:suggestion
 csharp_style_inlined_variable_declaration = true:suggestion
+
+# Preferences the stock template above never declared. Two severity tiers, and the difference is
+# load-bearing:
+#
+#   - `warning` is enforced. `dotnet format` fixes rules at warning or above by default, so ci.yml's
+#     --verify-no-changes step fails on a violation and the codebase cannot drift back.
+#   - `suggestion` is editor-only. It shows as a hint in the IDE and `dotnet format` leaves it
+#     alone, so it states a preference without rewriting code that predates it.
+#
+# The two file-shape rules are enforced because a mixed codebase is worse than either convention;
+# the expression-level ones are suggestions because the rewrite is judgement-dependent and a sweep
+# would churn code for no behavioural gain. Raising one to `warning` means running `dotnet format`
+# in the same commit. See #63.
+csharp_style_namespace_declarations = file_scoped:warning
+# Removes usings made redundant by <ImplicitUsings>enable</ImplicitUsings>, and keeps them from
+# growing back. Without this the property only adds global usings; nothing deletes the old lines.
+dotnet_diagnostic.IDE0005.severity = warning
+csharp_style_prefer_index_operator = true:suggestion
+csharp_style_prefer_range_operator = true:suggestion
+csharp_prefer_simple_using_statement = true:suggestion
+csharp_style_prefer_utf8_string_literals = true:suggestion
 ###############################
 # C# Formatting Rules         #
 ###############################

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using AutoMapper;
+﻿using AutoMapper;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,97 +7,96 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using PrintLogApi.Services;
 
-namespace PrintLogApi.Controllers
+namespace PrintLogApi.Controllers;
+
+/// <summary>
+/// Managing API keys for a user.
+/// </summary>
+[Route("api/UserApiKeys")]
+[ApiController]
+[Authorize]
+public class UserApiKeysController : ControllerBase
 {
-    /// <summary>
-    /// Managing API keys for a user.
-    /// </summary>
-    [Route("api/UserApiKeys")]
-    [ApiController]
-    [Authorize]
-    public class UserApiKeysController : ControllerBase
+    private readonly IUserApiKeyService _userApiKeyService;
+    private readonly IMapper _mapper;
+    private readonly TelemetryClient _telemetry;
+
+
+
+    public UserApiKeysController(IUserApiKeyService userApiKeyService, IMapper mapper, TelemetryClient telemetry)
     {
-        private readonly IUserApiKeyService _userApiKeyService;
-        private readonly IMapper _mapper;
-        private readonly TelemetryClient _telemetry;
+        _userApiKeyService = userApiKeyService;
+        _mapper = mapper;
+        _telemetry = telemetry;
 
+    }
 
-
-        public UserApiKeysController(IUserApiKeyService userApiKeyService, IMapper mapper, TelemetryClient telemetry)
+    /// <summary>
+    /// Get the list of API Key summary info for the current user.
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet]
+    public async Task<ActionResult<List<UserApiKeyDto>>> GetApiKeySummaryForUser()
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
         {
-            _userApiKeyService = userApiKeyService;
-            _mapper = mapper;
-            _telemetry = telemetry;
-
+            return Unauthorized();
         }
 
-        /// <summary>
-        /// Get the list of API Key summary info for the current user.
-        /// </summary>
-        /// <returns></returns>
-        [HttpGet]
-        public async Task<ActionResult<List<UserApiKeyDto>>> GetApiKeySummaryForUser()
+        var apiKeys = await _userApiKeyService.GetApiKeySummaryForUser(userId.Value);
+
+        return apiKeys;
+    }
+
+    /// <summary>
+    /// Generate a new API key for the current user.
+    /// </summary>
+    /// <param name="request"></param>
+    /// <returns></returns>
+    [HttpPost]
+    public async Task<ActionResult<NewUserApiKeyDto>> GenerateNewApiKey([FromBody] AddNewApiKeyDto request)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
         {
-            var userId = User.GetUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized();
-            }
-
-            var apiKeys = await _userApiKeyService.GetApiKeySummaryForUser(userId.Value);
-
-            return apiKeys;
+            return Unauthorized();
         }
 
-        /// <summary>
-        /// Generate a new API key for the current user.
-        /// </summary>
-        /// <param name="request"></param>
-        /// <returns></returns>
-        [HttpPost]
-        public async Task<ActionResult<NewUserApiKeyDto>> GenerateNewApiKey([FromBody] AddNewApiKeyDto request)
+        var newKey = await _userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
+
+
+        return newKey;
+    }
+
+    /// <summary>
+    /// Delete the specific API Key.
+    /// </summary>
+    /// <param name="apiKey"></param>
+    /// <returns></returns>
+    [HttpDelete("{apiKey}")]
+    public async Task<ActionResult<NewUserApiKeyDto>> DeleteApiKey([FromRoute] Guid apiKey)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
         {
-            var userId = User.GetUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized();
-            }
-
-            var newKey = await _userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
-
-
-            return newKey;
+            return Unauthorized();
         }
 
-        /// <summary>
-        /// Delete the specific API Key.
-        /// </summary>
-        /// <param name="apiKey"></param>
-        /// <returns></returns>
-        [HttpDelete("{apiKey}")]
-        public async Task<ActionResult<NewUserApiKeyDto>> DeleteApiKey([FromRoute] Guid apiKey)
+        try
         {
-            var userId = User.GetUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized();
-            }
-
-            try
-            {
-                await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
-                return NoContent();
-            }
-            catch (DoesNotExistException)
-            {
-                return NotFound("Active API Key Not Found");
-            }
-            catch (UserCannotAccessApiKeyException)
-            {
-                return Forbid("User does not have access to specified API Key");
-            }
-
-
+            await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
+            return NoContent();
         }
+        catch (DoesNotExistException)
+        {
+            return NotFound("Active API Key Not Found");
+        }
+        catch (UserCannotAccessApiKeyException)
+        {
+            return Forbid("User does not have access to specified API Key");
+        }
+
+
     }
 }

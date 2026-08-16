@@ -1,16 +1,14 @@
 ﻿using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.MaterialCategory;
-using PrintLogApi.Models.DTOs.Materials;
 
-namespace PrintLogApi.Profiles
+namespace PrintLogApi.Profiles;
+
+public class MaterialCategoryProfile : Profile
 {
-    public class MaterialCategoryProfile : Profile
+    public MaterialCategoryProfile()
     {
-        public MaterialCategoryProfile()
-        {
-            CreateMap<MaterialCategory, MaterialCategoryDto>()
-                .ReverseMap();
-        }
+        CreateMap<MaterialCategory, MaterialCategoryDto>()
+            .ReverseMap();
     }
 }

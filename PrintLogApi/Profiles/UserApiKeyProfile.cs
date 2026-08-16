@@ -2,14 +2,13 @@
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 
-namespace PrintLogApi.Profiles
-{
-    public class UserApiKeyProfile : Profile
-    {
+namespace PrintLogApi.Profiles;
 
-        public UserApiKeyProfile()
-        {
-            CreateMap<UserApiKey, UserApiKeyDto>();
-        }
+public class UserApiKeyProfile : Profile
+{
+
+    public UserApiKeyProfile()
+    {
+        CreateMap<UserApiKey, UserApiKeyDto>();
     }
 }

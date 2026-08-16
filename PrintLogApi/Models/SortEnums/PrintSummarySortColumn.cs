@@ -1,9 +1,8 @@
-﻿namespace PrintLogApi.Models.SortEnums
+﻿namespace PrintLogApi.Models.SortEnums;
+
+public enum PrintSummarySortColumn
 {
-    public enum PrintSummarySortColumn
-    {
-        Title = 1,
-        StartDate = 2,
-        FilamentUsage = 3,
-    }
+    Title = 1,
+    StartDate = 2,
+    FilamentUsage = 3,
 }
