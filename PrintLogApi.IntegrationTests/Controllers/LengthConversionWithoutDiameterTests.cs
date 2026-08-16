@@ -122,8 +122,8 @@ public class LengthConversionWithoutDiameterTests : IClassFixture<CustomWebAppli
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newPrint);
 
-        var response = await _httpClient.SendAsync(request);
-        var body = await response.Content.ReadAsStringAsync();
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {body}");
     }

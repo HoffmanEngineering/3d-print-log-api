@@ -96,7 +96,7 @@ public class McpTextMatchTranslationTests : IClassFixture<McpDataWebApplicationF
         var materials = await context.Filaments.AsNoTracking()
             .Where(McpTextMatch.MaterialMatches("PLA"))
             .Select(f => f.MaterialType)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("PLA", materials);
         Assert.Contains("PLA (Polylactic Acid)", materials);
@@ -113,7 +113,7 @@ public class McpTextMatchTranslationTests : IClassFixture<McpDataWebApplicationF
         var materials = await context.Filaments.AsNoTracking()
             .Where(McpTextMatch.MaterialMatches("PC"))
             .Select(f => f.MaterialType)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("PCTG", materials);
     }
@@ -127,7 +127,7 @@ public class McpTextMatchTranslationTests : IClassFixture<McpDataWebApplicationF
         var colors = await context.Filaments.AsNoTracking()
             .Where(McpTextMatch.ColorMatches("blue"))
             .Select(f => f.ColorName)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("Blue", colors);
         Assert.Contains("Light Blue", colors);

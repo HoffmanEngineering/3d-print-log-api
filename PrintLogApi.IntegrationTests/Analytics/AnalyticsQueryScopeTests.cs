@@ -23,7 +23,7 @@ public class AnalyticsQueryScopeTests : IClassFixture<Mcp.McpDataWebApplicationF
         var scoped = AnalyticsQueryScope.Scope(
             db.Prints.AsNoTracking(), Mcp.McpTestData.MetricsUserId, new AnalyticsFilter(), null, null);
 
-        Assert.All(await scoped.ToListAsync(),
+        Assert.All(await scoped.ToListAsync(cancellationToken: TestContext.Current.CancellationToken),
             p => Assert.Equal(Mcp.McpTestData.MetricsUserId, p.CreatedById));
     }
 
@@ -37,7 +37,7 @@ public class AnalyticsQueryScopeTests : IClassFixture<Mcp.McpDataWebApplicationF
         var scoped = AnalyticsQueryScope.Scope(
             db.Prints.AsNoTracking(), Mcp.McpTestData.MetricsUserId, filter, null, null);
 
-        Assert.Empty(await scoped.ToListAsync());
+        Assert.Empty(await scoped.ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -52,15 +52,15 @@ public class AnalyticsQueryScopeTests : IClassFixture<Mcp.McpDataWebApplicationF
         var before = await AnalyticsQueryScope
             .Scope(db.Prints.AsNoTracking(), Mcp.McpTestData.MetricsUserId, filter,
                    boundary.AddYears(-5), boundary)
-            .CountAsync();
+            .CountAsync(cancellationToken: TestContext.Current.CancellationToken);
         var after = await AnalyticsQueryScope
             .Scope(db.Prints.AsNoTracking(), Mcp.McpTestData.MetricsUserId, filter,
                    boundary, boundary.AddYears(5))
-            .CountAsync();
+            .CountAsync(cancellationToken: TestContext.Current.CancellationToken);
         var whole = await AnalyticsQueryScope
             .Scope(db.Prints.AsNoTracking(), Mcp.McpTestData.MetricsUserId, filter,
                    boundary.AddYears(-5), boundary.AddYears(5))
-            .CountAsync();
+            .CountAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(whole, before + after);
     }
@@ -79,7 +79,7 @@ public class AnalyticsQueryScopeTests : IClassFixture<Mcp.McpDataWebApplicationF
             new DateTimeOffset(1990, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
-        Assert.True(await all.CountAsync() >= await ranged.CountAsync());
-        Assert.Empty(await ranged.Where(p => p.StartDate == null).ToListAsync());
+        Assert.True(await all.CountAsync(cancellationToken: TestContext.Current.CancellationToken) >= await ranged.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await ranged.Where(p => p.StartDate == null).ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 }

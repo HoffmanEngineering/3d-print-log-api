@@ -57,9 +57,9 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetProjects_ReturnsOk_WithPagedList()
     {
         var request = AuthenticatedRequest(HttpMethod.Get, "/api/Projects?PageNumber=1&PageSize=10");
-        var response = await _client.SendAsync(request);
+        var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotNull(result.Items);
     }
@@ -76,9 +76,9 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
         request.Content = JsonContent.Create(dto);
 
-        var response = await _client.SendAsync(request);
+        var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var result = (await response.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("Test Voron Build", result.Name);
         Assert.NotEqual(Guid.Empty, result.Id);
@@ -91,14 +91,14 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         var createDto = new AddProjectDto { Name = "Get Test Project", Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private };
         var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
         createReq.Content = JsonContent.Create(createDto);
-        var createResp = await _client.SendAsync(createReq);
-        var created = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var createResp = await _client.SendAsync(createReq, TestContext.Current.CancellationToken);
+        var created = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Get
         var getReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects/{created.Id}");
-        var getResp = await _client.SendAsync(getReq);
+        var getResp = await _client.SendAsync(getReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
-        var result = (await getResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var result = (await getResp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal(created.Id, result.Id);
     }
 
@@ -117,7 +117,7 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var imgReq = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
         imgReq.Content = form;
-        var imgResp = await _client.SendAsync(imgReq);
+        var imgResp = await _client.SendAsync(imgReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, imgResp.StatusCode);
     }
 
@@ -135,9 +135,9 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         form.Add(content, "file", "test.png");
         imgReq.Content = form;
 
-        var response = await _client.SendAsync(imgReq);
+        var response = await _client.SendAsync(imgReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var image = (await response.Content.ReadFromJsonAsync<ProjectImageDto>())!;
+        var image = (await response.Content.ReadFromJsonAsync<ProjectImageDto>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains($"/api/Projects/{project.Id}/images/{image.Id}",
             response.Headers.Location?.ToString() ?? "");
     }
@@ -154,7 +154,7 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
         req.Content = form;
-        var response = await _client.SendAsync(req);
+        var response = await _client.SendAsync(req, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -171,7 +171,7 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Projects/{project.Id}/images");
         req.Content = form;
-        var response = await _client.SendAsync(req);
+        var response = await _client.SendAsync(req, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -187,7 +187,7 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}/images/{imageId}");
-        var deleteResp = await _client.SendAsync(deleteReq);
+        var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
 
         Assert.Equal(initialBlobCount, blobService.Blobs.Count);
@@ -204,7 +204,7 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}");
-        var deleteResp = await _client.SendAsync(deleteReq);
+        var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
 
         Assert.Equal(initialBlobCount, blobService.Blobs.Count);
@@ -221,13 +221,13 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
             Status = Models.Project.ProjectStatus.InProgress,
             ViewStatus = Models.Project.ProjectViewStatus.Private
         });
-        await _client.SendAsync(createReq);
+        await _client.SendAsync(createReq, TestContext.Current.CancellationToken);
 
         var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={uniqueName}&PageNumber=1&PageSize=10");
-        var response = await _client.SendAsync(searchReq);
+        var response = await _client.SendAsync(searchReq, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(result.Items, p => p.Name == uniqueName);
     }
 
@@ -243,13 +243,13 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
             Status = Models.Project.ProjectStatus.InProgress,
             ViewStatus = Models.Project.ProjectViewStatus.Private
         });
-        await _client.SendAsync(createReq);
+        await _client.SendAsync(createReq, TestContext.Current.CancellationToken);
 
         var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={uniqueRef}&PageNumber=1&PageSize=10");
-        var response = await _client.SendAsync(searchReq);
+        var response = await _client.SendAsync(searchReq, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(result.Items, p => p.Reference == uniqueRef);
     }
 
@@ -257,10 +257,10 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetProjects_Search_WithNoMatch_ReturnsEmptyList()
     {
         var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search=NOMATCH-{Guid.NewGuid():N}&PageNumber=1&PageSize=10");
-        var response = await _client.SendAsync(searchReq);
+        var response = await _client.SendAsync(searchReq, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Empty(result.Items);
     }
 
@@ -272,18 +272,18 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var matchReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
         matchReq.Content = JsonContent.Create(new AddProjectDto { Name = matchTerm, Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private });
-        await _client.SendAsync(matchReq);
+        await _client.SendAsync(matchReq, TestContext.Current.CancellationToken);
 
         var otherReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
         otherReq.Content = JsonContent.Create(new AddProjectDto { Name = otherName, Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private });
-        var otherResp = await _client.SendAsync(otherReq);
-        var otherProject = (await otherResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var otherResp = await _client.SendAsync(otherReq, TestContext.Current.CancellationToken);
+        var otherProject = (await otherResp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         var searchReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects?search={matchTerm}&PageNumber=1&PageSize=100");
-        var response = await _client.SendAsync(searchReq);
+        var response = await _client.SendAsync(searchReq, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(result.Items, p => p.Name == matchTerm);
         Assert.DoesNotContain(result.Items, p => p.Id == otherProject.Id);
     }
@@ -295,17 +295,17 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         var createDto = new AddProjectDto { Name = "Delete Test Project", Status = Models.Project.ProjectStatus.InProgress, ViewStatus = Models.Project.ProjectViewStatus.Private };
         var createReq = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
         createReq.Content = JsonContent.Create(createDto);
-        var createResp = await _client.SendAsync(createReq);
-        var project = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var createResp = await _client.SendAsync(createReq, TestContext.Current.CancellationToken);
+        var project = (await createResp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Delete
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}?deletePrints=false");
-        var deleteResp = await _client.SendAsync(deleteReq);
+        var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
 
         // Confirm gone
         var getReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects/{project.Id}");
-        var getResp = await _client.SendAsync(getReq);
+        var getResp = await _client.SendAsync(getReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getResp.StatusCode);
     }
 }

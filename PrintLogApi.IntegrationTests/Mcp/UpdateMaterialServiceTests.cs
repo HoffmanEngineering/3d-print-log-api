@@ -235,7 +235,7 @@ public class UpdateMaterialServiceTests : IClassFixture<McpDataWebApplicationFac
             () => Update(scope, id, new MaterialAttributesInput { MaterialCategoryNickname = "unobtainium", Brand = "SHOULD NOT STICK" }));
 
         // A later save in the same scope must not flush the rejected edit.
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         using var verifyScope = _factory.Services.CreateScope();
         var still = await Svc(verifyScope).GetOwnMaterialDetailForMcp(

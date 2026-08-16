@@ -49,12 +49,21 @@
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />
   </ItemGroup>
 
-  <!-- Test infrastructure. -->
+  <!-- Test infrastructure. xUnit v3 on Microsoft.Testing.Platform (#70).
+
+       There is no Microsoft.NET.Test.Sdk / xunit.runner.visualstudio pair here any more, and that
+       is the whole shape of the migration: under MTP the runner is linked INTO the test assembly,
+       which builds as an executable and hosts itself. VSTest's out-of-process discovery, its
+       datacollector model, and the packages that provided them are gone with it.
+
+       coverlet.collector went with them. It is a VSTest datacollector, driven by the "XPlat Code
+       Coverage" collect option, so it is inert under MTP and would have stopped producing a report
+       silently - exactly the outcome #70 called out. Microsoft.Testing.Extensions.CodeCoverage is
+       the MTP-native replacement; it emits Cobertura, which is the format reportgenerator already
+       consumes, so coverage.ps1 / coverage-check.sh keep their reportgenerator half unchanged. -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
-    <PackageVersion Include="xunit" Version="2.9.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
   </ItemGroup>
 
 </Project>

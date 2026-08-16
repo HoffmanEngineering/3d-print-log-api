@@ -85,11 +85,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterMaintenance");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<PrinterMaintenanceDto>>(content, JsonOptions);
         Assert.NotNull(result);
     }
@@ -101,7 +101,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/PrinterMaintenance");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -116,11 +116,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterMaintenance?pageSize=1&pageNumber=1");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<PrinterMaintenanceDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.True(result.Items.Count <= 1);
@@ -135,11 +135,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance?searchText={uniqueCategory}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<PrinterMaintenanceDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.All(result.Items, e => Assert.Contains(uniqueCategory, e.Category));
@@ -154,11 +154,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterMaintenance?includeDone=true&includeNotDone=false");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<PrinterMaintenanceDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.All(result.Items, e => Assert.True(e.Done));
@@ -172,11 +172,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance?filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<PrinterMaintenanceDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.All(result.Items, e => Assert.Equal(IntegrationTestSeeder.TestPrinterId, e.PrinterId));
@@ -194,11 +194,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance/{entry.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(entry.Id, result.Id);
         Assert.Equal("Get By Id Test", result.Category);
@@ -212,7 +212,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/PrinterMaintenance/{entryId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -226,7 +226,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance/{nonExistentId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -282,7 +282,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         // Act & Assert - Forbid() may throw InvalidOperationException in TestServer or return Forbidden
         try
         {
-            var response = await _httpClient.SendAsync(request);
+            var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
             // If we get here, check for Forbidden status
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
@@ -315,11 +315,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("New Maintenance", result.Category);
         Assert.Equal("New maintenance description", result.Description);
@@ -342,7 +342,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -365,8 +365,8 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         var persisted = GetMaintenanceEntryById(result.Id)!;
@@ -401,11 +401,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal("Updated Category", result.Category);
         Assert.True(result.Done);
     }
@@ -427,7 +427,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -452,7 +452,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -475,7 +475,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -503,7 +503,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        await _httpClient.SendAsync(request);
+        await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         var updated = GetMaintenanceEntryById(entry.Id)!;
@@ -524,7 +524,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/PrinterMaintenance/{entry.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -542,7 +542,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/PrinterMaintenance/{entryId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -597,7 +597,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         // Act & Assert - Forbid() may throw InvalidOperationException in TestServer or return Forbidden
         try
         {
-            var response = await _httpClient.SendAsync(request);
+            var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
             // If we get here, check for Forbidden status
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
@@ -624,11 +624,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterMaintenance/categories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotNull(result.Categories);
     }
@@ -640,7 +640,7 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/PrinterMaintenance/categories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -655,11 +655,11 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterMaintenance/categories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<PrinterMaintenanceCategoriesDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(uniqueCategory, result.Categories!);
     }
 
@@ -683,9 +683,9 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var createRequest = CreateAuthenticatedRequest(HttpMethod.Post, "/api/PrinterMaintenance");
         createRequest.Content = new StringContent(JsonSerializer.Serialize(createDto), Encoding.UTF8, "application/json");
 
-        var createResponse = await _httpClient.SendAsync(createRequest);
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
-        var created = (await createResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var created = (await createResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Update
         var updateDto = new PutPrinterMaintenanceDto
@@ -701,24 +701,24 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         var updateRequest = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/PrinterMaintenance/{created.Id}");
         updateRequest.Content = new StringContent(JsonSerializer.Serialize(updateDto), Encoding.UTF8, "application/json");
 
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
 
         // Verify update
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance/{created.Id}");
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var updated = (await getResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions))!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var updated = (await getResponse.Content.ReadFromJsonAsync<PrinterMaintenanceDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal("Workflow Test Updated", updated.Category);
         Assert.True(updated.Done);
 
         // Delete
         var deleteRequest = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/PrinterMaintenance/{created.Id}");
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // Verify deleted
         var verifyRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/PrinterMaintenance/{created.Id}");
-        var verifyResponse = await _httpClient.SendAsync(verifyRequest);
+        var verifyResponse = await _httpClient.SendAsync(verifyRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, verifyResponse.StatusCode);
     }
 

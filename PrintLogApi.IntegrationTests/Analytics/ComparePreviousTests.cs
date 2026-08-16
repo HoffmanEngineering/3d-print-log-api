@@ -190,7 +190,7 @@ public class ComparePreviousTests : IClassFixture<Mcp.McpDataWebApplicationFacto
 
         var printerId = await db.Printers
             .Where(p => p.UserId == Mcp.McpTestData.MetricsUserId)
-            .Select(p => p.Id).FirstAsync();
+            .Select(p => p.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // Current window: local April 2026, i.e. entirely after the 8 March DST start.
         var filter = new AnalyticsFilter
@@ -227,7 +227,7 @@ public class ComparePreviousTests : IClassFixture<Mcp.McpDataWebApplicationFacto
             UpdatedDate = DateTime.UtcNow,
         };
         db.Prints.Add(boundaryPrint);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -266,7 +266,7 @@ public class ComparePreviousTests : IClassFixture<Mcp.McpDataWebApplicationFacto
         finally
         {
             db.Remove(boundaryPrint);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 }

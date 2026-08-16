@@ -35,8 +35,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         // on the navigation being non-null, or a corrupt cross-owner row leaks another user's
         // project and printer names.
         await using var client = await _factory.ConnectAsync();
-        var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.CrossOwnerRefPrintId }));
+        var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.CrossOwnerRefPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Null(detail.ProjectName);
         Assert.Null(detail.ProjectId);
@@ -52,8 +51,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         // The motivating failure: a print named "Dual Color 3D Benchy" could not report which
         // two colours it used, because only an aggregate gram total was returned.
         await using var client = await _factory.ConnectAsync();
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         var named = detail.MaterialsUsed.Where(m => m.Color != null).ToList();
         Assert.Equal(2, named.Count);
@@ -66,8 +64,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     {
         // PrintFilament.FilamentId is nullable. An inner join would silently drop these rows.
         await using var client = await _factory.ConnectAsync();
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(4, detail.MaterialsUsed.Count);
         Assert.Contains(detail.MaterialsUsed, m => m.FilamentId is null && m.Grams > 0);
@@ -79,8 +76,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         // A zero (or negative) AmountMg must fall through to the estimate. `AmountMg ?? Est`
         // would take the zero at face value and break the sum invariant.
         await using var client = await _factory.ConnectAsync();
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         var estimated = detail.MaterialsUsed.Where(m => m.IsEstimated).ToList();
         Assert.Equal(2, estimated.Count);               // the orphan row and the zero-actual row
@@ -92,8 +88,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     {
         // The parts must add up to the whole, or an agent reading both will contradict itself.
         await using var client = await _factory.ConnectAsync();
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.DualColorPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(detail.MaterialsUsedTruncated);
         Assert.Equal(detail.MaterialUsedGrams, detail.MaterialsUsed.Sum(m => m.Grams), 3);
@@ -107,8 +102,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         // Corrupt cross-owner row. Guarding only on "navigation is not null" would leak the
         // other user's brand, material and colour.
         await using var client = await _factory.ConnectAsync();
-        var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.ForeignSpoolPrintId }));
+        var (detail, rawJson) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.ForeignSpoolPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         var usage = Assert.Single(detail.MaterialsUsed);
         Assert.Null(usage.FilamentId);
@@ -129,7 +123,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task Creator_CanReadOwnPrint()
     {
         await using var client = await _factory.ConnectAsync();
-        var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 });
+        var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 }, cancellationToken: TestContext.Current.CancellationToken);
         var (detail, _) = Parse(result);
 
         Assert.Equal(McpTestData.RichPrintId1, detail.Id);
@@ -160,7 +154,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task Detail_ExcludesImagesCommentsAndFiles()
     {
         await using var client = await _factory.ConnectAsync();
-        var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 });
+        var result = await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.RichPrintId1 }, cancellationToken: TestContext.Current.CancellationToken);
         var (_, rawJson) = Parse(result);
 
         // fileName/url/allowComments/allowFileDownloads are deliberately exposed (they are the
@@ -176,8 +170,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task Duration_UsesTheEstimate_AndFlagsIt()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(6933, detail.DurationSeconds);
         Assert.True(detail.DurationIsEstimated);
@@ -188,8 +181,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     {
         // A stored 0 IS HasValue, so a ??-coalescing reader reports 0 and suppresses the estimate.
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.ZeroActualPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.ZeroActualPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(1800, detail.DurationSeconds);   // NOT 0
         Assert.True(detail.DurationIsEstimated);
@@ -199,8 +191,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task Duration_ActualWins_AndIsNotFlagged()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(7200, detail.DurationSeconds);
         Assert.False(detail.DurationIsEstimated);
@@ -211,8 +202,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     {
         // Null, not 0: reporting 0 would assert a measurement of zero seconds.
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.NoDurationPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.NoDurationPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Null(detail.DurationSeconds);
         Assert.False(detail.DurationIsEstimated);
@@ -222,8 +212,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task MaterialIsEstimated_IsTrue_WhenTheUsageRowFellBack()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.EstimatedOnlyPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.True(detail.MaterialIsEstimated);
         Assert.Contains(detail.MaterialsUsed, m => m.IsEstimated);
@@ -233,8 +222,7 @@ public class GetPrintToolTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task MaterialIsEstimated_IsFalse_WhenTheActualWasMeasured()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var (detail, _) = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }));
+        var (detail, _) = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["id"] = McpTestData.ActualWinsPrintId }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(detail.MaterialIsEstimated);
     }

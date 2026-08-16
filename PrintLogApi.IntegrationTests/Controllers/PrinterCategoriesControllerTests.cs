@@ -92,11 +92,11 @@ public class PrinterCategoriesControllerTests : IClassFixture<CustomWebApplicati
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotEmpty(result);
     }
@@ -108,7 +108,7 @@ public class PrinterCategoriesControllerTests : IClassFixture<CustomWebApplicati
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/PrinterCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -121,11 +121,11 @@ public class PrinterCategoriesControllerTests : IClassFixture<CustomWebApplicati
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
 
         var fdm = result.FirstOrDefault(c => c.Nickname == "FDM");
@@ -143,11 +143,11 @@ public class PrinterCategoriesControllerTests : IClassFixture<CustomWebApplicati
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
 
         if (result.Count > 1)
@@ -165,11 +165,11 @@ public class PrinterCategoriesControllerTests : IClassFixture<CustomWebApplicati
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/PrinterCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<PrinterCategoryDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
 
         var fdm = result.FirstOrDefault(c => c.Nickname == "FDM");

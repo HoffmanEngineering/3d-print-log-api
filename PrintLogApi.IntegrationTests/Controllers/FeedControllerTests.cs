@@ -28,7 +28,7 @@ public class FeedControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Feed");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -42,7 +42,7 @@ public class FeedControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Returns NotFound because the user is not in the allowed list
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

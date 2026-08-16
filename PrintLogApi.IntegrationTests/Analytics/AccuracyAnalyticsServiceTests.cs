@@ -64,7 +64,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         var scalarOnly = await db.Prints.CountAsync(p =>
             p.CreatedById == Mcp.McpTestData.MetricsUserId &&
             p.FilamentUsageMg > 0 && p.EstimatedFilamentUsageMg > 0 &&
-            !p.FilamentUsage!.Any(pf => pf.AmountMg > 0));
+            !p.FilamentUsage!.Any(pf => pf.AmountMg > 0), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(scalarOnly > 0,
             "seed a print whose material is recorded only as the legacy scalars");
@@ -75,7 +75,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
             p.CreatedById == Mcp.McpTestData.MetricsUserId &&
             !(p.FilamentUsageMg > 0 && p.EstimatedFilamentUsageMg > 0) &&
             p.FilamentUsage!.Any(pf => pf.AmountMg > 0) &&
-            p.FilamentUsage!.Any(pf => pf.EstimatedAmountMg > 0));
+            p.FilamentUsage!.Any(pf => pf.EstimatedAmountMg > 0), cancellationToken: TestContext.Current.CancellationToken);
 
         var response = await Get(new AnalyticsFilter { TimeZone = "UTC" });
 
@@ -108,7 +108,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         // material columns; requiring both would silently shrink each one.
         var timeEligible = await db.Prints.CountAsync(p =>
             p.CreatedById == Mcp.McpTestData.MetricsUserId &&
-            p.EstimatedPrintTimeInSeconds > 0 && p.PrintTimeInSeconds > 0);
+            p.EstimatedPrintTimeInSeconds > 0 && p.PrintTimeInSeconds > 0, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(timeEligible > 0, "the fixture must contain a print with both durations");
 
@@ -158,7 +158,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
         var foreignPrinter = await db.Printers
-            .FirstAsync(p => p.UserId != Mcp.McpTestData.MetricsUserId);
+            .FirstAsync(p => p.UserId != Mcp.McpTestData.MetricsUserId, cancellationToken: TestContext.Current.CancellationToken);
 
         var trespass = new PrintLogApi.Models.Print
         {
@@ -175,7 +175,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
             UpdatedDate = DateTime.UtcNow,
         };
         db.Prints.Add(trespass);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -192,7 +192,7 @@ public class AccuracyAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         finally
         {
             db.Remove(trespass);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 

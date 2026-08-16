@@ -146,7 +146,7 @@ public class CreatePrintServiceTests : IClassFixture<McpDataWebApplicationFactor
                 UpdatedById = IntegrationTestSeeder.TestUserId,
             };
             db.Prints.Add(p);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             printId = p.Id;
             db.McpIdempotencyRecords.Add(new McpIdempotencyRecord
             {
@@ -157,7 +157,7 @@ public class CreatePrintServiceTests : IClassFixture<McpDataWebApplicationFactor
                 CreatedPrintId = printId,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         using var scope = _factory.Services.CreateScope();

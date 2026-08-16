@@ -35,7 +35,7 @@ public class McpWritePolicyTests : IClassFixture<McpDataWebApplicationFactory>
         await using var client = await _factory.ConnectAsync(
             IntegrationTestSeeder.TestUserOAuthId, new[] { "read:printdata", "write:printdata" });
 
-        var result = await client.CallToolAsync("whoami", new Dictionary<string, object?>());
+        var result = await client.CallToolAsync("whoami", new Dictionary<string, object?>(), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
     }
@@ -126,8 +126,8 @@ public class McpWritePolicyTests : IClassFixture<McpDataWebApplicationFactory>
             scopes: new[] { "read:printdata" });
 
         var response = await _factory.CreateClient()
-            .SendAsync(RawHandshakeLessToolCall("whoami", token));
-        var body = await response.Content.ReadAsStringAsync();
+            .SendAsync(RawHandshakeLessToolCall("whoami", token), TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         // The request MUST be admitted by the endpoint (HTTP 200) so that the refusal we go on to
         // assert can only have come from the per-tool-class authorization filter. Treating a

@@ -52,7 +52,7 @@ public class CreatePrintToolTests : IClassFixture<McpDataWebApplicationFactory>
                     ["amount"] = 5.0,
                 },
             },
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         using var scope = _factory.Services.CreateScope();

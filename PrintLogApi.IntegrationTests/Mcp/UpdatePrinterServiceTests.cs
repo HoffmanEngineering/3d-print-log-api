@@ -78,7 +78,7 @@ public class UpdatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
             () => Update(scope, McpTestData.OtherPrinterId, new PrinterAttributesInput { Name = "Hijacked" }));
 
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == McpTestData.OtherPrinterId);
+        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == McpTestData.OtherPrinterId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("Other User Printer", stored.Name);
     }
 
@@ -237,13 +237,13 @@ public class UpdatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
             IsActive = true,
         };
         ctx.Printers.Add(printer);
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // The null CANNOT be seeded by the insert above: CategoryNickname carries a store default
         // of "FFF" (PrintLogContext.cs:417-419), so EF omits the column and the database fills it
         // in. Only an explicit UPDATE reaches the state a pre-default legacy row is actually in.
         await ctx.Printers.Where(p => p.Id == printer.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.CategoryNickname, (string?)null));
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.CategoryNickname, (string?)null), cancellationToken: TestContext.Current.CancellationToken);
         ctx.ChangeTracker.Clear();
 
         var result = await Update(scope, printer.Id, new PrinterAttributesInput { Name = "Still Legacy" });
@@ -285,7 +285,7 @@ public class UpdatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
 
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         ctx.ChangeTracker.Clear();
-        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == id);
+        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("Atomic Patch", stored.Name);
         Assert.Equal(350, stored.WattageW);
     }
@@ -302,7 +302,7 @@ public class UpdatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
             .Where(pf => pf.PrinterId == McpTestData.SearchPrinterId)
             .Select(pf => new { pf.Id, pf.FilamentId, pf.LoadedDateTime, pf.UnloadedDateTime })
             .OrderBy(pf => pf.Id)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         ctx.ChangeTracker.Clear();
 
         await Update(scope, McpTestData.SearchPrinterId, new PrinterAttributesInput { Description = "edited" });
@@ -316,7 +316,7 @@ public class UpdatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
             .Where(pf => pf.PrinterId == McpTestData.SearchPrinterId)
             .Select(pf => new { pf.Id, pf.FilamentId, pf.LoadedDateTime, pf.UnloadedDateTime })
             .OrderBy(pf => pf.Id)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(before, after);
     }
 

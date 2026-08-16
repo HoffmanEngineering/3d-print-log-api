@@ -28,7 +28,7 @@ public class CreateMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
             ["densityGramPerCubicCm"] = 1.1,
             ["source"] = "Weight",
             ["initialAmount"] = 1000.0,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError == true);
         // Assert the REASON, not just that something failed: a bare IsError check also passes when
@@ -51,7 +51,7 @@ public class CreateMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
             ["densityGramPerCubicCm"] = 1.1,
             ["source"] = "Volume",
             ["initialAmount"] = 1000.0, // 1000 ml
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         var text = result.Content.OfType<TextContentBlock>().First().Text;

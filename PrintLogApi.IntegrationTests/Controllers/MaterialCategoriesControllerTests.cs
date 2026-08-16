@@ -21,7 +21,7 @@ public class MaterialCategoriesControllerTests : IClassFixture<CustomWebApplicat
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -35,8 +35,8 @@ public class MaterialCategoriesControllerTests : IClassFixture<CustomWebApplicat
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - 4 categories seeded via HasData: filament, powder, resin, wire
         Assert.NotNull(categories);
@@ -51,8 +51,8 @@ public class MaterialCategoriesControllerTests : IClassFixture<CustomWebApplicat
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - should be sorted alphabetically by Nickname
         Assert.NotNull(categories);
@@ -68,8 +68,8 @@ public class MaterialCategoriesControllerTests : IClassFixture<CustomWebApplicat
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var categories = (await response.Content.ReadFromJsonAsync<List<MaterialCategoryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - verify filament category properties
         var filament = categories.Single(c => c.Nickname == "filament");
@@ -85,7 +85,7 @@ public class MaterialCategoriesControllerTests : IClassFixture<CustomWebApplicat
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/MaterialCategories");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

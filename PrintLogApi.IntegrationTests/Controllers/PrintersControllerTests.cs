@@ -41,7 +41,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -55,8 +55,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -73,8 +73,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -100,8 +100,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -118,8 +118,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrinterSummaryWithFilamentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -135,7 +135,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Printers/summary");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -153,7 +153,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -167,8 +167,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var printer = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var printer = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(printer);
@@ -186,7 +186,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -200,7 +200,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -227,7 +227,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newPrinter);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -258,8 +258,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newPrinter);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var createdPrinter = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var createdPrinter = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -290,7 +290,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newPrinter);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -310,7 +310,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newPrinter);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -335,8 +335,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update
         var updateDto = new AddPrinterDTO
@@ -353,7 +353,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
@@ -375,8 +375,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update with all fields changed
         var updateDto = new AddPrinterDTO
@@ -399,8 +399,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
-        var updatedPrinter = (await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+        var updatedPrinter = (await updateResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
@@ -431,7 +431,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -455,7 +455,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -477,7 +477,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(updateDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -501,13 +501,13 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Printers/{createdPrinter.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
@@ -528,18 +528,18 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - delete the printer
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Printers/{createdPrinter.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(deleteRequest);
+        await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - try to get the deleted printer
         var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
@@ -551,7 +551,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - cannot delete printer that has prints
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -564,7 +564,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -578,7 +578,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -596,7 +596,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -610,8 +610,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var filaments = (await response.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filaments = (await response.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(filaments);
@@ -625,7 +625,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -639,7 +639,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -668,13 +668,13 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - unload all filaments
         var unloadRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}/filament/unload");
         unloadRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var unloadResponse = await _httpClient.SendAsync(unloadRequest);
+        var unloadResponse = await _httpClient.SendAsync(unloadRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, unloadResponse.StatusCode);
@@ -700,26 +700,26 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Verify filament is loaded
         var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
         getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse1 = await _httpClient.SendAsync(getRequest1);
-        var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var getResponse1 = await _httpClient.SendAsync(getRequest1, TestContext.Current.CancellationToken);
+        var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotEmpty(filamentsBefore);
 
         // Act - unload all filaments
         var unloadRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}/filament/unload");
         unloadRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(unloadRequest);
+        await _httpClient.SendAsync(unloadRequest, TestContext.Current.CancellationToken);
 
         // Assert - verify filaments are now empty
         var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
         getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse2 = await _httpClient.SendAsync(getRequest2);
-        var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var getResponse2 = await _httpClient.SendAsync(getRequest2, TestContext.Current.CancellationToken);
+        var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Empty(filamentsAfter);
     }
 
@@ -730,7 +730,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{IntegrationTestSeeder.TestPrinterId}/filament/unload");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -744,7 +744,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -769,8 +769,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - update with loaded filament
         var updateDto = new AddPrinterDTO
@@ -792,7 +792,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
@@ -813,8 +813,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - update with loaded filaments
         var updateDto = new AddPrinterDTO
@@ -837,13 +837,13 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        await _httpClient.SendAsync(updateRequest);
+        await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert - verify filaments are set
         var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var filaments = (await getResponse.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var filaments = (await getResponse.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(filaments);
         Assert.Equal(3, filaments.Count);
@@ -867,8 +867,8 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - try to update with a filament we don't have access to
         var updateDto = new AddPrinterDTO
@@ -888,7 +888,7 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         updateRequest.Content = JsonContent.Create(updateDto);
 
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, updateResponse.StatusCode);
@@ -913,14 +913,14 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrinter);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrinter = (await createResponse.Content.ReadFromJsonAsync<PrinterDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Verify filament is loaded
         var getRequest1 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
         getRequest1.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse1 = await _httpClient.SendAsync(getRequest1);
-        var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var getResponse1 = await _httpClient.SendAsync(getRequest1, TestContext.Current.CancellationToken);
+        var filamentsBefore = (await getResponse1.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotEmpty(filamentsBefore);
 
         // Act - update with empty filaments list
@@ -937,13 +937,13 @@ public class PrintersControllerTests : IClassFixture<CustomWebApplicationFactory
         var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{createdPrinter.Id}");
         updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         updateRequest.Content = JsonContent.Create(updateDto);
-        await _httpClient.SendAsync(updateRequest);
+        await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert - verify filaments are now empty
         var getRequest2 = new HttpRequestMessage(HttpMethod.Get, $"/api/Printers/{createdPrinter.Id}/filament");
         getRequest2.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse2 = await _httpClient.SendAsync(getRequest2);
-        var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>())!;
+        var getResponse2 = await _httpClient.SendAsync(getRequest2, TestContext.Current.CancellationToken);
+        var filamentsAfter = (await getResponse2.Content.ReadFromJsonAsync<List<PrinterFilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Empty(filamentsAfter);
     }
 

@@ -44,11 +44,11 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/total-filament-usage?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotNull(result.Stat);
     }
@@ -62,11 +62,11 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/total-filament-usage?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("0", result.Stat);
     }
@@ -84,11 +84,11 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/print-count?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotNull(result.Stat);
     }
@@ -102,11 +102,11 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/print-count?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("0", result.Stat);
     }
@@ -124,11 +124,11 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/total-print-time?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotNull(result.Stat);
     }
@@ -142,7 +142,7 @@ public class UsersPrintsControllerTests : IClassFixture<CustomWebApplicationFact
             $"/api/Users/{userId}/total-print-time?{GetDateRangeQuery()}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

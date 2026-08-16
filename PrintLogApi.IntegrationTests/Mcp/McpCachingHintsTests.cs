@@ -30,7 +30,7 @@ public class McpCachingHintsTests : IClassFixture<McpDataWebApplicationFactory>
 
         // The lower-level overload returns the raw per-page result. The flattening overload
         // deliberately drops these fields.
-        var result = await client.ListToolsAsync(new ListToolsRequestParams());
+        var result = await client.ListToolsAsync(new ListToolsRequestParams(), TestContext.Current.CancellationToken);
 
         Assert.Equal(CacheScope.Private, result.CacheScope);
         Assert.Equal(System.TimeSpan.Zero, result.TimeToLive);

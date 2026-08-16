@@ -346,7 +346,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = content;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -364,8 +364,8 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -381,7 +381,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -397,11 +397,11 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        var responseContent = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Printer does not belong to current user", responseContent);
     }
 
@@ -413,11 +413,11 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        var responseContent = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("No Printer Id found", responseContent);
     }
 
@@ -438,7 +438,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -458,7 +458,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify a print was created
@@ -483,7 +483,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - title should be set from filename
@@ -507,7 +507,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - estimated time should be rounded
@@ -529,7 +529,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileName: fileName,
             estimatedPrintTime: null);
 
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(fileName)!;
@@ -553,7 +553,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             overrideAveragePrintTime: true,
             averagePrintTime: 0.0);
 
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(fileName)!;
@@ -573,7 +573,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileName: fileName,
             estimatedPrintTime: 0.3);
 
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(fileName)!;
@@ -597,7 +597,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - StartDate should be set from CurrentTime
@@ -623,7 +623,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - file hash should be stored
@@ -646,7 +646,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         // Act & Assert - controller throws Exception("Invalid Device Identifier")
         await Assert.ThrowsAsync<Exception>(async () =>
         {
-            await _httpClient.SendAsync(request);
+            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
     }
 
@@ -666,7 +666,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         // Act & Assert
         await Assert.ThrowsAsync<PrintLogApi.Exceptions.UserCannotAccessPrinterException>(async () =>
         {
-            await _httpClient.SendAsync(request);
+            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
     }
 
@@ -686,7 +686,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -711,7 +711,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -736,7 +736,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -766,7 +766,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -800,7 +800,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -842,7 +842,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify source measurements are set correctly
@@ -874,7 +874,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert
@@ -905,7 +905,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify print was created with an image
@@ -931,7 +931,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify image is marked as default
@@ -957,7 +957,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify File record was created
@@ -987,7 +987,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileHashInDb(fileHash)!;
         Assert.NotNull(createdPrint);
@@ -1002,7 +1002,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        var doneResponse = await _httpClient.SendAsync(doneRequest);
+        var doneResponse = await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, doneResponse.StatusCode);
@@ -1025,7 +1025,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Print Done with snapshot
         var doneContent = CreateWebhookFormContent(
@@ -1037,7 +1037,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        await _httpClient.SendAsync(doneRequest);
+        await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         var print = FindPrintByFileHashInDb(fileHash)!;
@@ -1061,7 +1061,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileHashInDb(fileHash)!;
         Assert.NotNull(createdPrint);
@@ -1076,7 +1076,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
-        var failedResponse = await _httpClient.SendAsync(failedRequest);
+        var failedResponse = await _httpClient.SendAsync(failedRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, failedResponse.StatusCode);
@@ -1099,7 +1099,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Print Failed with snapshot
         var failedContent = CreateWebhookFormContent(
@@ -1111,7 +1111,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
-        await _httpClient.SendAsync(failedRequest);
+        await _httpClient.SendAsync(failedRequest, TestContext.Current.CancellationToken);
 
         // Assert
         var print = FindPrintByFileHashInDb(fileHash)!;
@@ -1136,7 +1136,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var print = FindPrintByFileHashInDb(fileHash)!;
         var imagesAfterStart = FindPrintImagesByPrintIdInDb(print.Id);
@@ -1152,7 +1152,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             includeSnapshot: true);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        await _httpClient.SendAsync(doneRequest);
+        await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         var updatedPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1190,7 +1190,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        var startResponse = await _httpClient.SendAsync(startRequest);
+        var startResponse = await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
         var createdPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1206,7 +1206,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        var doneResponse = await _httpClient.SendAsync(doneRequest);
+        var doneResponse = await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, doneResponse.StatusCode);
@@ -1229,7 +1229,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Print Done with specific time
         var printTime = 3456.7;
@@ -1241,7 +1241,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        await _httpClient.SendAsync(doneRequest);
+        await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         var updatedPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1261,7 +1261,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             estimatedPrintTime: 3600);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(fileName)!;
         Assert.NotNull(createdPrint);
@@ -1274,7 +1274,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             printTime: 2000);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        await _httpClient.SendAsync(doneRequest);
+        await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert
         var updatedPrint = FindPrintByFileNameInDb(fileName)!;
@@ -1294,7 +1294,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - returns Ok even when no matching print found
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1318,7 +1318,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Print Failed
         var failedContent = CreateWebhookFormContent(
@@ -1329,7 +1329,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
-        var failedResponse = await _httpClient.SendAsync(failedRequest);
+        var failedResponse = await _httpClient.SendAsync(failedRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, failedResponse.StatusCode);
@@ -1352,7 +1352,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act
         var printTime = 800.7;
@@ -1364,7 +1364,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
-        await _httpClient.SendAsync(failedRequest);
+        await _httpClient.SendAsync(failedRequest, TestContext.Current.CancellationToken);
 
         // Assert - Math.Round with MidpointRounding.AwayFromZero not used, so 800.7 -> 801
         var updatedPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1385,7 +1385,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1409,7 +1409,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Error
         var errorContent = CreateWebhookFormContent(
@@ -1420,7 +1420,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var errorRequest = CreateAuthenticatedWebhookRequest(errorContent);
-        var errorResponse = await _httpClient.SendAsync(errorRequest);
+        var errorResponse = await _httpClient.SendAsync(errorRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, errorResponse.StatusCode);
@@ -1445,7 +1445,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - unknown topics are silently ignored
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1471,7 +1471,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        var startResponse = await _httpClient.SendAsync(startRequest);
+        var startResponse = await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
         var createdPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1487,7 +1487,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        var doneResponse = await _httpClient.SendAsync(doneRequest);
+        var doneResponse = await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, doneResponse.StatusCode);
 
         var completedPrint = FindPrintByFileHashInDb(fileHash)!;
@@ -1511,7 +1511,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileHashInDb(fileHash)!;
         Assert.NotNull(createdPrint);
@@ -1525,7 +1525,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var failedRequest = CreateAuthenticatedWebhookRequest(failedContent);
-        await _httpClient.SendAsync(failedRequest);
+        await _httpClient.SendAsync(failedRequest, TestContext.Current.CancellationToken);
 
         var failedPrint = FindPrintByFileHashInDb(fileHash)!;
         Assert.Equal(PrintStatus.Failed, failedPrint.Status);
@@ -1548,7 +1548,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Step 2: Error occurs
         var errorContent = CreateWebhookFormContent(
@@ -1559,7 +1559,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var errorRequest = CreateAuthenticatedWebhookRequest(errorContent);
-        await _httpClient.SendAsync(errorRequest);
+        await _httpClient.SendAsync(errorRequest, TestContext.Current.CancellationToken);
 
         var errorPrint = FindPrintByFileHashInDb(fileHash)!;
         Assert.Equal(PrintStatus.Failed, errorPrint.Status);
@@ -1584,7 +1584,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(content);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - title should be truncated to 100 chars
@@ -1607,7 +1607,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var startRequest = CreateAuthenticatedWebhookRequest(startContent);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         // Act - send Print Done with the hash
         var doneContent = CreateWebhookFormContent(
@@ -1618,7 +1618,7 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
             fileHash: fileHash);
 
         var doneRequest = CreateAuthenticatedWebhookRequest(doneContent);
-        await _httpClient.SendAsync(doneRequest);
+        await _httpClient.SendAsync(doneRequest, TestContext.Current.CancellationToken);
 
         // Assert - print should be found by hash and updated
         var updatedPrint = FindPrintByFileHashInDb(fileHash)!;

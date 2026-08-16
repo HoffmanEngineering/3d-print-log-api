@@ -188,7 +188,7 @@ public class PrinterToolsTests : IClassFixture<McpDataWebApplicationFactory>
                 ScreenResolutionYPixels = 2160,
             };
             ctx.Printers.Add(printer);
-            await ctx.SaveChangesAsync();
+            await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
             printerId = printer.Id;
         }
 

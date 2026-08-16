@@ -32,17 +32,17 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     [Fact]
     public async Task Overview_Unauthenticated_ReturnsUnauthorized()
     {
-        var response = await _httpClient.GetAsync("/api/analytics/overview?timeZone=UTC");
+        var response = await _httpClient.GetAsync("/api/analytics/overview?timeZone=UTC", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
     public async Task Overview_Authenticated_ReturnsSuccess()
     {
-        var response = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"));
+        var response = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"), TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>())!;
+        var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(body);
         Assert.NotNull(body.Tiles);
         Assert.NotEqual("Auto", body.Granularity);
@@ -51,7 +51,7 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     [Fact]
     public async Task GetActivity_RejectsAnUnauthenticatedRequest()
     {
-        var response = await _httpClient.GetAsync("/api/analytics/activity?timeZone=UTC");
+        var response = await _httpClient.GetAsync("/api/analytics/activity?timeZone=UTC", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -59,7 +59,7 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     public async Task GetActivity_RejectsAnInvertedRange()
     {
         var response = await _httpClient.SendAsync(Authed(
-            "/api/analytics/activity?timeZone=UTC&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z"));
+            "/api/analytics/activity?timeZone=UTC&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z"), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -68,7 +68,7 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     public async Task Overview_InvertedRange_ReturnsBadRequest()
     {
         var response = await _httpClient.SendAsync(Authed(
-            "/api/analytics/overview?timeZone=UTC&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z"));
+            "/api/analytics/overview?timeZone=UTC&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z"), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -76,7 +76,7 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     [Fact]
     public async Task Overview_UnknownTimeZone_ReturnsBadRequest()
     {
-        var response = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=Mars/Olympus_Mons"));
+        var response = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=Mars/Olympus_Mons"), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -84,7 +84,7 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     public async Task Overview_TooManyPrinterIds_ReturnsBadRequest()
     {
         var ids = string.Join("&", Enumerable.Range(1, 51).Select(i => $"printerIds={i}"));
-        var response = await _httpClient.SendAsync(Authed($"/api/analytics/overview?timeZone=UTC&{ids}"));
+        var response = await _httpClient.SendAsync(Authed($"/api/analytics/overview?timeZone=UTC&{ids}"), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -93,11 +93,11 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
     public async Task Overview_DoesNotAcceptACallerSuppliedUserId()
     {
         // A userId parameter must have no effect — the tenant comes from the token only.
-        var mine = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"));
-        var spoofed = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC&userId=999999"));
+        var mine = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"), TestContext.Current.CancellationToken);
+        var spoofed = await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC&userId=999999"), TestContext.Current.CancellationToken);
 
-        var a = (await mine.Content.ReadFromJsonAsync<OverviewResponse>())!;
-        var b = (await spoofed.Content.ReadFromJsonAsync<OverviewResponse>())!;
+        var a = (await mine.Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
+        var b = (await spoofed.Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(a.Tiles.PrintCount.Value, b.Tiles.PrintCount.Value);
     }
@@ -114,10 +114,10 @@ public class AnalyticsControllerTests : IClassFixture<Mcp.McpDataWebApplicationF
         // and would make this assertion meaningless.
         _ = _factory.Services; // force seeding before reading the static id
         var response = await _httpClient.SendAsync(Authed(
-            $"/api/analytics/overview?timeZone=UTC&printerIds={Mcp.McpTestData.MetricsPrinterId}"));
+            $"/api/analytics/overview?timeZone=UTC&printerIds={Mcp.McpTestData.MetricsPrinterId}"), TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>())!;
+        var body = (await response.Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal(0, body!.Tiles.PrintCount.Value);
     }
 }
@@ -143,8 +143,8 @@ public class AnalyticsCacheInvalidationTests : IClassFixture<CustomWebApplicatio
     [Fact]
     public async Task Overview_AfterAMutation_DoesNotServeTheStaleCachedResult()
     {
-        var before = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
-            .Content.ReadFromJsonAsync<OverviewResponse>())!;
+        var before = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Any mutating Prints action bumps the user's cache version. Create a print through
         // the API (not the DbContext) so the real invalidation path runs. A TTL-only cache
@@ -160,10 +160,10 @@ public class AnalyticsCacheInvalidationTests : IClassFixture<CustomWebApplicatio
             }),
         };
         create.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        (await _httpClient.SendAsync(create)).EnsureSuccessStatusCode();
+        (await _httpClient.SendAsync(create, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
-        var after = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC")))
-            .Content.ReadFromJsonAsync<OverviewResponse>())!;
+        var after = (await (await _httpClient.SendAsync(Authed("/api/analytics/overview?timeZone=UTC"), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<OverviewResponse>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(before!.Tiles.PrintCount.Value + 1, after!.Tiles.PrintCount.Value);
     }

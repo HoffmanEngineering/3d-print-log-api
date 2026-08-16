@@ -59,7 +59,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newComment);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -77,8 +77,8 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newComment);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(comment);
@@ -98,7 +98,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newComment);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -115,7 +115,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(newComment);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -135,10 +135,10 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(editDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadAsStringAsync();
+        var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<CommentDetailDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.NotNull(result);
         Assert.Equal("Edited body", result.Body);
@@ -155,7 +155,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(editDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -171,7 +171,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Content = JsonContent.Create(editDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -191,7 +191,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -206,7 +206,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Comments/{comment.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -220,7 +220,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -234,7 +234,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Comments/{comment.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(deleteRequest);
+        await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Act - try to edit the deleted comment
         var editDto = new EditCommentDto { Body = "Trying to edit deleted" };
@@ -242,7 +242,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         editRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         editRequest.Content = JsonContent.Create(editDto);
 
-        var response = await _httpClient.SendAsync(editRequest);
+        var response = await _httpClient.SendAsync(editRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -276,7 +276,7 @@ public class CommentsControllerTests : IClassFixture<CustomWebApplicationFactory
         // Act
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Comments/{comment.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - delete succeeded and notification was cleaned up
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);

@@ -21,7 +21,7 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         var result = await client.CallToolAsync("list_projects", new Dictionary<string, object?>
         {
             ["search"] = "Rocket",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var text = result.Content.OfType<TextContentBlock>().First().Text;
         Assert.Contains("Rocket Build", text);
@@ -37,7 +37,7 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         {
             ["name"] = "Agent Created Project",
             ["viewStatus"] = "Unlisted",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         var text = result.Content.OfType<TextContentBlock>().First().Text;
@@ -59,7 +59,7 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
             ["url"] = "https://example.com/thing",
             ["status"] = "Complete",
             ["viewStatus"] = "Public",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().First().Text);
@@ -81,7 +81,7 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         var created = await client.CallToolAsync("create_project", new Dictionary<string, object?>
         {
             ["name"] = "Update Echo Target",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Guid id;
         using (var doc = JsonDocument.Parse(created.Content.OfType<TextContentBlock>().First().Text))
         {
@@ -93,7 +93,7 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
             ["id"] = id,
             ["reference"] = "REF-99",
             ["url"] = "https://example.com/updated",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(updated.IsError != true);
         using var updatedDoc = JsonDocument.Parse(updated.Content.OfType<TextContentBlock>().First().Text);
@@ -116,9 +116,9 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
             ["idempotencyKey"] = "proj-key-1",
         };
 
-        var first = await client.CallToolAsync("create_project", Args());
+        var first = await client.CallToolAsync("create_project", Args(), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
-        var replay = await client.CallToolAsync("create_project", Args());
+        var replay = await client.CallToolAsync("create_project", Args(), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(replay.IsError != true);
 
         using var firstDoc = JsonDocument.Parse(first.Content.OfType<TextContentBlock>().First().Text);
@@ -140,13 +140,13 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         {
             ["name"] = "Conflict Project",
             ["idempotencyKey"] = "proj-key-2",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         var conflict = await client.CallToolAsync("create_project", new Dictionary<string, object?>
         {
             ["name"] = "Conflict Project CHANGED",
             ["idempotencyKey"] = "proj-key-2",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Asserted on the raw prefix, not via ToolErrorCode: that helper only recognizes
         // "not found" and "denied", and reports every other failure as a bare "error" — it can
@@ -164,8 +164,8 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
 
         Dictionary<string, object?> Args() => new() { ["name"] = "Duplicate Project" };
 
-        var first = await client.CallToolAsync("create_project", Args());
-        var second = await client.CallToolAsync("create_project", Args());
+        var first = await client.CallToolAsync("create_project", Args(), cancellationToken: TestContext.Current.CancellationToken);
+        var second = await client.CallToolAsync("create_project", Args(), cancellationToken: TestContext.Current.CancellationToken);
 
         using var firstDoc = JsonDocument.Parse(first.Content.OfType<TextContentBlock>().First().Text);
         using var secondDoc = JsonDocument.Parse(second.Content.OfType<TextContentBlock>().First().Text);

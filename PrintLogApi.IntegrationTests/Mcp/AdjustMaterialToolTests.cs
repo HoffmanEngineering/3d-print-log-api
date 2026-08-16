@@ -44,7 +44,7 @@ public class AdjustMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
             ["materialId"] = id,
             ["source"] = "Weight",
             ["delta"] = -200.0,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
@@ -69,7 +69,7 @@ public class AdjustMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
             ["materialId"] = id,
             ["source"] = "Length",
             ["delta"] = -5000.0, // mm
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;

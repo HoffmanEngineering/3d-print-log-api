@@ -60,7 +60,7 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task ListTools_ReturnsPing()
     {
         await using var client = await ConnectAsync(McpToken());
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains(tools, t => t.Name == "ping");
     }
 
@@ -74,7 +74,7 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task ListTools_ExposesExactlyTheV1Surface()
     {
         await using var client = await ConnectAsync(McpToken());
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // A read-only token sees ONLY the read surface: the SDK's authorization filter hides the
         // write tools (which require write:printdata) from tools/list. See McpWriteSurfaceTests
@@ -101,9 +101,7 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task CallPing_Echoes()
     {
         await using var client = await ConnectAsync(McpToken());
-        var result = await client.CallToolAsync(
-            "ping",
-            new Dictionary<string, object?> { ["message"] = "hi" });
+        var result = await client.CallToolAsync("ping", new Dictionary<string, object?> { ["message"] = "hi" }, cancellationToken: TestContext.Current.CancellationToken);
         var text = result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text;
         Assert.Equal("pong: hi", text);
     }
@@ -111,28 +109,28 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task NoToken_Is401()
     {
-        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", token: null));
+        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", token: null), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
     [Fact]
     public async Task NoScope_Is403()
     {
-        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", McpToken(withScope: false)));
+        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", McpToken(withScope: false)), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task MissingMappedUser_CannotListTools()
     {
-        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", McpToken(subject: null)));
+        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", McpToken(subject: null)), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Challenge_ReferencesResourceMetadata()
     {
-        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", token: null));
+        var resp = await _factory.CreateClient().SendAsync(RpcPost("tools/list", token: null), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
 
         var header = resp.Headers.WwwAuthenticate.ToString();
@@ -143,15 +141,15 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Metadata_AdvertisesResourceAuth0AndScope()
     {
         var client = _factory.CreateClient();
-        var challenge = await client.SendAsync(RpcPost("tools/list", token: null));
+        var challenge = await client.SendAsync(RpcPost("tools/list", token: null), TestContext.Current.CancellationToken);
         var header = challenge.Headers.WwwAuthenticate.ToString();
         var match = Regex.Match(header, "resource_metadata=\"([^\"]+)\"");
         Assert.True(match.Success, $"No resource_metadata in challenge: {header}");
 
-        var metadataResp = await client.GetAsync(match.Groups[1].Value);
+        var metadataResp = await client.GetAsync(match.Groups[1].Value, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, metadataResp.StatusCode);
 
-        using var doc = JsonDocument.Parse(await metadataResp.Content.ReadAsStringAsync());
+        using var doc = JsonDocument.Parse(await metadataResp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var root = doc.RootElement;
 
         Assert.Equal(TestJwt.McpAudience, root.GetProperty("resource").GetString());

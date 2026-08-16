@@ -24,7 +24,7 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task CreatePrint_MaterialRow_RequiresOnlyTheMaterialId()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var createPrint = tools.Single(t => t.Name == "create_print");
         var required = createPrint.ProtocolTool.InputSchema
@@ -39,7 +39,7 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task UpdatePrint_MaterialRow_RequiresOnlyTheMaterialId()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var updatePrint = tools.Single(t => t.Name == "update_print");
         var required = updatePrint.ProtocolTool.InputSchema
@@ -60,7 +60,7 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task CreateFeedback_RequiresTypeNoteAndIdempotencyKey()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var createFeedback = tools.Single(t => t.Name == "create_feedback");
         var required = createFeedback.ProtocolTool.InputSchema
@@ -80,7 +80,7 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task EveryTool_AdvertisesATitle()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var untitled = tools
             .Where(t => string.IsNullOrWhiteSpace(t.ProtocolTool.Title)
@@ -100,7 +100,7 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     public async Task EveryTool_DeclaresReadOnlyOrDestructiveIntent()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var unhinted = tools
             .Where(t => t.ProtocolTool.Annotations is not { } a

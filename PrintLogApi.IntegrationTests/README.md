@@ -2,6 +2,13 @@
 
 Integration tests for the PrintLogApi using ASP.NET Core's `WebApplicationFactory` with SQLite in-memory database.
 
+## Test runner
+
+xUnit v3 on [Microsoft.Testing.Platform](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-intro) (#70). Two consequences are worth knowing before you debug anything here:
+
+- **The test project is an executable and hosts its own runner.** There is no VSTest host and no test adapter package. `dotnet run --project PrintLogApi.IntegrationTests` runs the suite directly, and the platform's own options (`--filter-class`, `--filter-method`, `--coverage`, …) are available on it. Through `dotnet test`, those options go after a `--` separator; anything before it is still parsed by the `dotnet test` CLI.
+- **The runner is selected repo-wide in `global.json`**, under `"test": { "runner": "Microsoft.Testing.Platform" }`. Without it `dotnet test` routes to VSTest and fails the build outright, because no VSTest adapter is referenced.
+
 ## Project Structure
 
 ```
@@ -24,6 +31,10 @@ dotnet test PrintLogApi.IntegrationTests
 # Run with verbose output
 dotnet test PrintLogApi.IntegrationTests -v n
 
+# Run one class, or one test (platform options, so after the `--`)
+dotnet test -- --filter-class "*NotificationsControllerTests"
+dotnet test -- --filter-method "*ReturnsOkWithNotifications*"
+
 # Run with code coverage (generates HTML report)
 ./coverage.ps1
 
@@ -33,7 +44,20 @@ dotnet test PrintLogApi.IntegrationTests -v n
 
 ## Code Coverage
 
-Code coverage is collected using [Coverlet](https://github.com/coverlet-coverage/coverlet) and reports are generated with [ReportGenerator](https://github.com/danielpalme/ReportGenerator).
+Coverage is collected by `Microsoft.Testing.Extensions.CodeCoverage`, an extension of the test executable itself, and reports are generated with [ReportGenerator](https://github.com/danielpalme/ReportGenerator).
+
+Coverlet used to fill this role and no longer does: `--collect "XPlat Code Coverage"` names a VSTest datacollector, and there is no VSTest host to load one into. The replacement is invoked as platform options instead, which is why `coverage.ps1` and `coverage-check.sh` pass them after a `--`:
+
+```bash
+dotnet test -- --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml
+```
+
+Two things to watch if you edit either script:
+
+- **Ask for `cobertura` explicitly.** The extension's default output is a binary `.coverage` file that ReportGenerator cannot parse.
+- **Pass an absolute `--results-directory`.** It is resolved by the test executable, so a relative path lands under the test project directory rather than the repo root.
+
+Line coverage is unchanged by the switch (80.8% → 80.0% at the time of the migration), but the two engines count *branches* differently, so branch coverage moved (64.5% → 77.7%) without any test changing. Compare branch numbers only against other runs of the same engine.
 
 ### Local Reports
 
@@ -51,11 +75,7 @@ The HTML report is generated at `TestResults/CoverageReport/index.html`.
 
 ### CI/CD Integration
 
-Azure Pipelines automatically:
-1. Runs tests with coverage collection
-2. Publishes coverage to the "Code Coverage" tab in build results
-
-Coverage data is in Cobertura XML format for Azure DevOps integration.
+`ci.yml` runs the suite without coverage (`dotnet test --no-build --configuration Release --verbosity normal`). Nothing collects coverage automatically today — `coverage-check.sh` exists to be run by hand, or by a coverage job if one is added.
 
 ## Test Infrastructure
 
@@ -166,6 +186,12 @@ public class MyControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 }
 ```
+
+### Every test must arrange what it asserts on
+
+A class fixture is **one database shared by every test in the class**, and the order those tests run in is not guaranteed. Do not write a test that depends on the seeder's rows still being present, or on there being few enough rows to fit the default page size of 10 — a sibling test that deletes or creates rows will break it, and it will break at whatever point the runner's ordering changes rather than in the commit that introduced the coupling.
+
+Two tests learned this the expensive way during the v3 migration (#70), both by asserting on seeded data that a sibling had removed or paged off. If a test needs a row, create it in Arrange.
 
 ### Adding Test Data
 

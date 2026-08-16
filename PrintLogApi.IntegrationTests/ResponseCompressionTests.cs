@@ -49,7 +49,7 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
     [Fact]
     public async Task JsonResponse_WhenClientAcceptsBrotliAndGzip_IsCompressedWithBrotli()
     {
-        var response = await _httpClient.SendAsync(Request("br", "gzip"));
+        var response = await _httpClient.SendAsync(Request("br", "gzip"), TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
         // Brotli is registered first precisely so it wins this negotiation.
@@ -59,7 +59,7 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
     [Fact]
     public async Task JsonResponse_WhenClientAcceptsOnlyGzip_IsCompressedWithGzip()
     {
-        var response = await _httpClient.SendAsync(Request("gzip"));
+        var response = await _httpClient.SendAsync(Request("gzip"), TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
         Assert.Equal("gzip", Assert.Single(response.Content.Headers.ContentEncoding));
@@ -68,18 +68,18 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
     [Fact]
     public async Task JsonResponse_WhenClientAcceptsNoEncoding_IsNotCompressed()
     {
-        var response = await _httpClient.SendAsync(Request());
+        var response = await _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
         Assert.Empty(response.Content.Headers.ContentEncoding);
         // A client that asked for nothing must still be able to read the body directly.
-        Assert.StartsWith("{", (await response.Content.ReadAsStringAsync()).TrimStart());
+        Assert.StartsWith("{", (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).TrimStart());
     }
 
     [Fact]
     public async Task CompressedResponse_AdvertisesVaryAcceptEncoding()
     {
-        var response = await _httpClient.SendAsync(Request("br"));
+        var response = await _httpClient.SendAsync(Request("br"), TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
         // Without this a shared cache could hand brotli bytes to a client that never asked for
@@ -93,21 +93,21 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
     [InlineData("gzip")]
     public async Task CompressedResponse_DecodesToTheUncompressedBody(string encoding)
     {
-        var plain = await _httpClient.SendAsync(Request());
+        var plain = await _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken);
         plain.EnsureSuccessStatusCode();
-        var expected = await plain.Content.ReadAsStringAsync();
+        var expected = await plain.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        var compressed = await _httpClient.SendAsync(Request(encoding));
+        var compressed = await _httpClient.SendAsync(Request(encoding), TestContext.Current.CancellationToken);
         compressed.EnsureSuccessStatusCode();
         Assert.Equal(encoding, Assert.Single(compressed.Content.Headers.ContentEncoding));
 
-        await using var raw = await compressed.Content.ReadAsStreamAsync();
+        await using var raw = await compressed.Content.ReadAsStreamAsync(TestContext.Current.CancellationToken);
         await using Stream decoder = encoding == "br"
             ? new BrotliStream(raw, CompressionMode.Decompress)
             : new GZipStream(raw, CompressionMode.Decompress);
         using var reader = new StreamReader(decoder);
 
-        Assert.Equal(expected, await reader.ReadToEndAsync());
+        Assert.Equal(expected, await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class ResponseCompressionTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
 
-        var response = await httpsClient.SendAsync(request);
+        var response = await httpsClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
         Assert.True(response.RequestMessage!.RequestUri!.Scheme == Uri.UriSchemeHttps);
