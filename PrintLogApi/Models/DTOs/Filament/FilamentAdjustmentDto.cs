@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Extensions;
 using static PrintLogApi.Models.FilamentAdjustment;

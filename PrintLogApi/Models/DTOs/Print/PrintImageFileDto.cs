@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System.IO;
+﻿using System.IO;
 
 namespace PrintLogApi.Models.DTOs.Print
 {

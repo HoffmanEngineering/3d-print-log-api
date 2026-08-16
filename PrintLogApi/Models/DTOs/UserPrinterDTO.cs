@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Models.DTOs
+﻿namespace PrintLogApi.Models.DTOs
 {
     public class UserPrinterDTO
     {

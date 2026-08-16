@@ -1,5 +1,3 @@
-#nullable enable
-
 using System;
 using System.Security;
 using System.Threading;

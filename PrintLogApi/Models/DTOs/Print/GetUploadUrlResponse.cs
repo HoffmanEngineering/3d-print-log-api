@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace PrintLogApi.Models.DTOs.Print
 {
     public class GetUploadUrlResponse

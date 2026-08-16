@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace PrintLogApi.Services
+﻿namespace PrintLogApi.Services
 {
     /// <summary>
     /// Service for managing cache versions per user to enable efficient cache invalidation.

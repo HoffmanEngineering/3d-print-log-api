@@ -14,7 +14,9 @@ namespace PrintLogApi.IntegrationTests
     /// because a file that had not was invisible: it compiled, it reviewed cleanly, and its
     /// properties would flip to non-nullable all at once at the project flip. The project setting
     /// now guarantees what those tests asserted, and &lt;WarningsAsErrors&gt;nullable&lt;/WarningsAsErrors&gt;
-    /// keeps it that way, so re-checking it in a test would only assert that MSBuild works.
+    /// keeps it that way, so re-checking it in a test would only assert that MSBuild works. The
+    /// headers themselves have since been removed; the only #nullable directives left in the
+    /// solution are EF's generated "#nullable disable" under Migrations/.
     ///
     /// The navigation check below is NOT scaffolding and stays permanently. See its own comment.
     ///

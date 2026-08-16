@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Models.DTOs.MaterialCategory;
 
 namespace PrintLogApi.Models.DTOs.PrinterCategory

@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System;
+﻿using System;
 using Microsoft.AspNetCore.Authorization;
 
 namespace PrintLogApi.Authentication

@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace PrintLogApi.Models.Stripe
 {
     public class StripeOptions

@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using AutoMapper;
+﻿using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 
