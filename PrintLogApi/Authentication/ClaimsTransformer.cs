@@ -1,11 +1,12 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Caching;
 using PrintLogApi.Users;
 
 namespace PrintLogApi.Authentication;
 
-public sealed class ClaimsTransformer(IUserService userService, HybridCache cache) : IClaimsTransformation
+public sealed class ClaimsTransformer(HybridCache cache, CachedComputation computation) : IClaimsTransformation
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -45,21 +46,28 @@ public sealed class ClaimsTransformer(IUserService userService, HybridCache cach
         // user that trades a mapping that could live 7 days for one re-read per day — a single
         // indexed lookup, against never letting a stale mapping outlive a deleted user by a
         // week.
+        // IUserService is resolved from CachedComputation's scope rather than the injected
+        // instance, for the reason set out there: this factory's result is handed to every
+        // concurrent caller for this auth id, so it must not run on services torn down when one
+        // of those requests ends. That applies with particular force here, where the factory
+        // writes a row.
         var cacheKey = $"user_id:{authUserId}";
         var localUserId = await cache.GetOrCreateAsync(
             cacheKey,
-            (userService, authUserId),
-            static async (state, _) =>
+            (computation, authUserId),
+            static (state, ct) => state.computation.RunAsync(async (services, _) =>
             {
-                var existing = await state.userService.GetLocalUserIdByAuthUserId(state.authUserId);
+                var users = services.GetRequiredService<IUserService>();
+
+                var existing = await users.GetLocalUserIdByAuthUserId(state.authUserId);
                 if (existing != 0)
                 {
                     return existing;
                 }
 
-                var newUser = await state.userService.CreateUserFromAuthId(state.authUserId);
+                var newUser = await users.CreateUserFromAuthId(state.authUserId);
                 return newUser.Id;
-            },
+            }, ct),
             CacheOptions);
 
         existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()));

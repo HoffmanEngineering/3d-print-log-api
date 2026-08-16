@@ -16,8 +16,10 @@ public sealed record PrintCostRef(long PrintId, string? Title, DateOnly? Date, d
 /// of nothing is undefined, not 0%, and 0% would read as "no failures".
 /// </summary>
 // [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
-// shared from L1 rather than deserialized per hit. Truthful here - this is a positional
-// record with init-only members. See PagedList<T> for the full rationale.
+// shared from L1 rather than deserialized per hit. The record'''s own members are init-only,
+// but its IReadOnlyList/IReadOnlyDictionary members are backed by mutable collections, so
+// this asserts a convention - nothing mutates a cached response - not a guarantee the type
+// system enforces. See PagedList<T> for the full rationale.
 [ImmutableObject(true)]
 public sealed record CostsResponse(
     DateTimeOffset? From,

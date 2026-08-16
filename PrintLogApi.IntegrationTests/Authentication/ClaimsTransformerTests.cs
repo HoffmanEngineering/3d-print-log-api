@@ -1,5 +1,4 @@
 ﻿using System.Security.Claims;
-using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Authentication;
 using PrintLogApi.Models;
 using PrintLogApi.Users;
@@ -16,13 +15,22 @@ public class ClaimsTransformerTests
         return new ClaimsPrincipal(identity);
     }
 
-    private static HybridCache CreateCache() => TestHybridCache.Create();
+    /// <summary>
+    /// ClaimsTransformer resolves IUserService from CachedComputation's scope rather than
+    /// holding an injected one, so the fake has to be reachable through DI. Registered as a
+    /// singleton so the instance the test asserts against is the one the factory used.
+    /// </summary>
+    private static ClaimsTransformer CreateTransformer(FakeUserService userService)
+    {
+        var (cache, computation) = TestHybridCache.Create(s => s.AddSingleton<IUserService>(userService));
+        return new ClaimsTransformer(cache, computation);
+    }
 
     [Fact]
     public async Task TransformAsync_ExistingUser_AddsCorrectNameIdentifierClaim()
     {
         var userService = new FakeUserService { ReturnUserId = 42L };
-        var transformer = new ClaimsTransformer(userService, CreateCache());
+        var transformer = CreateTransformer(userService);
 
         var result = await transformer.TransformAsync(CreatePrincipal("auth|existing"));
 
@@ -35,7 +43,7 @@ public class ClaimsTransformerTests
     public async Task TransformAsync_ExistingUser_DoesNotHitDatabaseOnSecondRequest()
     {
         var userService = new FakeUserService { ReturnUserId = 42L };
-        var transformer = new ClaimsTransformer(userService, CreateCache());
+        var transformer = CreateTransformer(userService);
 
         await transformer.TransformAsync(CreatePrincipal("auth|existing"));
         await transformer.TransformAsync(CreatePrincipal("auth|existing"));
@@ -47,7 +55,7 @@ public class ClaimsTransformerTests
     public async Task TransformAsync_NewUser_CreatesUserAndAddsCorrectNameIdentifierClaim()
     {
         var userService = new FakeUserService { ReturnUserId = 0L, NewUserId = 99L };
-        var transformer = new ClaimsTransformer(userService, CreateCache());
+        var transformer = CreateTransformer(userService);
 
         var result = await transformer.TransformAsync(CreatePrincipal("auth|new"));
 
@@ -60,7 +68,7 @@ public class ClaimsTransformerTests
     public async Task TransformAsync_NewUser_DoesNotHitDatabaseOnSecondRequest()
     {
         var userService = new FakeUserService { ReturnUserId = 0L, NewUserId = 99L };
-        var transformer = new ClaimsTransformer(userService, CreateCache());
+        var transformer = CreateTransformer(userService);
 
         await transformer.TransformAsync(CreatePrincipal("auth|new"));
         await transformer.TransformAsync(CreatePrincipal("auth|new"));
@@ -84,7 +92,7 @@ public class ClaimsTransformerTests
         const int concurrentCallers = 32;
 
         var userService = new FakeUserService { ReturnUserId = 0L, NewUserId = 77L, Delay = TimeSpan.FromMilliseconds(150) };
-        var cache = CreateCache();
+        var (cache, computation) = TestHybridCache.Create(s => s.AddSingleton<IUserService>(userService));
 
         var principals = Enumerable.Range(0, concurrentCallers)
             .Select(_ => CreatePrincipal("auth|stampede"))
@@ -93,7 +101,7 @@ public class ClaimsTransformerTests
         // A fresh transformer per caller, matching the transient registration: nothing is
         // serialized by sharing an instance.
         var results = await Task.WhenAll(principals.Select(p =>
-            Task.Run(() => new ClaimsTransformer(userService, cache).TransformAsync(p))));
+            Task.Run(() => new ClaimsTransformer(cache, computation).TransformAsync(p))));
 
         Assert.Equal(1, userService.GetLocalUserIdCallCount);
         Assert.Equal(1, userService.CreateUserCallCount);

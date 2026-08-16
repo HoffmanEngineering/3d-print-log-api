@@ -434,6 +434,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 LocalCacheExpiration = TimeSpan.FromMinutes(15),
             };
         });
+
+        // Singleton: it holds only the scope factory, and the scopes it creates must be
+        // independent of any request scope — which is the entire point. See CachedComputation.
+        services.AddSingleton<CachedComputation>();
     }
 
     /// <summary>

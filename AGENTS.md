@@ -73,10 +73,20 @@ Two consequences worth knowing before editing:
 - **Sliding expiration is gone.** HybridCache offers absolute expiry only, so entries that paired a
   sliding window with a longer absolute cap are now flat (15 min for summaries and analytics,
   24 h for the claims and API-key lookups). The cost is one extra query per hot key per window.
-- **A shared factory runs on the winning caller's scoped services.** If that request is aborted
-  mid-computation its `DbContext` can be disposed underneath the joiners waiting on the same key.
-  The blast radius is an exception for that key's waiters — nothing is cached and the next call
-  recomputes — but it is a real trade the previous one-query-per-caller shape did not have.
+- **Every cache factory runs through `CachedComputation`, and must.** Stampede protection means
+  one caller's factory produces the value all the others receive, which creates two ways for a
+  single aborted request to break healthy ones — neither of which existed when every caller ran
+  its own query:
+  - Its **scoped services** are disposed when its pipeline unwinds, leaving the shared work on a
+    dead `DbContext`. So the factory resolves what it needs from a scope `CachedComputation` owns,
+    never from the instance injected into the controller or service.
+  - Its **cancellation token** fires the moment it aborts. A factory that observes the originating
+    request's token cancels the shared computation and hands that cancellation to every joiner.
+    Use the token HybridCache passes the factory; it is cancelled only once every joiner has left.
+    Verified against 10.0.0 and pinned by `CachingConfigurationTests`.
+
+  Because the scope is disposed as soon as the factory returns, a factory must materialise its
+  result — returning a lazily-enumerated query would reach into a scope that is already gone.
 
 ### Output caching was evaluated and declined (#66)
 

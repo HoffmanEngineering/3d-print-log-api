@@ -20,7 +20,8 @@ public class UserApiKeyService(
     TelemetryClient telemetry,
     INotificationService notificationService,
     IMemoryCache cache,
-    HybridCache hybridCache) : IUserApiKeyService
+    HybridCache hybridCache,
+    CachedComputation computation) : IUserApiKeyService
 {
     private static string UserIdCacheKey(string hashedKey) => $"apikey_userid:{hashedKey}";
     private static string LastUsedThrottleKey(string hashedKey) => $"apikey_lastused:{hashedKey}";
@@ -124,21 +125,24 @@ public class UserApiKeyService(
     {
         var hashedKey = GetSHA256Hash(publicKey);
 
+        // The context comes from CachedComputation's scope, not the injected one: this factory's
+        // result is served to every concurrent caller presenting the same key, so it must not
+        // run on a DbContext disposed when one of those requests ends. See CachedComputation.
         return await hybridCache.GetOrCreateAsync(
             UserIdCacheKey(hashedKey),
-            (context, hashedKey),
-            static async (state, ct) =>
+            (computation, hashedKey),
+            static (state, ct) => state.computation.RunAsync(async (services, token) =>
             {
-                var userId = await state.context.UserApiKeys
+                var userId = await services.GetRequiredService<PrintLogContext>().UserApiKeys
                     .Where(u => u.HashedKey == state.hashedKey && u.IsDeleted == false)
                     .Select(u => u.UserId)
-                    .SingleOrDefaultAsync(ct);
+                    .SingleOrDefaultAsync(token);
 
                 if (userId == default)
                     throw new ApiKeyIsNotValidException();
 
                 return userId;
-            },
+            }, ct),
             ApiKeyCacheOptions);
     }
 

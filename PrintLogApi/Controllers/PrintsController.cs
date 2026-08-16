@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
+using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -36,6 +37,7 @@ public class PrintsController(
     IPrintImageService printImageService,
     ICommentService commentService,
     HybridCache cache,
+    CachedComputation computation,
     ICacheVersionService cacheVersionService,
     IBlobStorageService blobStorageService,
     IFileAttachmentService fileAttachmentService) : ControllerBase
@@ -134,12 +136,19 @@ public class PrintsController(
         // absolute lifetime only. That shortens the life of a repeatedly-read entry from
         // "15 minutes, extended while in use" to a flat 15 minutes, which costs an extra query
         // on a hot key every 15 minutes and is not worth reproducing by hand.
+        //
+        // IPrintService is resolved from CachedComputation's scope rather than the injected
+        // instance: the winning caller's factory serves every joiner on this key, so it must not
+        // run on a DbContext that is disposed the moment that one request ends. Read
+        // CachedComputation before changing this.
         return await cache.GetOrCreateAsync(
             cacheKey,
-            _ => new ValueTask<PagedList<PrintSummaryDTO>>(
-                printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
-                                                filterByFilamentIds, statuses, userId, currentUserId, projectIds,
-                                                fromDate, toDate)),
+            ct => computation.RunAsync(
+                (services, _) => services.GetRequiredService<IPrintService>()
+                    .SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
+                                        filterByFilamentIds, statuses, userId, currentUserId, projectIds,
+                                        fromDate, toDate),
+                ct),
             SummaryCacheOptions,
             cancellationToken: HttpContext.RequestAborted);
     }

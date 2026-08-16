@@ -12,11 +12,17 @@ namespace PrintLogApi.Models;
 /// declined to spend on the serialize side, and it would land on the endpoints whose expensive
 /// part — the SQL aggregation — the cache already skips.</para>
 ///
-/// <para>It asserts nothing new about this type. A cached <c>PagedList</c> is already shared by
-/// reference across concurrent requests under plain <c>IMemoryCache</c>, and nothing mutates a
-/// list it read out of the cache. The attribute states that existing invariant rather than
-/// creating one — but it does mean a future caller that mutates a cached instance would corrupt
-/// every other reader's copy, so treat anything returned from a cache lookup as read-only.</para>
+/// <para><b>Be clear about what it does and does not claim.</b> This type is mutable — both
+/// properties have setters and <c>Items</c> is a mutable <c>List&lt;T&gt;</c> — so the attribute
+/// is a statement of convention, not a property the compiler enforces: nothing mutates a
+/// <c>PagedList</c> it read out of the cache, and nothing may start.</para>
+///
+/// <para>What it is not is a new risk. A cached <c>PagedList</c> was already shared by reference
+/// across concurrent requests under plain <c>IMemoryCache</c>; the attribute keeps that exact
+/// behaviour rather than introducing it. The only alternative is letting HybridCache serialize
+/// and re-deserialize per hit, which is a real cost paid on every request to buy protection
+/// against a mutation that does not happen. Treat anything returned from a cache lookup as
+/// read-only, and if a caller ever genuinely needs to mutate one, copy it first.</para>
 /// </summary>
 [ImmutableObject(true)]
 public class PagedList<T>

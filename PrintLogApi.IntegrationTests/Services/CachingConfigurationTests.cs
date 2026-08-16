@@ -71,6 +71,49 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
     }
 
     /// <summary>
+    /// An aborted caller must not take the other waiters on its key down with it.
+    ///
+    /// <para>This is the failure a naive conversion produces, and it is silent in every other
+    /// test: if a factory observes the <i>originating request's</i> cancellation token instead of
+    /// the one HybridCache supplies, then one caller closing its browser cancels the shared
+    /// computation and every joiner — each on a perfectly healthy request of its own — receives
+    /// that cancellation. HybridCache cancels its own token only once every joiner has left,
+    /// which is why <see cref="CachedComputation"/> insists the factory use it.</para>
+    ///
+    /// <para>The two halves below are the same scenario differing only in which token the factory
+    /// body honours, so the test also documents the distinction rather than just asserting it.</para>
+    /// </summary>
+    [Fact]
+    public async Task AbortedCaller_DoesNotCancelTheJoinersWaitingOnTheSameKey()
+    {
+        var cache = _factory.Services.GetRequiredService<HybridCache>();
+
+        // The correct shape: the factory honours HybridCache's token.
+        var goodKey = $"cancel-isolation:{Guid.NewGuid():N}";
+        using var abortedRequest = new CancellationTokenSource();
+
+        var aborted = cache.GetOrCreateAsync(goodKey, async ct =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            return "computed";
+        }, cancellationToken: abortedRequest.Token).AsTask();
+
+        await Task.Delay(100);
+
+        var joiner = cache.GetOrCreateAsync(goodKey, async ct =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            return "computed";
+        }, cancellationToken: CancellationToken.None).AsTask();
+
+        await Task.Delay(100);
+        abortedRequest.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => aborted);
+        Assert.Equal("computed", await joiner);
+    }
+
+    /// <summary>
     /// HybridCache must be storing its L1 entries in the application's registered IMemoryCache,
     /// not standing up a second one. If that ever stopped being true, the process would hold two
     /// independent caches with two independent budgets and <see cref="CacheBudget.SizeLimitBytes"/>
@@ -88,6 +131,54 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
         await hybrid.GetOrCreateAsync(key, _ => new ValueTask<string>("value"));
 
         Assert.Contains(memory.Keys.OfType<string>(), k => k.Contains(key, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <see cref="CachedComputation"/> must hand the factory a scope of its own, and must dispose
+    /// it once the factory returns.
+    ///
+    /// <para>The first half is the guarantee every converted call site depends on: a shared
+    /// computation that borrowed the winning request's scope would be querying through a disposed
+    /// DbContext the moment that request ended. The second half is why the factories must
+    /// materialise their results — a lazily-enumerated query handed back from here would be
+    /// reaching into a scope that is already gone.</para>
+    /// </summary>
+    [Fact]
+    public async Task CachedComputation_RunsTheFactoryInAScopeItOwnsAndDisposes()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<TrackedScopedService>();
+        services.AddSingleton<CachedComputation>();
+        var provider = services.BuildServiceProvider();
+
+        var computation = provider.GetRequiredService<CachedComputation>();
+
+        // A service resolved from the root provider, standing in for one a request would have
+        // injected into a controller.
+        using var callerScope = provider.CreateScope();
+        var callersInstance = callerScope.ServiceProvider.GetRequiredService<TrackedScopedService>();
+
+        var first = await computation.RunAsync(
+            (sp, _) => Task.FromResult(sp.GetRequiredService<TrackedScopedService>()), CancellationToken.None);
+        var second = await computation.RunAsync(
+            (sp, _) => Task.FromResult(sp.GetRequiredService<TrackedScopedService>()), CancellationToken.None);
+
+        // Not the caller's instance, and not shared between computations either.
+        Assert.NotSame(callersInstance, first);
+        Assert.NotSame(first, second);
+
+        // The computation's scope is torn down with it, so nothing leaks past the factory.
+        Assert.True(first.Disposed);
+        Assert.True(second.Disposed);
+
+        // The caller's own scope is untouched by any of it.
+        Assert.False(callersInstance.Disposed);
+    }
+
+    private sealed class TrackedScopedService : IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
     }
 
     /// <summary>

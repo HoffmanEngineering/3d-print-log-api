@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Caching;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
@@ -26,6 +27,7 @@ public class PrintersController(
     IPrinterService printerService,
     IPrinterCategoryService printerCategoryService,
     HybridCache cache,
+    CachedComputation computation,
     ICacheVersionService cacheVersionService) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
@@ -55,18 +57,20 @@ public class PrintersController(
 
         // Stampede protection: concurrent misses on one key run the query once between them.
         // See the equivalent block in PrintsController.GetPrintSummary — including why the
-        // sliding expiration is not reproduced.
+        // sliding expiration is not reproduced, and why the context comes from
+        // CachedComputation's scope rather than the one injected into this controller.
         var response = await cache.GetOrCreateAsync(
             cacheKey,
-            _ => new ValueTask<PagedList<PrinterSummarySimpleDto>>(LoadPrinterSummary()),
+            ct => computation.RunAsync(
+                (services, _) => LoadPrinterSummary(services.GetRequiredService<PrintLogContext>()), ct),
             SummaryCacheOptions,
             cancellationToken: HttpContext.RequestAborted);
 
         return Ok(response);
 
-        Task<PagedList<PrinterSummarySimpleDto>> LoadPrinterSummary()
+        Task<PagedList<PrinterSummarySimpleDto>> LoadPrinterSummary(PrintLogContext db)
         {
-            var printers = context.Printers
+            var printers = db.Printers
                 .AsNoTracking()
                 .Where(p => p.UserId == userId);
 
