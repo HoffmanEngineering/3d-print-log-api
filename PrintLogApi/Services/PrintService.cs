@@ -489,24 +489,43 @@ public sealed class PrintService(
         var counting = new ByteCountingStream(destination);
 
         using (var operation = telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
-        await using (var writeFile = new StreamWriter(counting, leaveOpen: true))
-        await using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
         {
+            // Deliberately not `using`/`await using`: disposing these flushes, and on the failure
+            // path a flush is the one thing we must not do. Bytes reaching the response start it,
+            // after which the status code and headers are fixed and a fault can no longer be
+            // reported as a 500. Both types are pure managed wrappers with no finalizer, so
+            // abandoning them on the exception path leaks nothing and discards the buffer — which
+            // is exactly the wanted behaviour. The success path disposes explicitly below.
+            var writeFile = new StreamWriter(counting, leaveOpen: true);
+            var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture);
+
             csv.Context.RegisterClassMap<PrintDetailReportMap>();
+
+            // The query executes on the first MoveNextAsync, so it is pulled before a single byte
+            // is written. A SQL error, a command timeout or a projection failure therefore still
+            // surfaces with the response unstarted and becomes a 500, as it did when the export
+            // was fully materialized. Streaming cannot extend that guarantee past the first row:
+            // a fault mid-enumeration lands after the response has started and truncates the
+            // download instead. See the endpoint for that trade-off.
+            await using var rows = prints.AsAsyncEnumerable().GetAsyncEnumerator(cancellationToken);
+            var hasRow = await rows.MoveNextAsync();
 
             // WriteRecords emits the header from the type even for an empty sequence, so it is
             // written unconditionally here to keep an empty export byte-identical to before.
             csv.WriteHeader<PrintDetailReport>();
             await csv.NextRecordAsync();
 
-            await foreach (var report in prints.AsAsyncEnumerable().WithCancellation(cancellationToken))
+            while (hasRow)
             {
-                csv.WriteRecord(report);
+                csv.WriteRecord(rows.Current);
                 await csv.NextRecordAsync();
                 printCount++;
+                hasRow = await rows.MoveNextAsync();
             }
 
-            await csv.FlushAsync();
+            // Flushes the CSV buffer through the StreamWriter to the response and disposes the
+            // writer it owns. `leaveOpen: true` keeps the caller's stream open.
+            await csv.DisposeAsync();
         }
 
         var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", counting.BytesWritten } };

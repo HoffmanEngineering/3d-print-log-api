@@ -1,4 +1,6 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
+using CsvHelper.Configuration;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
@@ -917,7 +919,16 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         response.EnsureSuccessStatusCode();
 
         var csv = await response.Content.ReadAsStringAsync();
-        var lines = csv.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToList();
+
+        // Asserted on the raw payload before any normalization: the line ending and the trailing
+        // newline are part of the byte-level CSV contract, and normalizing first would hide a
+        // regression in either. CsvHelper's own default is the reference — the export deliberately
+        // does not override NewLine, so pinning it here fails if someone starts to.
+        var newLine = new CsvConfiguration(CultureInfo.InvariantCulture).NewLine;
+        Assert.Contains(newLine, csv, StringComparison.Ordinal);
+        Assert.EndsWith(newLine, csv, StringComparison.Ordinal);
+
+        var lines = csv.Split(newLine, StringSplitOptions.RemoveEmptyEntries).ToList();
 
         Assert.Equal(
             "Start Date,Title,Printer Name,Printer Make,Printer Model,Estimated Print Time (s),"
@@ -973,6 +984,11 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => printService.WritePrintReportAsCsvForUser(
                 IntegrationTestSeeder.TestUserId, destination, cts.Token));
+
+        // Nothing was flushed on the way out. A failure that reaches the destination starts the
+        // response and locks in a 200, so the writers are abandoned rather than disposed on the
+        // exception path — this is what keeps a failed export reportable as an error.
+        Assert.Equal(0, destination.Length);
     }
 
     /// <summary>

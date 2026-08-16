@@ -268,6 +268,14 @@ public class PrintsController(
         // streams rows as it reads them, so there is no Stream to hand back. The headers therefore
         // have to be set before the first byte goes out. Content type stays application/octet-stream
         // — text/csv is arguably more correct but is a caller-visible change (see #65).
+        //
+        // The cost of streaming: once bytes have gone out the status code is fixed, so a fault
+        // partway through the result set truncates a 200 rather than becoming a 500. The service
+        // pulls the first row before writing anything, which keeps the whole "the query failed"
+        // class (SQL errors, timeouts, projection faults) reporting as a 500 the way it did when
+        // the export was buffered; only a fault after the first row can truncate. That residual
+        // case is accepted here — buffering the report to make it impossible is precisely the
+        // O(total prints) allocation #65 removed.
         var contentDisposition = new ContentDispositionHeaderValue("attachment");
         contentDisposition.SetHttpFileName("PrintReports.csv");
 
