@@ -37,6 +37,13 @@ namespace PrintLogApi.Models.DTOs.Analytics
         public AnalyticsGranularity Granularity { get; set; } = AnalyticsGranularity.Auto;
         public bool ComparePrevious { get; set; }
 
+        /// <summary>
+        /// True when both ends of the range are set. The attribute is what lets callers write
+        /// <c>filter.FromDate.Value</c> after gating on this — without it the compiler cannot see
+        /// that a property getter implies anything about two other properties, and every such
+        /// dereference raises CS8629.
+        /// </summary>
+        [MemberNotNullWhen(true, nameof(FromDate), nameof(ToDate))]
         public bool HasRange => FromDate.HasValue && ToDate.HasValue;
 
         /// <summary>

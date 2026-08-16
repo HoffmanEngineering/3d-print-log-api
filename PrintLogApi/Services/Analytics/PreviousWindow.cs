@@ -62,6 +62,14 @@ namespace PrintLogApi.Services.Analytics
         /// </summary>
         private static (DateTimeOffset From, DateTimeOffset To) Preceding(AnalyticsFilter filter)
         {
+            // For() above gates on HasRange, but that does not cross the method boundary. Restated
+            // here so the compiler carries it — and so a future caller that forgets the gate fails
+            // loudly rather than dereferencing a null date.
+            if (!filter.HasRange)
+            {
+                throw new InvalidOperationException("Preceding requires a filter with both dates set.");
+            }
+
             if (!filter.TryResolveTimeZone(out var zone) || zone is null)
             {
                 var span = filter.ToDate.Value - filter.FromDate.Value;

@@ -118,7 +118,10 @@ namespace PrintLogApi.Controllers
 
             long? currentUserId = User.GetUserId();
 
-            if (!userId.HasValue && !currentUserId.HasValue)
+            // Same condition as `!userId.HasValue && !currentUserId.HasValue`, written so the
+            // resulting id is a non-nullable local the compiler can follow thirty lines down to
+            // its use. currentUserId itself is still needed separately for the cache key.
+            if ((userId ?? currentUserId) is not { } targetUserId)
             {
                 return BadRequest("User is not logged in, and summary is not filtered by a specific userId. Please log in and try again.");
             }
@@ -150,7 +153,6 @@ namespace PrintLogApi.Controllers
                 projectIds.Add(filterByProjectId.Value);
             }
 
-            var targetUserId = userId ?? currentUserId.Value;
             var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
             var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                             filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,

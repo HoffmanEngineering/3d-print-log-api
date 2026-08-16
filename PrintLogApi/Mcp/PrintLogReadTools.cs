@@ -281,12 +281,14 @@ namespace PrintLogApi.Mcp
                     "Supply both 'from' and 'to', or neither (for all-time).");
             }
 
-            if (!from.HasValue)
+            // Both or neither, by the mismatch check above - so this tests `from` for the same
+            // reason the original did, and picks up `to` for free.
+            if (from is not { } fromValue || to is not { } toValue)
             {
                 return (null, null);
             }
 
-            var (validFrom, validTo) = McpValidation.RequireUtcRange(from.Value, to.Value);
+            var (validFrom, validTo) = McpValidation.RequireUtcRange(fromValue, toValue);
             return (validFrom, validTo);
         }
 

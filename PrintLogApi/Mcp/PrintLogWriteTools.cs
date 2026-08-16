@@ -81,15 +81,18 @@ namespace PrintLogApi.Mcp
             {
                 throw McpToolException.InvalidArguments("A material row's estimatedSource and estimatedAmount must be provided together.");
             }
-            if (row.Source.HasValue)
+            // The && is not a weakening: line 76 above has already rejected a row where exactly one
+            // of the pair is present, so Source non-null implies Amount non-null by the time we
+            // get here. Same for the estimated pair via line 80.
+            if (row.Source is { } source && row.Amount is { } amount)
             {
-                McpWriteValidation.RequireDefinedEnum(row.Source.Value, "materials.source");
-                McpWriteValidation.RequirePositiveAmount(row.Amount.Value);
+                McpWriteValidation.RequireDefinedEnum(source, "materials.source");
+                McpWriteValidation.RequirePositiveAmount(amount);
             }
-            if (row.EstimatedSource.HasValue)
+            if (row.EstimatedSource is { } estimatedSource && row.EstimatedAmount is { } estimatedAmount)
             {
-                McpWriteValidation.RequireDefinedEnum(row.EstimatedSource.Value, "materials.estimatedSource");
-                McpWriteValidation.RequirePositiveAmount(row.EstimatedAmount.Value);
+                McpWriteValidation.RequireDefinedEnum(estimatedSource, "materials.estimatedSource");
+                McpWriteValidation.RequirePositiveAmount(estimatedAmount);
             }
             McpWriteValidation.RequireMaxLength(row.Notes, 1000, "materials.notes");
         }

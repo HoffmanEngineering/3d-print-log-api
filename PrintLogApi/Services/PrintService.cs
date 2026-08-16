@@ -589,17 +589,21 @@ namespace PrintLogApi.Services
             }
 
             var filamentIdsToCheck = newPrint.FilamentUsage!
-                .Where(f => f.FilamentId.HasValue)
-                .Select(f => f.FilamentId.Value);
+                .Select(f => f.FilamentId)
+                .OfType<Guid>();
 
             if (!await _filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
             {
                 throw new UserCannotAccessFilamentException();
             }
 
+            // The != default exclusion is redundant with the normalisation loop above, which has
+            // already turned every empty GUID into a null. Kept anyway: it is free, and it stops
+            // this list from silently admitting Guid.Empty if that loop ever moves.
             var newLoadedFilamentIds = newPrint.FilamentUsage!
-                .Where(filament => filament.FilamentId.HasValue && filament.FilamentId != default)
-                .Select(filament => filament.FilamentId.Value);
+                .Select(filament => filament.FilamentId)
+                .OfType<Guid>()
+                .Where(id => id != default);
 
             // PrinterService setLoadedFilament
             await _printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
@@ -769,15 +773,15 @@ namespace PrintLogApi.Services
             // The record is scoped by ToolName, so a create_print row always carries a print id. A
             // null here means the row is corrupt, not that another tool owns it — treat it exactly
             // like a dangling reference rather than dereferencing it.
-            var createdPrintId = record.CreatedPrintId;
-            var exists = createdPrintId.HasValue && await _context.Prints
-                .AnyAsync(p => p.Id == createdPrintId.Value && p.CreatedById == userId, ct);
-            if (!exists)
+            // Short-circuit order is load-bearing: the null test stays on the left so the query is
+            // still skipped entirely when the id is absent.
+            if (record.CreatedPrintId is not { } createdPrintId
+                || !await _context.Prints.AnyAsync(p => p.Id == createdPrintId && p.CreatedById == userId, ct))
             {
                 throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
             }
 
-            return await BuildCreatePrintResult(createdPrintId.Value, wasReplayed: true, userId, ct);
+            return await BuildCreatePrintResult(createdPrintId, wasReplayed: true, userId, ct);
         }
 
         /// <summary>
@@ -857,13 +861,25 @@ namespace PrintLogApi.Services
                     // will already have been rejected as not_found. Fail closed here regardless.
                     throw McpToolException.NotFound("Material not found.");
                 }
-                if (row.Source.HasValue)
+                // Restated here rather than relied upon from PrintLogWriteTools.ValidateUsageRow:
+                // that runs in the tool layer, and this service is reachable without it. Without
+                // this, a half-populated pair reaches the dereferences below and throws
+                // InvalidOperationException instead of reporting invalid_arguments.
+                if (row.Source.HasValue != row.Amount.HasValue)
                 {
-                    RequireConvertible(row.Source.Value, row.Amount.Value, f);
+                    throw McpToolException.InvalidArguments("A material row's source and amount must be provided together.");
                 }
-                if (row.EstimatedSource.HasValue)
+                if (row.EstimatedSource.HasValue != row.EstimatedAmount.HasValue)
                 {
-                    RequireConvertible(row.EstimatedSource.Value, row.EstimatedAmount.Value, f);
+                    throw McpToolException.InvalidArguments("A material row's estimatedSource and estimatedAmount must be provided together.");
+                }
+                if (row.Source is { } source && row.Amount is { } amount)
+                {
+                    RequireConvertible(source, amount, f);
+                }
+                if (row.EstimatedSource is { } estimatedSource && row.EstimatedAmount is { } estimatedAmount)
+                {
+                    RequireConvertible(estimatedSource, estimatedAmount, f);
                 }
             }
         }
@@ -892,8 +908,15 @@ namespace PrintLogApi.Services
             double mg = source switch
             {
                 // amountInSourceUnit is mm here; GetAmountMgFromLength expects meters -> divide once.
+                // requiresDiameter is exactly `source == Length`, so the guard above already threw
+                // unless DiameterMm was present. Stated as a throwing fallback rather than a `when`
+                // clause: a `when` would fall through to the Weight arm below and convert
+                // millimetres as if they were grams, which is worse than failing.
                 McpMeasurementSource.Length => GetAmountMgFromLength(
-                    amountInSourceUnit / 1000.0, f.DiameterMm.Value, f.MaterialDensityGramPerCubicCm),
+                    amountInSourceUnit / 1000.0,
+                    f.DiameterMm ?? throw new InvalidOperationException(
+                        "A Length source reached conversion without a diameter; the guard above should have rejected it."),
+                    f.MaterialDensityGramPerCubicCm),
                 McpMeasurementSource.Volume => GetAmountMgFromVolume(
                     amountInSourceUnit, f.MaterialDensityGramPerCubicCm),
                 _ => Math.Round(amountInSourceUnit * 1000.0), // g -> mg
@@ -965,7 +988,10 @@ namespace PrintLogApi.Services
         {
             var materialIds = await _context.PrintFilament.AsNoTracking()
                 .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
-                .Select(pf => pf.FilamentId.Value)
+                // Guarded by the Where above. This is an EF expression tree translated to SQL and
+                // never dereferenced in process, so ! is the only permitted fix here - an OfType
+                // or pattern rewrite would change the translation.
+                .Select(pf => pf.FilamentId!.Value)
                 .Distinct()
                 .ToListAsync(ct);
 
@@ -1123,8 +1149,8 @@ namespace PrintLogApi.Services
             }
 
             var updatedFilamentIdsToCheck = updatedPrint.FilamentUsage!
-                .Where(f => f.FilamentId.HasValue)
-                .Select(f => f.FilamentId.Value);
+                .Select(f => f.FilamentId)
+                .OfType<Guid>();
 
             if (!await _filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
             {
@@ -1191,9 +1217,14 @@ namespace PrintLogApi.Services
         /// </summary>
         public async Task UpdateFilamentUsageWeights(Print print)
         {
+            // OfType unwraps first so the != default test below compares a plain Guid and needs no
+            // .Value. The empty-GUID exclusion is kept deliberately: it is belt-and-braces with the
+            // identical guard at the top of the loop below, and dropping it here would make this
+            // list depend on that one staying put.
             var filamentIds = print.FilamentUsage!
-                .Where(pf => pf.FilamentId.HasValue && pf.FilamentId != default(Guid))
-                .Select(pf => pf.FilamentId.Value)
+                .Select(pf => pf.FilamentId)
+                .OfType<Guid>()
+                .Where(id => id != default)
                 .Distinct()
                 .ToList();
 
@@ -1227,10 +1258,13 @@ namespace PrintLogApi.Services
 
                 if (pf.Source == PrintFilament.SourceMeasurement.Length)
                 {
-                    if (pf.LengthInM.HasValue)
+                    // The diameter test is what the Volume and Weight branches below already do.
+                    // Without it a material whose category tracks no diameter (resin, powder)
+                    // reaches DiameterMm.Value and throws.
+                    if (pf.LengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                        pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, filament.DiameterMm.Value);
+                        pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                        pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, diameterMm);
                     }
                 }
                 else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
@@ -1239,9 +1273,9 @@ namespace PrintLogApi.Services
                     {
                         pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (hasDiameter)
+                        if (hasDiameter && filament.DiameterMm is { } diameterMm)
                         {
-                            pf.LengthInM = GetLengthInMetersFromVolume(pf.VolumeMl.Value, filament.DiameterMm.Value);
+                            pf.LengthInM = GetLengthInMetersFromVolume(pf.VolumeMl.Value, diameterMm);
                         }
                     }
                 }
@@ -1251,19 +1285,20 @@ namespace PrintLogApi.Services
                     {
                         pf.VolumeMl = GetVolumeInMlFromAmount(pf.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (hasDiameter)
+                        if (hasDiameter && filament.DiameterMm is { } diameterMm)
                         {
-                            pf.LengthInM = GetLengthInMetersFromAmount(pf.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                            pf.LengthInM = GetLengthInMetersFromAmount(pf.AmountMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
                         }
                     }
                 }
 
                 if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Length)
                 {
-                    if (pf.EstimatedLengthInM.HasValue)
+                    // Same missing diameter test as the actual-measurement Length branch above.
+                    if (pf.EstimatedLengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                        pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, filament.DiameterMm.Value);
+                        pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                        pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, diameterMm);
                     }
                 }
                 else if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Volume)
@@ -1272,9 +1307,9 @@ namespace PrintLogApi.Services
                     {
                         pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (hasDiameter)
+                        if (hasDiameter && filament.DiameterMm is { } diameterMm)
                         {
-                            pf.EstimatedLengthInM = GetLengthInMetersFromVolume(pf.EstimatedVolumeMl.Value, filament.DiameterMm.Value);
+                            pf.EstimatedLengthInM = GetLengthInMetersFromVolume(pf.EstimatedVolumeMl.Value, diameterMm);
                         }
                     }
                 }
@@ -1284,9 +1319,9 @@ namespace PrintLogApi.Services
                     {
                         pf.EstimatedVolumeMl = GetVolumeInMlFromAmount(pf.EstimatedAmountMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                        if (hasDiameter)
+                        if (hasDiameter && filament.DiameterMm is { } diameterMm)
                         {
-                            pf.EstimatedLengthInM = GetLengthInMetersFromAmount(pf.EstimatedAmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                            pf.EstimatedLengthInM = GetLengthInMetersFromAmount(pf.EstimatedAmountMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
                         }
                     }
                 }
@@ -1557,8 +1592,10 @@ namespace PrintLogApi.Services
                     .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
                     .ToListAsync();
                 filteredGroupLookup = groups
+                    // Non-null by the Where; the group is still needed for the value selector, so
+                    // a Select+OfType unwrap here would discard FilteredPrintCount.
                     .Where(g => g.ProjectId.HasValue)
-                    .ToDictionary(g => g.ProjectId.Value, g => g.FilteredPrintCount);
+                    .ToDictionary(g => g.ProjectId!.Value, g => g.FilteredPrintCount);
             }
             else
             {
@@ -1723,9 +1760,11 @@ namespace PrintLogApi.Services
                     .AsNoTracking()
                     .ToListAsync();
                 projectPrintStats = printStatsRows
+                    // Non-null by the Where; the row is still needed for the value selector, so
+                    // a Select+OfType unwrap here would discard the three statistics.
                     .Where(r => r.ProjectId.HasValue)
                     .ToDictionary(
-                        r => r.ProjectId.Value,
+                        r => r.ProjectId!.Value,
                         r => (r.PrintCount, r.TotalPrintTime, r.TotalEstPrintTime));
 
                 var defaultImageRows = await _context.ProjectImages
@@ -1755,8 +1794,8 @@ namespace PrintLogApi.Services
                     .ToListAsync();
 
                 var uniqueFilamentIds = filamentUsageRows
-                    .Where(r => r.FilamentId.HasValue)
-                    .Select(r => r.FilamentId.Value)
+                    .Select(r => r.FilamentId)
+                    .OfType<Guid>()
                     .Distinct()
                     .ToList();
                 var filamentEntities = uniqueFilamentIds.Count > 0
@@ -1768,14 +1807,19 @@ namespace PrintLogApi.Services
                     : new List<Filament>();
                 var filamentEntityLookup = filamentEntities.ToDictionary(f => f.Id);
                 projectFilamentUsageLookup = filamentUsageRows
-                    .Where(r => r.ProjectId.HasValue && r.FilamentId.HasValue)
-                    .GroupBy(r => r.ProjectId.Value)
+                    // Both ids are proved once, up front, so nothing below needs .Value. A Where
+                    // cannot do this job: it proves TWO members at a time, and flow analysis does
+                    // not carry either of them into the lambdas that follow.
+                    .SelectMany(r => r.ProjectId is { } projectId && r.FilamentId is { } filamentId
+                        ? new[] { (ProjectId: projectId, FilamentId: filamentId, r.TotalAmountMg) }
+                        : Array.Empty<(Guid ProjectId, Guid FilamentId, long TotalAmountMg)>())
+                    .GroupBy(r => r.ProjectId)
                     .ToDictionary(
                         g => g.Key,
                         g => g.Select(r => new PrintFilamentSummaryDto
                         {
-                            Id = r.FilamentId.Value,
-                            Filament = filamentEntityLookup.TryGetValue(r.FilamentId.Value, out var fil)
+                            Id = r.FilamentId,
+                            Filament = filamentEntityLookup.TryGetValue(r.FilamentId, out var fil)
                                 ? _mapper.Map<FilamentSummaryDto>(fil)
                                 : null,
                             AmountMg = (int?)r.TotalAmountMg,
@@ -1819,8 +1863,10 @@ namespace PrintLogApi.Services
                     pr => pr.Id,
                     pr => _mapper.Map<PrinterSummary>(pr));
                 projectPrinterLookup = printerMapRows
+                    // Non-null by the Where; the row is still needed inside the group projection
+                    // below, so a Select+OfType unwrap here would discard PrinterId.
                     .Where(r => r.ProjectId.HasValue)
-                    .GroupBy(r => r.ProjectId.Value)
+                    .GroupBy(r => r.ProjectId!.Value)
                     .ToDictionary(
                         g => g.Key,
                         g => g.Select(r =>

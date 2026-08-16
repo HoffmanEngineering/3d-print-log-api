@@ -33,7 +33,7 @@ namespace PrintLogApi.IntegrationTests.Controllers
             // Verify seeded data exists
             Assert.Equal(1, db.Users.Count());
             Assert.Equal(2, db.Printers.Count());
-            Assert.Equal(3, db.Filaments.Count());
+            Assert.Equal(4, db.Filaments.Count());
             Assert.Equal(5, db.Prints.Count());
 
             // Verify all prints belong to the test user

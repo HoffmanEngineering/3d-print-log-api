@@ -209,8 +209,15 @@ namespace PrintLogApi.Services
 
             double mg = source switch
             {
+                // The throw above rejects a Length source without a diameter, so this is stated as
+                // a throwing fallback rather than a `when` clause: a `when` would fall through to
+                // the Weight arm and treat millimetres as grams, which is worse than failing.
                 McpMeasurementSource.Length =>
-                    GetAmountMgFromLengthUnrounded(initialAmount / 1000.0, diameterMm.Value, density),
+                    GetAmountMgFromLengthUnrounded(
+                        initialAmount / 1000.0,
+                        diameterMm ?? throw new InvalidOperationException(
+                            "A Length source reached conversion without a diameter; the guard above should have rejected it."),
+                        density),
                 McpMeasurementSource.Volume =>
                     GetAmountMgFromVolumeUnrounded(initialAmount, density),
                 _ => initialAmount * 1000.0,
@@ -261,6 +268,13 @@ namespace PrintLogApi.Services
                 throw McpToolException.InvalidArguments("densityGramPerCubicCm is required.");
             }
 
+            // Captured here, before the Canonicalize() reassignment below resets what the compiler
+            // knows about `input`. Safe to read pre-canonicalisation: Canonicalize only trims string
+            // properties, so these three value types pass through its `with` untouched.
+            var source = input.Source.Value;
+            var density = input.DensityGramPerCubicCm.Value;
+            var initialAmount = input.InitialAmount.Value;
+
             // Canonicalize ONCE, before both hashing and persistence. Anything the fingerprint
             // normalizes away must also be normalized in what we store, or the hash asserts an
             // equivalence the database contradicts.
@@ -291,9 +305,7 @@ namespace PrintLogApi.Services
             }
 
             var category = await RequireCategory(input.MaterialCategoryNickname, input.DiameterMm, ct);
-            var source = input.Source.Value;
-            var density = input.DensityGramPerCubicCm.Value;
-            RequireRepresentableCapacity(source, input.InitialAmount.Value, density, input.DiameterMm);
+            RequireRepresentableCapacity(source, initialAmount, density, input.DiameterMm);
 
             var dto = new AddFilamentDto
             {
@@ -344,13 +356,13 @@ namespace PrintLogApi.Services
             switch (source)
             {
                 case McpMeasurementSource.Weight:
-                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
+                    dto.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(initialAmount, "initialAmount");
                     break;
                 case McpMeasurementSource.Length:
-                    dto.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
+                    dto.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
                     break;
                 case McpMeasurementSource.Volume:
-                    dto.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
+                    dto.InitialNominalVolumeMl = initialAmount; // ml
                     break;
             }
 
@@ -656,20 +668,22 @@ namespace PrintLogApi.Services
             }
 
             // --- Capacity. The source names the authoritative field; the fill derives the rest. ---
-            if (input.Source.HasValue)
+            // The && is not a weakening: the mismatch check earlier in this method has already
+            // rejected a request carrying one of the pair without the other, so Source non-null
+            // implies InitialAmount non-null here.
+            if (input.Source is { } source && input.InitialAmount is { } initialAmount)
             {
-                var source = input.Source.Value;
                 material.Source = (Filament.SourceMeasurement)(int)source;
                 switch (source)
                 {
                     case McpMeasurementSource.Weight:
-                        material.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(input.InitialAmount.Value, "initialAmount");
+                        material.InitialNominalWeightMg = McpMaterialConversion.GramsToMg(initialAmount, "initialAmount");
                         break;
                     case McpMeasurementSource.Length:
-                        material.InitialNominalLengthM = input.InitialAmount.Value / 1000.0; // mm -> m
+                        material.InitialNominalLengthM = initialAmount / 1000.0; // mm -> m
                         break;
                     case McpMeasurementSource.Volume:
-                        material.InitialNominalVolumeMl = input.InitialAmount.Value; // ml
+                        material.InitialNominalVolumeMl = initialAmount; // ml
                         break;
                 }
             }
@@ -1216,8 +1230,20 @@ namespace PrintLogApi.Services
             {
                 if (adjustment.LengthInM.HasValue)
                 {
-                    adjustment.AmountMg = GetAmountMgFromLength(adjustment.LengthInM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                    adjustment.VolumeMl = GetVolumeInMlFromLengthM(adjustment.LengthInM.Value, filament.DiameterMm.Value);
+                    // The diameter test is what the Volume and Weight branches below already do.
+                    // Without it a material whose category tracks no diameter (resin, powder)
+                    // reaches DiameterMm.Value and throws. The else clears the derived fields
+                    // rather than leaving a stale value behind, matching those branches.
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
+                    {
+                        adjustment.AmountMg = GetAmountMgFromLength(adjustment.LengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                        adjustment.VolumeMl = GetVolumeInMlFromLengthM(adjustment.LengthInM.Value, diameterMm);
+                    }
+                    else
+                    {
+                        adjustment.AmountMg = null;
+                        adjustment.VolumeMl = null;
+                    }
                 }
             }
             else if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Volume)
@@ -1226,9 +1252,9 @@ namespace PrintLogApi.Services
                 {
                     adjustment.AmountMg = GetAmountMgFromVolume(adjustment.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                    if (filament.MaterialCategory.HasDiameter)
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        adjustment.LengthInM = GetLengthInMetersFromVolume(adjustment.VolumeMl.Value, filament.DiameterMm.Value);
+                        adjustment.LengthInM = GetLengthInMetersFromVolume(adjustment.VolumeMl.Value, diameterMm);
                     } else
                     {
                         adjustment.LengthInM = null;
@@ -1242,9 +1268,9 @@ namespace PrintLogApi.Services
                 {
                     adjustment.VolumeMl = GetVolumeInMlFromAmount(adjustment.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                    if (filament.MaterialCategory.HasDiameter)
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        adjustment.LengthInM = GetLengthInMetersFromAmount(adjustment.AmountMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        adjustment.LengthInM = GetLengthInMetersFromAmount(adjustment.AmountMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
                     }
                     else
                     {
@@ -1267,8 +1293,20 @@ namespace PrintLogApi.Services
             {
                 if (filament.InitialNominalLengthM.HasValue)
                 {
-                    filament.InitialNominalWeightMg = GetAmountMgFromLength(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
-                    filament.InitialNominalVolumeMl = GetVolumeInMlFromLengthM(filament.InitialNominalLengthM.Value, filament.DiameterMm.Value);
+                    // The diameter test is what the Volume and Weight branches below already do.
+                    // Without it a material whose category tracks no diameter (resin, powder)
+                    // reaches DiameterMm.Value and throws. The else clears the derived fields
+                    // rather than leaving a stale value behind, matching those branches.
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
+                    {
+                        filament.InitialNominalWeightMg = GetAmountMgFromLength(filament.InitialNominalLengthM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                        filament.InitialNominalVolumeMl = GetVolumeInMlFromLengthM(filament.InitialNominalLengthM.Value, diameterMm);
+                    }
+                    else
+                    {
+                        filament.InitialNominalWeightMg = null;
+                        filament.InitialNominalVolumeMl = null;
+                    }
                 }
             } else if (filament.Source == Filament.SourceMeasurement.Volume)
             {
@@ -1276,9 +1314,9 @@ namespace PrintLogApi.Services
                 {
                     filament.InitialNominalWeightMg = GetAmountMgFromVolume(filament.InitialNominalVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
 
-                    if (filament.MaterialCategory.HasDiameter)
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        filament.InitialNominalLengthM = GetLengthInMetersFromVolume(filament.InitialNominalVolumeMl.Value, filament.DiameterMm.Value);
+                        filament.InitialNominalLengthM = GetLengthInMetersFromVolume(filament.InitialNominalVolumeMl.Value, diameterMm);
                     }
                     else
                     {
@@ -1292,9 +1330,9 @@ namespace PrintLogApi.Services
                 {
                     filament.InitialNominalVolumeMl = GetVolumeInMlFromAmount(filament.InitialNominalWeightMg.Value, filament.MaterialDensityGramPerCubicCm);
 
-                    if (filament.MaterialCategory.HasDiameter)
+                    if (filament.MaterialCategory.HasDiameter && filament.DiameterMm is { } diameterMm)
                     {
-                        filament.InitialNominalLengthM = GetLengthInMetersFromAmount(filament.InitialNominalWeightMg.Value, filament.DiameterMm.Value, filament.MaterialDensityGramPerCubicCm);
+                        filament.InitialNominalLengthM = GetLengthInMetersFromAmount(filament.InitialNominalWeightMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
                     }
                     else
                     {
