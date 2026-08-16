@@ -17,34 +17,15 @@ using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services;
 
-public sealed class PrintService : IPrintService
+public sealed class PrintService(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    IFilamentService filamentService,
+    IPrinterService printerService,
+    INotificationService notificationService,
+    ICacheVersionService cacheVersionService) : IPrintService
 {
-
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly IFilamentService _filamentService;
-    private readonly IPrinterService _printerService;
-    private readonly INotificationService _notificationService;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public PrintService(PrintLogContext context,
-                        IMapper mapper,
-                        TelemetryClient telemetry,
-                        IFilamentService filamentService,
-                        IPrinterService printerService,
-                        INotificationService notificationService,
-                        ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _filamentService = filamentService;
-        _printerService = printerService;
-        _notificationService = notificationService;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
 
@@ -53,7 +34,7 @@ public sealed class PrintService : IPrintService
         Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? searchQuery,
         CancellationToken ct)
     {
-        var query = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
+        var query = context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
 
         if (searchQuery is not null && string.IsNullOrWhiteSpace(searchQuery))
         {
@@ -168,7 +149,7 @@ public sealed class PrintService : IPrintService
 
     public async Task<PrintDetailResult?> GetOwnPrintDetailForMcp(long userId, long printId, CancellationToken ct)
     {
-        var row = await _context.Prints.AsNoTracking()
+        var row = await context.Prints.AsNoTracking()
             .Where(p => p.Id == printId && p.CreatedById == userId)
             .Select(p => new
             {
@@ -326,14 +307,14 @@ public sealed class PrintService : IPrintService
         if (userId.HasValue && userId != currentUserId)
         {
             // Get the user's public prints
-            printQuery = _context.Prints
+            printQuery = context.Prints
                 .Where(p => p.CreatedById == userId)
                 .Where(p => p.ViewStatus == Print.PrintViewStatus.Public);
 
         }
         else
         {
-            printQuery = _context.Prints
+            printQuery = context.Prints
                 .Where(p => p.CreatedById == currentUserId);
         }
 
@@ -442,7 +423,7 @@ public sealed class PrintService : IPrintService
         var totalCount = await printQuery.CountAsync();
 
         // **Now load the full data for just these IDs with explicit includes**
-        var prints = await _context.Prints
+        var prints = await context.Prints
             .Where(p => printIds.Contains(p.Id))
             .Include(p => p.Printer)
                 .ThenInclude(pr => pr.Category!)
@@ -458,7 +439,7 @@ public sealed class PrintService : IPrintService
 
         // **Project to DTO in-memory (more efficient than complex DB projection)**
         var dtos = prints
-            .Select(p => _mapper.Map<PrintSummaryDTO>(p))
+            .Select(p => mapper.Map<PrintSummaryDTO>(p))
             .ToList();
 
         // **Restore original sort order**
@@ -476,28 +457,28 @@ public sealed class PrintService : IPrintService
 
     public async Task<List<long>> GetPublicPrintIds()
     {
-        return await this._context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
+        return await context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
     }
 
     public async Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate)
     {
-        return await _context.Prints
+        return await context.Prints
                         .Where(p => p.CreatedById == userId)
                         .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
                         .OrderByDescending(p => p.StartDate)
                         .ThenByDescending(p => p.CreatedDate)
                         .ThenByDescending(p => p.Id)
-                        .ProjectTo<PrintStatistic>(_mapper.ConfigurationProvider)
+                        .ProjectTo<PrintStatistic>(mapper.ConfigurationProvider)
                         .AsNoTracking()
                         .ToListAsync();
     }
 
     public async Task<Stream> GeneratePrintReportAsCsvForUser(long userId)
     {
-        var prints = _context.Prints
+        var prints = context.Prints
                         .Where(p => p.CreatedById == userId)
                         .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedDate)
-                        .ProjectTo<PrintDetailReport>(_mapper.ConfigurationProvider)
+                        .ProjectTo<PrintDetailReport>(mapper.ConfigurationProvider)
                         .AsNoTracking();
 
 
@@ -506,7 +487,7 @@ public sealed class PrintService : IPrintService
 
         var stream = new MemoryStream();
 
-        using (var operation = _telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
+        using (var operation = telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
         using (var writeFile = new StreamWriter(stream, leaveOpen: true))
         using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
         {
@@ -518,14 +499,14 @@ public sealed class PrintService : IPrintService
 
         var lengthInBytes = stream.Length;
         var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", lengthInBytes } };
-        _telemetry.TrackEvent("PrintReportExport", metrics: metrics);
+        telemetry.TrackEvent("PrintReportExport", metrics: metrics);
 
         return stream;
     }
 
     public async Task<Print?> GetPrintById(long id)
     {
-        var print = await this._context.Prints
+        var print = await context.Prints
             .Include(p => p.Printer)
             .Include(p => p.Images!)
                 .ThenInclude(p => p.File)
@@ -553,9 +534,9 @@ public sealed class PrintService : IPrintService
     /// <returns></returns>
     public async Task<Print> AddPrint(AddPrintDTO print, long userId)
     {
-        var newPrint = _mapper.Map<Print>(print);
+        var newPrint = mapper.Map<Print>(print);
 
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .Include(p => p.LoadedFilaments)
             .Where(p => p.Id == print.PrinterId)
             .AsSplitQuery()
@@ -583,7 +564,7 @@ public sealed class PrintService : IPrintService
             .Select(f => f.FilamentId)
             .OfType<Guid>();
 
-        if (!await _filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
+        if (!await filamentService.CanUserAccessAllFilaments(userId, filamentIdsToCheck))
         {
             throw new UserCannotAccessFilamentException();
         }
@@ -597,7 +578,7 @@ public sealed class PrintService : IPrintService
             .Where(id => id != default);
 
         // PrinterService setLoadedFilament
-        await _printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+        await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
 
 
         await UpdateFilamentUsageWeights(newPrint);
@@ -608,7 +589,7 @@ public sealed class PrintService : IPrintService
         // Resolve project assignment
         if (print.ProjectId.HasValue)
         {
-            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == print.ProjectId.Value && p.CreatedById == userId);
+            var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == print.ProjectId.Value && p.CreatedById == userId);
             if (project == null) throw new DoesNotExistException();
             newPrint.ProjectId = project.Id;
         }
@@ -623,12 +604,12 @@ public sealed class PrintService : IPrintService
                 CreatedById = userId,
                 UpdatedById = userId
             };
-            _context.Projects.Add(newProject);
+            context.Projects.Add(newProject);
             newPrint.ProjectId = newProject.Id;
         }
 
-        _context.Prints.Add(newPrint);
-        await _context.SaveChangesAsync();
+        context.Prints.Add(newPrint);
+        await context.SaveChangesAsync();
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(newPrint.Id))!;
     }
@@ -662,7 +643,7 @@ public sealed class PrintService : IPrintService
         }
 
         // Ownership checks. Foreign/missing ids all surface the same NotFound (no existence oracle).
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .FirstOrDefaultAsync(p => p.Id == printerId && p.UserId == userId, ct);
         if (printer == null)
         {
@@ -670,7 +651,7 @@ public sealed class PrintService : IPrintService
         }
 
         if (projectId.HasValue &&
-            !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+            !await context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
         {
             throw McpToolException.NotFound("Project not found.");
         }
@@ -680,7 +661,7 @@ public sealed class PrintService : IPrintService
         {
             throw McpToolException.InvalidArguments("Each material may appear at most once in a print.");
         }
-        if (materialIds.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, materialIds))
+        if (materialIds.Count > 0 && !await filamentService.CanUserAccessAllFilaments(userId, materialIds))
         {
             throw McpToolException.NotFound("Material not found.");
         }
@@ -710,16 +691,16 @@ public sealed class PrintService : IPrintService
         {
             // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
             // run inside an execution strategy, so the whole tx is the retriable unit.
-            var strategy = _context.Database.CreateExecutionStrategy();
+            var strategy = context.Database.CreateExecutionStrategy();
             await strategy.ExecuteAsync(async () =>
             {
-                using var tx = await _context.Database.BeginTransactionAsync(ct);
-                _context.Prints.Add(newPrint);
-                await _context.SaveChangesAsync(ct);
+                using var tx = await context.Database.BeginTransactionAsync(ct);
+                context.Prints.Add(newPrint);
+                await context.SaveChangesAsync(ct);
 
-                _context.McpIdempotencyRecords.Add(
+                context.McpIdempotencyRecords.Add(
                     McpIdempotencyRecordFactory.ForPrint(userId, idempotencyKey, fingerprint, newPrint.Id));
-                await _context.SaveChangesAsync(ct);
+                await context.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
             });
         }
@@ -729,7 +710,7 @@ public sealed class PrintService : IPrintService
             // transaction has rolled back but the failed Added entities are still tracked; clear
             // them so the recovery query reads only committed state, then replay the winner's
             // result. If there is no such record the failure was something else, so rethrow.
-            _context.ChangeTracker.Clear();
+            context.ChangeTracker.Clear();
             // Fingerprint match -> replay the winner's result; a mismatch throws conflict inside.
             var concurrent = await FindIdempotentPrint(userId, toolName, idempotencyKey, fingerprint, ct);
             if (concurrent != null)
@@ -739,14 +720,14 @@ public sealed class PrintService : IPrintService
             throw;
         }
 
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
         return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
     }
 
     private async Task<CreatePrintResult?> FindIdempotentPrint(
         long userId, string toolName, string key, string fingerprint, CancellationToken ct)
     {
-        var record = await _context.McpIdempotencyRecords
+        var record = await context.McpIdempotencyRecords
             .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
         if (record == null)
         {
@@ -767,7 +748,7 @@ public sealed class PrintService : IPrintService
         // Short-circuit order is load-bearing: the null test stays on the left so the query is
         // still skipped entirely when the id is absent.
         if (record.CreatedPrintId is not { } createdPrintId
-            || !await _context.Prints.AnyAsync(p => p.Id == createdPrintId && p.CreatedById == userId, ct))
+            || !await context.Prints.AnyAsync(p => p.Id == createdPrintId && p.CreatedById == userId, ct))
         {
             throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
         }
@@ -838,7 +819,7 @@ public sealed class PrintService : IPrintService
             return;
         }
 
-        var map = await _context.Filaments
+        var map = await context.Filaments
             .Where(f => ids.Contains(f.Id))
             .Include(f => f.MaterialCategory)
             .AsNoTracking()
@@ -940,7 +921,7 @@ public sealed class PrintService : IPrintService
         else
         {
             print.ViewStatus = Print.PrintViewStatus.Private;
-            var s = await _context.UserSettings.AsNoTracking()
+            var s = await context.UserSettings.AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatusTypeId, ct);
             if (s?.Value is { } v && Enum.TryParse<Print.PrintViewStatus>(v, out var parsed) && Enum.IsDefined(parsed))
             {
@@ -955,7 +936,7 @@ public sealed class PrintService : IPrintService
         else
         {
             print.AllowComments = false;
-            var s = await _context.UserSettings.AsNoTracking()
+            var s = await context.UserSettings.AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == userId && u.UserSettingTypeId == lastAllowCommentsTypeId, ct);
             if (s?.Value is { } v && bool.TryParse(v, out var parsed))
             {
@@ -977,7 +958,7 @@ public sealed class PrintService : IPrintService
     private async Task<IReadOnlyList<MaterialRemaining>> BuildMaterialRemaining(
         long printId, long userId, CancellationToken ct)
     {
-        var materialIds = await _context.PrintFilament.AsNoTracking()
+        var materialIds = await context.PrintFilament.AsNoTracking()
             .Where(pf => pf.PrintId == printId && pf.FilamentId.HasValue)
             // Guarded by the Where above. This is an EF expression tree translated to SQL and
             // never dereferenced in process, so ! is the only permitted fix here - an OfType
@@ -989,7 +970,7 @@ public sealed class PrintService : IPrintService
         var remaining = new List<MaterialRemaining>();
         foreach (var id in materialIds)
         {
-            remaining.Add(new MaterialRemaining(id, await _filamentService.GetRemainingGramsForMcp(userId, id, ct)));
+            remaining.Add(new MaterialRemaining(id, await filamentService.GetRemainingGramsForMcp(userId, id, ct)));
         }
         return remaining;
     }
@@ -1001,7 +982,7 @@ public sealed class PrintService : IPrintService
         Guid? projectId, bool materialsProvided, IReadOnlyList<MaterialUsageInput>? materials,
         ISet<string> clearFields, CancellationToken ct)
     {
-        var print = await _context.Prints
+        var print = await context.Prints
             .Include(p => p.FilamentUsage)
             .FirstOrDefaultAsync(p => p.Id == printId && p.CreatedById == userId, ct);
         if (print == null)
@@ -1034,12 +1015,12 @@ public sealed class PrintService : IPrintService
         Guard("projectId", projectId.HasValue);
 
         if (printerId.HasValue &&
-            !await _context.Printers.AnyAsync(p => p.Id == printerId.Value && p.UserId == userId, ct))
+            !await context.Printers.AnyAsync(p => p.Id == printerId.Value && p.UserId == userId, ct))
         {
             throw McpToolException.NotFound("Printer not found.");
         }
         if (projectId.HasValue &&
-            !await _context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
+            !await context.Projects.AnyAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct))
         {
             throw McpToolException.NotFound("Project not found.");
         }
@@ -1053,7 +1034,7 @@ public sealed class PrintService : IPrintService
             {
                 throw McpToolException.InvalidArguments("Each material may appear at most once.");
             }
-            if (mids.Count > 0 && !await _filamentService.CanUserAccessAllFilaments(userId, mids))
+            if (mids.Count > 0 && !await filamentService.CanUserAccessAllFilaments(userId, mids))
             {
                 throw McpToolException.NotFound("Material not found.");
             }
@@ -1096,14 +1077,14 @@ public sealed class PrintService : IPrintService
 
         if (materialsProvided)
         {
-            _context.PrintFilament.RemoveRange(print.FilamentUsage!);
+            context.PrintFilament.RemoveRange(print.FilamentUsage!);
             print.FilamentUsage = materials!.Select(ToPrintFilament).ToList();
             await UpdateFilamentUsageWeights(print);
         }
 
         print.UpdatedById = userId;
-        await _context.SaveChangesAsync(ct);
-        _cacheVersionService.InvalidateUserCache(userId);
+        await context.SaveChangesAsync(ct);
+        cacheVersionService.InvalidateUserCache(userId);
 
         return await GetOwnPrintDetailForMcp(userId, printId, ct)
             ?? throw McpToolException.NotFound("Print not found.");
@@ -1118,9 +1099,9 @@ public sealed class PrintService : IPrintService
             throw new ArgumentNullException(nameof(id));
         }
 
-        var updatedPrint = _mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
+        var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
-        var printer = await _context.Printers.FindAsync(dto.PrinterId);
+        var printer = await context.Printers.FindAsync(dto.PrinterId);
         updatedPrint.Printer = printer!;
 
         // Check if the user had access to that printer!
@@ -1143,7 +1124,7 @@ public sealed class PrintService : IPrintService
             .Select(f => f.FilamentId)
             .OfType<Guid>();
 
-        if (!await _filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
+        if (!await filamentService.CanUserAccessAllFilaments(userId, updatedFilamentIdsToCheck))
         {
             throw new UserCannotAccessFilamentException();
         }
@@ -1155,7 +1136,7 @@ public sealed class PrintService : IPrintService
         // Resolve project assignment
         if (dto.ProjectId.HasValue)
         {
-            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId);
+            var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId);
             if (project == null) throw new DoesNotExistException();
             updatedPrint.ProjectId = project.Id;
         }
@@ -1170,7 +1151,7 @@ public sealed class PrintService : IPrintService
                 CreatedById = userId,
                 UpdatedById = userId
             };
-            _context.Projects.Add(newProject);
+            context.Projects.Add(newProject);
             updatedPrint.ProjectId = newProject.Id;
         }
         else
@@ -1179,11 +1160,11 @@ public sealed class PrintService : IPrintService
             updatedPrint.ProjectId = dto.ProjectId; // null
         }
 
-        _context.Entry(updatedPrint).State = EntityState.Modified;
+        context.Entry(updatedPrint).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1197,7 +1178,7 @@ public sealed class PrintService : IPrintService
             }
         }
 
-        _telemetry.TrackEvent("PrintEdit");
+        telemetry.TrackEvent("PrintEdit");
 
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(updatedPrint.Id))!;
@@ -1221,7 +1202,7 @@ public sealed class PrintService : IPrintService
 
         if (filamentIds.Count == 0) return;
 
-        var filamentMap = await _context.Filaments
+        var filamentMap = await context.Filaments
             .Where(f => filamentIds.Contains(f.Id))
             .Include(f => f.MaterialCategory)
             .AsNoTracking()
@@ -1334,11 +1315,11 @@ public sealed class PrintService : IPrintService
         existingPrint.Status = newStatus;
         existingPrint.UpdatedById = userId;
 
-        _context.Entry(existingPrint).State = EntityState.Modified;
+        context.Entry(existingPrint).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1352,14 +1333,14 @@ public sealed class PrintService : IPrintService
             }
         }
 
-        _telemetry.TrackEvent("PrintStatusEdit");
+        telemetry.TrackEvent("PrintStatusEdit");
 
         return existingPrint;
     }
 
     public async Task<int> GetMaxImagesPerPrint(long userId)
     {
-        var subscription = await _context.Subscriptions
+        var subscription = await context.Subscriptions
             .Where(s => s.UserId == userId)
             .AsNoTracking()
             .SingleOrDefaultAsync();
@@ -1378,17 +1359,17 @@ public sealed class PrintService : IPrintService
             throw new ArgumentNullException(nameof(printId));
         }
 
-        var selectedImage = await _context.PrintImages.FindAsync(newDefaultImageId);
+        var selectedImage = await context.PrintImages.FindAsync(newDefaultImageId);
         // Null-forgiven: an unknown image id already threw here. Note the print existence
         // check above throws ArgumentNullException but the image is not validated — tracked
         // in #57 rather than changed in this annotation-only pass.
         selectedImage!.IsDefault = true;
 
         // Set other defaults to false;
-        var otherEntities = await _context.PrintImages.Where(p => p.PrintId == printId && p.IsDefault == true && p.Id != newDefaultImageId).ToListAsync();
+        var otherEntities = await context.PrintImages.Where(p => p.PrintId == printId && p.IsDefault == true && p.Id != newDefaultImageId).ToListAsync();
         otherEntities.ForEach(p => p.IsDefault = false);
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
     public async Task DeletePrint(Print print)
@@ -1401,40 +1382,40 @@ public sealed class PrintService : IPrintService
         // Remove Print Comments.
         foreach (var comment in print.Comments!.ToArray())
         {
-            _context.Comments.Remove(comment.Comment);
+            context.Comments.Remove(comment.Comment);
         }
-        _context.PrintComments.RemoveRange(print.Comments!.ToArray());
+        context.PrintComments.RemoveRange(print.Comments!.ToArray());
 
         // Remove Print Images.
         foreach (var image in print.Images!.ToArray())
         {
-            _context.Files.Remove(image.File);
+            context.Files.Remove(image.File);
         }
-        _context.PrintImages.RemoveRange(print.Images!.ToArray());
+        context.PrintImages.RemoveRange(print.Images!.ToArray());
 
         // Remove Print Attachments.
-        var attachments = await _context.PrintAttachments
+        var attachments = await context.PrintAttachments
             .Include(a => a.File)
             .Where(a => a.PrintId == print.Id)
             .ToListAsync();
         foreach (var attachment in attachments)
         {
-            _context.Files.Remove(attachment.File);
+            context.Files.Remove(attachment.File);
         }
-        _context.PrintAttachments.RemoveRange(attachments);
+        context.PrintAttachments.RemoveRange(attachments);
 
         // Remove PrintFilament for this print.
-        _context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
+        context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
 
         // Remove Notifications referencing this print.
-        var notifications = await _context.Notifications
+        var notifications = await context.Notifications
             .Where(n => n.PrintId == print.Id)
             .ToListAsync();
-        _context.Notifications.RemoveRange(notifications);
+        context.Notifications.RemoveRange(notifications);
 
-        _context.Prints.Remove(print);
+        context.Prints.Remove(print);
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
 
@@ -1453,7 +1434,7 @@ public sealed class PrintService : IPrintService
             CreatedById = userId,
             UpdatedById = userId,
         };
-        _context.Comments.Add(comment);
+        context.Comments.Add(comment);
 
         var printComment = new PrintComment()
         {
@@ -1462,18 +1443,18 @@ public sealed class PrintService : IPrintService
             CreatedById = userId,
             UpdatedById = userId,
         };
-        _context.PrintComments.Add(printComment);
+        context.PrintComments.Add(printComment);
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("CommentAdded");
+        telemetry.TrackEvent("CommentAdded");
 
         // Get commenter info for notifications
-        var commenter = await _context.Users.FindAsync(userId);
+        var commenter = await context.Users.FindAsync(userId);
         var commenterDisplayName = commenter?.DisplayName ?? "Someone";
 
         // Build recipient list: print owner (if not the commenter) + previous unique commenters
-        var previousCommenterIds = await _context.PrintComments
+        var previousCommenterIds = await context.PrintComments
             .Where(pc => pc.PrintId == print.Id && pc.CommentId != comment.Id)
             .Select(pc => pc.Comment.CreatedById)
             .Distinct()
@@ -1485,7 +1466,7 @@ public sealed class PrintService : IPrintService
             recipients.Add((print.CreatedById, true));
         recipients.AddRange(previousCommenterIds.Select(id => (id, false)));
 
-        await _notificationService.CreateCommentNotifications(
+        await notificationService.CreateCommentNotifications(
             recipients,
             print.Id,
             print.Title,
@@ -1497,7 +1478,7 @@ public sealed class PrintService : IPrintService
     }
     private bool PrintExists(long id)
     {
-        return _context.Prints.Any(e => e.Id == id);
+        return context.Prints.Any(e => e.Id == id);
     }
 
     private enum FeedItemType { Print, Project }
@@ -1516,12 +1497,12 @@ public sealed class PrintService : IPrintService
     {
         // TODO: Use the currentUserId to filter the feed based on friends, likes, etcetc
 
-        var prints = await _context.Prints
+        var prints = await context.Prints
             .Where(p => p.CreatedDate < fromDateTime)
             .Where(p => p.ViewStatus == PrintViewStatus.Public) // Only show public prints
             .OrderByDescending(p => p.CreatedDate)
             .Take(numberOfRecords)
-            .ProjectTo<PrintFeedSummaryDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<PrintFeedSummaryDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .ToListAsync();
 
@@ -1547,7 +1528,7 @@ public sealed class PrintService : IPrintService
             || (filamentIdList != null && filamentIdList.Any());
 
         // ── Phase 1: Build the filtered print query ───────────────────────────────
-        IQueryable<Print> filteredPrintQuery = _context.Prints
+        IQueryable<Print> filteredPrintQuery = context.Prints
             .Where(p => p.CreatedById == userId);
 
         if (!string.IsNullOrWhiteSpace(searchText))
@@ -1596,15 +1577,15 @@ public sealed class PrintService : IPrintService
         // ── Phase 3: Lightweight sort-key queries (no navigation loads) ───────────
         // Projects: two queries joined in memory to avoid a correlated subquery per row.
         // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
-        var projectList = await _context.Projects
+        var projectList = await context.Projects
             .Where(p => p.CreatedById == userId)
             .Select(p => new { p.Id, p.CreatedDate, p.Name })
             .AsNoTracking()
             .ToListAsync();
 
-        var projectFilamentTotals = await _context.PrintFilament
+        var projectFilamentTotals = await context.PrintFilament
             .Join(
-                _context.Prints.Where(pr => pr.CreatedById == userId && pr.ProjectId != null),
+                context.Prints.Where(pr => pr.CreatedById == userId && pr.ProjectId != null),
                 pf => pf.PrintId, pr => pr.Id,
                 (pf, pr) => new { pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
             .GroupBy(x => x.ProjectId)
@@ -1639,7 +1620,7 @@ public sealed class PrintService : IPrintService
             .AsNoTracking()
             .ToListAsync();
 
-        var standaloneFilamentTotals = await _context.PrintFilament
+        var standaloneFilamentTotals = await context.PrintFilament
             .Join(
                 filteredPrintQuery.Where(p => p.ProjectId == null),
                 pf => pf.PrintId, pr => pr.Id,
@@ -1719,13 +1700,13 @@ public sealed class PrintService : IPrintService
 
         if (pageProjectGuids.Count > 0)
         {
-            var projectEntities = await _context.Projects
+            var projectEntities = await context.Projects
                 .Where(p => pageProjectGuids.Contains(p.Id))
                 .AsNoTracking()
                 .ToListAsync();
             projectEntityLookup = projectEntities.ToDictionary(p => p.Id);
 
-            var printStatsRows = await _context.Prints
+            var printStatsRows = await context.Prints
                 .Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value))
                 .GroupBy(pr => pr.ProjectId)
                 .Select(g => new
@@ -1758,16 +1739,16 @@ public sealed class PrintService : IPrintService
                     r => r.ProjectId!.Value,
                     r => (r.PrintCount, r.TotalPrintTime, r.TotalEstPrintTime));
 
-            var defaultImageRows = await _context.ProjectImages
+            var defaultImageRows = await context.ProjectImages
                 .Where(i => pageProjectGuids.Contains(i.ProjectId) && i.IsDefault)
                 .Select(i => new { i.ProjectId, i.Id })
                 .AsNoTracking()
                 .ToListAsync();
             projectDefaultImageLookup = defaultImageRows.ToDictionary(i => i.ProjectId, i => i.Id);
 
-            var filamentUsageRows = await _context.PrintFilament
+            var filamentUsageRows = await context.PrintFilament
                 .Join(
-                    _context.Prints.Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value)),
+                    context.Prints.Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value)),
                     pf => pf.PrintId, pr => pr.Id,
                     (pf, pr) => new { pf.FilamentId, pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
                 .Where(x => x.FilamentId != null)
@@ -1790,7 +1771,7 @@ public sealed class PrintService : IPrintService
                 .Distinct()
                 .ToList();
             var filamentEntities = uniqueFilamentIds.Count > 0
-                ? await _context.Filaments
+                ? await context.Filaments
                     .Where(f => uniqueFilamentIds.Contains(f.Id))
                     .Include(f => f.MaterialCategory)
                     .AsNoTracking()
@@ -1811,13 +1792,13 @@ public sealed class PrintService : IPrintService
                     {
                         Id = r.FilamentId,
                         Filament = filamentEntityLookup.TryGetValue(r.FilamentId, out var fil)
-                            ? _mapper.Map<FilamentSummaryDto>(fil)
+                            ? mapper.Map<FilamentSummaryDto>(fil)
                             : null,
                         AmountMg = (int?)r.TotalAmountMg,
                         Source = PrintFilament.SourceMeasurement.Weight,
                     }).ToList());
 
-            var printerMapRows = await _context.Prints
+            var printerMapRows = await context.Prints
                 .Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value))
                 .GroupBy(pr => new { pr.ProjectId, pr.PrinterId })
                 .Select(g => new
@@ -1843,7 +1824,7 @@ public sealed class PrintService : IPrintService
                 .Distinct()
                 .ToList();
             var printerEntities = uniquePrinterIds.Count > 0
-                ? await _context.Printers
+                ? await context.Printers
                     .Where(pr => uniquePrinterIds.Contains(pr.Id))
                     .Include(pr => pr.Category!)
                         .ThenInclude(c => c.MaterialCategory)
@@ -1852,7 +1833,7 @@ public sealed class PrintService : IPrintService
                 : new List<Printer>();
             var printerDtoLookup = printerEntities.ToDictionary(
                 pr => pr.Id,
-                pr => _mapper.Map<PrinterSummary>(pr));
+                pr => mapper.Map<PrinterSummary>(pr));
             projectPrinterLookup = printerMapRows
                 // Non-null by the Where; the row is still needed inside the group projection
                 // below, so a Select+OfType unwrap here would discard PrinterId.
@@ -1891,7 +1872,7 @@ public sealed class PrintService : IPrintService
         }
 
         var pageStandalonePrints = pagePrintIds.Count > 0
-            ? await _context.Prints
+            ? await context.Prints
                 .Where(p => pagePrintIds.Contains(p.Id))
                 .Include(p => p.Printer)
                     .ThenInclude(pr => pr.Category!)
@@ -1945,7 +1926,7 @@ public sealed class PrintService : IPrintService
                 {
                     Type = "print",
                     SortDate = sortDate,
-                    Print = _mapper.Map<PrintSummaryDTO>(p)
+                    Print = mapper.Map<PrintSummaryDTO>(p)
                 };
             }
         }).Where(item => item != null).Select(item => item!).ToList();

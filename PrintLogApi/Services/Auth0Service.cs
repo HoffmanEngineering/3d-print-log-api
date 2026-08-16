@@ -7,25 +7,17 @@ using PrintLogApi.Models.DTOs;
 
 namespace PrintLogApi.Services;
 
-public class Auth0Service : IAuth0Service
+public class Auth0Service(
+    IHttpClientFactory clientFactory,
+    IConfiguration configuration,
+    IMemoryCache cache) : IAuth0Service
 {
     private const string TokenCacheKey = "auth0:management-token";
     private const string ReadPrintDataScope = "read:printdata";
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
     private static readonly SemaphoreSlim TokenLock = new(1, 1);
 
-    private readonly IHttpClientFactory _clientFactory;
-    private readonly IConfiguration _configuration;
-    private readonly IMemoryCache _cache;
-
-    public Auth0Service(IHttpClientFactory clientFactory, IConfiguration configuration, IMemoryCache cache)
-    {
-        _clientFactory = clientFactory;
-        _configuration = configuration;
-        _cache = cache;
-    }
-
-    private string ManagementBaseUrl => $"https://{_configuration["Auth0Management:Domain"]}/api/v2";
+    private string ManagementBaseUrl => $"https://{configuration["Auth0Management:Domain"]}/api/v2";
 
     /// <summary>
     ///   Gets an access token needed to interact with the Auth0 Management Apis
@@ -38,7 +30,7 @@ public class Auth0Service : IAuth0Service
 
     private async Task<string?> GetCachedAccessTokenAsync(CancellationToken ct)
     {
-        if (_cache.TryGetValue(TokenCacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
+        if (cache.TryGetValue(TokenCacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
         {
             return cached;
         }
@@ -46,7 +38,7 @@ public class Auth0Service : IAuth0Service
         await TokenLock.WaitAsync(ct);
         try
         {
-            if (_cache.TryGetValue(TokenCacheKey, out cached) && !string.IsNullOrEmpty(cached))
+            if (cache.TryGetValue(TokenCacheKey, out cached) && !string.IsNullOrEmpty(cached))
             {
                 return cached;
             }
@@ -54,7 +46,7 @@ public class Auth0Service : IAuth0Service
             var jwt = await FetchAccessTokenAsync(ct);
             // Refresh a minute before actual expiry to avoid using an about-to-expire token.
             var lifetime = TimeSpan.FromSeconds(Math.Max(30, jwt.ExpiresIn - 60));
-            _cache.Set(TokenCacheKey, jwt.AccessToken, new MemoryCacheEntryOptions()
+            cache.Set(TokenCacheKey, jwt.AccessToken, new MemoryCacheEntryOptions()
                 .SetSize(1)
                 .SetAbsoluteExpiration(lifetime));
             return jwt.AccessToken;
@@ -67,13 +59,13 @@ public class Auth0Service : IAuth0Service
 
     private async Task<Jwt> FetchAccessTokenAsync(CancellationToken ct)
     {
-        var tokenUrl = $"https://{_configuration["Auth0Management:Domain"]}/oauth/token";
+        var tokenUrl = $"https://{configuration["Auth0Management:Domain"]}/oauth/token";
         var content = new List<KeyValuePair<string, string>>
         {
             new("grant_type", "client_credentials"),
-            new("client_id", _configuration["Auth0Management:ClientId"]!),
-            new("client_secret", _configuration["Auth0Management:ClientSecret"]!),
-            new("audience", $"https://{_configuration["Auth0Management:Domain"]}/api/v2/"),
+            new("client_id", configuration["Auth0Management:ClientId"]!),
+            new("client_secret", configuration["Auth0Management:ClientSecret"]!),
+            new("audience", $"https://{configuration["Auth0Management:Domain"]}/api/v2/"),
         };
 
         using var client = CreateClient();
@@ -97,7 +89,7 @@ public class Auth0Service : IAuth0Service
 
     public async Task<IReadOnlyList<ConnectedAgentDto>> ListMcpGrants(string authUserId, CancellationToken ct)
     {
-        var mcpAudience = _configuration["Auth0:McpIdentifier"];
+        var mcpAudience = configuration["Auth0:McpIdentifier"];
         var agents = new List<ConnectedAgentDto>();
 
         var page = 0;
@@ -174,7 +166,7 @@ public class Auth0Service : IAuth0Service
 
             if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
             {
-                _cache.Remove(TokenCacheKey); // stale token; refresh and retry once
+                cache.Remove(TokenCacheKey); // stale token; refresh and retry once
                 continue;
             }
 
@@ -197,7 +189,7 @@ public class Auth0Service : IAuth0Service
 
     private HttpClient CreateClient()
     {
-        var client = _clientFactory.CreateClient();
+        var client = clientFactory.CreateClient();
         client.Timeout = HttpTimeout;
         return client;
     }

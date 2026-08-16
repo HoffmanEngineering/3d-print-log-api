@@ -18,40 +18,19 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class AnalyticsController : ControllerBase
+public class AnalyticsController(
+    IAnalyticsService analytics,
+    IActivityAnalyticsService activity,
+    IPrinterAnalyticsService printers,
+    IMaterialAnalyticsService materials,
+    ICostAnalyticsService costs,
+    IAccuracyAnalyticsService accuracy,
+    IMemoryCache cache,
+    ICacheVersionService cacheVersionService) : ControllerBase
 {
     // Correctness comes from the per-user cache version, not from this window. The TTL only
     // stops the cache growing without bound.
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(15);
-
-    private readonly IAnalyticsService _analytics;
-    private readonly IActivityAnalyticsService _activity;
-    private readonly IPrinterAnalyticsService _printers;
-    private readonly IMaterialAnalyticsService _materials;
-    private readonly ICostAnalyticsService _costs;
-    private readonly IAccuracyAnalyticsService _accuracy;
-    private readonly IMemoryCache _cache;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public AnalyticsController(
-        IAnalyticsService analytics,
-        IActivityAnalyticsService activity,
-        IPrinterAnalyticsService printers,
-        IMaterialAnalyticsService materials,
-        ICostAnalyticsService costs,
-        IAccuracyAnalyticsService accuracy,
-        IMemoryCache cache,
-        ICacheVersionService cacheVersionService)
-    {
-        _analytics = analytics;
-        _activity = activity;
-        _printers = printers;
-        _materials = materials;
-        _costs = costs;
-        _accuracy = accuracy;
-        _cache = cache;
-        _cacheVersionService = cacheVersionService;
-    }
 
     /// <summary>
     /// Every analytics endpoint validates, caches and authorizes identically. Written once so
@@ -74,14 +53,14 @@ public class AnalyticsController : ControllerBase
         var errors = filter.Validate();
         if (errors.Count > 0) return BadRequest(new { errors });
 
-        var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
+        var version = cacheVersionService.GetUserCacheVersion(userId.Value);
         var cacheKey = $"{name}:v{version}:{filter.CacheKey(userId.Value)}";
         // Null-forgiven: only `load`'s non-null result is ever stored under this key.
-        if (_cache.TryGetValue(cacheKey, out T? cached)) return cached!;
+        if (cache.TryGetValue(cacheKey, out T? cached)) return cached!;
 
         var result = await load(userId.Value, filter);
 
-        _cache.Set(cacheKey, result, new MemoryCacheEntryOptions()
+        cache.Set(cacheKey, result, new MemoryCacheEntryOptions()
             .SetAbsoluteExpiration(CacheTtl)
             .SetSize(1)
             .SetPriority(CacheItemPriority.Low));
@@ -95,7 +74,7 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<OverviewResponse>> GetOverview(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("overview", filter, (userId, f) => _analytics.GetOverview(userId, f, ct));
+        Cached("overview", filter, (userId, f) => analytics.GetOverview(userId, f, ct));
 
     [HttpGet("activity")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -103,7 +82,7 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<ActivityResponse>> GetActivity(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("activity", filter, (userId, f) => _activity.GetActivity(userId, f, ct));
+        Cached("activity", filter, (userId, f) => activity.GetActivity(userId, f, ct));
 
     [HttpGet("printers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -111,7 +90,7 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<PrintersResponse>> GetPrinters(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("printers", filter, (userId, f) => _printers.GetPrinters(userId, f, ct));
+        Cached("printers", filter, (userId, f) => printers.GetPrinters(userId, f, ct));
 
     [HttpGet("materials")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -119,7 +98,7 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<MaterialsResponse>> GetMaterials(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("materials", filter, (userId, f) => _materials.GetMaterials(userId, f, ct));
+        Cached("materials", filter, (userId, f) => materials.GetMaterials(userId, f, ct));
 
     [HttpGet("costs")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -127,7 +106,7 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<CostsResponse>> GetCosts(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("costs", filter, (userId, f) => _costs.GetCosts(userId, f, ct));
+        Cached("costs", filter, (userId, f) => costs.GetCosts(userId, f, ct));
 
     [HttpGet("accuracy")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -135,5 +114,5 @@ public class AnalyticsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<AccuracyResponse>> GetAccuracy(
         [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("accuracy", filter, (userId, f) => _accuracy.GetAccuracy(userId, f, ct));
+        Cached("accuracy", filter, (userId, f) => accuracy.GetAccuracy(userId, f, ct));
 }

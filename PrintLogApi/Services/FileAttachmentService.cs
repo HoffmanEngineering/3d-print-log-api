@@ -6,24 +6,17 @@ using FileModel = PrintLogApi.Models.File;
 
 namespace PrintLogApi.Services;
 
-public class FileAttachmentService : IFileAttachmentService
+public class FileAttachmentService(
+    PrintLogContext context,
+    IBlobStorageService blobStorageService) : IFileAttachmentService
 {
-    private readonly PrintLogContext _context;
-    private readonly IBlobStorageService _blobStorageService;
-
     private const string AttachmentContainer = "printattachments";
     private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200MB
     private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj" };
 
-    public FileAttachmentService(PrintLogContext context, IBlobStorageService blobStorageService)
-    {
-        _context = context;
-        _blobStorageService = blobStorageService;
-    }
-
     public async Task<GetUploadUrlResponse> GetUploadUrlAsync(long printId, long userId, GetUploadUrlRequest request)
     {
-        var print = await _context.Prints.FindAsync(printId)
+        var print = await context.Prints.FindAsync(printId)
             ?? throw new NotFoundException($"Print {printId} not found.");
 
         if (print.CreatedById != userId)
@@ -34,7 +27,7 @@ public class FileAttachmentService : IFileAttachmentService
         AssertAllowedExtension(request.FileName);
 
         var blobName = $"{printId}/{Guid.NewGuid()}{GetExtension(request.FileName)}";
-        var sasUri = await _blobStorageService.GenerateSasUploadUrlAsync(
+        var sasUri = await blobStorageService.GenerateSasUploadUrlAsync(
             AttachmentContainer, blobName, TimeSpan.FromMinutes(15));
 
         return new GetUploadUrlResponse
@@ -46,7 +39,7 @@ public class FileAttachmentService : IFileAttachmentService
 
     public async Task<PrintAttachmentDto> ConfirmUploadAsync(long printId, long userId, ConfirmUploadRequest request)
     {
-        var print = await _context.Prints.FindAsync(printId)
+        var print = await context.Prints.FindAsync(printId)
             ?? throw new NotFoundException($"Print {printId} not found.");
 
         if (print.CreatedById != userId)
@@ -68,9 +61,9 @@ public class FileAttachmentService : IFileAttachmentService
             CreatedById = userId,
             UpdatedById = userId,
         };
-        _context.Files.Add(file);
+        context.Files.Add(file);
 
-        var displayOrder = await _context.PrintAttachments
+        var displayOrder = await context.PrintAttachments
             .Where(pa => pa.PrintId == printId)
             .CountAsync();
 
@@ -84,8 +77,8 @@ public class FileAttachmentService : IFileAttachmentService
             CreatedById = userId,
             UpdatedById = userId,
         };
-        _context.PrintAttachments.Add(attachment);
-        await _context.SaveChangesAsync();
+        context.PrintAttachments.Add(attachment);
+        await context.SaveChangesAsync();
 
         return new PrintAttachmentDto
         {
@@ -99,7 +92,7 @@ public class FileAttachmentService : IFileAttachmentService
 
     public async Task<IEnumerable<PrintAttachmentDto>> GetFilesAsync(long printId)
     {
-        return await _context.PrintAttachments
+        return await context.PrintAttachments
             .Where(pa => pa.PrintId == printId)
             .OrderBy(pa => pa.DisplayOrder)
             .Select(pa => new PrintAttachmentDto
@@ -115,7 +108,7 @@ public class FileAttachmentService : IFileAttachmentService
 
     public async Task<GetDownloadUrlResponse> GetDownloadUrlAsync(long printId, long fileId, long? userId)
     {
-        var attachment = await _context.PrintAttachments
+        var attachment = await context.PrintAttachments
             .Include(pa => pa.File)
             .Include(pa => pa.Print)
             .Where(pa => pa.Id == fileId && pa.PrintId == printId)
@@ -137,7 +130,7 @@ public class FileAttachmentService : IFileAttachmentService
         if (blobPathParts.Length != 2)
             throw new InvalidOperationException($"Stored blob path is invalid: {attachment.File.Path}");
         var expiresIn = TimeSpan.FromHours(1);
-        var sasUri = await _blobStorageService.GenerateSasDownloadUrlAsync(
+        var sasUri = await blobStorageService.GenerateSasDownloadUrlAsync(
             blobPathParts[0],
             blobPathParts[1],
             attachment.ContentType,
@@ -153,7 +146,7 @@ public class FileAttachmentService : IFileAttachmentService
 
     public async Task DeleteFileAsync(long printId, long fileId, long userId)
     {
-        var attachment = await _context.PrintAttachments
+        var attachment = await context.PrintAttachments
             .Include(pa => pa.File)
             .Where(pa => pa.Id == fileId && pa.PrintId == printId)
             .SingleOrDefaultAsync()
@@ -162,9 +155,9 @@ public class FileAttachmentService : IFileAttachmentService
         if (attachment.CreatedById != userId)
             throw new ForbiddenException("You do not own this file.");
 
-        _context.PrintAttachments.Remove(attachment);
-        _context.Files.Remove(attachment.File);
-        await _context.SaveChangesAsync();
+        context.PrintAttachments.Remove(attachment);
+        context.Files.Remove(attachment.File);
+        await context.SaveChangesAsync();
 
         // Note: blob is left in Azure storage (orphaned blobs cleaned up by a separate job or policy).
         // This matches the existing PrintImage deletion behavior.
@@ -174,7 +167,7 @@ public class FileAttachmentService : IFileAttachmentService
 
     private async Task AssertProAsync(long userId)
     {
-        var subscription = await _context.Subscriptions
+        var subscription = await context.Subscriptions
             .Where(s => s.UserId == userId)
             .AsNoTracking()
             .SingleOrDefaultAsync();
@@ -186,7 +179,7 @@ public class FileAttachmentService : IFileAttachmentService
     private async Task AssertFileQuotaAsync(long printId, long userId, long newFileSizeBytes)
     {
         // Per-print file count limit
-        var fileCount = await _context.PrintAttachments
+        var fileCount = await context.PrintAttachments
             .Where(pa => pa.PrintId == printId)
             .CountAsync();
 
@@ -194,7 +187,7 @@ public class FileAttachmentService : IFileAttachmentService
             throw new BadRequestException($"Maximum of {SubscriptionLimits.ProMaxFilesPerPrint} files per print allowed.");
 
         // Per-user storage quota
-        var usedBytes = await _context.PrintAttachments
+        var usedBytes = await context.PrintAttachments
             .Where(pa => pa.CreatedById == userId)
             .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
 

@@ -17,19 +17,11 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class PrinterMaintenanceController : ControllerBase
+public class PrinterMaintenanceController(
+    IPrinterMaintenanceService printerMaintenanceService,
+    IMapper mapper,
+    IPrinterService printerService) : ControllerBase
 {
-    private readonly IPrinterMaintenanceService _printerMaintenanceService;
-    private readonly IMapper _mapper;
-    private readonly IPrinterService _printerService;
-
-    public PrinterMaintenanceController(IPrinterMaintenanceService printerMaintenanceService, IMapper mapper, IPrinterService printerService)
-    {
-        _printerMaintenanceService = printerMaintenanceService;
-        _mapper = mapper;
-        _printerService = printerService;
-    }
-
     /// <summary>
     /// Gets a Paged Result of printer maintenance entries
     /// </summary>
@@ -62,7 +54,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Unauthorized("Please login before requesting filaments.");
         }
 
-        return await _printerMaintenanceService.GetPrinterMaintenanceByUser(currentUserId.Value,
+        return await printerMaintenanceService.GetPrinterMaintenanceByUser(currentUserId.Value,
             sortRequest.SortDirection,
             sortRequest.SortColumn,
             pagingRequest.PageNumber,
@@ -88,7 +80,7 @@ public class PrinterMaintenanceController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrinterMaintenanceDto>> GetMaintenanceEntry(Guid id)
     {
-        var entry = await _printerMaintenanceService.GetEntryById(id);
+        var entry = await printerMaintenanceService.GetEntryById(id);
 
         if (entry == null)
         {
@@ -102,7 +94,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Forbid();
         }
 
-        return _mapper.Map<PrinterMaintenanceDto>(entry);
+        return mapper.Map<PrinterMaintenanceDto>(entry);
     }
 
     /// <summary>
@@ -133,7 +125,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Unauthorized();
         }
 
-        var existingEntry = await _printerMaintenanceService.GetEntryById(id);
+        var existingEntry = await printerMaintenanceService.GetEntryById(id);
 
         if (existingEntry == null)
         {
@@ -145,7 +137,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Forbid();
         }
 
-        var printer = await _printerService.getPrinterById(maintenanceDto.PrinterId);
+        var printer = await printerService.getPrinterById(maintenanceDto.PrinterId);
 
         // Return if the printer does not belong to the user making the request.
         // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
@@ -157,9 +149,9 @@ public class PrinterMaintenanceController : ControllerBase
 
         try
         {
-            var updatedEntry = await _printerMaintenanceService.UpdateEntry(id, maintenanceDto, userId.Value);
+            var updatedEntry = await printerMaintenanceService.UpdateEntry(id, maintenanceDto, userId.Value);
 
-            return CreatedAtAction("GetMaintenanceEntry", new { id = existingEntry.Id }, _mapper.Map<PrinterMaintenanceDto>(updatedEntry));
+            return CreatedAtAction("GetMaintenanceEntry", new { id = existingEntry.Id }, mapper.Map<PrinterMaintenanceDto>(updatedEntry));
         }
         catch (DoesNotExistException)
         {
@@ -186,10 +178,10 @@ public class PrinterMaintenanceController : ControllerBase
             return Unauthorized();
         }
 
-        var newEntry = await _printerMaintenanceService.AddEntry(dto, userId.Value);
+        var newEntry = await printerMaintenanceService.AddEntry(dto, userId.Value);
 
 
-        return CreatedAtAction("GetMaintenanceEntry", new { id = newEntry.Id }, _mapper.Map<PrinterMaintenance, PrinterMaintenanceDto>(newEntry));
+        return CreatedAtAction("GetMaintenanceEntry", new { id = newEntry.Id }, mapper.Map<PrinterMaintenance, PrinterMaintenanceDto>(newEntry));
     }
 
     /// <summary>
@@ -210,7 +202,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Unauthorized();
         }
 
-        var existingEntry = await _printerMaintenanceService.GetEntryById(id);
+        var existingEntry = await printerMaintenanceService.GetEntryById(id);
 
         // Null-forgiven: a missing id already threw here before nullable analysis was
         // enabled, and it fails closed either way. Turning it into a clean 404, as the
@@ -222,7 +214,7 @@ public class PrinterMaintenanceController : ControllerBase
 
         try
         {
-            await _printerMaintenanceService.DeleteMaintenanceEntry(existingEntry);
+            await printerMaintenanceService.DeleteMaintenanceEntry(existingEntry);
         }
         catch (Exception)
         {
@@ -249,7 +241,7 @@ public class PrinterMaintenanceController : ControllerBase
             return Forbid();
         }
 
-        var categories = await this._printerMaintenanceService.GetMaintenanceCategories(currentUserId.Value);
+        var categories = await printerMaintenanceService.GetMaintenanceCategories(currentUserId.Value);
 
         return new PrinterMaintenanceCategoriesDto { Categories = categories };
     }

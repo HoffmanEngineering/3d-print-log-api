@@ -3,17 +3,10 @@ using Microsoft.ApplicationInsights;
 
 namespace PrintLogApi.Mcp;
 
-public sealed class McpToolTelemetry : IMcpToolTelemetry
+public sealed class McpToolTelemetry(
+    TelemetryClient telemetryClient,
+    ILogger<McpToolTelemetry> logger) : IMcpToolTelemetry
 {
-    private readonly TelemetryClient telemetryClient;
-    private readonly ILogger<McpToolTelemetry> logger;
-
-    public McpToolTelemetry(TelemetryClient telemetryClient, ILogger<McpToolTelemetry> logger)
-    {
-        this.telemetryClient = telemetryClient;
-        this.logger = logger;
-    }
-
     public void ToolCalled(string toolName, string outcome, long durationMs, string subjectHash)
     {
         telemetryClient.TrackEvent("Mcp_ToolCalled", new Dictionary<string, string>

@@ -6,20 +6,11 @@ using PrintLogApi.Models.DTOs.Notification;
 
 namespace PrintLogApi.Services;
 
-public class NotificationService : INotificationService
+public class NotificationService(PrintLogContext context, IMapper mapper) : INotificationService
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-
-    public NotificationService(PrintLogContext context, IMapper mapper)
-    {
-        _context = context;
-        _mapper = mapper;
-    }
-
     public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null)
     {
-        var query = _context.Notifications
+        var query = context.Notifications
             .Where(n => n.UserId == userId);
 
         if (unreadOnly == true)
@@ -29,7 +20,7 @@ public class NotificationService : INotificationService
 
         var orderedQuery = query
             .OrderByDescending(n => n.CreatedDate)
-            .ProjectTo<NotificationSummaryDto>(_mapper.ConfigurationProvider);
+            .ProjectTo<NotificationSummaryDto>(mapper.ConfigurationProvider);
 
         return await PagedList<NotificationSummaryDto>.CreateAsync(
             orderedQuery,
@@ -39,7 +30,7 @@ public class NotificationService : INotificationService
 
     public async Task<NotificationDetailDto?> GetNotificationById(Guid notificationId, long userId)
     {
-        var notification = await _context.Notifications
+        var notification = await context.Notifications
             .Where(n => n.Id == notificationId && n.UserId == userId)
             .Include(n => n.Print)
             .Include(n => n.TriggeredByUser)
@@ -50,19 +41,19 @@ public class NotificationService : INotificationService
             return null;
         }
 
-        return _mapper.Map<NotificationDetailDto>(notification);
+        return mapper.Map<NotificationDetailDto>(notification);
     }
 
     public async Task<int> GetUnreadCountForUser(long userId)
     {
-        return await _context.Notifications
+        return await context.Notifications
             .Where(n => n.UserId == userId && !n.IsRead)
             .CountAsync();
     }
 
     public async Task<bool> MarkAsRead(Guid notificationId, long userId)
     {
-        var notification = await _context.Notifications
+        var notification = await context.Notifications
             .Where(n => n.Id == notificationId && n.UserId == userId)
             .FirstOrDefaultAsync();
 
@@ -75,7 +66,7 @@ public class NotificationService : INotificationService
         {
             notification.IsRead = true;
             notification.ReadDate = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
 
         return true;
@@ -84,7 +75,7 @@ public class NotificationService : INotificationService
     public async Task<int> MarkAllAsRead(long userId)
     {
         var now = DateTime.UtcNow;
-        return await _context.Notifications
+        return await context.Notifications
             .Where(n => n.UserId == userId && !n.IsRead)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(n => n.IsRead, true)
@@ -95,7 +86,7 @@ public class NotificationService : INotificationService
     {
         var idList = notificationIds.ToList();
         var now = DateTime.UtcNow;
-        return await _context.Notifications
+        return await context.Notifications
             .Where(n => n.UserId == userId && idList.Contains(n.Id) && !n.IsRead)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(n => n.IsRead, true)
@@ -104,7 +95,7 @@ public class NotificationService : INotificationService
 
     public async Task<bool> DeleteNotification(Guid notificationId, long userId)
     {
-        var deleted = await _context.Notifications
+        var deleted = await context.Notifications
             .Where(n => n.Id == notificationId && n.UserId == userId)
             .ExecuteDeleteAsync();
 
@@ -113,7 +104,7 @@ public class NotificationService : INotificationService
 
     public async Task<int> DeleteAllNotifications(long userId)
     {
-        return await _context.Notifications
+        return await context.Notifications
             .Where(n => n.UserId == userId)
             .ExecuteDeleteAsync();
     }
@@ -145,8 +136,8 @@ public class NotificationService : INotificationService
             CreatedDate = DateTime.UtcNow
         };
 
-        _context.Notifications.Add(notification);
-        await _context.SaveChangesAsync();
+        context.Notifications.Add(notification);
+        await context.SaveChangesAsync();
 
         return notification;
     }
@@ -219,8 +210,8 @@ public class NotificationService : INotificationService
 
         if (notifications.Count == 0) return;
 
-        _context.Notifications.AddRange(notifications);
-        await _context.SaveChangesAsync();
+        context.Notifications.AddRange(notifications);
+        await context.SaveChangesAsync();
     }
 
     public async Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string? printTitle)

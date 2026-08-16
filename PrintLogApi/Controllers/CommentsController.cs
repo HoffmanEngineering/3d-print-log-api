@@ -17,21 +17,12 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class CommentsController : ControllerBase
+public class CommentsController(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    ICommentService commentService) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly ICommentService _commentService;
-
-    public CommentsController(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ICommentService commentService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _commentService = commentService;
-    }
-
     /// <summary>
     /// Edit a comment.
     /// </summary>
@@ -51,7 +42,7 @@ public class CommentsController : ControllerBase
             return Unauthorized();
         }
 
-        var existingComment = await _context.Comments.FindAsync(id);
+        var existingComment = await context.Comments.FindAsync(id);
 
         if (existingComment == null)
         {
@@ -65,11 +56,11 @@ public class CommentsController : ControllerBase
 
         existingComment.Body = edittedComment.Body;
 
-        _context.Entry(existingComment).State = EntityState.Modified;
+        context.Entry(existingComment).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -83,9 +74,9 @@ public class CommentsController : ControllerBase
             }
         }
 
-        _telemetry.TrackEvent("CommentEdit");
+        telemetry.TrackEvent("CommentEdit");
 
-        return Ok(_mapper.Map<CommentDetailDto>(existingComment));
+        return Ok(mapper.Map<CommentDetailDto>(existingComment));
     }
 
     /// <summary>
@@ -106,7 +97,7 @@ public class CommentsController : ControllerBase
             return Unauthorized();
         }
 
-        var existingComment = await _context.Comments.FindAsync(id);
+        var existingComment = await context.Comments.FindAsync(id);
 
         if (existingComment == null)
         {
@@ -118,14 +109,14 @@ public class CommentsController : ControllerBase
             return Forbid();
         }
 
-        await _commentService.DeleteCommentById(id);
+        await commentService.DeleteCommentById(id);
 
         var properties = new Dictionary<string, string> {
             { "CommentId", existingComment.Id.ToString() },
             { "UserId", userId.ToString()! },
             { "CommentCreated", existingComment.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
         };
-        _telemetry.TrackEvent("CommentDelete", properties);
+        telemetry.TrackEvent("CommentDelete", properties);
 
         return Ok();
     }
@@ -133,6 +124,6 @@ public class CommentsController : ControllerBase
 
     private bool CommentExists(long id)
     {
-        return _context.Comments.Any(e => e.Id == id);
+        return context.Comments.Any(e => e.Id == id);
     }
 }

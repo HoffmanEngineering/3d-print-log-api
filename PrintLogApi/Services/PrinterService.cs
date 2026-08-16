@@ -6,25 +6,11 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.Services;
 
-public class PrinterService : IPrinterService
+public class PrinterService(
+    PrintLogContext context,
+    TelemetryClient telemetry,
+    ICacheVersionService cacheVersionService) : IPrinterService
 {
-    private readonly PrintLogContext _context;
-    private readonly TelemetryClient _telemetry;
-    private readonly IPrinterCategoryService _printerCategoryService;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public PrinterService(
-        PrintLogContext context,
-        TelemetryClient telemetry,
-        IPrinterCategoryService printerCategoryService,
-        ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _telemetry = telemetry;
-        _printerCategoryService = printerCategoryService;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>
     /// The category a printer gets when none is named. Shared with PrintersController so the web
     /// and MCP create paths cannot drift onto different defaults.
@@ -33,7 +19,7 @@ public class PrinterService : IPrinterService
 
     public async Task<Printer?> getPrinterById(long printerId)
     {
-        var existingPrinter = await _context.Printers
+        var existingPrinter = await context.Printers
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(f => f.Filament)
             .Include(p => p.Category!)
@@ -70,7 +56,7 @@ public class PrinterService : IPrinterService
         foreach (var filament in filamentsToUnload)
         {
             filament.UnloadedDateTime = modifiedTime;
-            _context.Entry(filament).State = EntityState.Modified;
+            context.Entry(filament).State = EntityState.Modified;
         }
 
         // Add any new filament to the list
@@ -98,7 +84,7 @@ public class PrinterService : IPrinterService
         }
 
         // Finally, unload these filament from any other printer's loaded list.
-        var loadedFilamentFromOtherPrinters = await _context
+        var loadedFilamentFromOtherPrinters = await context
             .PrinterFilament
             .Where(pf => pf.PrinterId != printerId && loadedFilamentIds.Any(id => id == pf.FilamentId))
             .ToListAsync();
@@ -135,27 +121,27 @@ public class PrinterService : IPrinterService
         // Remove any adjustments
         if (printer.LoadedFilaments!.Any())
         {
-            _context.PrinterFilament.RemoveRange(printer.LoadedFilaments!);
+            context.PrinterFilament.RemoveRange(printer.LoadedFilaments!);
         }
 
-        var maintenanceEntries = _context.PrinterMaintenance.Where(pm => pm.PrinterId == printerId);
+        var maintenanceEntries = context.PrinterMaintenance.Where(pm => pm.PrinterId == printerId);
         if (maintenanceEntries.Any())
         {
-            _context.PrinterMaintenance.RemoveRange(maintenanceEntries);
+            context.PrinterMaintenance.RemoveRange(maintenanceEntries);
         }
 
-        _context.Printers.Remove(printer);
+        context.Printers.Remove(printer);
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("PrinterDelete");
+        telemetry.TrackEvent("PrinterDelete");
 
         return;
     }
 
     private async Task<bool> DoPrintsExistForPrinter(long printerId)
     {
-        var exists = await _context.Prints.AnyAsync(p => p.PrinterId == printerId);
+        var exists = await context.Prints.AnyAsync(p => p.PrinterId == printerId);
 
         return exists;
     }
@@ -171,7 +157,7 @@ public class PrinterService : IPrinterService
         long userId, int page, int pageSize, CancellationToken ct)
     {
         // Printer ownership is UserId (Filament ownership is CreatedById - they differ).
-        var query = _context.Printers.AsNoTracking()
+        var query = context.Printers.AsNoTracking()
             .Where(p => p.UserId == userId)
             .OrderBy(p => p.Name)
             .ThenBy(p => p.Id);
@@ -192,7 +178,7 @@ public class PrinterService : IPrinterService
     public async Task<PrinterDetailResult> GetPrinterForMcp(
         long userId, long printerId, CancellationToken ct)
     {
-        var row = await _context.Printers.AsNoTracking()
+        var row = await context.Printers.AsNoTracking()
             .Where(p => p.Id == printerId && p.UserId == userId) // creator-only; no existence oracle
             .Select(p => new
             {
@@ -308,14 +294,14 @@ public class PrinterService : IPrinterService
     private async Task<PrinterCategory> RequirePrinterCategory(string? nickname, CancellationToken ct)
     {
         var requested = nickname ?? DefaultPrinterCategoryNickname;
-        var category = await _context.PrinterCategories
+        var category = await context.PrinterCategories
             .FirstOrDefaultAsync(c => c.Nickname == requested, ct);
         if (category == null)
         {
             // Name the valid options: nothing lists printer categories, so a bare rejection
             // leaves an agent guessing. They are a small fixed seed shared by every user, so the
             // extra query costs nothing on the happy path and only runs when already failing.
-            var known = await _context.PrinterCategories
+            var known = await context.PrinterCategories
                 .Select(c => c.Nickname).OrderBy(n => n).ToListAsync(ct);
             throw McpToolException.InvalidArguments(
                 $"'{requested}' is not a known printer category. Valid categories: {string.Join(", ", known)}.");
@@ -412,8 +398,8 @@ public class PrinterService : IPrinterService
 
         if (idempotencyKey == null)
         {
-            _context.Printers.Add(printer);
-            await _context.SaveChangesAsync(ct);
+            context.Printers.Add(printer);
+            await context.SaveChangesAsync(ct);
         }
         else
         {
@@ -429,7 +415,7 @@ public class PrinterService : IPrinterService
                 // winner's result. If there is NO such record the failure was something else
                 // entirely — rethrow rather than reporting every write failure as an
                 // idempotency problem.
-                _context.ChangeTracker.Clear();
+                context.ChangeTracker.Clear();
                 var concurrent = await FindIdempotentPrinter(userId, toolName, idempotencyKey, fingerprint, ct);
                 if (concurrent != null)
                 {
@@ -439,8 +425,8 @@ public class PrinterService : IPrinterService
             }
         }
 
-        _telemetry.TrackEvent("McpPrinterAdded");
-        _cacheVersionService.InvalidateUserCache(userId);
+        telemetry.TrackEvent("McpPrinterAdded");
+        cacheVersionService.InvalidateUserCache(userId);
 
         // Re-read through the read projection rather than mapping the tracked entity: it is the
         // one place that knows how to render loaded filaments (which this path deliberately
@@ -459,16 +445,16 @@ public class PrinterService : IPrinterService
     {
         // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
         // run inside an execution strategy, so the whole tx is the retriable unit.
-        var strategy = _context.Database.CreateExecutionStrategy();
+        var strategy = context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
-            using var tx = await _context.Database.BeginTransactionAsync(ct);
-            _context.Printers.Add(printer);
-            await _context.SaveChangesAsync(ct); // assigns printer.Id
+            using var tx = await context.Database.BeginTransactionAsync(ct);
+            context.Printers.Add(printer);
+            await context.SaveChangesAsync(ct); // assigns printer.Id
 
-            _context.McpIdempotencyRecords.Add(
+            context.McpIdempotencyRecords.Add(
                 McpIdempotencyRecordFactory.ForPrinter(userId, key, fingerprint, printer.Id));
-            await _context.SaveChangesAsync(ct);
+            await context.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         });
     }
@@ -476,7 +462,7 @@ public class PrinterService : IPrinterService
     private async Task<CreatePrinterResult?> FindIdempotentPrinter(
         long userId, string toolName, string key, string? fingerprint, CancellationToken ct)
     {
-        var record = await _context.McpIdempotencyRecords.AsNoTracking()
+        var record = await context.McpIdempotencyRecords.AsNoTracking()
             .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
         if (record == null)
         {
@@ -496,7 +482,7 @@ public class PrinterService : IPrinterService
         // Short-circuit order is load-bearing: the null test stays on the left so the query is
         // still skipped entirely when the id is absent.
         if (record.CreatedPrinterId is not { } printerId
-            || !await _context.Printers.AnyAsync(p => p.Id == printerId && p.UserId == userId, ct))
+            || !await context.Printers.AnyAsync(p => p.Id == printerId && p.UserId == userId, ct))
         {
             throw McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
         }
@@ -548,7 +534,7 @@ public class PrinterService : IPrinterService
 
         // No Include of LoadedFilaments, deliberately: what is never loaded can never be marked
         // modified, so the loaded-state invariant does not depend on the patch code being careful.
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .FirstOrDefaultAsync(p => p.Id == printerId && p.UserId == userId, ct);
         if (printer == null)
         {
@@ -587,10 +573,10 @@ public class PrinterService : IPrinterService
             printer.IsActive = input.IsActive.Value;
         }
 
-        await _context.SaveChangesAsync(ct);
+        await context.SaveChangesAsync(ct);
 
-        _telemetry.TrackEvent("McpPrinterEdit");
-        _cacheVersionService.InvalidateUserCache(userId);
+        telemetry.TrackEvent("McpPrinterEdit");
+        cacheVersionService.InvalidateUserCache(userId);
 
         return await GetPrinterForMcp(userId, printer.Id, ct);
     }

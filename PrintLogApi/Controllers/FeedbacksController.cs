@@ -12,15 +12,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class FeedbacksController : ControllerBase
+public class FeedbacksController(IFeedbackService feedbackService) : ControllerBase
 {
-    private readonly IFeedbackService _feedbackService;
-
-    public FeedbacksController(IFeedbackService feedbackService)
-    {
-        _feedbackService = feedbackService;
-    }
-
     /// <summary>
     ///     Send a feedback.
     /// </summary>
@@ -37,7 +30,7 @@ public class FeedbacksController : ControllerBase
             return Unauthorized();
         }
 
-        await _feedbackService.CreateFeedback(
+        await feedbackService.CreateFeedback(
             userId.Value, requestDto.Type, requestDto.Email, requestDto.Note, ct);
 
         return StatusCode(201);

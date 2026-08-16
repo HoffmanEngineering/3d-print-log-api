@@ -13,15 +13,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class NotificationsController : ControllerBase
+public class NotificationsController(INotificationService notificationService) : ControllerBase
 {
-    private readonly INotificationService _notificationService;
-
-    public NotificationsController(INotificationService notificationService)
-    {
-        _notificationService = notificationService;
-    }
-
     /// <summary>
     /// Get a paged list of notifications for the current user.
     /// </summary>
@@ -43,7 +36,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        var notifications = await _notificationService.GetNotificationsForUser(userId.Value, pagingRequest, unreadOnly);
+        var notifications = await notificationService.GetNotificationsForUser(userId.Value, pagingRequest, unreadOnly);
         return Ok(notifications);
     }
 
@@ -64,7 +57,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        var count = await _notificationService.GetUnreadCountForUser(userId.Value);
+        var count = await notificationService.GetUnreadCountForUser(userId.Value);
         return Ok(new NotificationUnreadCountDto { UnreadCount = count });
     }
 
@@ -88,7 +81,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        var notification = await _notificationService.GetNotificationById(id, userId.Value);
+        var notification = await notificationService.GetNotificationById(id, userId.Value);
         if (notification == null)
         {
             return NotFound();
@@ -117,7 +110,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        var success = await _notificationService.MarkAsRead(id, userId.Value);
+        var success = await notificationService.MarkAsRead(id, userId.Value);
         if (!success)
         {
             return NotFound();
@@ -143,7 +136,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        await _notificationService.MarkAllAsRead(userId.Value);
+        await notificationService.MarkAllAsRead(userId.Value);
         return NoContent();
     }
 
@@ -179,7 +172,7 @@ public class NotificationsController : ControllerBase
             return BadRequest($"Cannot mark more than {MaxNotificationIds} notifications as read at once.");
         }
 
-        await _notificationService.MarkMultipleAsRead(dto.NotificationIds, userId.Value);
+        await notificationService.MarkMultipleAsRead(dto.NotificationIds, userId.Value);
         return NoContent();
     }
 
@@ -203,7 +196,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        var success = await _notificationService.DeleteNotification(id, userId.Value);
+        var success = await notificationService.DeleteNotification(id, userId.Value);
         if (!success)
         {
             return NotFound();
@@ -229,7 +222,7 @@ public class NotificationsController : ControllerBase
             return Unauthorized();
         }
 
-        await _notificationService.DeleteAllNotifications(userId.Value);
+        await notificationService.DeleteAllNotifications(userId.Value);
         return NoContent();
     }
 }

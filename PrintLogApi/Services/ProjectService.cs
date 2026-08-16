@@ -6,25 +6,16 @@ using PrintLogApi.Models.DTOs.Project;
 
 namespace PrintLogApi.Services;
 
-public class ProjectService : IProjectService
+public class ProjectService(
+    PrintLogContext context,
+    IMapper mapper,
+    IBlobStorageService blobStorageService,
+    ICacheVersionService cacheVersionService) : IProjectService
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly IBlobStorageService _blobStorageService;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public ProjectService(PrintLogContext context, IMapper mapper, IBlobStorageService blobStorageService, ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _blobStorageService = blobStorageService;
-        _cacheVersionService = cacheVersionService;
-    }
-
     public async Task<Mcp.McpPage<Mcp.ProjectListItem>> ListProjectsForMcp(
         long userId, int page, int pageSize, string? search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
     {
-        var query = _context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
+        var query = context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
         if (!string.IsNullOrWhiteSpace(search))
         {
             query = query.Where(p =>
@@ -85,8 +76,8 @@ public class ProjectService : IProjectService
 
         if (idempotencyKey == null)
         {
-            _context.Projects.Add(project);
-            await _context.SaveChangesAsync(ct);
+            context.Projects.Add(project);
+            await context.SaveChangesAsync(ct);
         }
         else
         {
@@ -100,7 +91,7 @@ public class ProjectService : IProjectService
                 // Clear the failed Added entities so the recovery query reads committed state
                 // only, then replay the winner. No such record means the failure was something
                 // else entirely — rethrow rather than reporting it as an idempotency problem.
-                _context.ChangeTracker.Clear();
+                context.ChangeTracker.Clear();
                 var concurrent = await FindIdempotentProject(userId, toolName, idempotencyKey, fingerprint, ct);
                 if (concurrent != null)
                 {
@@ -110,7 +101,7 @@ public class ProjectService : IProjectService
             }
         }
 
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
         return new Mcp.CreateProjectResult(Describe(project), WasReplayed: false);
     }
 
@@ -124,16 +115,16 @@ public class ProjectService : IProjectService
     {
         // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they run
         // inside an execution strategy, so the whole tx is the retriable unit.
-        var strategy = _context.Database.CreateExecutionStrategy();
+        var strategy = context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
-            using var tx = await _context.Database.BeginTransactionAsync(ct);
-            _context.Projects.Add(project);
-            await _context.SaveChangesAsync(ct);
+            using var tx = await context.Database.BeginTransactionAsync(ct);
+            context.Projects.Add(project);
+            await context.SaveChangesAsync(ct);
 
-            _context.McpIdempotencyRecords.Add(
+            context.McpIdempotencyRecords.Add(
                 Mcp.McpIdempotencyRecordFactory.ForProject(userId, key, fingerprint, project.Id));
-            await _context.SaveChangesAsync(ct);
+            await context.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         });
     }
@@ -141,7 +132,7 @@ public class ProjectService : IProjectService
     private async Task<Mcp.CreateProjectResult?> FindIdempotentProject(
         long userId, string toolName, string key, string? fingerprint, System.Threading.CancellationToken ct)
     {
-        var record = await _context.McpIdempotencyRecords.AsNoTracking()
+        var record = await context.McpIdempotencyRecords.AsNoTracking()
             .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
         if (record == null)
         {
@@ -160,7 +151,7 @@ public class ProjectService : IProjectService
         // is dangling, whatever else it may carry. Ownership is re-checked in the predicate.
         var projectId = record.CreatedProjectId;
         var project = projectId.HasValue
-            ? await _context.Projects.AsNoTracking()
+            ? await context.Projects.AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == projectId.Value && p.CreatedById == userId, ct)
             : null;
         if (project == null)
@@ -195,7 +186,7 @@ public class ProjectService : IProjectService
         long userId, Guid id, string? name, string? reference, string? description, string? url,
         Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, System.Threading.CancellationToken ct)
     {
-        var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
+        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
         if (project == null)
         {
             throw Mcp.McpToolException.NotFound("Project not found.");
@@ -207,8 +198,8 @@ public class ProjectService : IProjectService
         if (status.HasValue) project.Status = status.Value;
         if (viewStatus.HasValue) project.ViewStatus = viewStatus.Value;
         project.UpdatedById = userId;
-        await _context.SaveChangesAsync(ct);
-        _cacheVersionService.InvalidateUserCache(userId);
+        await context.SaveChangesAsync(ct);
+        cacheVersionService.InvalidateUserCache(userId);
         return Describe(project);
     }
 
@@ -216,7 +207,7 @@ public class ProjectService : IProjectService
         int pageNumber, int pageSize, long userId,
         string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate")
     {
-        IQueryable<Project> query = _context.Projects
+        IQueryable<Project> query = context.Projects
             .Where(p => p.CreatedById == userId)
             .Include(p => p.Images!)
             .Include(p => p.Prints!)
@@ -243,13 +234,13 @@ public class ProjectService : IProjectService
             .Take(pageSize)
             .ToListAsync();
 
-        var dtos = items.Select(p => _mapper.Map<ProjectSummaryDto>(p)).ToList();
+        var dtos = items.Select(p => mapper.Map<ProjectSummaryDto>(p)).ToList();
         return new PagedList<ProjectSummaryDto>(dtos, total, pageNumber, pageSize);
     }
 
     public async Task<Project?> GetProjectByIdAsync(Guid id)
     {
-        return await _context.Projects
+        return await context.Projects
             .Include(p => p.Images!)
                 .ThenInclude(i => i.File)
             .Include(p => p.Prints!)
@@ -260,13 +251,13 @@ public class ProjectService : IProjectService
 
     public async Task<Project> CreateProjectAsync(AddProjectDto dto, long userId)
     {
-        var project = _mapper.Map<Project>(dto);
+        var project = mapper.Map<Project>(dto);
         project.Id = Guid.NewGuid();
         project.CreatedById = userId;
         project.UpdatedById = userId;
 
-        _context.Projects.Add(project);
-        await _context.SaveChangesAsync();
+        context.Projects.Add(project);
+        await context.SaveChangesAsync();
 
         // Null-forgiven: the project was just persisted, so the re-read always finds it.
         return (await GetProjectByIdAsync(project.Id))!;
@@ -274,21 +265,21 @@ public class ProjectService : IProjectService
 
     public async Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId)
     {
-        var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == id);
         if (project == null)
             throw new DoesNotExistException();
 
-        _mapper.Map(dto, project);
+        mapper.Map(dto, project);
         project.UpdatedById = userId;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
         // Null-forgiven: loaded and updated above, so the re-read always finds it.
         return (await GetProjectByIdAsync(id))!;
     }
 
     public async Task DeleteProjectAsync(Guid id, bool deletePrints, long userId)
     {
-        var project = await _context.Projects
+        var project = await context.Projects
             .Include(p => p.Prints!)
             .Include(p => p.Images!)
                 .ThenInclude(img => img.File)
@@ -299,7 +290,7 @@ public class ProjectService : IProjectService
 
         if (deletePrints)
         {
-            _context.Prints.RemoveRange(project.Prints!);
+            context.Prints.RemoveRange(project.Prints!);
         }
         else
         {
@@ -312,28 +303,28 @@ public class ProjectService : IProjectService
         foreach (var image in project.Images!)
         {
             if (image.File != null)
-                await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
+                await blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
         }
 
-        _context.ProjectImages.RemoveRange(project.Images!);
-        _context.Projects.Remove(project);
-        await _context.SaveChangesAsync();
+        context.ProjectImages.RemoveRange(project.Images!);
+        context.Projects.Remove(project);
+        await context.SaveChangesAsync();
     }
 
     public async Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId)
     {
-        var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
         if (project == null) throw new DoesNotExistException();
 
         var blobName = $"{Guid.NewGuid()}{System.IO.Path.GetExtension(file.FileName)}";
         using var stream = file.OpenReadStream();
-        await _blobStorageService.UploadAsync("projectimages", blobName, stream);
+        await blobStorageService.UploadAsync("projectimages", blobName, stream);
 
         var fileEntity = new Models.File { Path = blobName, Size = file.Length, CreatedById = userId, UpdatedById = userId };
-        _context.Files.Add(fileEntity);
-        await _context.SaveChangesAsync();
+        context.Files.Add(fileEntity);
+        await context.SaveChangesAsync();
 
-        var existingCount = await _context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+        var existingCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
         var image = new ProjectImage
         {
             ProjectId = projectId,
@@ -343,28 +334,28 @@ public class ProjectService : IProjectService
             CreatedById = userId,
             UpdatedById = userId
         };
-        _context.ProjectImages.Add(image);
-        await _context.SaveChangesAsync();
+        context.ProjectImages.Add(image);
+        await context.SaveChangesAsync();
         return image;
     }
 
     public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
     {
-        var image = await _context.ProjectImages
+        var image = await context.ProjectImages
             .Include(pi => pi.File)
             .FirstOrDefaultAsync(pi => pi.ProjectId == projectId && pi.Id == imageId);
         if (image == null) throw new DoesNotExistException();
 
         if (image.File != null)
-            await _blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
+            await blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
 
-        _context.ProjectImages.Remove(image);
-        await _context.SaveChangesAsync();
+        context.ProjectImages.Remove(image);
+        await context.SaveChangesAsync();
     }
 
     public async Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId)
     {
-        var images = await _context.ProjectImages
+        var images = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId)
             .ToListAsync();
 
@@ -373,12 +364,12 @@ public class ProjectService : IProjectService
             var img = images.FirstOrDefault(im => im.Id == orderedImageIds[i]);
             if (img != null) img.DisplayOrder = i;
         }
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
     public async Task SetDefaultImageAsync(Guid projectId, int imageId, long userId)
     {
-        var images = await _context.ProjectImages
+        var images = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId)
             .ToListAsync();
 
@@ -388,12 +379,12 @@ public class ProjectService : IProjectService
         foreach (var img in images)
             img.IsDefault = img.Id == imageId;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
     public async Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId)
     {
-        var data = await _context.ProjectImages
+        var data = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId && pi.Id == imageId)
             .Select(pi => new
             {
@@ -411,6 +402,6 @@ public class ProjectService : IProjectService
             return null;
 
         var blobName = Path.GetFileName(data.Path!);
-        return await _blobStorageService.DownloadAsync("projectimages", blobName);
+        return await blobStorageService.DownloadAsync("projectimages", blobName);
     }
 }

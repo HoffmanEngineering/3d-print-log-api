@@ -9,7 +9,7 @@ namespace PrintLogApi.Services.Analytics;
 /// Two-stage aggregation. Stage 1 is SQL and groups to the smallest useful unit; stage 2 is
 /// bounded in-memory work over stage-1 rows only. Nothing materializes the user's print list.
 /// </summary>
-public sealed class AnalyticsService : IAnalyticsService
+public sealed class AnalyticsService(PrintLogContext context) : IAnalyticsService
 {
     /// <summary>
     /// The cost tile is the only metric needing per-filament-row projection, so it is capped on
@@ -27,10 +27,6 @@ public sealed class AnalyticsService : IAnalyticsService
     /// returning an empty chart or quietly doing the unbounded work.
     /// </summary>
     public const int MaxSeriesRows = 20000;
-
-    private readonly PrintLogContext _context;
-
-    public AnalyticsService(PrintLogContext context) => _context = context;
 
     public async Task<OverviewResponse> GetOverview(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
@@ -86,7 +82,7 @@ public sealed class AnalyticsService : IAnalyticsService
     {
         var hasRange = from.HasValue && to.HasValue;
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, from, to);
+            context.Prints.AsNoTracking(), userId, filter, from, to);
 
         // One aggregate for the plain counts. The four metric sums below stay as separate
         // top-level calls on purpose: g.Sum takes a Func rather than an Expression, so
@@ -189,7 +185,7 @@ public sealed class AnalyticsService : IAnalyticsService
     private async Task<(decimal? Cost, IReadOnlyDictionary<string, int> Exclusions, string Currency, HighlightRef? Priciest)> ComputeCost(
         long userId, IQueryable<Print> scoped, CancellationToken ct)
     {
-        var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
+        var projection = await AnalyticsCostProjection.Project(context, userId, scoped, ct);
 
         if (projection.RowCapExceeded)
             return (

@@ -16,31 +16,14 @@ namespace PrintLogApi.Mcp;
 /// </summary>
 [McpServerToolType]
 [Authorize(Policy = "McpWrite")]
-public class PrintLogWriteTools
+public class PrintLogWriteTools(
+    IHttpContextAccessor httpContextAccessor,
+    IPrintService printService,
+    IFilamentService filamentService,
+    IProjectService projectService,
+    IPrinterService printerService,
+    IFeedbackService feedbackService)
 {
-    private readonly IHttpContextAccessor httpContextAccessor;
-    private readonly IPrintService printService;
-    private readonly IFilamentService filamentService;
-    private readonly IProjectService projectService;
-    private readonly IPrinterService printerService;
-    private readonly IFeedbackService feedbackService;
-
-    public PrintLogWriteTools(
-        IHttpContextAccessor httpContextAccessor,
-        IPrintService printService,
-        IFilamentService filamentService,
-        IProjectService projectService,
-        IPrinterService printerService,
-        IFeedbackService feedbackService)
-    {
-        this.httpContextAccessor = httpContextAccessor;
-        this.printService = printService;
-        this.filamentService = filamentService;
-        this.projectService = projectService;
-        this.printerService = printerService;
-        this.feedbackService = feedbackService;
-    }
-
     private long CurrentUserId =>
         McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User);
 

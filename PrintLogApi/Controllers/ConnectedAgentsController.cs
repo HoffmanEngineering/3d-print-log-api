@@ -14,15 +14,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/connected-agents")]
 [ApiController]
 [Authorize]
-public class ConnectedAgentsController : ControllerBase
+public class ConnectedAgentsController(IAuth0Service auth0Service) : ControllerBase
 {
-    private readonly IAuth0Service _auth0Service;
-
-    public ConnectedAgentsController(IAuth0Service auth0Service)
-    {
-        _auth0Service = auth0Service;
-    }
-
     /// <summary>Gets the current user's connected AI agents.</summary>
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ConnectedAgentDto>>> GetConnectedAgents(CancellationToken ct)
@@ -33,7 +26,7 @@ public class ConnectedAgentsController : ControllerBase
             return Unauthorized();
         }
 
-        var agents = await _auth0Service.ListMcpGrants(authUserId, ct);
+        var agents = await auth0Service.ListMcpGrants(authUserId, ct);
         return Ok(agents);
     }
 
@@ -49,7 +42,7 @@ public class ConnectedAgentsController : ControllerBase
 
         try
         {
-            await _auth0Service.RevokeMcpGrant(authUserId, grantId, ct);
+            await auth0Service.RevokeMcpGrant(authUserId, grantId, ct);
             return NoContent();
         }
         catch (NotFoundException)

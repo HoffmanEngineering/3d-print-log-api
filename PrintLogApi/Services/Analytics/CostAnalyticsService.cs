@@ -9,7 +9,7 @@ namespace PrintLogApi.Services.Analytics;
 /// currency, default-price and parse rules as the cost tile on Overview — the two surfaces
 /// disagreeing is the failure mode this design exists to prevent.
 /// </summary>
-public sealed class CostAnalyticsService : ICostAnalyticsService
+public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyticsService
 {
     public const int MaxExtremes = 5;
     public const int MaxCostGroups = 15;
@@ -23,10 +23,6 @@ public sealed class CostAnalyticsService : ICostAnalyticsService
         ("<1", 0m, 1m), ("1–2", 1m, 2m), ("2–5", 2m, 5m), ("5–10", 5m, 10m),
         ("10–25", 10m, 25m), ("25–50", 25m, 50m), ("50–100", 50m, 100m), ("100+", 100m, null),
     };
-
-    private readonly PrintLogContext _context;
-
-    public CostAnalyticsService(PrintLogContext context) => _context = context;
 
     public async Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
@@ -56,13 +52,13 @@ public sealed class CostAnalyticsService : ICostAnalyticsService
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+            context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
         var counts = await AnalyticsPrintCounts.Load(scoped, ct);
         var coverage = new CoverageBuilder("prints") { Total = counts.Total };
         coverage.UndatedCount = filter.HasRange ? 0 : counts.Undated;
 
-        var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
+        var projection = await AnalyticsCostProjection.Project(context, userId, scoped, ct);
         var currency = projection.Inputs.UserCurrency;
 
         if (projection.RowCapExceeded)
@@ -290,7 +286,7 @@ public sealed class CostAnalyticsService : ICostAnalyticsService
         long userId, AnalyticsFilter filter, TimeZoneInfo zone,
         CoverageBuilder coverage, CancellationToken ct)
     {
-        var query = _context.PrinterMaintenance.AsNoTracking()
+        var query = context.PrinterMaintenance.AsNoTracking()
             .Where(m => m.Printer.UserId == userId && m.Done);
 
         if (filter.PrinterIds.Count > 0)

@@ -13,17 +13,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class PrinterCategoriesController : ControllerBase
+public class PrinterCategoriesController(PrintLogContext context, IMapper mapper) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-
-    public PrinterCategoriesController(PrintLogContext context, IMapper mapper)
-    {
-        _context = context;
-        _mapper = mapper;
-    }
-
     /// <summary>
     /// Returns the current list of printer categories for the material selection dropdown.
     /// </summary>
@@ -32,7 +23,7 @@ public class PrinterCategoriesController : ControllerBase
     [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
     public async Task<ActionResult<IEnumerable<PrinterCategoryDto>>> GetMaterials()
     {
-        return await _context.PrinterCategories.ProjectTo<PrinterCategoryDto>(_mapper.ConfigurationProvider).OrderBy(m => m.Nickname).ToListAsync();
+        return await context.PrinterCategories.ProjectTo<PrinterCategoryDto>(mapper.ConfigurationProvider).OrderBy(m => m.Nickname).ToListAsync();
     }
 
 }

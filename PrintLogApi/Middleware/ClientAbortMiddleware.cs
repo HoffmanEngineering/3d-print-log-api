@@ -16,7 +16,7 @@
 /// The long analytics aggregates are where this shows up in practice, but the middleware is
 /// deliberately global: any endpoint that awaits a slow query can hit the same race.
 /// </summary>
-public class ClientAbortMiddleware
+public class ClientAbortMiddleware(RequestDelegate next, ILogger<ClientAbortMiddleware> logger)
 {
     /// <summary>
     /// nginx's non-standard "client closed request". Nothing reads it — the socket is gone —
@@ -24,20 +24,11 @@ public class ClientAbortMiddleware
     /// </summary>
     private const int ClientClosedRequest = 499;
 
-    private readonly RequestDelegate _next;
-    private readonly ILogger<ClientAbortMiddleware> _logger;
-
-    public ClientAbortMiddleware(RequestDelegate next, ILogger<ClientAbortMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
-
     public async Task InvokeAsync(HttpContext context)
     {
         try
         {
-            await _next(context);
+            await next(context);
         }
         catch (Exception ex) when (IsClientAbort(context, ex))
         {
@@ -47,7 +38,7 @@ public class ClientAbortMiddleware
             // fault that happened to coincide with one.
             if (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(
+                logger.LogWarning(
                     ex,
                     "Request {Method} {Path} faulted after the client disconnected.",
                     context.Request.Method,

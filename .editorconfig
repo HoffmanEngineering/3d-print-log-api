@@ -146,6 +146,10 @@ csharp_style_namespace_declarations = file_scoped:warning
 # Removes usings made redundant by <ImplicitUsings>enable</ImplicitUsings>, and keeps them from
 # growing back. Without this the property only adds global usings; nothing deletes the old lines.
 dotnet_diagnostic.IDE0005.severity = warning
+# Suggestion, not warning: the rule cannot see whether a constructor body is pure field
+# assignment, so `dotnet format` would rewrite the constructors that validate or read
+# configuration too — the exact ones #64 deliberately left alone.
+csharp_style_prefer_primary_constructors = true:suggestion
 csharp_style_prefer_index_operator = true:suggestion
 csharp_style_prefer_range_operator = true:suggestion
 csharp_prefer_simple_using_statement = true:suggestion

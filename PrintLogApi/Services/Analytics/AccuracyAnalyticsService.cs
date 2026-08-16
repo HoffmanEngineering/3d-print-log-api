@@ -10,16 +10,12 @@ namespace PrintLogApi.Services.Analytics;
 /// a measured duration and an estimated-only material amount, and requiring both would
 /// silently shrink each sample.
 /// </summary>
-public sealed class AccuracyAnalyticsService : IAccuracyAnalyticsService
+public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccuracyAnalyticsService
 {
     public const int ScatterBins = 24;
 
     /// <summary>Below a 10% deviation, a callout is noise dressed up as advice.</summary>
     public const double MinCalloutDeviation = 0.1;
-
-    private readonly PrintLogContext _context;
-
-    public AccuracyAnalyticsService(PrintLogContext context) => _context = context;
 
     private sealed record Row(
         long PrintId, long PrinterId, bool PrinterOwned, string? PrinterName,
@@ -58,7 +54,7 @@ public sealed class AccuracyAnalyticsService : IAccuracyAnalyticsService
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+            context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
         var counts = await AnalyticsPrintCounts.Load(scoped, ct);
         var coverage = new CoverageBuilder("prints") { Total = counts.Total };

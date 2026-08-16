@@ -16,17 +16,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class CuraController : ControllerBase
+public class CuraController(PrintLogContext context, TelemetryClient telemetry) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly TelemetryClient _telemetry;
-
-    public CuraController(PrintLogContext context, TelemetryClient telemetry)
-    {
-        _context = context;
-        _telemetry = telemetry;
-    }
-
     /// <summary>
     /// Returns the settings saved by cura by GUID. Since Cura does not know the user who first saved the settings,
     /// the first time the settings are retrieved by a 3D Print Log user, the settings are linked to that user.
@@ -47,7 +38,7 @@ public class CuraController : ControllerBase
             return Unauthorized();
         }
 
-        var settings = await _context.CuraSettings.Where(c => c.Id == id).FirstOrDefaultAsync();
+        var settings = await context.CuraSettings.Where(c => c.Id == id).FirstOrDefaultAsync();
 
         if (settings == null)
         {
@@ -64,14 +55,14 @@ public class CuraController : ControllerBase
         }
         else
         {
-            _telemetry.TrackEvent("CuraSettingsFirstLoad");
+            telemetry.TrackEvent("CuraSettingsFirstLoad");
 
             // Update the setting to be locked to the first user that looks at it.
             settings.UserId = userId.Value;
 
-            _context.Entry(settings).State = EntityState.Modified;
+            context.Entry(settings).State = EntityState.Modified;
 
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
 
         return settings;
@@ -86,7 +77,7 @@ public class CuraController : ControllerBase
     public async Task<ActionResult<NewCuraSettingsDto>> SaveSettings()
     {
 
-        _telemetry.TrackEvent("CuraSettingsSaved");
+        telemetry.TrackEvent("CuraSettingsSaved");
 
         using var ms = new MemoryStream();
         await Request.Body.CopyToAsync(ms);
@@ -107,8 +98,8 @@ public class CuraController : ControllerBase
             CreatedDate = DateTimeOffset.Now
         };
 
-        _context.CuraSettings.Add(newSettings);
-        await _context.SaveChangesAsync();
+        context.CuraSettings.Add(newSettings);
+        await context.SaveChangesAsync();
 
         var result = new NewCuraSettingsDto()
         {

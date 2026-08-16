@@ -17,17 +17,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class FilamentsController : ControllerBase
+public class FilamentsController(IFilamentService filamentService, IMapper mapper) : ControllerBase
 {
-    private readonly IFilamentService _filamentService;
-    private readonly IMapper _mapper;
-
-    public FilamentsController(IFilamentService filamentService, IMapper mapper)
-    {
-        _filamentService = filamentService;
-        _mapper = mapper;
-    }
-
     /// <summary>
     /// Gets a Paged Result of filament summaries for the current user.
     /// </summary>
@@ -64,7 +55,7 @@ public class FilamentsController : ControllerBase
             return Unauthorized("Please login before requesting filaments.");
         }
 
-        return await _filamentService.GetFilamentSummaryForUser(currentUserId.Value,
+        return await filamentService.GetFilamentSummaryForUser(currentUserId.Value,
             sortRequest.SortDirection,
             sortRequest.SortColumn,
             pagingRequest.PageNumber,
@@ -94,7 +85,7 @@ public class FilamentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<FilamentDetailDto>> GetFilament(Guid id)
     {
-        var filament = await _filamentService.GetFilamentById(id);
+        var filament = await filamentService.GetFilamentById(id);
 
         if (filament == null)
         {
@@ -109,7 +100,7 @@ public class FilamentsController : ControllerBase
             return Forbid();
         }
 
-        return _mapper.Map<FilamentDetailDto>(filament);
+        return mapper.Map<FilamentDetailDto>(filament);
     }
 
     /// <summary>
@@ -134,7 +125,7 @@ public class FilamentsController : ControllerBase
             return BadRequest("ID in route does not match body.");
         }
 
-        var existingFilament = await _filamentService.GetFilamentById(id);
+        var existingFilament = await filamentService.GetFilamentById(id);
 
         if (existingFilament == null)
         {
@@ -147,16 +138,16 @@ public class FilamentsController : ControllerBase
             return Unauthorized();
         }
 
-        if (!await _filamentService.CanUserAccessFilament(userId.Value, id))
+        if (!await filamentService.CanUserAccessFilament(userId.Value, id))
         {
             return Forbid();
         }
 
         try
         {
-            var updatedPrint = await _filamentService.UpdateFilament(id, filamentDto, userId.Value);
+            var updatedPrint = await filamentService.UpdateFilament(id, filamentDto, userId.Value);
 
-            return CreatedAtAction("GetFilament", new { id = existingFilament.Id }, _mapper.Map<FilamentDetailDto>(updatedPrint));
+            return CreatedAtAction("GetFilament", new { id = existingFilament.Id }, mapper.Map<FilamentDetailDto>(updatedPrint));
         }
         catch (DoesNotExistException)
         {
@@ -183,10 +174,10 @@ public class FilamentsController : ControllerBase
             return Unauthorized();
         }
 
-        var newFilament = await _filamentService.AddFilament(filamentDto, userId.Value);
+        var newFilament = await filamentService.AddFilament(filamentDto, userId.Value);
 
 
-        return CreatedAtAction("GetFilament", new { id = newFilament.Id }, _mapper.Map<Filament, FilamentDetailDto>(newFilament));
+        return CreatedAtAction("GetFilament", new { id = newFilament.Id }, mapper.Map<Filament, FilamentDetailDto>(newFilament));
     }
 
     /// <summary>
@@ -210,14 +201,14 @@ public class FilamentsController : ControllerBase
         }
 
 
-        if (!await _filamentService.CanUserAccessFilament(userId.Value, id))
+        if (!await filamentService.CanUserAccessFilament(userId.Value, id))
         {
             return Forbid();
         }
 
         try
         {
-            await _filamentService.DeleteFilament(id);
+            await filamentService.DeleteFilament(id);
         }
         catch (FilamentIsInUseException)
         {
@@ -244,7 +235,7 @@ public class FilamentsController : ControllerBase
             return Unauthorized();
         }
 
-        var locations = await this._filamentService.GetFilamentStorageLocations(currentUserId.Value);
+        var locations = await filamentService.GetFilamentStorageLocations(currentUserId.Value);
 
         return new FilamentStorageLocationDto { StorageLocations = locations };
     }
@@ -266,7 +257,7 @@ public class FilamentsController : ControllerBase
             return Unauthorized();
         }
 
-        var locations = await this._filamentService.GetFilamentPurchaseLocations(currentUserId.Value);
+        var locations = await filamentService.GetFilamentPurchaseLocations(currentUserId.Value);
 
         return new FilamentPurchaseLocationsDto { PurchaseLocations = locations };
     }
@@ -289,7 +280,7 @@ public class FilamentsController : ControllerBase
             return Unauthorized();
         }
 
-        var brands = await this._filamentService.GetFilamentBrands(currentUserId.Value);
+        var brands = await filamentService.GetFilamentBrands(currentUserId.Value);
 
         return new FilamentBrandsDto { Brands = brands };
     }

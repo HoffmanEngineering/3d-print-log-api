@@ -18,39 +18,18 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class PrintersController : ControllerBase
+public class PrintersController(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    IFilamentService filamentService,
+    IPrinterService printerService,
+    IPrinterCategoryService printerCategoryService,
+    IMemoryCache cache,
+    ICacheVersionService cacheVersionService) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
     private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
-
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly IFilamentService _filamentService;
-    private readonly IPrinterService _printerService;
-    private readonly IPrinterCategoryService _printerCategoryService;
-    private readonly IMemoryCache _cache;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public PrintersController(PrintLogContext context,
-                              IMapper mapper,
-                              TelemetryClient telemetry,
-                              IFilamentService filamentService,
-                              IPrinterService printerService,
-                              IPrinterCategoryService printerCategoryService,
-                              IMemoryCache cache,
-                              ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _filamentService = filamentService;
-        _printerService = printerService;
-        _printerCategoryService = printerCategoryService;
-        _cache = cache;
-        _cacheVersionService = cacheVersionService;
-    }
-
 
     /// <summary>
     /// Get an array of paged Printer Summaries for current user.
@@ -71,15 +50,15 @@ public class PrintersController : ControllerBase
             return Unauthorized();
         }
 
-        var version = _cacheVersionService.GetUserCacheVersion(userId.Value);
+        var version = cacheVersionService.GetUserCacheVersion(userId.Value);
         var cacheKey = GeneratePrinterCacheKey(userId.Value, version, pagingRequest, searchText, includeInactive);
 
-        if (_cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto>? cachedResult))
+        if (cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto>? cachedResult))
         {
             return Ok(cachedResult);
         }
 
-        var printers = _context.Printers
+        var printers = context.Printers
             .AsNoTracking()
             .Where(p => p.UserId == userId);
 
@@ -100,7 +79,7 @@ public class PrintersController : ControllerBase
             .OrderByDescending(p => p.Name)
             .ThenByDescending(p => p.Make)
             .ThenByDescending(p => p.Model)
-            .ProjectTo<PrinterSummarySimpleDto>(_mapper.ConfigurationProvider);
+            .ProjectTo<PrinterSummarySimpleDto>(mapper.ConfigurationProvider);
 
         var response = await PagedList<PrinterSummarySimpleDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
 
@@ -110,7 +89,7 @@ public class PrintersController : ControllerBase
             .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
             .SetPriority(CacheItemPriority.Normal);
 
-        _cache.Set(cacheKey, response, cacheOptions);
+        cache.Set(cacheKey, response, cacheOptions);
 
         return Ok(response);
     }
@@ -130,7 +109,7 @@ public class PrintersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrinterDetailDto>> GetPrinter(long id)
     {
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
                     .ThenInclude(f => f.FilamentAdjustments)
@@ -159,7 +138,7 @@ public class PrintersController : ControllerBase
             return Forbid();
         }
 
-        return _mapper.Map<PrinterDetailDto>(printer);
+        return mapper.Map<PrinterDetailDto>(printer);
     }
 
     /// <summary>
@@ -191,7 +170,7 @@ public class PrintersController : ControllerBase
             return BadRequest("ID in route does not match body.");
         }
 
-        var existingPrinter = await _printerService.getPrinterById(id);
+        var existingPrinter = await printerService.getPrinterById(id);
 
         if (existingPrinter == null)
         {
@@ -204,9 +183,9 @@ public class PrintersController : ControllerBase
             return Forbid();
         }
 
-        existingPrinter = _mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
+        existingPrinter = mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
-        var printerCategory = await _printerCategoryService.get(printer.Category ?? existingPrinter.Category!.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        var printerCategory = await printerCategoryService.get(printer.Category ?? existingPrinter.Category!.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
         if (printerCategory is null)
         {
@@ -219,7 +198,7 @@ public class PrintersController : ControllerBase
         {
             if (filament.FilamentId != default)
             {
-                var canAccessFilament = await this._filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
+                var canAccessFilament = await filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
                 if (!canAccessFilament)
                 {
                     //throw new UserCannotAccessFilamentException();
@@ -228,13 +207,13 @@ public class PrintersController : ControllerBase
             }
         }
 
-        await this._printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
+        await printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
 
-        _context.Entry(existingPrinter).State = EntityState.Modified;
+        context.Entry(existingPrinter).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -248,11 +227,11 @@ public class PrintersController : ControllerBase
             }
         }
 
-        _telemetry.TrackEvent("PrinterEdit");
+        telemetry.TrackEvent("PrinterEdit");
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return Ok(_mapper.Map<PrinterDetailDto>(existingPrinter));
+        return Ok(mapper.Map<PrinterDetailDto>(existingPrinter));
     }
 
     /// <summary>
@@ -277,9 +256,9 @@ public class PrintersController : ControllerBase
             return Unauthorized();
         }
 
-        var newPrinter = _mapper.Map<Printer>(printer);
+        var newPrinter = mapper.Map<Printer>(printer);
 
-        var printerType = await _printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        var printerType = await printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
         if (printerType is null)
         {
@@ -290,14 +269,14 @@ public class PrintersController : ControllerBase
 
         newPrinter.UserId = userId.Value;
 
-        _context.Printers.Add(newPrinter);
-        await _context.SaveChangesAsync();
+        context.Printers.Add(newPrinter);
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("PrinterAdded");
+        telemetry.TrackEvent("PrinterAdded");
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, _mapper.Map<PrinterDetailDto>(newPrinter));
+        return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, mapper.Map<PrinterDetailDto>(newPrinter));
     }
 
     /// <summary>
@@ -308,7 +287,7 @@ public class PrintersController : ControllerBase
     [HttpGet("{id}/filament")]
     public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
     {
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
                     .ThenInclude(f => f.FilamentAdjustments)
@@ -334,7 +313,7 @@ public class PrintersController : ControllerBase
             return Forbid();
         }
 
-        return _mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
     }
 
     /// <summary>
@@ -350,7 +329,7 @@ public class PrintersController : ControllerBase
             return Unauthorized();
         }
 
-        var existingPrinter = await _printerService.getPrinterById(id);
+        var existingPrinter = await printerService.getPrinterById(id);
 
         if (existingPrinter == null)
         {
@@ -364,11 +343,11 @@ public class PrintersController : ControllerBase
         }
 
         // Set loaded filament to an empty list.
-        await this._printerService.setLoadedFilament(existingPrinter.Id, new List<Guid>());
+        await printerService.setLoadedFilament(existingPrinter.Id, new List<Guid>());
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -382,9 +361,9 @@ public class PrintersController : ControllerBase
             }
         }
 
-        _telemetry.TrackEvent("PrinterFilamentUnloaded");
+        telemetry.TrackEvent("PrinterFilamentUnloaded");
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         return Ok();
     }
@@ -409,7 +388,7 @@ public class PrintersController : ControllerBase
             return Unauthorized();
         }
 
-        var existingPrinter = await _printerService.getPrinterById(id);
+        var existingPrinter = await printerService.getPrinterById(id);
 
         if (existingPrinter == null)
         {
@@ -424,21 +403,21 @@ public class PrintersController : ControllerBase
 
         try
         {
-            await _printerService.DeletePrinter(id);
+            await printerService.DeletePrinter(id);
         }
         catch (PrinterIsInUseException)
         {
             return BadRequest("This Printer is used in a Print and cannot be deleted. Try editing the Printer and marking it as Inactive instead.");
         }
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         return NoContent();
     }
 
     private bool PrinterExists(long id)
     {
-        return _context.Printers.Any(e => e.Id == id);
+        return context.Printers.Any(e => e.Id == id);
     }
 
     /// <summary>

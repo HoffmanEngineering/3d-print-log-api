@@ -26,47 +26,21 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class PrintsController : ControllerBase
+public class PrintsController(
+    PrintLogContext context,
+    IMapper mapper,
+    IAuthorizationService authorizationService,
+    TelemetryClient telemetry,
+    IPrintService printService,
+    IPrintImageService printImageService,
+    ICommentService commentService,
+    IMemoryCache cache,
+    ICacheVersionService cacheVersionService,
+    IBlobStorageService blobStorageService,
+    IFileAttachmentService fileAttachmentService) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly IAuthorizationService _authorizationService;
-    private readonly TelemetryClient _telemetry;
-    private readonly IPrintService _printService;
-    private readonly ICommentService _commentService;
-    private readonly IPrintImageService _printImageService;
-    private readonly IMemoryCache _cache;
-    private readonly ICacheVersionService _cacheVersionService;
-    private readonly IBlobStorageService _blobStorageService;
-    private readonly IFileAttachmentService _fileAttachmentService;
     private readonly string printImageContainerName = "printimages";
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
-
-    public PrintsController(
-        PrintLogContext context,
-        IMapper mapper,
-        IAuthorizationService authorizationService,
-        TelemetryClient telemetry,
-        IPrintService printService,
-        IPrintImageService printImageService,
-        ICommentService commentService,
-        IMemoryCache cache,
-        ICacheVersionService cacheVersionService,
-        IBlobStorageService blobStorageService,
-        IFileAttachmentService fileAttachmentService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _authorizationService = authorizationService;
-        _telemetry = telemetry;
-        _printService = printService;
-        _commentService = commentService;
-        _printImageService = printImageService;
-        _cache = cache;
-        _cacheVersionService = cacheVersionService;
-        _blobStorageService = blobStorageService;
-        _fileAttachmentService = fileAttachmentService;
-    }
 
     /// <summary>
     ///     Get a paged list of Print Summary information for a user. 
@@ -145,18 +119,18 @@ public class PrintsController : ControllerBase
             projectIds.Add(filterByProjectId.Value);
         }
 
-        var version = _cacheVersionService.GetUserCacheVersion(targetUserId);
+        var version = cacheVersionService.GetUserCacheVersion(targetUserId);
         var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                         filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
                                         fromDate, toDate);
 
         // Null-forgiven: only a non-null result is ever stored under this key.
-        if (_cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO>? cachedResult))
+        if (cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO>? cachedResult))
         {
             return cachedResult!;
         }
 
-        var result = await _printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, statuses, userId, currentUserId, projectIds, fromDate, toDate);
+        var result = await printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, statuses, userId, currentUserId, projectIds, fromDate, toDate);
 
         var cacheOptions = new MemoryCacheEntryOptions()
             .SetSize(EstimateCacheSize(result))
@@ -164,7 +138,7 @@ public class PrintsController : ControllerBase
             .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
             .SetPriority(CacheItemPriority.Normal);
 
-        _cache.Set(cacheKey, result, cacheOptions);
+        cache.Set(cacheKey, result, cacheOptions);
 
         return result;
     }
@@ -186,7 +160,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var printStats = await _printService.GetPrintStatisticsForUser(userId.Value, fromDate, toDate);
+        var printStats = await printService.GetPrintStatisticsForUser(userId.Value, fromDate, toDate);
 
         return printStats;
     }
@@ -213,7 +187,7 @@ public class PrintsController : ControllerBase
         if (!userId.HasValue)
             return Unauthorized();
 
-        var result = await _printService.GetGroupedFeedAsync(
+        var result = await printService.GetGroupedFeedAsync(
             pageNumber, pageSize, userId.Value,
             searchText, filterByPrinterIds, filterByFilamentIds,
             filterByStatus, sortRequest);
@@ -238,7 +212,7 @@ public class PrintsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrintDetailDTO>> GetPrintById(long id)
     {
-        var print = await _printService.GetPrintById(id);
+        var print = await printService.GetPrintById(id);
 
         if (print == null)
         {
@@ -250,7 +224,7 @@ public class PrintsController : ControllerBase
             return Forbid();
         }
 
-        var printDetailDto = await this._context.Prints
+        var printDetailDto = await context.Prints
             .Include(p => p.Printer)
             .Include(p => p.Images!)
                 .ThenInclude(p => p.File)
@@ -260,7 +234,7 @@ public class PrintsController : ControllerBase
                 .ThenInclude(pf => pf.Filament)
             .Where(p => p.Id == id)
             .AsNoTracking()
-            .ProjectTo<PrintDetailDTO>(_mapper.ConfigurationProvider)
+            .ProjectTo<PrintDetailDTO>(mapper.ConfigurationProvider)
             .FirstOrDefaultAsync();
 
         // Not provably non-null: the existence check above and this projection are separate
@@ -289,7 +263,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var stream = await _printService.GeneratePrintReportAsCsvForUser(currentUserId.Value);
+        var stream = await printService.GeneratePrintReportAsCsvForUser(currentUserId.Value);
 
         return File(stream, "application/octet-stream", "PrintReports.csv");
     }
@@ -315,7 +289,7 @@ public class PrintsController : ControllerBase
             return BadRequest("ID in route does not match body.");
         }
 
-        var existingPrint = await _printService.GetPrintById(id);
+        var existingPrint = await printService.GetPrintById(id);
 
         if (existingPrint == null)
         {
@@ -335,11 +309,11 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var updatedPrint = await _printService.UpdatePrint(id, printDTO, userId.Value);
+            var updatedPrint = await printService.UpdatePrint(id, printDTO, userId.Value);
 
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(updatedPrint));
+            return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(updatedPrint));
         }
         catch (UserCannotAccessPrinterException)
         {
@@ -369,7 +343,7 @@ public class PrintsController : ControllerBase
     public async Task<ActionResult<PrintDetailDTO>> UpdatePrintStatus(long id, PrintStatus newStatus)
     {
 
-        var existingPrint = await _printService.GetPrintById(id);
+        var existingPrint = await printService.GetPrintById(id);
 
         if (existingPrint == null)
         {
@@ -388,11 +362,11 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var updatedPrint = await _printService.UpdatePrintStatus(id, newStatus, userId.Value);
+            var updatedPrint = await printService.UpdatePrintStatus(id, newStatus, userId.Value);
 
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, _mapper.Map<PrintDetailDTO>(existingPrint));
+            return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(existingPrint));
         }
         catch (DoesNotExistException)
         {
@@ -425,12 +399,12 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var newPrint = await _printService.AddPrint(print, userId.Value);
-            _telemetry.TrackEvent("PrintAdded");
+            var newPrint = await printService.AddPrint(print, userId.Value);
+            telemetry.TrackEvent("PrintAdded");
 
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, _mapper.Map<PrintDetailDTO>(newPrint));
+            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, mapper.Map<PrintDetailDTO>(newPrint));
         }
         catch (UserCannotAccessPrinterException)
         {
@@ -465,7 +439,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var existingPrint = await _printService.GetPrintById(id);
+        var existingPrint = await printService.GetPrintById(id);
 
         if (existingPrint == null)
         {
@@ -478,16 +452,16 @@ public class PrintsController : ControllerBase
             return Forbid();
         }
 
-        await _printService.DeletePrint(existingPrint);
+        await printService.DeletePrint(existingPrint);
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         var properties = new Dictionary<string, string> {
             { "PrintId", existingPrint.Id.ToString() },
             { "UserId", userId.ToString()! },
             { "PrintCreated", existingPrint.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
         };
-        _telemetry.TrackEvent("PrintDeleted", properties);
+        telemetry.TrackEvent("PrintDeleted", properties);
 
         return Ok();
     }
@@ -505,7 +479,7 @@ public class PrintsController : ControllerBase
     public async Task<IActionResult> GetImage(long printId, int imageId)
     {
         // Optimized query: only load the specific image and minimal print data needed for authorization
-        var imageData = await _context.PrintImages
+        var imageData = await context.PrintImages
             .Where(pi => pi.PrintId == printId && pi.Id == imageId)
             .Select(pi => new
             {
@@ -531,7 +505,7 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var printImageDto = await _printImageService.DownloadPrintFile(imageData.File);
+            var printImageDto = await printImageService.DownloadPrintFile(imageData.File);
 
             new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName!, out var contentType);
             return File(printImageDto.File!, contentType ?? "application/octet-stream");
@@ -558,7 +532,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _printService.GetPrintById(printId);
+        var print = await printService.GetPrintById(printId);
 
         if (print == null || !print.Images!.Any(i => i.Id == imageId))
         {
@@ -571,7 +545,7 @@ public class PrintsController : ControllerBase
             return Forbid();
         }
 
-        await _printService.SetDefaultImage(printId, imageId);
+        await printService.SetDefaultImage(printId, imageId);
 
         return Ok();
     }
@@ -611,7 +585,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _context.Prints
+        var print = await context.Prints
             .Include(p => p.Images)
             .FirstOrDefaultAsync(p => p.Id == printId);
 
@@ -646,9 +620,9 @@ public class PrintsController : ControllerBase
             image.DisplayOrder = imageOrder.DisplayOrder;
         }
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         return Ok();
     }
@@ -670,7 +644,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _printService.GetPrintById(id);
+        var print = await printService.GetPrintById(id);
 
         if (print == null)
         {
@@ -701,8 +675,8 @@ public class PrintsController : ControllerBase
         }
 
         // Check image limit
-        var maxImages = await _printService.GetMaxImagesPerPrint(userId.Value);
-        var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == id);
+        var maxImages = await printService.GetMaxImagesPerPrint(userId.Value);
+        var existingImageCount = await context.PrintImages.CountAsync(pi => pi.PrintId == id);
         if (existingImageCount >= maxImages)
         {
             return BadRequest($"Maximum of {maxImages} images per print allowed");
@@ -714,7 +688,7 @@ public class PrintsController : ControllerBase
 
 
         using var uploadFileStream = image.OpenReadStream();
-        var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+        var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
         var file = new Models.File()
         {
@@ -724,10 +698,10 @@ public class PrintsController : ControllerBase
             CreatedById = userId.Value,
             UpdatedById = userId.Value,
         };
-        _context.Files.Add(file);
+        context.Files.Add(file);
 
         // Calculate next display order
-        var maxDisplayOrder = await _context.PrintImages
+        var maxDisplayOrder = await context.PrintImages
             .Where(pi => pi.PrintId == id)
             .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
 
@@ -740,18 +714,18 @@ public class PrintsController : ControllerBase
             IsDefault = isDefault,
             DisplayOrder = maxDisplayOrder + 1,
         };
-        _context.PrintImages.Add(printImage);
+        context.PrintImages.Add(printImage);
 
         if (isDefault)
         {
             // Set other defaults to false;
-            var otherEntities = await _context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+            var otherEntities = await context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
             otherEntities.ForEach(p => p.IsDefault = false);
         }
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("PrintPictureAdded");
+        telemetry.TrackEvent("PrintPictureAdded");
 
         // Return the created image with its ID so the client can use it for reordering
         var printImageDto = new PrintImageDto
@@ -779,7 +753,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _context.Prints
+        var print = await context.Prints
             .Include(p => p.Images)
             .FirstOrDefaultAsync(p => p.Id == printId);
 
@@ -801,7 +775,7 @@ public class PrintsController : ControllerBase
 
         var wasDefault = imageToDelete.IsDefault;
 
-        _context.PrintImages.Remove(imageToDelete);
+        context.PrintImages.Remove(imageToDelete);
 
         // If deleted image was default, promote next image by DisplayOrder
         if (wasDefault)
@@ -817,9 +791,9 @@ public class PrintsController : ControllerBase
             }
         }
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         return Ok();
     }
@@ -845,7 +819,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _printService.GetPrintById(printId);
+        var print = await printService.GetPrintById(printId);
 
         if (print == null)
         {
@@ -864,10 +838,10 @@ public class PrintsController : ControllerBase
             return Forbid();
         }
 
-        var comment = await _printService.AddPrintComment(print, newComment.Body!, userId.Value);
+        var comment = await printService.AddPrintComment(print, newComment.Body!, userId.Value);
 
         // Null-forgiven: the comment was just persisted, so the re-read always finds it.
-        var mappedComment = await _commentService.GetCommentDetailById(comment.Id);
+        var mappedComment = await commentService.GetCommentDetailById(comment.Id);
 
         return mappedComment!;
     }
@@ -891,7 +865,7 @@ public class PrintsController : ControllerBase
             return Unauthorized();
         }
 
-        var print = await _printService.GetPrintById(printId);
+        var print = await printService.GetPrintById(printId);
 
         if (print == null)
         {
@@ -916,7 +890,7 @@ public class PrintsController : ControllerBase
         }
 
         // Delete the print and comment:
-        await _commentService.DeleteCommentById(commentId);
+        await commentService.DeleteCommentById(commentId);
 
         return Ok();
     }
@@ -930,8 +904,8 @@ public class PrintsController : ControllerBase
     [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
     public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds()
     {
-        this._telemetry.TrackEvent("PublicPrintsQueried");
-        return await this._printService.GetPublicPrintIds();
+        telemetry.TrackEvent("PublicPrintsQueried");
+        return await printService.GetPublicPrintIds();
     }
 
     /// <summary>
@@ -961,7 +935,7 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var result = await _fileAttachmentService.GetUploadUrlAsync(id, userId.Value, request);
+            var result = await fileAttachmentService.GetUploadUrlAsync(id, userId.Value, request);
             return Ok(result);
         }
         catch (NotFoundException) { return NotFound(); }
@@ -997,7 +971,7 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var result = await _fileAttachmentService.ConfirmUploadAsync(id, userId.Value, request);
+            var result = await fileAttachmentService.ConfirmUploadAsync(id, userId.Value, request);
             return Ok(result);
         }
         catch (NotFoundException) { return NotFound(); }
@@ -1021,7 +995,7 @@ public class PrintsController : ControllerBase
     public async Task<ActionResult<IEnumerable<PrintAttachmentDto>>> GetFiles(long id)
     {
         // Load minimal print data needed to check visibility — mirrors the GetImage pattern.
-        var printData = await _context.Prints
+        var printData = await context.Prints
             .Where(p => p.Id == id)
             .Select(p => new { p.ViewStatus, p.CreatedById })
             .AsNoTracking()
@@ -1039,7 +1013,7 @@ public class PrintsController : ControllerBase
             return Forbid();
         }
 
-        var files = await _fileAttachmentService.GetFilesAsync(id);
+        var files = await fileAttachmentService.GetFilesAsync(id);
         return Ok(files);
     }
 
@@ -1063,7 +1037,7 @@ public class PrintsController : ControllerBase
 
         try
         {
-            var result = await _fileAttachmentService.GetDownloadUrlAsync(id, fileId, userId);
+            var result = await fileAttachmentService.GetDownloadUrlAsync(id, fileId, userId);
             return Ok(result);
         }
         catch (NotFoundException) { return NotFound(); }
@@ -1094,7 +1068,7 @@ public class PrintsController : ControllerBase
 
         try
         {
-            await _fileAttachmentService.DeleteFileAsync(id, fileId, userId.Value);
+            await fileAttachmentService.DeleteFileAsync(id, fileId, userId.Value);
             return Ok();
         }
         catch (NotFoundException) { return NotFound(); }
@@ -1108,7 +1082,7 @@ public class PrintsController : ControllerBase
     /// <returns></returns>
     private async Task<bool> CanViewPrint(Print print)
     {
-        var authorizationResult = await _authorizationService
+        var authorizationResult = await authorizationService
                         .AuthorizeAsync(User, print, "ViewPrint");
 
         return authorizationResult.Succeeded;
@@ -1117,7 +1091,7 @@ public class PrintsController : ControllerBase
 
     private bool PrintExists(long id)
     {
-        return _context.Prints.Any(e => e.Id == id);
+        return context.Prints.Any(e => e.Id == id);
     }
 
     /// <summary>

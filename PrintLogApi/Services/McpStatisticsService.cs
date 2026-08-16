@@ -4,20 +4,13 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.Services;
 
-public sealed class McpStatisticsService : IMcpStatisticsService
+public sealed class McpStatisticsService(PrintLogContext context) : IMcpStatisticsService
 {
-    private readonly PrintLogContext _context;
-
-    public McpStatisticsService(PrintLogContext context)
-    {
-        _context = context;
-    }
-
     public async Task<McpPage<PrinterStatsItem>> GetPrinterStats(
         long userId, DateTimeOffset? from, DateTimeOffset? to, long? printerId,
         int page, int pageSize, CancellationToken ct)
     {
-        var prints = _context.Prints.AsNoTracking()
+        var prints = context.Prints.AsNoTracking()
             .Where(p => p.CreatedById == userId && p.Printer.UserId == userId);
 
         // Omitted range means all-time. Note this excludes undated prints from a ranged query,
@@ -102,7 +95,7 @@ public sealed class McpStatisticsService : IMcpStatisticsService
         long userId, DateTimeOffset? from, DateTimeOffset? to,
         Print.PrintStatus? status, CancellationToken ct)
     {
-        var owned = _context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
+        var owned = context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
 
         // An explicit range covers dated prints inside it. All-time covers EVERY print, including
         // undated ones — which is why the undated block below exists to reconcile the two.

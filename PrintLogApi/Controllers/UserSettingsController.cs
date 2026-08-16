@@ -16,22 +16,11 @@ namespace PrintLogApi.Controllers;
 [Route("api/Users/me/user-settings")]
 [ApiController]
 [Authorize]
-public class UserSettingsController : ControllerBase
+public class UserSettingsController(
+    PrintLogContext context,
+    IMapper mapper,
+    Services.ICacheVersionService cacheVersionService) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly Services.ICacheVersionService _cacheVersionService;
-
-    public UserSettingsController(
-        PrintLogContext context,
-        IMapper mapper,
-        Services.ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>
     /// Returns the list of the current user's UserSettings.
     /// </summary>
@@ -45,10 +34,10 @@ public class UserSettingsController : ControllerBase
             return Unauthorized();
         }
 
-        var settings = await _context.UserSettings
+        var settings = await context.UserSettings
             .Where(u => u.UserId == userId)
             .AsNoTracking()
-            .ProjectTo<UserSettingDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserSettingDto>(mapper.ConfigurationProvider)
             .ToListAsync();
 
         return settings;
@@ -68,7 +57,7 @@ public class UserSettingsController : ControllerBase
             return Unauthorized();
         }
 
-        var existingSetting = await _context.UserSettings
+        var existingSetting = await context.UserSettings
             .Where(setting => setting.Id == updateSettingDto.Id && setting.UserId == userId)
             .SingleOrDefaultAsync();
 
@@ -77,13 +66,13 @@ public class UserSettingsController : ControllerBase
             return NotFound();
         }
 
-        existingSetting = _mapper.Map(updateSettingDto, existingSetting);
+        existingSetting = mapper.Map(updateSettingDto, existingSetting);
 
-        _context.Entry(existingSetting).State = EntityState.Modified;
+        context.Entry(existingSetting).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -101,9 +90,9 @@ public class UserSettingsController : ControllerBase
         // electricity rate and wattage), so a settings change makes any cached aggregate
         // wrong. Without this the user edits their kWh rate and the cost tile keeps the
         // old figure for up to the cache TTL.
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return _mapper.Map<UserSettingDto>(existingSetting);
+        return mapper.Map<UserSettingDto>(existingSetting);
     }
 
     /// <summary>
@@ -120,7 +109,7 @@ public class UserSettingsController : ControllerBase
             return Unauthorized();
         }
 
-        var existingSetting = await _context.UserSettings
+        var existingSetting = await context.UserSettings
             .Where(setting => setting.UserSettingTypeId == newSettingDto.UserSettingTypeId && setting.UserId == userId)
             .SingleOrDefaultAsync();
 
@@ -129,24 +118,24 @@ public class UserSettingsController : ControllerBase
             return BadRequest("UserSetting for this SettingTypeId already exists.");
         }
 
-        var newSetting = _mapper.Map<UserSetting>(newSettingDto);
+        var newSetting = mapper.Map<UserSetting>(newSettingDto);
 
         newSetting.UserId = userId.Value;
         newSetting.CreatedById = userId.Value;
         newSetting.UpdatedById = userId.Value;
 
 
-        _context.UserSettings.Add(newSetting);
-        await _context.SaveChangesAsync();
+        context.UserSettings.Add(newSetting);
+        await context.SaveChangesAsync();
 
         // As with the update path: a newly-set price or rate changes every cached cost.
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return _mapper.Map<UserSettingDto>(newSetting);
+        return mapper.Map<UserSettingDto>(newSetting);
     }
 
     private bool UserSettingExists(long id)
     {
-        return _context.UserSettings.Any(e => e.Id == id);
+        return context.UserSettings.Any(e => e.Id == id);
     }
 }
