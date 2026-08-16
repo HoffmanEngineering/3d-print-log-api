@@ -5,23 +5,14 @@ using PrintLogApi.Models.DTOs.Comments;
 
 namespace PrintLogApi.Services;
 
-public class CommentService : ICommentService
+public class CommentService(PrintLogContext context, IMapper mapper) : ICommentService
 {
-    private PrintLogContext _context;
-    private IMapper _mapper;
-
-    public CommentService(PrintLogContext context, IMapper mapper)
-    {
-        _context = context;
-        _mapper = mapper;
-    }
-
     public async Task<CommentDetailDto?> GetCommentDetailById(long id)
     {
-        return await _context.Comments
+        return await context.Comments
                         .Where(c => c.Id == id)
                         .AsNoTracking()
-                        .ProjectTo<CommentDetailDto>(_mapper.ConfigurationProvider)
+                        .ProjectTo<CommentDetailDto>(mapper.ConfigurationProvider)
                         .SingleOrDefaultAsync();
     }
 
@@ -32,7 +23,7 @@ public class CommentService : ICommentService
     /// <returns></returns>
     public async Task DeleteCommentById(long id)
     {
-        var comment = await _context.Comments
+        var comment = await context.Comments
                         .Where(c => c.Id == id)
                         .SingleOrDefaultAsync();
         if (comment is null)
@@ -41,23 +32,23 @@ public class CommentService : ICommentService
         }
 
         // Find related links:
-        var printComments = await _context.PrintComments
+        var printComments = await context.PrintComments
                                 .Where(pc => pc.CommentId == id)
                                 .ToListAsync();
 
         if (printComments.Any())
         {
-            _context.PrintComments.RemoveRange(printComments);
+            context.PrintComments.RemoveRange(printComments);
         }
 
         // Remove Notifications referencing this comment.
-        var notifications = await _context.Notifications
+        var notifications = await context.Notifications
             .Where(n => n.CommentId == id)
             .ToListAsync();
-        _context.Notifications.RemoveRange(notifications);
+        context.Notifications.RemoveRange(notifications);
 
-        _context.Comments.Remove(comment);
-        await _context.SaveChangesAsync();
+        context.Comments.Remove(comment);
+        await context.SaveChangesAsync();
 
     }
 }

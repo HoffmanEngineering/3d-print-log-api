@@ -5,17 +5,8 @@ using PrintLogApi.Users;
 
 namespace PrintLogApi.Authentication;
 
-public sealed class ClaimsTransformer : IClaimsTransformation
+public sealed class ClaimsTransformer(IUserService userService, IMemoryCache cache) : IClaimsTransformation
 {
-    private readonly IUserService userService;
-    private readonly IMemoryCache cache;
-
-    public ClaimsTransformer(IUserService userService, IMemoryCache cache)
-    {
-        this.userService = userService;
-        this.cache = cache;
-    }
-
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
     {
         // A principal reaching claims transformation always carries an identity. Casting a

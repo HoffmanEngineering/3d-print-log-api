@@ -21,32 +21,14 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class MoonrakerController : ControllerBase
+public class MoonrakerController(
+    PrintLogContext context,
+    TelemetryClient telemetry,
+    ILogger<MoonrakerController> logger,
+    IPrintService printService,
+    INotificationService notificationService,
+    ICacheVersionService cacheVersionService) : ControllerBase
 {
-
-    private readonly PrintLogContext _context;
-
-    private readonly TelemetryClient _telemetry;
-    private readonly ILogger _logger;
-    private readonly IPrintService _printService;
-    private readonly INotificationService _notificationService;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public MoonrakerController(PrintLogContext context,
-                               TelemetryClient telemetry,
-                               ILogger<MoonrakerController> logger,
-                               IPrintService printService,
-                               INotificationService notificationService,
-                               ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _telemetry = telemetry;
-        _logger = logger;
-        _printService = printService;
-        _notificationService = notificationService;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>
     /// Webhook endpoint for the Moonraker. Takes in webhook data and uses that to create or 
     /// update prints based on the statuses sent by Moonraker. See https://www.3dprintlog.com/docs/klipper Moonraker 
@@ -65,7 +47,7 @@ public class MoonrakerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> Webhook()
     {
-        _logger.LogInformation("Webhook Recieved:");
+        logger.LogInformation("Webhook Recieved:");
 
         var userId = User.GetUserId();
 
@@ -98,30 +80,30 @@ public class MoonrakerController : ControllerBase
             switch (dto.EventName)
             {
                 case "started":
-                    _telemetry.TrackEvent("Moonraker_Webhook_Started");
+                    telemetry.TrackEvent("Moonraker_Webhook_Started");
                     await HandlePrintStarted(dto, userId.Value);
                     break;
                 case "cancelled":
-                    _telemetry.TrackEvent("Moonraker_Webhook_Cancelled");
+                    telemetry.TrackEvent("Moonraker_Webhook_Cancelled");
                     await HandlePrintFailed(dto, userId.Value);
                     break;
                 case "error":
-                    _telemetry.TrackEvent("Moonraker_Webhook_Error");
+                    telemetry.TrackEvent("Moonraker_Webhook_Error");
                     await HandlePrintFailed(dto, userId.Value);
                     break;
                 case "complete":
-                    _telemetry.TrackEvent("Moonraker_Webhook_Completed");
+                    telemetry.TrackEvent("Moonraker_Webhook_Completed");
                     await HandlePrintCompleted(dto, userId.Value);
                     break;
                 default:
                     var properties = new Dictionary<string, string> { { "event", dto.EventName! } };
-                    _telemetry.TrackEvent("Moonraker_Webhook_Unhandled", properties);
+                    telemetry.TrackEvent("Moonraker_Webhook_Unhandled", properties);
                     break;
             }
         }
         catch (Exception)
         {
-            _logger.LogError("An error occurred in the Moonraker Webhook", dto);
+            logger.LogError("An error occurred in the Moonraker Webhook", dto);
             throw;
         }
 
@@ -155,7 +137,7 @@ public class MoonrakerController : ControllerBase
         if (data.PrinterId > 0)
         {
             // Check the Printer to make sure the user has access to it.
-            var printer = await _context.Printers
+            var printer = await context.Printers
                 .Where(p => p.Id == data.PrinterId)
                 .Include(p => p.LoadedFilaments)
                 .FirstOrDefaultAsync();
@@ -179,7 +161,7 @@ public class MoonrakerController : ControllerBase
         {
             // Determine the Allow Comments settings
             var lastSelectedAllowCommentsUserSettingTypeId = 3;
-            var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
+            var setting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
             var lastSelectedAllowCommentsValue = setting?.Value ?? "false";
 
             if (bool.TryParse(lastSelectedAllowCommentsValue, out var allowComments))
@@ -201,7 +183,7 @@ public class MoonrakerController : ControllerBase
         {
             // Determine the last view status
             var defaultViewStatus = 1;
-            var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
+            var defaultPrintViewStatusSetting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
             // Null-forgiven deliberately: a user with no saved default has no row here, and
             // the resulting throw is what the catch below turns into the Private fallback.
             // The catch is load-bearing control flow, not defensive padding.
@@ -239,20 +221,20 @@ public class MoonrakerController : ControllerBase
             Notes = "Added by Moonraker"
         });
 
-        await _printService.UpdateFilamentUsageWeights(newPrint);
+        await printService.UpdateFilamentUsageWeights(newPrint);
 
 
         newPrint.StartDate = DateTimeOffset.UtcNow;
 
 
-        _ = _context.Prints.Add(newPrint);
+        _ = context.Prints.Add(newPrint);
 
-        _ = await _context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Webhooks are how most prints get created for automated setups. Saving straight
         // through the context skips the invalidation the controllers do, so the cached
         // print summary and analytics aggregates would keep serving pre-print figures.
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
     }
 
 
@@ -270,7 +252,7 @@ public class MoonrakerController : ControllerBase
         if (filename is not null)
         {
 
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -287,13 +269,13 @@ public class MoonrakerController : ControllerBase
         else
         {
             // We have no other way of coorlating files other than filehash or name, so...
-            _logger.LogWarning("Not enough information from moonraker to find matching print.", data);
+            logger.LogWarning("Not enough information from moonraker to find matching print.", data);
             return;
         }
 
         if (print == null)
         {
-            _logger.LogWarning("Matching print was not found.", data);
+            logger.LogWarning("Matching print was not found.", data);
             return;
         }
 
@@ -304,7 +286,7 @@ public class MoonrakerController : ControllerBase
         var failedDuration = (int)Math.Round(data?.PrintDuration ?? 0.0);
         print.PrintTimeInSeconds = failedDuration > 0 ? failedDuration : (int?)null;
         print.UpdatedById = userId;
-        _context.Entry(print).State = EntityState.Modified;
+        context.Entry(print).State = EntityState.Modified;
 
 
         var printersLoadedFilament = print.Printer.LoadedFilaments ?? new List<PrinterFilament>();
@@ -336,14 +318,14 @@ public class MoonrakerController : ControllerBase
                 });
             }
 
-            await _printService.UpdateFilamentUsageWeights(print);
+            await printService.UpdateFilamentUsageWeights(print);
         }
 
-        _ = await _context.SaveChangesAsync();
-        _cacheVersionService.InvalidateUserCache(userId);
+        _ = await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
 
         // Send notification for print failure
-        await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
+        await notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
 
     }
 
@@ -356,7 +338,7 @@ public class MoonrakerController : ControllerBase
         // Find a print thats Printing with that same filename and printer
         if (filename is not null)
         {
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -373,13 +355,13 @@ public class MoonrakerController : ControllerBase
         else
         {
             // We have no other way of correlating files other than filename, so...
-            _logger.LogWarning("Not enough information from moonraker to find matching print.", data);
+            logger.LogWarning("Not enough information from moonraker to find matching print.", data);
             return;
         }
 
         if (print == null)
         {
-            _logger.LogWarning("Matching print was not found.", data);
+            logger.LogWarning("Matching print was not found.", data);
             return;
         }
 
@@ -389,7 +371,7 @@ public class MoonrakerController : ControllerBase
         var totalDuration = (int)Math.Round(data?.TotalDuration ?? 0.0);
         print.PrintTimeInSeconds = totalDuration > 0 ? totalDuration : (int?)null;
         print.UpdatedById = userId;
-        _context.Entry(print).State = EntityState.Modified;
+        context.Entry(print).State = EntityState.Modified;
 
         var printersLoadedFilament = print.Printer.LoadedFilaments ?? new List<PrinterFilament>();
 
@@ -416,14 +398,14 @@ public class MoonrakerController : ControllerBase
                 });
             }
 
-            await _printService.UpdateFilamentUsageWeights(print);
+            await printService.UpdateFilamentUsageWeights(print);
         }
 
-        _ = await _context.SaveChangesAsync();
-        _cacheVersionService.InvalidateUserCache(userId);
+        _ = await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
 
         // Send notification for print completion
-        await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
+        await notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
 
     }
 

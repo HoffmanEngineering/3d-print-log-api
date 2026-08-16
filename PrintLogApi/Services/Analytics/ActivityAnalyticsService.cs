@@ -10,14 +10,10 @@ namespace PrintLogApi.Services.Analytics;
 /// five widgets that must agree, so they are derived from one set of rows rather than five
 /// queries that can drift.
 /// </summary>
-public sealed class ActivityAnalyticsService : IActivityAnalyticsService
+public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivityAnalyticsService
 {
     /// <summary>53 weeks. Beyond this a calendar heatmap is unreadable, not merely large.</summary>
     public const int MaxCalendarDays = 371;
-
-    private readonly PrintLogContext _context;
-
-    public ActivityAnalyticsService(PrintLogContext context) => _context = context;
 
     private sealed record ActivityRow(DateTimeOffset StartDate, int DurationSeconds, int Count, long MaterialMg);
 
@@ -28,7 +24,7 @@ public sealed class ActivityAnalyticsService : IActivityAnalyticsService
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+            context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
         var coverage = new CoverageBuilder("prints");
         var dated = scoped.Where(p => p.StartDate != null);
@@ -183,7 +179,7 @@ public sealed class ActivityAnalyticsService : IActivityAnalyticsService
         long userId, IQueryable<Print> scoped, IReadOnlyList<TimeBucket> buckets,
         CoverageBuilder coverage, CancellationToken ct)
     {
-        var projection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
+        var projection = await AnalyticsCostProjection.Project(context, userId, scoped, ct);
         if (projection.RowCapExceeded)
         {
             coverage.Exclude(ExclusionReason.RowCapExceeded, projection.PrintCount);

@@ -5,23 +5,16 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.Users;
 
-public class UserService : IUserService
+public class UserService(PrintLogContext context) : IUserService
 {
-    private readonly PrintLogContext _context;
-
-    public UserService(PrintLogContext context)
-    {
-        _context = context;
-    }
-
     public User? GetLocalUserByAuthUserId(string authUserId)
     {
-        return _context.Users.Where(u => u.OAuthUserId == authUserId).FirstOrDefault();
+        return context.Users.Where(u => u.OAuthUserId == authUserId).FirstOrDefault();
     }
 
     public async Task<long> GetLocalUserIdByAuthUserId(string authUserId)
     {
-        return await _context.Users.Where(u => u.OAuthUserId == authUserId).Select(u => u.Id).FirstOrDefaultAsync();
+        return await context.Users.Where(u => u.OAuthUserId == authUserId).Select(u => u.Id).FirstOrDefaultAsync();
     }
 
     /// <summary>
@@ -31,7 +24,7 @@ public class UserService : IUserService
     /// <returns></returns>
     public async Task MarkUserAsDeactivated(long userId)
     {
-        var user = await _context.Users.Where(u => u.Id == userId).SingleOrDefaultAsync();
+        var user = await context.Users.Where(u => u.Id == userId).SingleOrDefaultAsync();
         if (user is null)
         {
             throw new DoesNotExistException();
@@ -45,8 +38,8 @@ public class UserService : IUserService
 
         user.DeactivationDateTime = DateTimeOffset.Now;
 
-        _context.Entry(user).State = EntityState.Modified;
-        await _context.SaveChangesAsync();
+        context.Entry(user).State = EntityState.Modified;
+        await context.SaveChangesAsync();
     }
 
     /// <summary>
@@ -56,7 +49,7 @@ public class UserService : IUserService
     /// <returns></returns>
     public async Task ReactivateUser(long userId)
     {
-        var user = await _context.Users.Where(u => u.Id == userId).SingleOrDefaultAsync();
+        var user = await context.Users.Where(u => u.Id == userId).SingleOrDefaultAsync();
         if (user is null)
         {
             throw new DoesNotExistException();
@@ -64,8 +57,8 @@ public class UserService : IUserService
 
         user.DeactivationDateTime = null;
 
-        _context.Entry(user).State = EntityState.Modified;
-        await _context.SaveChangesAsync();
+        context.Entry(user).State = EntityState.Modified;
+        await context.SaveChangesAsync();
     }
 
     public async Task<User> CreateUserFromAuthId(string authUserId)
@@ -76,11 +69,11 @@ public class UserService : IUserService
             ViewStatus = User.ProfileViewStatus.Public
         };
 
-        _context.Users.Add(newUser);
+        context.Users.Add(newUser);
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateException dbUpdateEx)
         {

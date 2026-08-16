@@ -14,7 +14,7 @@ namespace PrintLogApi.Services.Analytics;
 /// It is reported in coverage rather than silently absorbed into a bucket it does not
 /// belong to.
 /// </summary>
-public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
+public sealed class MaterialAnalyticsService(PrintLogContext context) : IMaterialAnalyticsService
 {
     public const int MaxGroups = 15;
     public const int MaxSpools = 25;
@@ -26,10 +26,6 @@ public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
 
     /// <summary>Neutral grey, used when a spool records no colour at all (spec §10).</summary>
     public const string UnknownSwatchColor = "#9e9e9e";
-
-    private readonly PrintLogContext _context;
-
-    public MaterialAnalyticsService(PrintLogContext context) => _context = context;
 
     /// <summary>
     /// The four numbers this tab needs about one filtered print set. Named rather than
@@ -108,7 +104,7 @@ public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+            context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
         var stats = await StatsQuery(scoped).FirstOrDefaultAsync(ct) ?? MaterialScopeStats.Empty;
 
@@ -121,7 +117,7 @@ public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
         // Loaded once here and threaded through: Waste's projection needs the same settings,
         // and reading them twice is both an extra round-trip and a chance for one response to
         // price two things off two different reads of the same rate.
-        var costInputs = await AnalyticsCostProjection.LoadInputs(_context, userId, ct);
+        var costInputs = await AnalyticsCostProjection.LoadInputs(context, userId, ct);
 
         if (stats.UsageRows > AnalyticsService.MaxSeriesRows)
         {
@@ -327,7 +323,7 @@ public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
 
         var ids = usedByFilament.Keys.ToList();
 
-        var spools = await _context.Filaments.AsNoTracking()
+        var spools = await context.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == userId && ids.Contains(f.Id))
             .Select(f => new
             {
@@ -457,7 +453,7 @@ public sealed class MaterialAnalyticsService : IMaterialAnalyticsService
         // nothing on the tile to say why.
         var costCoverage = new CoverageBuilder("prints") { Total = wastedCount };
 
-        var projection = await AnalyticsCostProjection.Project(_context, userId, wasted, ct, inputs);
+        var projection = await AnalyticsCostProjection.Project(context, userId, wasted, ct, inputs);
         decimal? cost = null;
         if (projection.RowCapExceeded)
         {

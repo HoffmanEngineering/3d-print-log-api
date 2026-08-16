@@ -12,39 +12,29 @@ using PrintLogApi.Models.DTOs.UserApiKeys;
 
 namespace PrintLogApi.Services;
 
-public class UserApiKeyService : IUserApiKeyService
+public class UserApiKeyService(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    INotificationService notificationService,
+    IMemoryCache cache) : IUserApiKeyService
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly INotificationService _notificationService;
-    private readonly IMemoryCache _cache;
-
     private static string UserIdCacheKey(string hashedKey) => $"apikey_userid:{hashedKey}";
     private static string LastUsedThrottleKey(string hashedKey) => $"apikey_lastused:{hashedKey}";
 
-    public UserApiKeyService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, INotificationService notificationService, IMemoryCache cache)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _notificationService = notificationService;
-        _cache = cache;
-    }
-
     public async Task<List<UserApiKeyDto>> GetApiKeySummaryForUser(long userId)
     {
-        return await _context.UserApiKeys
+        return await context.UserApiKeys
             .Where(u => u.UserId == userId && u.IsDeleted == false)
             .OrderByDescending(u => u.CreatedDate)
-            .ProjectTo<UserApiKeyDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserApiKeyDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .ToListAsync();
     }
 
     public async Task DeactivateApiKey(Guid keyId, long userId)
     {
-        var existingKey = await _context.UserApiKeys.FindAsync(keyId);
+        var existingKey = await context.UserApiKeys.FindAsync(keyId);
 
         if (existingKey == null || existingKey.IsDeleted)
         {
@@ -58,12 +48,12 @@ public class UserApiKeyService : IUserApiKeyService
 
         existingKey.IsDeleted = true;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _cache.Remove(UserIdCacheKey(existingKey.HashedKey));
-        _cache.Remove(LastUsedThrottleKey(existingKey.HashedKey));
+        cache.Remove(UserIdCacheKey(existingKey.HashedKey));
+        cache.Remove(LastUsedThrottleKey(existingKey.HashedKey));
 
-        await _notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
+        await notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
     }
 
     public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string? description)
@@ -83,8 +73,8 @@ public class UserApiKeyService : IUserApiKeyService
             IsDeleted = false,
         };
 
-        _context.UserApiKeys.Add(entity);
-        await _context.SaveChangesAsync();
+        context.UserApiKeys.Add(entity);
+        await context.SaveChangesAsync();
 
         var response = new NewUserApiKeyDto()
         {
@@ -94,9 +84,9 @@ public class UserApiKeyService : IUserApiKeyService
             PublicKey = publicKey
         };
 
-        _telemetry.TrackEvent("NewApiKeyGenerated");
+        telemetry.TrackEvent("NewApiKeyGenerated");
 
-        await _notificationService.CreateApiKeyCreatedNotification(userId, description);
+        await notificationService.CreateApiKeyCreatedNotification(userId, description);
 
         return response;
     }
@@ -105,10 +95,10 @@ public class UserApiKeyService : IUserApiKeyService
     {
         var hashedKey = GetSHA256Hash(publicKey);
 
-        if (_cache.TryGetValue(UserIdCacheKey(hashedKey), out long cachedUserId))
+        if (cache.TryGetValue(UserIdCacheKey(hashedKey), out long cachedUserId))
             return cachedUserId;
 
-        var userId = await _context.UserApiKeys
+        var userId = await context.UserApiKeys
             .Where(u => u.HashedKey == hashedKey && u.IsDeleted == false)
             .Select(u => u.UserId)
             .SingleOrDefaultAsync();
@@ -116,7 +106,7 @@ public class UserApiKeyService : IUserApiKeyService
         if (userId == default)
             throw new ApiKeyIsNotValidException();
 
-        _cache.Set(UserIdCacheKey(hashedKey), userId, new MemoryCacheEntryOptions()
+        cache.Set(UserIdCacheKey(hashedKey), userId, new MemoryCacheEntryOptions()
             .SetSize(1)
             .SetSlidingExpiration(TimeSpan.FromHours(24))
             .SetAbsoluteExpiration(TimeSpan.FromDays(7)));
@@ -128,7 +118,7 @@ public class UserApiKeyService : IUserApiKeyService
     {
         var hashedKey = GetSHA256Hash(publicKey);
 
-        if (_cache.TryGetValue(LastUsedThrottleKey(hashedKey), out _))
+        if (cache.TryGetValue(LastUsedThrottleKey(hashedKey), out _))
             return;
 
         // ExecuteUpdateAsync issues a single UPDATE and skips loading and tracking the entity
@@ -136,7 +126,7 @@ public class UserApiKeyService : IUserApiKeyService
         // to stamp one column. Matches NotificationService and UserDeletionService, which
         // already use it. A row count of zero means no live key matched, which is the same
         // condition the previous null check caught.
-        var rowsUpdated = await _context.UserApiKeys
+        var rowsUpdated = await context.UserApiKeys
             .Where(u => u.HashedKey == hashedKey && u.IsDeleted == false)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(u => u.LastUsed, DateTimeOffset.UtcNow));
@@ -144,7 +134,7 @@ public class UserApiKeyService : IUserApiKeyService
         if (rowsUpdated == 0)
             throw new ApiKeyIsNotValidException();
 
-        _cache.Set(LastUsedThrottleKey(hashedKey), true, new MemoryCacheEntryOptions()
+        cache.Set(LastUsedThrottleKey(hashedKey), true, new MemoryCacheEntryOptions()
             .SetSize(1)
             .SetAbsoluteExpiration(TimeSpan.FromHours(1)));
     }

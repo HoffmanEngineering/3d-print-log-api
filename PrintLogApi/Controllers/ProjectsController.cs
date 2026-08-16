@@ -12,22 +12,11 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class ProjectsController : ControllerBase
+public class ProjectsController(
+    IProjectService projectService,
+    IMapper mapper,
+    ICacheVersionService cacheVersionService) : ControllerBase
 {
-    private readonly IProjectService _projectService;
-    private readonly IMapper _mapper;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public ProjectsController(
-        IProjectService projectService,
-        IMapper mapper,
-        ICacheVersionService cacheVersionService)
-    {
-        _projectService = projectService;
-        _mapper = mapper;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>Get a paged list of the current user's projects.</summary>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -43,7 +32,7 @@ public class ProjectsController : ControllerBase
         if (!userId.HasValue)
             return Unauthorized();
 
-        var result = await _projectService.GetProjectSummariesAsync(pageNumber, pageSize, userId.Value, search, status, sortBy);
+        var result = await projectService.GetProjectSummariesAsync(pageNumber, pageSize, userId.Value, search, status, sortBy);
         return Ok(result);
     }
 
@@ -55,7 +44,7 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProjectDetailDto>> GetProjectById(Guid id)
     {
-        var project = await _projectService.GetProjectByIdAsync(id);
+        var project = await projectService.GetProjectByIdAsync(id);
         if (project == null)
             return NotFound();
 
@@ -65,7 +54,7 @@ public class ProjectsController : ControllerBase
         if (project.ViewStatus == Project.ProjectViewStatus.Private && !isOwner)
             return Forbid();
 
-        return Ok(_mapper.Map<ProjectDetailDto>(project));
+        return Ok(mapper.Map<ProjectDetailDto>(project));
     }
 
     /// <summary>Create a new project.</summary>
@@ -78,11 +67,11 @@ public class ProjectsController : ControllerBase
         if (!userId.HasValue)
             return Unauthorized();
 
-        var project = await _projectService.CreateProjectAsync(dto, userId.Value);
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        var project = await projectService.CreateProjectAsync(dto, userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
         return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
-            _mapper.Map<ProjectDetailDto>(project));
+            mapper.Map<ProjectDetailDto>(project));
     }
 
     /// <summary>Update a project's metadata.</summary>
@@ -95,7 +84,7 @@ public class ProjectsController : ControllerBase
         if (id != dto.Id)
             return BadRequest("ID in route does not match body.");
 
-        var existing = await _projectService.GetProjectByIdAsync(id);
+        var existing = await projectService.GetProjectByIdAsync(id);
         if (existing == null)
             return NotFound();
 
@@ -106,10 +95,10 @@ public class ProjectsController : ControllerBase
         if (existing.CreatedById != userId.Value)
             return Forbid();
 
-        var updated = await _projectService.UpdateProjectAsync(id, dto, userId.Value);
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return Ok(_mapper.Map<ProjectDetailDto>(updated));
+        return Ok(mapper.Map<ProjectDetailDto>(updated));
     }
 
     /// <summary>
@@ -122,7 +111,7 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> DeleteProject(Guid id, [FromQuery] bool deletePrints = false)
     {
-        var existing = await _projectService.GetProjectByIdAsync(id);
+        var existing = await projectService.GetProjectByIdAsync(id);
         if (existing == null)
             return NotFound();
 
@@ -135,8 +124,8 @@ public class ProjectsController : ControllerBase
 
         try
         {
-            await _projectService.DeleteProjectAsync(id, deletePrints, userId.Value);
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            await projectService.DeleteProjectAsync(id, deletePrints, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
             return Ok();
         }
         catch (DoesNotExistException)
@@ -155,7 +144,7 @@ public class ProjectsController : ControllerBase
     public async Task<IActionResult> GetProjectImage(Guid id, int imageId)
     {
         var userId = User.GetUserId();
-        var result = await _projectService.GetImageAsync(id, imageId, userId);
+        var result = await projectService.GetImageAsync(id, imageId, userId);
         if (result == null) return NotFound();
 
         new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
@@ -175,7 +164,7 @@ public class ProjectsController : ControllerBase
         var userId = User.GetUserId();
         if (!userId.HasValue) return Unauthorized();
 
-        var project = await _projectService.GetProjectByIdAsync(id);
+        var project = await projectService.GetProjectByIdAsync(id);
         if (project == null) return NotFound();
         if (project.CreatedById != userId.Value) return Forbid();
 
@@ -192,9 +181,9 @@ public class ProjectsController : ControllerBase
 
         try
         {
-            var image = await _projectService.AddImageAsync(id, file, userId.Value);
-            _cacheVersionService.InvalidateUserCache(userId.Value);
-            return CreatedAtAction(nameof(GetProjectImage), new { id, imageId = image.Id }, _mapper.Map<ProjectImageDto>(image));
+            var image = await projectService.AddImageAsync(id, file, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            return CreatedAtAction(nameof(GetProjectImage), new { id, imageId = image.Id }, mapper.Map<ProjectImageDto>(image));
         }
         catch (DoesNotExistException)
         {
@@ -213,14 +202,14 @@ public class ProjectsController : ControllerBase
         var userId = User.GetUserId();
         if (!userId.HasValue) return Unauthorized();
 
-        var project = await _projectService.GetProjectByIdAsync(id);
+        var project = await projectService.GetProjectByIdAsync(id);
         if (project == null) return NotFound();
         if (project.CreatedById != userId.Value) return Forbid();
 
         try
         {
-            await _projectService.DeleteImageAsync(id, imageId, userId.Value);
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            await projectService.DeleteImageAsync(id, imageId, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
             return Ok();
         }
         catch (DoesNotExistException) { return NotFound(); }
@@ -237,12 +226,12 @@ public class ProjectsController : ControllerBase
         var userId = User.GetUserId();
         if (!userId.HasValue) return Unauthorized();
 
-        var project = await _projectService.GetProjectByIdAsync(id);
+        var project = await projectService.GetProjectByIdAsync(id);
         if (project == null) return NotFound();
         if (project.CreatedById != userId.Value) return Forbid();
 
-        await _projectService.ReorderImagesAsync(id, orderedImageIds, userId.Value);
-        _cacheVersionService.InvalidateUserCache(userId.Value);
+        await projectService.ReorderImagesAsync(id, orderedImageIds, userId.Value);
+        cacheVersionService.InvalidateUserCache(userId.Value);
         return Ok();
     }
 
@@ -257,14 +246,14 @@ public class ProjectsController : ControllerBase
         var userId = User.GetUserId();
         if (!userId.HasValue) return Unauthorized();
 
-        var project = await _projectService.GetProjectByIdAsync(id);
+        var project = await projectService.GetProjectByIdAsync(id);
         if (project == null) return NotFound();
         if (project.CreatedById != userId.Value) return Forbid();
 
         try
         {
-            await _projectService.SetDefaultImageAsync(id, imageId, userId.Value);
-            _cacheVersionService.InvalidateUserCache(userId.Value);
+            await projectService.SetDefaultImageAsync(id, imageId, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
             return Ok();
         }
         catch (DoesNotExistException) { return NotFound(); }

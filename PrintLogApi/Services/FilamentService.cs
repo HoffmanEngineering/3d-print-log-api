@@ -12,25 +12,16 @@ using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services;
 
-public class FilamentService : IFilamentService
+public class FilamentService(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    ICacheVersionService cacheVersionService) : IFilamentService
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public FilamentService(PrintLogContext context, IMapper mapper, TelemetryClient telemetry, ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _cacheVersionService = cacheVersionService;
-    }
-
     private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
         long userId, string? material, string? color, bool includeInactive)
     {
-        var query = _context.Filaments.AsNoTracking().Where(f => f.CreatedById == userId);
+        var query = context.Filaments.AsNoTracking().Where(f => f.CreatedById == userId);
 
         if (!includeInactive)
         {
@@ -52,7 +43,7 @@ public class FilamentService : IFilamentService
             query = query.Where(McpTextMatch.ColorMatches(color));
         }
 
-        return query.ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider);
+        return query.ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider);
     }
 
     public async Task<McpPage<MaterialInventoryItem>> GetMaterialInventoryForMcp(
@@ -95,9 +86,9 @@ public class FilamentService : IFilamentService
 
     public async Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
     {
-        var remainingMg = await _context.Filaments.AsNoTracking()
+        var remainingMg = await context.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == userId && f.Id == materialId)
-            .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider)
             .Select(f => f.FilamentRemaining)
             .FirstOrDefaultAsync(ct);
         return McpUnits.MgToGrams(remainingMg);
@@ -105,7 +96,7 @@ public class FilamentService : IFilamentService
 
     public async Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct)
     {
-        var material = await _context.Filaments.AsNoTracking()
+        var material = await context.Filaments.AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
         {
@@ -159,14 +150,14 @@ public class FilamentService : IFilamentService
     /// </summary>
     private async Task<MaterialCategory> RequireCategory(string? nickname, double? diameterMm, CancellationToken ct)
     {
-        var category = await _context.MaterialCategories
+        var category = await context.MaterialCategories
             .FirstOrDefaultAsync(c => c.Nickname == nickname, ct);
         if (category == null)
         {
             // Name the valid options: nothing lists material categories, so a bare rejection
             // leaves an agent guessing. They are a small fixed seed shared by every user, so the
             // extra query costs nothing on the happy path and only runs when already failing.
-            var known = await _context.MaterialCategories
+            var known = await context.MaterialCategories
                 .Select(c => c.Nickname).OrderBy(n => n).ToListAsync(ct);
             throw McpToolException.InvalidArguments(
                 $"Unknown material category '{nickname}'. Valid categories: {string.Join(", ", known)}.");
@@ -377,7 +368,7 @@ public class FilamentService : IFilamentService
                 // winner's result. If there is NO such record the failure was something else
                 // entirely (a column overflow, a constraint we don't know about) — rethrow it
                 // rather than reporting every write failure as an idempotency problem.
-                _context.ChangeTracker.Clear();
+                context.ChangeTracker.Clear();
                 var concurrent = await FindIdempotentMaterial(userId, toolName, idempotencyKey, fingerprint, ct);
                 if (concurrent != null)
                 {
@@ -387,7 +378,7 @@ public class FilamentService : IFilamentService
             }
         }
 
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
         var remaining = await GetRemainingGramsForMcp(userId, created.Id, ct);
         return new CreateMaterialResult(ToMaterialDetail(created, remaining), WasReplayed: false);
     }
@@ -402,16 +393,16 @@ public class FilamentService : IFilamentService
     {
         // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they
         // run inside an execution strategy, so the whole tx is the retriable unit.
-        var strategy = _context.Database.CreateExecutionStrategy();
+        var strategy = context.Database.CreateExecutionStrategy();
         Filament? created = null;
         await strategy.ExecuteAsync(async () =>
         {
-            using var tx = await _context.Database.BeginTransactionAsync(ct);
+            using var tx = await context.Database.BeginTransactionAsync(ct);
             created = await AddFilament(dto, userId);
 
-            _context.McpIdempotencyRecords.Add(
+            context.McpIdempotencyRecords.Add(
                 McpIdempotencyRecordFactory.ForMaterial(userId, key, fingerprint, created.Id));
-            await _context.SaveChangesAsync(ct);
+            await context.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         });
         // Null-forgiven: ExecuteAsync runs the delegate synchronously with respect to this
@@ -422,7 +413,7 @@ public class FilamentService : IFilamentService
     private async Task<CreateMaterialResult?> FindIdempotentMaterial(
         long userId, string toolName, string key, string? fingerprint, CancellationToken ct)
     {
-        var record = await _context.McpIdempotencyRecords.AsNoTracking()
+        var record = await context.McpIdempotencyRecords.AsNoTracking()
             .FirstOrDefaultAsync(r => r.UserId == userId && r.ToolName == toolName && r.IdempotencyKey == key, ct);
         if (record == null)
         {
@@ -439,7 +430,7 @@ public class FilamentService : IFilamentService
 
         var materialId = record.CreatedFilamentId;
         var material = materialId.HasValue
-            ? await _context.Filaments.AsNoTracking()
+            ? await context.Filaments.AsNoTracking()
                 .FirstOrDefaultAsync(f => f.Id == materialId.Value && f.CreatedById == userId, ct)
             : null;
         if (material == null)
@@ -508,7 +499,7 @@ public class FilamentService : IFilamentService
             throw McpToolException.InvalidArguments("source and initialAmount must be provided together.");
         }
 
-        var material = await _context.Filaments
+        var material = await context.Filaments
             .Include(f => f.MaterialCategory)
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
@@ -526,11 +517,11 @@ public class FilamentService : IFilamentService
             // state that a later SaveChangesAsync on this same context would happily commit.
             // Nothing else saves within an MCP request today — but "rejected edits change
             // nothing" should be a property of the code, not of the current call graph.
-            _context.ChangeTracker.Clear();
+            context.ChangeTracker.Clear();
             throw;
         }
 
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
 
         var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
         return ToMaterialDetail(material, remaining);
@@ -689,7 +680,7 @@ public class FilamentService : IFilamentService
         UpdateFilamentMeasurements(material);
 
         material.UpdatedById = userId;
-        await _context.SaveChangesAsync(ct);
+        await context.SaveChangesAsync(ct);
     }
 
     private static void PatchString(ISet<string> clear, string field, string? value, Action<string?> set)
@@ -773,7 +764,7 @@ public class FilamentService : IFilamentService
             throw McpToolException.InvalidArguments("delta must be non-zero.");
         }
 
-        var material = await _context.Filaments
+        var material = await context.Filaments
             .Include(f => f.MaterialCategory)
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
@@ -825,16 +816,16 @@ public class FilamentService : IFilamentService
             throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.");
         }
 
-        _context.FilamentAdjustments.Add(adjustment);
-        await _context.SaveChangesAsync(ct);
-        _cacheVersionService.InvalidateUserCache(userId);
+        context.FilamentAdjustments.Add(adjustment);
+        await context.SaveChangesAsync(ct);
+        cacheVersionService.InvalidateUserCache(userId);
 
         return new MaterialWriteResult(materialId, beforeGrams, afterGrams);
     }
 
     public async Task<MaterialInventoryItem> SetMaterialActiveForMcp(long userId, Guid materialId, bool isActive, CancellationToken ct)
     {
-        var material = await _context.Filaments
+        var material = await context.Filaments
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
         {
@@ -843,8 +834,8 @@ public class FilamentService : IFilamentService
 
         material.IsActive = isActive;
         material.UpdatedById = userId;
-        await _context.SaveChangesAsync(ct);
-        _cacheVersionService.InvalidateUserCache(userId);
+        await context.SaveChangesAsync(ct);
+        cacheVersionService.InvalidateUserCache(userId);
 
         var remaining = await GetRemainingGramsForMcp(userId, material.Id, ct);
         return new MaterialInventoryItem(
@@ -993,7 +984,7 @@ public class FilamentService : IFilamentService
         List<FilamentFinishType>? finishTypes = null,
         List<FilamentEffect>? effects = null)
     {
-        var filament = _context.Filaments
+        var filament = context.Filaments
             .Include(f => f.MaterialCategory)
             .Where(f => f.CreatedById == userId);
 
@@ -1035,7 +1026,7 @@ public class FilamentService : IFilamentService
         }
 
         var filamentsBase = filament
-            .ProjectTo<FilamentSummaryDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider)
             .AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(searchText))
@@ -1144,7 +1135,7 @@ public class FilamentService : IFilamentService
 
     public async Task<Filament?> GetFilamentById(Guid id)
     {
-        return await _context.Filaments
+        return await context.Filaments
                 .Where(f => f.Id == id)
                 .Include(f => f.FilamentAdjustments)
                 .Include(f => f.PrintFilaments)
@@ -1177,14 +1168,14 @@ public class FilamentService : IFilamentService
             filament.FinishType ??= FilamentFinishType.Standard;
         }
 
-        var newFilament = _mapper.Map<Filament>(filament);
+        var newFilament = mapper.Map<Filament>(filament);
 
-        var materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == newFilament.MaterialCategoryNickname);
+        var materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == newFilament.MaterialCategoryNickname);
 
         if (materialCategory == null)
         {
             // Todo, throw error?
-            materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
+            materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
         }
 
         newFilament.MaterialCategory = materialCategory!;
@@ -1202,12 +1193,12 @@ public class FilamentService : IFilamentService
         newFilament.CreatedById = userId;
         newFilament.UpdatedById = userId;
 
-        _context.Filaments.Add(newFilament);
-        await _context.SaveChangesAsync();
+        context.Filaments.Add(newFilament);
+        await context.SaveChangesAsync();
 
         var filamentId = newFilament.Id;
 
-        _telemetry.TrackEvent("FilamentAdd");
+        telemetry.TrackEvent("FilamentAdd");
 
         // Null-forgiven: the filament was just persisted, so the re-read always finds it.
         return (await GetFilamentById(filamentId))!;
@@ -1363,14 +1354,14 @@ public class FilamentService : IFilamentService
             throw new ArgumentNullException(nameof(id));
         }
 
-        var updatedFilament = _mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
+        var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
 
-        var materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);
+        var materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);
 
         if (materialCategory == null)
         {
             // Todo, throw error?
-            materialCategory = await _context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
+            materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == "filament");
         }
 
         // Null-forgiven: the "filament" fallback lookup above can itself return null if that
@@ -1393,11 +1384,11 @@ public class FilamentService : IFilamentService
         // Set UpdatedByIds
         updatedFilament.UpdatedById = userId;
 
-        _context.Entry(updatedFilament).State = EntityState.Modified;
+        context.Entry(updatedFilament).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1411,14 +1402,14 @@ public class FilamentService : IFilamentService
             }
         }
 
-        _telemetry.TrackEvent("FilamentEdit");
+        telemetry.TrackEvent("FilamentEdit");
 
         return updatedFilament;
     }
 
     public async Task<string[]> GetFilamentStorageLocations(long userId)
     {
-        return await _context.Filaments
+        return await context.Filaments
             .Where(f => f.CreatedById == userId)
             .Where(f => f.StorageLocation != null && f.StorageLocation != "")
             .Select(f => f.StorageLocation!)
@@ -1429,7 +1420,7 @@ public class FilamentService : IFilamentService
 
     public async Task<string[]> GetFilamentPurchaseLocations(long userId)
     {
-        return await _context.Filaments
+        return await context.Filaments
             .Where(f => f.CreatedById == userId)
             .Where(f => f.PurchaseLocation != null && f.PurchaseLocation != "")
             .Select(f => f.PurchaseLocation!)
@@ -1440,7 +1431,7 @@ public class FilamentService : IFilamentService
 
     public async Task<string[]> GetFilamentBrands(long userId)
     {
-        return await _context.Filaments
+        return await context.Filaments
             .Where(f => f.CreatedById == userId)
             .Where(f => f.Brand != null && f.Brand != "")
             .Select(f => f.Brand!)
@@ -1466,7 +1457,7 @@ public class FilamentService : IFilamentService
         var ids = filamentIds.Distinct().ToList();
         if (ids.Count == 0) return true;
 
-        var accessibleCount = await _context.Filaments
+        var accessibleCount = await context.Filaments
             .CountAsync(f => ids.Contains(f.Id) && f.CreatedById == userId);
 
         return accessibleCount == ids.Count;
@@ -1494,20 +1485,20 @@ public class FilamentService : IFilamentService
         // Remove any adjustments
         if (filament.FilamentAdjustments!.Any())
         {
-            _context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments!);
+            context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments!);
         }
 
-        _context.Filaments.Remove(filament);
-        await _context.SaveChangesAsync();
+        context.Filaments.Remove(filament);
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("FilamentDelete");
+        telemetry.TrackEvent("FilamentDelete");
 
         return;
     }
 
     public bool FilamentExists(Guid id)
     {
-        return _context.Filaments.Any(f => f.Id == id);
+        return context.Filaments.Any(f => f.Id == id);
     }
 
 }

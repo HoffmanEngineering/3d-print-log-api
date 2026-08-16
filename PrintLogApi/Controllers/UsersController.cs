@@ -20,40 +20,20 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class UsersController : ControllerBase
+public class UsersController(
+    PrintLogContext context,
+    IUserDeletionService userDeletionService,
+    IUserService userService,
+    IMapper mapper,
+    IAuthorizationService authorizationService,
+    TelemetryClient telemetry,
+    IBlobStorageService blobStorageService,
+    ISubscriptionService subscriptionService) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly IAuthorizationService _authorizationService;
-    private readonly IUserDeletionService _userDeletionService;
-    private readonly TelemetryClient _telemetry;
-    private readonly IUserService _userService;
-    private readonly IBlobStorageService _blobStorageService;
-    private readonly ISubscriptionService _subscriptionService;
-
     private readonly string profileImageContainerName = "userprofile";
 
     private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
-
-    public UsersController(PrintLogContext context,
-                           IUserDeletionService userDeletionService,
-                           IUserService userService,
-                           IMapper mapper,
-                           IAuthorizationService authorizationService,
-                           TelemetryClient telemetry,
-                           IBlobStorageService blobStorageService,
-                           ISubscriptionService subscriptionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _authorizationService = authorizationService;
-        _userDeletionService = userDeletionService;
-        _telemetry = telemetry;
-        _userService = userService;
-        _blobStorageService = blobStorageService;
-        _subscriptionService = subscriptionService;
-    }
 
     /// <summary>
     /// Get the user summary for the specified user id. 
@@ -64,9 +44,9 @@ public class UsersController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
     {
-        var user = await _context.Users
+        var user = await context.Users
             .Where(u => u.Id == id)
-            .ProjectTo<UserSummaryDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserSummaryDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .SingleOrDefaultAsync();
 
@@ -91,9 +71,9 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        var user = await _context.Users
+        var user = await context.Users
             .Where(u => u.Id == userId)
-            .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserDetailDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .SingleAsync();
 
@@ -113,14 +93,14 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        await _userService.MarkUserAsDeactivated(userId.Value);
-        await _subscriptionService.CancelSubscriptionAtPeriodEnd(userId.Value);
+        await userService.MarkUserAsDeactivated(userId.Value);
+        await subscriptionService.CancelSubscriptionAtPeriodEnd(userId.Value);
 
-        _telemetry.TrackEvent("UserDeactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
+        telemetry.TrackEvent("UserDeactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
 
-        var user = await _context.Users
+        var user = await context.Users
             .Where(u => u.Id == userId)
-            .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserDetailDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .SingleAsync();
 
@@ -140,15 +120,15 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        await _userService.ReactivateUser(userId.Value);
-        await _subscriptionService.ResumeSubscription(userId.Value);
+        await userService.ReactivateUser(userId.Value);
+        await subscriptionService.ResumeSubscription(userId.Value);
 
-        _telemetry.TrackEvent("UserReactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
+        telemetry.TrackEvent("UserReactivated", new Dictionary<string, string>() { { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) } });
 
 
-        var user = await _context.Users
+        var user = await context.Users
             .Where(u => u.Id == userId)
-            .ProjectTo<UserDetailDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<UserDetailDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .SingleAsync();
 
@@ -163,7 +143,7 @@ public class UsersController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult> ProcessPendingDeactivations()
     {
-        await _userDeletionService.DeletePendingDeactivatedUsers();
+        await userDeletionService.DeletePendingDeactivatedUsers();
 
         return Ok();
     }
@@ -177,7 +157,7 @@ public class UsersController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<UserDetailDto>> GetUserDetails(long id)
     {
-        var user = await _context.Users
+        var user = await context.Users
         .Where(u => u.Id == id)
         .AsNoTracking()
         .SingleOrDefaultAsync();
@@ -192,7 +172,7 @@ public class UsersController : ControllerBase
             return Forbid();
         }
 
-        return _mapper.Map<UserDetailDto>(user);
+        return mapper.Map<UserDetailDto>(user);
     }
 
     /// <summary>
@@ -209,7 +189,7 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        var existingUser = await _context.Users
+        var existingUser = await context.Users
             .Where(u => u.Id == userId)
             .SingleAsync();
 
@@ -219,13 +199,13 @@ public class UsersController : ControllerBase
         }
 
 
-        existingUser = _mapper.Map(updatedUser, existingUser);
+        existingUser = mapper.Map(updatedUser, existingUser);
 
-        _context.Entry(existingUser).State = EntityState.Modified;
+        context.Entry(existingUser).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -239,7 +219,7 @@ public class UsersController : ControllerBase
             }
         }
 
-        return _mapper.Map<UserDetailDto>(existingUser);
+        return mapper.Map<UserDetailDto>(existingUser);
     }
 
     /// <summary>
@@ -256,7 +236,7 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        var user = await _context.Users.FindAsync(userId);
+        var user = await context.Users.FindAsync(userId);
 
         if (user == null)
         {
@@ -283,7 +263,7 @@ public class UsersController : ControllerBase
 
         using (var uploadFileStream = image.OpenReadStream())
         {
-            var uploadResult = await _blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
+            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
 
             var file = new Models.File()
             {
@@ -293,13 +273,13 @@ public class UsersController : ControllerBase
                 CreatedById = userId.Value,
                 UpdatedById = userId.Value,
             };
-            _context.Files.Add(file);
+            context.Files.Add(file);
 
             user.ProfilePicture = uploadResult.BlobUri.AbsoluteUri;
         }
 
-        await _context.SaveChangesAsync();
-        _telemetry.TrackEvent("UserProfilePictureUploaded");
+        await context.SaveChangesAsync();
+        telemetry.TrackEvent("UserProfilePictureUploaded");
 
         return new UserUrlDto() { Url = user.ProfilePicture };
     }
@@ -318,7 +298,7 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        var user = await _context.Users.FindAsync(userId);
+        var user = await context.Users.FindAsync(userId);
 
         if (user == null)
         {
@@ -345,7 +325,7 @@ public class UsersController : ControllerBase
 
         using (var uploadFileStream = image.OpenReadStream())
         {
-            var uploadResult = await _blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
+            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
 
             var file = new Models.File()
             {
@@ -355,13 +335,13 @@ public class UsersController : ControllerBase
                 CreatedById = userId.Value,
                 UpdatedById = userId.Value,
             };
-            _context.Files.Add(file);
+            context.Files.Add(file);
 
             user.CoverPicture = uploadResult.BlobUri.AbsoluteUri;
         }
 
-        await _context.SaveChangesAsync();
-        _telemetry.TrackEvent("UserCoverPictureUploaded");
+        await context.SaveChangesAsync();
+        telemetry.TrackEvent("UserCoverPictureUploaded");
 
         return new UserUrlDto() { Url = user.CoverPicture };
     }
@@ -379,7 +359,7 @@ public class UsersController : ControllerBase
             return Unauthorized();
         }
 
-        var user = await _context.Users.FindAsync(userId);
+        var user = await context.Users.FindAsync(userId);
 
         if (user == null)
         {
@@ -388,7 +368,7 @@ public class UsersController : ControllerBase
 
         user.CoverPicture = null;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
         return Ok();
     }
@@ -402,8 +382,8 @@ public class UsersController : ControllerBase
     [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
     public async Task<ActionResult<IEnumerable<long>>> GetPublicUserIds()
     {
-        this._telemetry.TrackEvent("PublicUsersQueried");
-        return await this._context.Users.Where(u => u.ViewStatus == Models.User.ProfileViewStatus.Public).Select(u => u.Id).ToListAsync();
+        telemetry.TrackEvent("PublicUsersQueried");
+        return await context.Users.Where(u => u.ViewStatus == Models.User.ProfileViewStatus.Public).Select(u => u.Id).ToListAsync();
     }
 
     /// <summary>
@@ -413,7 +393,7 @@ public class UsersController : ControllerBase
     /// <returns></returns>
     private async Task<bool> CanViewUserProfile(User profileToView)
     {
-        var authorizationResult = await _authorizationService
+        var authorizationResult = await authorizationService
                         .AuthorizeAsync(User, profileToView, "ViewUserProfile");
 
         return authorizationResult.Succeeded;
@@ -422,7 +402,7 @@ public class UsersController : ControllerBase
 
     private bool UserExists(long id)
     {
-        return _context.Users.Any(e => e.Id == id);
+        return context.Users.Any(e => e.Id == id);
     }
 
 }

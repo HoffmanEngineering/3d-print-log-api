@@ -9,24 +9,12 @@ using PrintLogApi.Models.SortEnums;
 
 namespace PrintLogApi.Services;
 
-public class PrinterMaintenanceService : IPrinterMaintenanceService
+public class PrinterMaintenanceService(
+    PrintLogContext context,
+    IMapper mapper,
+    TelemetryClient telemetry,
+    ICacheVersionService cacheVersionService) : IPrinterMaintenanceService
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-    private readonly TelemetryClient _telemetry;
-    private readonly ICacheVersionService _cacheVersionService;
-
-    public PrinterMaintenanceService(PrintLogContext context,
-                        IMapper mapper,
-                        TelemetryClient telemetry,
-                        ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _mapper = mapper;
-        _telemetry = telemetry;
-        _cacheVersionService = cacheVersionService;
-    }
-
     /// <summary>
     /// Maintenance feeds /api/analytics/printers, which caches per-printer maintenance cost
     /// for fifteen minutes. Without this bump, logging a service would leave the tab showing
@@ -38,17 +26,17 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
     /// </summary>
     private async Task InvalidateAnalyticsCache(long printerId)
     {
-        var ownerId = await _context.Printers
+        var ownerId = await context.Printers
             .Where(p => p.Id == printerId)
             .Select(p => (long?)p.UserId)
             .FirstOrDefaultAsync();
 
-        if (ownerId.HasValue) _cacheVersionService.InvalidateUserCache(ownerId.Value);
+        if (ownerId.HasValue) cacheVersionService.InvalidateUserCache(ownerId.Value);
     }
 
     public async Task<List<PrinterMaintenance>> GetEntriesByPrinterId(long printerId)
     {
-        var entry = await this._context.PrinterMaintenance
+        var entry = await context.PrinterMaintenance
             .Include(pm => pm.Printer)
             .Where(pm => pm.PrinterId == printerId)
             .OrderByDescending(pm => pm.Date)
@@ -60,7 +48,7 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
 
     public async Task<PrinterMaintenance?> GetEntryById(Guid id)
     {
-        var entry = await this._context.PrinterMaintenance
+        var entry = await context.PrinterMaintenance
             .Include(pm => pm.Printer)
             .Where(p => p.Id == id)
             .FirstOrDefaultAsync();
@@ -81,12 +69,12 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
         bool? includeDone = true,
         bool? includeNotDone = true)
     {
-        var printerMaintenance = _context.PrinterMaintenance
+        var printerMaintenance = context.PrinterMaintenance
             .Where(f => f.CreatedById == userId);
 
 
         var maintenanceBaseQuery = printerMaintenance
-            .ProjectTo<PrinterMaintenanceDto>(_mapper.ConfigurationProvider)
+            .ProjectTo<PrinterMaintenanceDto>(mapper.ConfigurationProvider)
             .AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(searchText))
@@ -184,9 +172,9 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
 
     public async Task<PrinterMaintenance> AddEntry(AddPrinterMaintenanceDto dto, long userId)
     {
-        var newEntry = _mapper.Map<PrinterMaintenance>(dto);
+        var newEntry = mapper.Map<PrinterMaintenance>(dto);
 
-        var printer = await _context.Printers
+        var printer = await context.Printers
             .Where(p => p.Id == newEntry.PrinterId)
             .FirstOrDefaultAsync();
         newEntry.Printer = printer ?? throw new UserCannotAccessPrinterException();
@@ -201,10 +189,10 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
         newEntry.CreatedById = userId;
         newEntry.UpdatedById = userId;
 
-        _context.PrinterMaintenance.Add(newEntry);
-        await _context.SaveChangesAsync();
+        context.PrinterMaintenance.Add(newEntry);
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("PrinterMaintenanceAdd");
+        telemetry.TrackEvent("PrinterMaintenanceAdd");
         await InvalidateAnalyticsCache(newEntry.PrinterId);
 
         // Null-forgiven: the entry was just persisted, so the re-read always finds it.
@@ -221,9 +209,9 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
             throw new ArgumentNullException(nameof(id));
         }
 
-        var updatedEntry = _mapper.Map<PutPrinterMaintenanceDto, PrinterMaintenance>(dto, existingEntry);
+        var updatedEntry = mapper.Map<PutPrinterMaintenanceDto, PrinterMaintenance>(dto, existingEntry);
 
-        var printer = await _context.Printers.FindAsync(dto.PrinterId);
+        var printer = await context.Printers.FindAsync(dto.PrinterId);
         updatedEntry.Printer = printer!;
 
         // Check if the user had access to that printer!
@@ -238,11 +226,11 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
         updatedEntry.UpdatedById = userId;
 
 
-        _context.Entry(updatedEntry).State = EntityState.Modified;
+        context.Entry(updatedEntry).State = EntityState.Modified;
 
         try
         {
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -256,7 +244,7 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
             }
         }
 
-        _telemetry.TrackEvent("PrinterMaintenanceEdit");
+        telemetry.TrackEvent("PrinterMaintenanceEdit");
         await InvalidateAnalyticsCache(updatedEntry.PrinterId);
 
         // Null-forgiven: the entry was just persisted, so the re-read always finds it.
@@ -266,7 +254,7 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
 
     public async Task<string[]> GetMaintenanceCategories(long userId)
     {
-        return await _context.PrinterMaintenance
+        return await context.PrinterMaintenance
             .Where(f => f.CreatedById == userId)
             .Where(f => f.Category != null && f.Category != "")
             .Select(f => f.Category!)
@@ -277,7 +265,7 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
 
     private bool PrinterMaintenanceEntryExists(Guid id)
     {
-        return _context.PrinterMaintenance.Any(e => e.Id == id);
+        return context.PrinterMaintenance.Any(e => e.Id == id);
     }
 
     public async Task DeleteMaintenanceEntry(PrinterMaintenance entry)
@@ -288,11 +276,11 @@ public class PrinterMaintenanceService : IPrinterMaintenanceService
         // derivable from it.
         var printerId = entry.PrinterId;
 
-        _context.PrinterMaintenance.Remove(entry);
+        context.PrinterMaintenance.Remove(entry);
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
-        _telemetry.TrackEvent("PrinterMaintenanceDelete");
+        telemetry.TrackEvent("PrinterMaintenanceDelete");
         await InvalidateAnalyticsCache(printerId);
     }
 }

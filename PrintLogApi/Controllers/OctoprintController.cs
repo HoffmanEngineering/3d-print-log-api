@@ -17,35 +17,16 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class OctoprintController : ControllerBase
+public class OctoprintController(
+    PrintLogContext context,
+    TelemetryClient telemetry,
+    ILogger<OctoprintController> logger,
+    IPrintService printService,
+    INotificationService notificationService,
+    IBlobStorageService blobStorageService,
+    ICacheVersionService cacheVersionService) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly TelemetryClient _telemetry;
-    private readonly ILogger _logger;
-    private readonly IPrintService _printService;
-    private readonly INotificationService _notificationService;
-    private readonly IBlobStorageService _blobStorageService;
-    private readonly ICacheVersionService _cacheVersionService;
-
     private readonly string printImageContainerName = "printimages";
-
-    public OctoprintController(PrintLogContext context,
-                               TelemetryClient telemetry,
-                               ILogger<OctoprintController> logger,
-                               IPrintService printService,
-                               INotificationService notificationService,
-                               IBlobStorageService blobStorageService,
-                               ICacheVersionService cacheVersionService)
-    {
-        _context = context;
-        _telemetry = telemetry;
-        _logger = logger;
-        _printService = printService;
-        _notificationService = notificationService;
-        _blobStorageService = blobStorageService;
-        _cacheVersionService = cacheVersionService;
-    }
-
 
     /// <summary>
     /// Webhook endpoint for the Octoprint Webhooks plugin. Takes in webhook data and uses that to create or 
@@ -63,7 +44,7 @@ public class OctoprintController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> Webhook([FromForm] OctoprintWebhookDto data)
     {
-        this._logger.LogInformation("Webhook Recieved:");
+        logger.LogInformation("Webhook Recieved:");
 
         var userId = User.GetUserId();
 
@@ -74,12 +55,12 @@ public class OctoprintController : ControllerBase
 
         if (isTestWebhook(data))
         {
-            _telemetry.TrackEvent("OctoPrint_Webhook_Test");
+            telemetry.TrackEvent("OctoPrint_Webhook_Test");
             string printerName;
             if (long.TryParse(data.DeviceIdentifier, out long printerId))
             {
                 // Check the Printer to make sure the user has access to it.
-                var printer = await _context.Printers.FindAsync(printerId);
+                var printer = await context.Printers.FindAsync(printerId);
 
                 // Check if the user had access to that printer!
                 if (printer is null || userId != printer.UserId)
@@ -102,30 +83,30 @@ public class OctoprintController : ControllerBase
             switch (data.Topic)
             {
                 case "Print Started":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Started");
+                    telemetry.TrackEvent("OctoPrint_Webhook_Started");
                     await HandlePrintStarted(data, userId.Value);
                     break;
                 case "Print Failed":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Failed");
+                    telemetry.TrackEvent("OctoPrint_Webhook_Failed");
                     await HandlePrintFailed(data, userId.Value);
                     break;
                 case "Error":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Error");
+                    telemetry.TrackEvent("OctoPrint_Webhook_Error");
                     await HandlePrintFailed(data, userId.Value);
                     break;
                 case "Print Done":
-                    _telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
+                    telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
                     await HandlePrintCompleted(data, userId.Value);
                     break;
                 default:
                     var properties = new Dictionary<string, string> { { "Topic", data.Topic! } };
-                    _telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
+                    telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
                     break;
             }
         }
         catch (Exception)
         {
-            _logger.LogError("An error occurred in the Octoprint Webhook", data);
+            logger.LogError("An error occurred in the Octoprint Webhook", data);
             throw;
         }
 
@@ -177,7 +158,7 @@ public class OctoprintController : ControllerBase
         if (long.TryParse(data!.DeviceIdentifier, out long printerId))
         {
             // Check the Printer to make sure the user has access to it.
-            var printer = await _context.Printers
+            var printer = await context.Printers
                 .Where(p => p.Id == printerId)
                 .Include(p => p.LoadedFilaments)
                 .FirstOrDefaultAsync();
@@ -202,7 +183,7 @@ public class OctoprintController : ControllerBase
         {
             // Determine the Allow Comments settings
             var lastSelectedAllowCommentsUserSettingTypeId = 3;
-            var setting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
+            var setting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
             // Null-forgiven deliberately: a user with no saved default has no row here, and
             // the resulting throw is what the catch below turns into the fallback value.
             // The catch is load-bearing control flow, not defensive padding.
@@ -227,7 +208,7 @@ public class OctoprintController : ControllerBase
         {
             // Determine the last view status
             var defaultViewStatus = 1;
-            var defaultPrintViewStatusSetting = await _context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
+            var defaultPrintViewStatusSetting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
             // Null-forgiven deliberately — see the preceding try block; the catch turns the
             // missing-row throw into the Private fallback.
             var viewStatusValue = defaultPrintViewStatusSetting!.Value;
@@ -321,7 +302,7 @@ public class OctoprintController : ControllerBase
                 });
             }
 
-            await _printService.UpdateFilamentUsageWeights(newPrint);
+            await printService.UpdateFilamentUsageWeights(newPrint);
         }
 
         // Work with File Hash
@@ -334,12 +315,12 @@ public class OctoprintController : ControllerBase
         newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data!.CurrentTime);
 
 
-        _context.Prints.Add(newPrint);
+        context.Prints.Add(newPrint);
 
 
         if (data.snapshot is not null)
         {
-            var maxImages = await _printService.GetMaxImagesPerPrint(userId);
+            var maxImages = await printService.GetMaxImagesPerPrint(userId);
             // No existing images to count: this is a newly created print, so count is always 0.
             if (0 < maxImages)
             {
@@ -349,7 +330,7 @@ public class OctoprintController : ControllerBase
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
@@ -359,7 +340,7 @@ public class OctoprintController : ControllerBase
                         CreatedById = userId,
                         UpdatedById = userId,
                     };
-                    _context.Files.Add(file);
+                    context.Files.Add(file);
 
                     // DisplayOrder = 0: this is the first (and only) image for a newly created print from a webhook.
                     var printImage = new PrintImage()
@@ -371,17 +352,17 @@ public class OctoprintController : ControllerBase
                         IsDefault = true,
                         DisplayOrder = 0,
                     };
-                    _context.PrintImages.Add(printImage);
+                    context.PrintImages.Add(printImage);
                 }
             }
         }
 
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
         // Webhook-created prints must invalidate the same caches the controllers do, or the
         // print list and analytics keep serving figures from before the print existed.
-        _cacheVersionService.InvalidateUserCache(userId);
+        cacheVersionService.InvalidateUserCache(userId);
     }
 
     private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
@@ -392,7 +373,7 @@ public class OctoprintController : ControllerBase
         if (data?.Meta?.Hash is not null)
         {
             var hash = StringToByteArray(data.Meta.Hash);
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -407,7 +388,7 @@ public class OctoprintController : ControllerBase
         {
             // if the hash doesn't exist, then look for the same file name?
             var fileName = data?.Job?.File?.Name;
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -421,13 +402,13 @@ public class OctoprintController : ControllerBase
         else
         {
             // We have no other way of coorlating files other than filehash or name, so...
-            _logger.LogWarning("Not enough information from octoprint to find matching print.", data);
+            logger.LogWarning("Not enough information from octoprint to find matching print.", data);
             return;
         }
 
         if (print == null)
         {
-            _logger.LogWarning("Matching print was not found.", data);
+            logger.LogWarning("Matching print was not found.", data);
             return;
         }
 
@@ -438,13 +419,13 @@ public class OctoprintController : ControllerBase
         var failedElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
         print.PrintTimeInSeconds = failedElapsed > 0 ? failedElapsed : (int?)null;
         print.UpdatedById = userId;
-        _context.Entry(print).State = EntityState.Modified;
+        context.Entry(print).State = EntityState.Modified;
 
         // Images
         if (data.snapshot != null)
         {
-            var maxImages = await _printService.GetMaxImagesPerPrint(userId);
-            var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+            var maxImages = await printService.GetMaxImagesPerPrint(userId);
+            var existingImageCount = await context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
             if (existingImageCount < maxImages)
             {
                 var image = data.snapshot;
@@ -453,7 +434,7 @@ public class OctoprintController : ControllerBase
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
@@ -463,10 +444,10 @@ public class OctoprintController : ControllerBase
                         CreatedById = userId,
                         UpdatedById = userId,
                     };
-                    _context.Files.Add(file);
+                    context.Files.Add(file);
 
                     // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await _context.PrintImages
+                    var maxDisplayOrder = await context.PrintImages
                         .Where(pi => pi.PrintId == print.Id)
                         .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
 
@@ -479,21 +460,21 @@ public class OctoprintController : ControllerBase
                         IsDefault = true,
                         DisplayOrder = maxDisplayOrder + 1,
                     };
-                    _context.PrintImages.Add(printImage);
+                    context.PrintImages.Add(printImage);
 
 
                     // Set other defaults to false;
-                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                    var otherEntities = await context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
                     otherEntities.ForEach(p => p.IsDefault = false);
                 }
             }
         }
 
-        await _context.SaveChangesAsync();
-        _cacheVersionService.InvalidateUserCache(userId);
+        await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
 
         // Send notification for print failure
-        await _notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
+        await notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
 
     }
 
@@ -505,7 +486,7 @@ public class OctoprintController : ControllerBase
         if (data?.Meta?.Hash is not null)
         {
             var hash = StringToByteArray(data.Meta.Hash);
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -520,7 +501,7 @@ public class OctoprintController : ControllerBase
         {
             // if the hash doesn't exist, then look for the same file name?
             var fileName = data?.Job?.File?.Name;
-            print = await _context.Prints
+            print = await context.Prints
             .Where(p => p.CreatedById == userId
                             && p.Status == PrintStatus.Printing
 
@@ -534,13 +515,13 @@ public class OctoprintController : ControllerBase
         else
         {
             // We have no other way of coorlating files other than filehash or name, so...
-            _logger.LogWarning("Not enough information from octoprint to find matching print.", data);
+            logger.LogWarning("Not enough information from octoprint to find matching print.", data);
             return;
         }
 
         if (print == null)
         {
-            _logger.LogWarning("Matching print was not found.", data);
+            logger.LogWarning("Matching print was not found.", data);
             return;
         }
 
@@ -550,13 +531,13 @@ public class OctoprintController : ControllerBase
         var successElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
         print.PrintTimeInSeconds = successElapsed > 0 ? successElapsed : (int?)null;
         print.UpdatedById = userId;
-        _context.Entry(print).State = EntityState.Modified;
+        context.Entry(print).State = EntityState.Modified;
 
         // Images
         if (data.snapshot != null)
         {
-            var maxImages = await _printService.GetMaxImagesPerPrint(userId);
-            var existingImageCount = await _context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
+            var maxImages = await printService.GetMaxImagesPerPrint(userId);
+            var existingImageCount = await context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
             if (existingImageCount < maxImages)
             {
                 var image = data.snapshot;
@@ -565,7 +546,7 @@ public class OctoprintController : ControllerBase
 
                 using (var uploadFileStream = image.OpenReadStream())
                 {
-                    var uploadResult = await _blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
+                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
 
                     var file = new Models.File()
                     {
@@ -575,10 +556,10 @@ public class OctoprintController : ControllerBase
                         CreatedById = userId,
                         UpdatedById = userId,
                     };
-                    _context.Files.Add(file);
+                    context.Files.Add(file);
 
                     // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await _context.PrintImages
+                    var maxDisplayOrder = await context.PrintImages
                         .Where(pi => pi.PrintId == print.Id)
                         .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
 
@@ -591,21 +572,21 @@ public class OctoprintController : ControllerBase
                         IsDefault = true,
                         DisplayOrder = maxDisplayOrder + 1,
                     };
-                    _context.PrintImages.Add(printImage);
+                    context.PrintImages.Add(printImage);
 
 
                     // Set other defaults to false;
-                    var otherEntities = await _context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                    var otherEntities = await context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
                     otherEntities.ForEach(p => p.IsDefault = false);
                 }
             }
         }
 
-        await _context.SaveChangesAsync();
-        _cacheVersionService.InvalidateUserCache(userId);
+        await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
 
         // Send notification for print completion
-        await _notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
+        await notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
 
     }
 

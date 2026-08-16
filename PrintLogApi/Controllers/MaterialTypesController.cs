@@ -14,17 +14,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class MaterialTypesController : ControllerBase
+public class MaterialTypesController(PrintLogContext context, IMapper mapper) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-    private readonly IMapper _mapper;
-
-    public MaterialTypesController(PrintLogContext context, IMapper mapper)
-    {
-        _context = context;
-        _mapper = mapper;
-    }
-
     /// <summary>
     /// Returns the current list of material types for the material selection dropdown.
     /// </summary>
@@ -32,7 +23,7 @@ public class MaterialTypesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<MaterialTypeDto>>> GetMaterials()
     {
-        return await _context.MaterialTypes.ProjectTo<MaterialTypeDto>(_mapper.ConfigurationProvider).OrderBy(m => m.Acronym).ToListAsync();
+        return await context.MaterialTypes.ProjectTo<MaterialTypeDto>(mapper.ConfigurationProvider).OrderBy(m => m.Acronym).ToListAsync();
     }
 
 }

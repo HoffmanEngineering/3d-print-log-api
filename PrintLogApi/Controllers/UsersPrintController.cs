@@ -12,16 +12,8 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 [Authorize]
 [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Client, NoStore = false)]
-public class UsersPrintsController : ControllerBase
+public class UsersPrintsController(PrintLogContext context) : ControllerBase
 {
-    private readonly PrintLogContext _context;
-
-    public UsersPrintsController(PrintLogContext context)
-    {
-        _context = context;
-
-    }
-
     /// <summary>
     /// Get the total amount of filament used by a user between a date range.
     /// </summary>
@@ -33,7 +25,7 @@ public class UsersPrintsController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<SinglePrintStat>> GetUsersTotalFilamentUsage(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
     {
-        var baseQuery = _context.Prints
+        var baseQuery = context.Prints
             .Include(p => p.FilamentUsage)
             .Where(p => p.CreatedById == userId)
             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
@@ -77,7 +69,7 @@ public class UsersPrintsController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<SinglePrintStat>> GetUsersTotalPrintCount(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
     {
-        var printCount = await _context.Prints
+        var printCount = await context.Prints
             .Where(p => p.CreatedById == userId)
             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
             .CountAsync();
@@ -101,7 +93,7 @@ public class UsersPrintsController : ControllerBase
         // Was: HasValue ? actual : estimated — a stored 0 IS HasValue, so the webhook's coerced
         // zero silently suppressed a perfectly good estimate. The pre-filter is gone with it:
         // the rule already yields 0 for a print with neither, and summing a 0 changes nothing.
-        var printTime = await _context.Prints
+        var printTime = await context.Prints
             .Where(p => p.CreatedById == userId)
             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate)
             .SumAsync(PrintMetrics.DurationSecondsExpr);

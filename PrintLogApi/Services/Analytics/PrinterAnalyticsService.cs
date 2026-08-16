@@ -10,7 +10,7 @@ namespace PrintLogApi.Services.Analytics;
 /// and has no CreatedById — and maintenance is scoped through its printer, so a maintenance
 /// row can never reach a user who does not own the machine it belongs to.
 /// </summary>
-public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
+public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterAnalyticsService
 {
     public const int MaxMaintenanceEvents = 500;
 
@@ -22,10 +22,6 @@ public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
     /// </summary>
     public static bool ShouldSkipMaintenanceTotals(int rowCount) =>
         rowCount > AnalyticsService.MaxSeriesRows;
-
-    private readonly PrintLogContext _context;
-
-    public PrinterAnalyticsService(PrintLogContext context) => _context = context;
 
     public async Task<PrintersResponse> GetPrinters(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
@@ -54,11 +50,11 @@ public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
+            context.Prints.AsNoTracking(), userId, filter, filter.FromDate, filter.ToDate);
 
         var coverage = new CoverageBuilder("printers");
 
-        var owned = _context.Printers.AsNoTracking().Where(p => p.UserId == userId);
+        var owned = context.Printers.AsNoTracking().Where(p => p.UserId == userId);
         if (filter.PrinterIds.Count > 0)
             owned = owned.Where(p => filter.PrinterIds.Contains(p.Id));
 
@@ -158,7 +154,7 @@ public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
         // user past 500 entries under-report their spend with nothing on screen to say so.
         var maintenanceByPrinter = await LoadMaintenanceTotals(userId, filter, coverage, ct);
 
-        var costProjection = await AnalyticsCostProjection.Project(_context, userId, scoped, ct);
+        var costProjection = await AnalyticsCostProjection.Project(context, userId, scoped, ct);
         if (costProjection.RowCapExceeded)
             coverage.Exclude(ExclusionReason.RowCapExceeded, costProjection.PrintCount);
         else
@@ -265,7 +261,7 @@ public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
         // Same tenant and same filters, deliberately WITHOUT the range: the range is what
         // this method has to widen.
         var unranged = AnalyticsQueryScope.Scope(
-            _context.Prints.AsNoTracking(), userId, filter, null, null)
+            context.Prints.AsNoTracking(), userId, filter, null, null)
             .Where(p => p.StartDate != null);
 
         // Projected as int? so this is a plain SQL MAX that yields NULL on an empty set.
@@ -345,7 +341,7 @@ public sealed class PrinterAnalyticsService : IPrinterAnalyticsService
     /// </summary>
     private IQueryable<PrinterMaintenance> MaintenanceQuery(long userId, AnalyticsFilter filter)
     {
-        var query = _context.PrinterMaintenance.AsNoTracking()
+        var query = context.PrinterMaintenance.AsNoTracking()
             .Where(m => m.Printer.UserId == userId && m.Done);
 
         if (filter.PrinterIds.Count > 0)

@@ -5,20 +5,12 @@ using Microsoft.Extensions.Options;
 
 namespace PrintLogApi.Authentication.Handlers;
 
-public class DevAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+public class DevAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder,
+    IConfiguration configuration) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    private readonly IConfiguration configuration;
-
-    public DevAuthenticationHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder,
-        IConfiguration configuration)
-        : base(options, logger, encoder)
-    {
-        this.configuration = configuration;
-    }
-
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         if (!Request.Headers.TryGetValue("X-Dev-User-Id", out var userIdValues)

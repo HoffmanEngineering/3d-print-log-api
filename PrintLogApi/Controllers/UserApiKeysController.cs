@@ -13,18 +13,8 @@ namespace PrintLogApi.Controllers;
 [Route("api/UserApiKeys")]
 [ApiController]
 [Authorize]
-public class UserApiKeysController : ControllerBase
+public class UserApiKeysController(IUserApiKeyService userApiKeyService) : ControllerBase
 {
-    private readonly IUserApiKeyService _userApiKeyService;
-
-
-
-    public UserApiKeysController(IUserApiKeyService userApiKeyService)
-    {
-        _userApiKeyService = userApiKeyService;
-
-    }
-
     /// <summary>
     /// Get the list of API Key summary info for the current user.
     /// </summary>
@@ -38,7 +28,7 @@ public class UserApiKeysController : ControllerBase
             return Unauthorized();
         }
 
-        var apiKeys = await _userApiKeyService.GetApiKeySummaryForUser(userId.Value);
+        var apiKeys = await userApiKeyService.GetApiKeySummaryForUser(userId.Value);
 
         return apiKeys;
     }
@@ -57,7 +47,7 @@ public class UserApiKeysController : ControllerBase
             return Unauthorized();
         }
 
-        var newKey = await _userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
+        var newKey = await userApiKeyService.GenerateNewApiKey(userId.Value, request.Description);
 
 
         return newKey;
@@ -79,7 +69,7 @@ public class UserApiKeysController : ControllerBase
 
         try
         {
-            await _userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
+            await userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
             return NoContent();
         }
         catch (DoesNotExistException)
