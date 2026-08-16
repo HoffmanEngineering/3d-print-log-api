@@ -1,10 +1,13 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
+using CsvHelper.Configuration;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -891,6 +894,123 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/octet-stream", response.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("attachment", response.Content.Headers.ContentDisposition!.DispositionType);
+        Assert.Equal("PrintReports.csv", response.Content.Headers.ContentDisposition.FileName);
+    }
+
+    /// <summary>
+    /// The CSV contract is user-facing, so the header line, the column order and the descending
+    /// StartDate ordering are all asserted rather than just the status code. Rows for other prints
+    /// in the shared fixture are ignored — only the two created here are compared, and only
+    /// relative to each other.
+    /// </summary>
+    [Fact]
+    public async Task GetAllPrintDetailsAsCsv_ReturnsHeaderAndRowsNewestStartDateFirst()
+    {
+        var older = await CreatePrintWithStartDateAsync(
+            "Csv Export Older Print", new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var newer = await CreatePrintWithStartDateAsync(
+            "Csv Export Newer Print", new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var csv = await response.Content.ReadAsStringAsync();
+
+        // Asserted on the raw payload before any normalization: the line ending and the trailing
+        // newline are part of the byte-level CSV contract, and normalizing first would hide a
+        // regression in either. CsvHelper's own default is the reference — the export deliberately
+        // does not override NewLine, so pinning it here fails if someone starts to.
+        var newLine = new CsvConfiguration(CultureInfo.InvariantCulture).NewLine;
+        Assert.Contains(newLine, csv, StringComparison.Ordinal);
+        Assert.EndsWith(newLine, csv, StringComparison.Ordinal);
+
+        var lines = csv.Split(newLine, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+        Assert.Equal(
+            "Start Date,Title,Printer Name,Printer Make,Printer Model,Estimated Print Time (s),"
+            + "Estimated Filament Usage (g),Print Time (s),Filament Usage (g),Filament Type,Notes,"
+            + "Url,Status,View Status",
+            lines[0]);
+
+        var newerIndex = lines.FindIndex(l => l.Contains(newer.Title!, StringComparison.Ordinal));
+        var olderIndex = lines.FindIndex(l => l.Contains(older.Title!, StringComparison.Ordinal));
+
+        Assert.True(newerIndex > 0, "Expected the newer print to appear in the export.");
+        Assert.True(olderIndex > 0, "Expected the older print to appear in the export.");
+        Assert.True(newerIndex < olderIndex, "Expected rows ordered by StartDate descending.");
+
+        // A representative row: the projected columns line up with the print that was created.
+        var newerRow = lines[newerIndex].Split(',');
+        Assert.Equal(newer.Title, newerRow[1]);
+        Assert.Equal("Test Printer 1", newerRow[2]);
+    }
+
+    /// <summary>
+    /// The export streams rather than buffering, so the response has no Content-Length. This is the
+    /// observable consequence of #65 — a buffered MemoryStream result would set one.
+    /// </summary>
+    [Fact]
+    public async Task GetAllPrintDetailsAsCsv_StreamsWithoutBufferingWholeReport()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+
+        Assert.Null(response.Content.Headers.ContentLength);
+    }
+
+    /// <summary>
+    /// A client that hangs up mid-export must stop the query rather than draining it. Asserted at
+    /// the service level with an already-cancelled token, because the abort point in a real
+    /// disconnect is a race and would make the test flaky.
+    /// </summary>
+    [Fact]
+    public async Task WritePrintReportAsCsvForUser_CancelledToken_StopsInsteadOfDraining()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var printService = scope.ServiceProvider.GetRequiredService<IPrintService>();
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await using var destination = new MemoryStream();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => printService.WritePrintReportAsCsvForUser(
+                IntegrationTestSeeder.TestUserId, destination, cts.Token));
+
+        // Nothing was flushed on the way out. A failure that reaches the destination starts the
+        // response and locks in a 200, so the writers are abandoned rather than disposed on the
+        // exception path — this is what keeps a failed export reportable as an error.
+        Assert.Equal(0, destination.Length);
+    }
+
+    /// <summary>
+    /// Helper: creates a print with an explicit StartDate so export ordering can be asserted.
+    /// </summary>
+    private async Task<PrintDetailDTO> CreatePrintWithStartDateAsync(string title, DateTimeOffset startDate)
+    {
+        var newPrint = new AddPrintDTO
+        {
+            Title = title,
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Public,
+            AllowComments = true,
+            StartDate = startDate
+        };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(newPrint);
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
     }
 
     [Fact]

@@ -473,7 +473,7 @@ public sealed class PrintService(
                         .ToListAsync();
     }
 
-    public async Task<Stream> GeneratePrintReportAsCsvForUser(long userId)
+    public async Task WritePrintReportAsCsvForUser(long userId, Stream destination, CancellationToken cancellationToken = default)
     {
         var prints = context.Prints
                         .Where(p => p.CreatedById == userId)
@@ -481,27 +481,55 @@ public sealed class PrintService(
                         .ProjectTo<PrintDetailReport>(mapper.ConfigurationProvider)
                         .AsNoTracking();
 
-
-        List<PrintDetailReport> reportCSVModels = await prints.ToListAsync();
-        var printCount = reportCSVModels.Count;
-
-        var stream = new MemoryStream();
+        // Streamed row-by-row rather than materialized: the export used to hold the whole result
+        // set as a List and a second copy as a MemoryStream, so peak memory grew with the user's
+        // print count and the buffer landed on the large object heap. Nothing is buffered beyond
+        // the writer's own buffer now, which is why the metrics below are tallied as we go.
+        var printCount = 0L;
+        var counting = new ByteCountingStream(destination);
 
         using (var operation = telemetry.StartOperation<DependencyTelemetry>("ConvertPrintReportToCsv"))
-        using (var writeFile = new StreamWriter(stream, leaveOpen: true))
-        using (var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture))
         {
+            // Deliberately not `using`/`await using`: disposing these flushes, and on the failure
+            // path a flush is the one thing we must not do. Bytes reaching the response start it,
+            // after which the status code and headers are fixed and a fault can no longer be
+            // reported as a 500. Both types are pure managed wrappers with no finalizer, so
+            // abandoning them on the exception path leaks nothing and discards the buffer — which
+            // is exactly the wanted behaviour. The success path disposes explicitly below.
+            var writeFile = new StreamWriter(counting, leaveOpen: true);
+            var csv = new CsvWriter(writeFile, CultureInfo.InvariantCulture);
+
             csv.Context.RegisterClassMap<PrintDetailReportMap>();
-            csv.WriteRecords(reportCSVModels);
 
+            // The query executes on the first MoveNextAsync, so it is pulled before a single byte
+            // is written. A SQL error, a command timeout or a projection failure therefore still
+            // surfaces with the response unstarted and becomes a 500, as it did when the export
+            // was fully materialized. Streaming cannot extend that guarantee past the first row:
+            // a fault mid-enumeration lands after the response has started and truncates the
+            // download instead. See the endpoint for that trade-off.
+            await using var rows = prints.AsAsyncEnumerable().GetAsyncEnumerator(cancellationToken);
+            var hasRow = await rows.MoveNextAsync();
+
+            // WriteRecords emits the header from the type even for an empty sequence, so it is
+            // written unconditionally here to keep an empty export byte-identical to before.
+            csv.WriteHeader<PrintDetailReport>();
+            await csv.NextRecordAsync();
+
+            while (hasRow)
+            {
+                csv.WriteRecord(rows.Current);
+                await csv.NextRecordAsync();
+                printCount++;
+                hasRow = await rows.MoveNextAsync();
+            }
+
+            // Flushes the CSV buffer through the StreamWriter to the response and disposes the
+            // writer it owns. `leaveOpen: true` keeps the caller's stream open.
+            await csv.DisposeAsync();
         }
-        stream.Position = 0; //reset stream
 
-        var lengthInBytes = stream.Length;
-        var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", lengthInBytes } };
+        var metrics = new Dictionary<string, double> { { "PrintCount", printCount }, { "ReportLengthInBytes", counting.BytesWritten } };
         telemetry.TrackEvent("PrintReportExport", metrics: metrics);
-
-        return stream;
     }
 
     public async Task<Print?> GetPrintById(long id)
