@@ -37,13 +37,13 @@ namespace PrintLogApi.IntegrationTests.Mcp
             await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
             var tools = await client.ListToolsAsync();
 
-            var create = Assert.Single(tools.Where(t => t.Name == "create_printer"));
+            var create = Assert.Single(tools, t => t.Name == "create_printer");
             Assert.False(create.ProtocolTool.Annotations?.DestructiveHint);
             // The key is OPTIONAL, so a no-key call is genuinely not idempotent. false is the honest
             // static hint; claiming true would tell a client a blind retry is safe when it is not.
             Assert.False(create.ProtocolTool.Annotations?.IdempotentHint);
 
-            var update = Assert.Single(tools.Where(t => t.Name == "update_printer"));
+            var update = Assert.Single(tools, t => t.Name == "update_printer");
             // True, matching update_print: 'destructive' in MCP means an update may overwrite or
             // discard existing data, not that it deletes the entity. This tool overwrites fields and
             // honours 'clear', so a client must not treat a blind retry as free.

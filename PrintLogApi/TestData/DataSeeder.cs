@@ -212,9 +212,9 @@ namespace PrintLogApi.TestData
             context.Database.CreateExecutionStrategy().Execute(() =>
             {
                 using var transaction = context.Database.BeginTransaction();
-                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} ON;");
+                context.Database.ExecuteSql($"SET IDENTITY_INSERT {tableName} ON;");
                 context.SaveChanges();
-                context.Database.ExecuteSqlRaw($"SET IDENTITY_INSERT {tableName} OFF;");
+                context.Database.ExecuteSql($"SET IDENTITY_INSERT {tableName} OFF;");
                 transaction.Commit();
             });
         }

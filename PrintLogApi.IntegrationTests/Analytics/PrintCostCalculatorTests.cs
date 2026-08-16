@@ -78,7 +78,7 @@ namespace PrintLogApi.IntegrationTests.Analytics
         [InlineData("1,5", null)]
         [InlineData("1.5", 1.5)]
         [InlineData("0", 0.0)]
-        public void ParseInvariant_RejectsNonNumericNegativeAndLocaleFormattedValues(string raw, double? expected)
+        public void ParseInvariant_RejectsNonNumericNegativeAndLocaleFormattedValues(string? raw, double? expected)
         {
             Assert.Equal((decimal?)expected, PrintCostCalculator.ParseInvariant(raw));
         }
