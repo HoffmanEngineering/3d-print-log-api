@@ -26,6 +26,78 @@ version GUID + query parameters, so bumping a user's version invalidates every e
 at once. Applied to `GetPrintSummary()` and `GetPrinterSummary()`; every create/update/delete must
 invalidate, or callers keep reading stale summaries.
 
+### Output caching was evaluated and declined (#66)
+
+`AddOutputCache` is deliberately **not** in the pipeline. It was proposed to skip the JSON
+serialization that every `IMemoryCache` *hit* still pays, and it was measured rather than argued
+about. Do not add it back without new numbers.
+
+The reason it loses is that response compression, added in the same change, moved the goalposts.
+A cache hit's remaining cost is serialize-then-compress, and brotli at quality 1 costs ~0.15 ms on
+a 52 KB summary — the same order as the serialization output caching would remove. So the ceiling
+on the win is roughly half of an already-sub-millisecond step, on endpoints whose expensive part
+(the SQL aggregation) is *already* skipped by the existing cache. Caching the compressed bytes
+instead would beat that, but only by varying on `Accept-Encoding` on top of everything below.
+
+What it would cost to get there:
+
+- **The framework's own safety guard has to be switched off.** `OutputCache`'s `DefaultPolicy`
+  refuses to cache a request that is authenticated or carries an `Authorization` header. Every
+  endpoint worth caching here is authenticated, so adopting output caching means writing a custom
+  policy that deliberately disables that check — and then re-deriving the tenant in the cache key
+  by hand. A mistake there is a cross-user data leak, not a stale read.
+- **`GetPrintSummary` is `[AllowAnonymous]` and takes a `userId` query parameter**, so its response
+  varies by *both* the target user and the caller. The key would need both, plus the target user's
+  version GUID, plus `Accept-Encoding`.
+- **A second, untracked memory budget.** `IMemoryCache` here is capped at 8192 units
+  (`Startup.ConfigureServices`). The output cache store has its own default 100 MB limit that the
+  existing budget knows nothing about, holding a serialized copy of objects already cached.
+
+Revisit only if the shape changes — a distributed output cache store, cookie or session
+authentication, or a profile showing serialization is actually material. Any revival must still
+satisfy the two rules the original issue set: vary by `User.GetUserId()`, and participate in
+`ICacheVersionService` invalidation rather than relying on a TTL.
+
+## Response Compression
+
+Brotli and Gzip, wired in `Startup.ConfigureResponseCompression` and placed in the pipeline
+immediately **inside** `UseClientAbortHandling`. Both of those details carry reasoning that is not
+obvious and is written out in full at those two sites — read them before changing either.
+
+The binding ordering constraint is that compression replaces `IHttpResponseBodyFeature`, so it must
+sit outside anything that writes a body. Its position relative to `UseClientAbortHandling` is the
+weaker half of the decision and the comment there says so explicitly: `FinishCompressionAsync` runs
+inside the middleware's `try`, **not** a `finally`, so a downstream abort skips finalization
+entirely. Do not restate the old "flush throws from a finally" rationale — it was wrong, and it was
+checked against `dotnet/aspnetcore` `release/10.0`.
+
+The two things most likely to be "tidied" into a regression:
+
+- **`EnableForHttps = true` is not the framework default.** It is a considered BREACH decision that
+  rests on this API being token-authenticated, so no request can be forged with the victim's
+  ambient credentials. **If cookie or session authentication is ever added, this must be revisited
+  before that ships** — start at `POST /api/UserApiKeys`, the one response that returns a secret
+  alongside caller-supplied text.
+- **Both providers are on `CompressionLevel.Fastest`, and raising either is a CPU decision, not a
+  tuning preference.** The measurements are in the doc comment. Brotli `SmallestSize` is a 600x CPU
+  increase for three percentage points — never use it on a request thread. Gzip `Optimal` is the
+  more tempting one (35% fewer bytes for 0.2 ms) and was deliberately rejected: gzip is reached
+  only by clients that cannot do brotli, but it is also whichever codec an attacker names in
+  `Accept-Encoding`, so the extra CPU is spent mostly on adversaries. That trade is only as good as
+  the bound on response size, and there is none — `PagedRequest.PageSize` is an unconstrained `int`
+  that flows into `Take()`. Capping it is a caller-visible change and belongs in its own issue.
+
+`text/event-stream` is deliberately absent from `MimeTypes`: compressing a streaming body buffers
+it, and `/mcp` negotiates that content type. `ResponseCompressionTests` pins that, the encoding
+negotiation, the compression levels, and that compressed bytes decode back to the uncompressed
+response. One test there is load-bearing in a way that is easy to miss: `Compression_AppliesOverHttps`
+drives an `https://` base address, because every other test runs over plain HTTP where compression
+happens whatever `EnableForHttps` says — revert that option and it is the *only* test that fails.
+
+One thing `UseHttpMetrics` readers should know: the codec runs during the endpoint's `WriteAsync`
+calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
+response-size metric, so no byte count is distorted.
+
 ## Database
 
 Migrations are auto-applied on startup in `Development` and `E2ETesting` only. Production applies

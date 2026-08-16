@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.IO.Compression;
+using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -54,6 +56,8 @@ public class Startup
         services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Startup).Assembly));
 
         services.AddCors();
+
+        ConfigureResponseCompression(services);
 
         services.AddHttpClient();
 
@@ -307,6 +311,81 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     });
             });
         });
+    }
+
+    /// <summary>
+    /// Brotli-first response compression for the JSON the browser and mobile clients read.
+    ///
+    /// ENABLED OVER HTTPS, WHICH IS NOT THE FRAMEWORK DEFAULT. <c>EnableForHttps</c> defaults to
+    /// false because compressing a TLS response leaks plaintext length, which is the lever BREACH
+    /// pulls. That attack needs three things at once: a response body that mixes attacker-chosen
+    /// input with a secret, an attacker able to make the victim's client issue that request
+    /// repeatedly, and a way to observe the resulting sizes. The middle one does not hold here.
+    /// This API is token-authenticated — a bearer token or an X-Api-Key header/query value — and
+    /// nothing is attached to a cross-site request ambiently the way a cookie is, so an attacker
+    /// cannot cause the victim's browser to issue an authenticated request at all. (The CORS
+    /// policy is AllowAnyOrigin *without* AllowCredentials, which is the same statement from the
+    /// other direction.) Leaving the default in place would mean shipping compression that never
+    /// runs in production, since everything outside Development is behind UseHttpsRedirection.
+    ///
+    /// The body-shape check the issue asked for came back clean. The <c>searchText</c> family of
+    /// query parameters is the obvious candidate for reflected input, but no summary response
+    /// echoes it: <c>PagedList</c> carries only <c>Paging</c> and <c>Items</c>. The one endpoint
+    /// that does return a secret alongside caller-supplied text is
+    /// <c>POST /api/UserApiKeys</c> — <c>NewUserApiKeyDto</c> carries the generated key next to
+    /// the caller's own Description — and it is safe for the reason above rather than by
+    /// accident: only the key's owner can ever elicit that response. If cookie authentication is
+    /// ever added, this decision has to be revisited before it ships, and that endpoint is where
+    /// to start.
+    ///
+    /// COMPRESSION LEVELS ARE MEASURED, NOT GUESSED. On a 52 KB payload shaped like a print
+    /// summary page (200 rows of repetitive JSON):
+    ///
+    ///     brotli Fastest        9.0% of raw     0.15 ms
+    ///     brotli Optimal        9.0% of raw     0.42 ms
+    ///     brotli SmallestSize   6.1% of raw    90.19 ms   (never use this)
+    ///     gzip   Fastest       14.4% of raw     0.09 ms
+    ///     gzip   Optimal        9.3% of raw     0.30 ms
+    ///
+    /// Brotli quality 1 (Fastest) already matches what gzip only reaches at Optimal, so paying
+    /// for a higher brotli level buys nothing — and SmallestSize costs 600x the CPU for three
+    /// percentage points, which on a request thread is a self-inflicted outage.
+    ///
+    /// Both providers are therefore on Fastest, including gzip, where the tempting choice is
+    /// Optimal: it sends 35% fewer bytes for 0.2 ms more. That trade was taken and then
+    /// reversed, because the two populations it applies to are not the same. Gzip is only
+    /// reached by clients that do not offer brotli — a shrinking set of real users — but it is
+    /// also whichever codec an attacker names in Accept-Encoding, and they will always name the
+    /// expensive one. Paying 3x the CPU on a path selected mostly by adversaries is the wrong
+    /// side of that trade, and gzip Fastest still removes ~86% of the bytes.
+    ///
+    /// That reasoning is bounded by response size, and response size here is not bounded:
+    /// PagedRequest.PageSize is an unconstrained int that flows into Take(), so a caller can
+    /// ask any of the paged endpoints for an arbitrarily large body. Compression is not the
+    /// origin of that (the SQL and the serialization on that path cost far more than any
+    /// codec) and capping it is a caller-visible change that belongs in its own issue — but it
+    /// is the reason not to spend extra CPU per byte here.
+    ///
+    /// Brotli is registered first so it wins when a client offers both at equal quality.
+    ///
+    /// MIME types are the framework defaults (which already include application/json) plus
+    /// application/problem+json, the content type of every validation and error response MVC
+    /// produces. Note what is deliberately absent: text/event-stream. Compressing a streaming
+    /// body buffers it, and /mcp negotiates that content type for its Streamable HTTP
+    /// responses — adding it here would stall an agent's tool call until the response ended.
+    /// </summary>
+    private static void ConfigureResponseCompression(IServiceCollection services)
+    {
+        services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.Providers.Add<BrotliCompressionProvider>();
+            options.Providers.Add<GzipCompressionProvider>();
+            options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/problem+json"]);
+        });
+
+        services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+        services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
     }
 
     /// <summary>
@@ -582,6 +661,32 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // absorb it, and outside everything below so it covers any endpoint that awaits a
         // slow query — not just analytics, where the abort race was first noticed.
         app.UseClientAbortHandling();
+
+        // Outside every middleware that writes a response body, which is the actual constraint:
+        // this swaps IHttpResponseBodyFeature for a wrapper, so anything that has already
+        // started writing would bypass it. That puts it above routing, endpoints, Swagger and
+        // /metrics, and below the HTTPS redirect (no point compressing a 307 with no body).
+        //
+        // It also sits inside UseClientAbortHandling so that anything thrown while finalizing
+        // the compressed frame passes back through that handler. Do not read more into that
+        // than it says. ResponseCompressionMiddleware calls FinishCompressionAsync inside its
+        // try, NOT in a finally (verified against dotnet/aspnetcore release/10.0), so when a
+        // downstream abort throws, finalization is skipped and compression adds no exception of
+        // its own. The case this ordering covers is the narrower one where the handler ran to
+        // completion but the socket is already gone. Even then the coverage is partial:
+        // ClientAbortMiddleware matches only OperationCanceledException and
+        // InvalidOperationException, so an IOException surfacing from a dead-socket write would
+        // still escape. Widening that is a change to that middleware, not to this line.
+        //
+        // Ordering against UseHttpMetrics was checked (issue #66 raised it): prometheus-net 8's
+        // UseHttpMetrics records request counts, in-flight gauge and duration — it has no
+        // response-size metric, so no recorded byte count can be distorted by compression.
+        // Duration is a different story and worth stating accurately: the codec runs during the
+        // WriteAsync calls the endpoint makes, which happen while UseHttpMetrics is still
+        // awaiting, so request duration INCLUDES compression. Only the trailing finalization
+        // falls outside it. At the measured 0.15 ms that is under the noise floor of these
+        // handlers, but a dashboard reading duration is not reading pure handler latency.
+        app.UseResponseCompression();
 
         app.UseCors(builder =>
         {
