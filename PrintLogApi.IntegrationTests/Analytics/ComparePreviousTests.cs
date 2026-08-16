@@ -69,7 +69,7 @@ public class ComparePreviousTests : IClassFixture<Mcp.McpDataWebApplicationFacto
         };
         filter.Normalize();
 
-        var previous = PreviousWindow.For(filter);
+        var previous = PreviousWindow.For(filter, DateTimeOffset.UtcNow);
         Assert.NotNull(previous);
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(
@@ -104,7 +104,7 @@ public class ComparePreviousTests : IClassFixture<Mcp.McpDataWebApplicationFacto
         };
         filter.Normalize();
 
-        var previous = PreviousWindow.For(filter);
+        var previous = PreviousWindow.For(filter, DateTimeOffset.UtcNow);
 
         Assert.NotNull(previous);
         Assert.Equal(filter.FromDate, previous.ToDate);

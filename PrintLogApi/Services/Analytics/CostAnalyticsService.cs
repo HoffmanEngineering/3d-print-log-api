@@ -9,7 +9,8 @@ namespace PrintLogApi.Services.Analytics;
 /// currency, default-price and parse rules as the cost tile on Overview — the two surfaces
 /// disagreeing is the failure mode this design exists to prevent.
 /// </summary>
-public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyticsService
+public sealed class CostAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : ICostAnalyticsService
 {
     public const int MaxExtremes = 5;
     public const int MaxCostGroups = 15;
@@ -28,7 +29,7 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
     {
         var current = await Compute(userId, filter, ct);
 
-        var previousFilter = PreviousWindow.For(filter);
+        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
         if (previousFilter is null) return current;
 
         var previous = await Compute(userId, previousFilter, ct);
@@ -47,6 +48,11 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
 
     private async Task<CostsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
+        // One clock read per computation. A filter with no ToDate means "up to now", and
+        // reading the clock separately in each helper that closes that window lets two of
+        // them disagree by the width of a query.
+        var now = timeProvider.GetUtcNow();
+
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
         var granularity = filter.ResolveGranularity();
@@ -98,7 +104,7 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
             new MoneyMetric(filamentSpend, null, currency, costCoverage),
             new MoneyMetric(electricitySpend, null, currency, costCoverage),
             new MoneyMetric(maintenanceSpend, null, currency, costCoverage),
-            BuildSeries(projection.Prints, maintenance, filter, zone, granularity),
+            BuildSeries(projection.Prints, maintenance, filter, zone, granularity, now),
             Distribution(projection.Prints),
             byMaterialType,
             byBrand,
@@ -160,7 +166,8 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
     private static IReadOnlyList<CostSeriesBucket> BuildSeries(
         IReadOnlyList<CostedPrint> prints,
         IReadOnlyList<(long PrinterId, DateOnly Date, DateTimeOffset Instant, decimal Cost)> maintenance,
-        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity)
+        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity,
+        DateTimeOffset now)
     {
         var dated = prints.Where(p => p.StartDate.HasValue).ToList();
 
@@ -171,11 +178,11 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
         var earliest = dated
             .Select(p => p.StartDate!.Value)
             .Concat(maintenance.Select(m => m.Instant))
-            .DefaultIfEmpty(DateTimeOffset.UtcNow)
+            .DefaultIfEmpty(now)
             .Min();
 
         var from = filter.FromDate ?? earliest;
-        var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<CostSeriesBucket>();
 
         var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);

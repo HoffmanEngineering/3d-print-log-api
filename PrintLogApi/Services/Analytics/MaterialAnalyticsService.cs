@@ -14,7 +14,8 @@ namespace PrintLogApi.Services.Analytics;
 /// It is reported in coverage rather than silently absorbed into a bucket it does not
 /// belong to.
 /// </summary>
-public sealed class MaterialAnalyticsService(PrintLogContext context) : IMaterialAnalyticsService
+public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IMaterialAnalyticsService
 {
     public const int MaxGroups = 15;
     public const int MaxSpools = 25;
@@ -76,7 +77,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context) : IMateria
     {
         var current = await Compute(userId, filter, ct);
 
-        var previousFilter = PreviousWindow.For(filter);
+        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
         if (previousFilter is null) return current;
 
         var previous = await Compute(userId, previousFilter, ct);
@@ -99,6 +100,12 @@ public sealed class MaterialAnalyticsService(PrintLogContext context) : IMateria
 
     private async Task<MaterialsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
+        // One clock read per computation. A filter with no ToDate means "up to now", and the
+        // burn-rate window Runway measures is anchored to the same instant the series ends
+        // at — reading the clock twice lets a spool's runway be computed against a window the
+        // chart beside it does not show.
+        var now = timeProvider.GetUtcNow();
+
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
         var granularity = filter.ResolveGranularity();
@@ -189,9 +196,9 @@ public sealed class MaterialAnalyticsService(PrintLogContext context) : IMateria
         // material type it would emit buckets under keys the UI has no series for — the UI
         // builds its series from ByType — and every type ranked below the cap would vanish
         // from a stacked chart the user reads as a total.
-        var series = BuildSeries(rows, byType, filter, zone, granularity);
+        var series = BuildSeries(rows, byType, filter, zone, granularity, now);
         var spools = await TopSpools(userId, rows, costInputs, ct);
-        var runway = Runway(spools, rows, filter);
+        var runway = Runway(spools, rows, filter, now);
         var (wasteGrams, wasteCost, currency) = await Waste(userId, scoped, costInputs, coverage, ct);
 
         return new MaterialsResponse(
@@ -276,14 +283,15 @@ public sealed class MaterialAnalyticsService(PrintLogContext context) : IMateria
     /// </summary>
     private static IReadOnlyList<MaterialSeriesBucket> BuildSeries(
         IReadOnlyList<UsageRow> rows, IReadOnlyList<MaterialGroup> byType,
-        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity)
+        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity,
+        DateTimeOffset now)
     {
         var retained = byType.Select(g => g.Key).ToHashSet();
         var dated = rows.Where(r => r.StartDate.HasValue).ToList();
         if (dated.Count == 0) return Array.Empty<MaterialSeriesBucket>();
 
         var from = filter.FromDate ?? dated.Min(r => r.StartDate!.Value);
-        var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<MaterialSeriesBucket>();
 
         var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);
@@ -402,9 +410,10 @@ public sealed class MaterialAnalyticsService(PrintLogContext context) : IMateria
     /// Runway is suppressed at zero burn and never extrapolated past a year.
     /// </summary>
     private static IReadOnlyList<RunwayRow> Runway(
-        IReadOnlyList<SpoolRow> spools, IReadOnlyList<UsageRow> rows, AnalyticsFilter filter)
+        IReadOnlyList<SpoolRow> spools, IReadOnlyList<UsageRow> rows, AnalyticsFilter filter,
+        DateTimeOffset now)
     {
-        var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var windowTo = filter.ToDate ?? now;
         var windowFrom = filter.FromDate ?? windowTo.AddDays(-BurnRateWindowDays);
         var days = Math.Min((windowTo - windowFrom).TotalDays, BurnRateWindowDays);
         if (days <= 0) return Array.Empty<RunwayRow>();

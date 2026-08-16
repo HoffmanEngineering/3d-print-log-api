@@ -85,7 +85,7 @@ public class AnalyticsRoundTripTests : IClassFixture<Mcp.McpDataWebApplicationFa
         var (context, counter) = CountingContext();
         using (context)
         {
-            var service = new ActivityAnalyticsService(context);
+            var service = new ActivityAnalyticsService(context, TimeProvider.System);
             await service.GetActivity(Mcp.McpTestData.MetricsUserId, Ranged(), CancellationToken.None);
         }
 
@@ -100,7 +100,7 @@ public class AnalyticsRoundTripTests : IClassFixture<Mcp.McpDataWebApplicationFa
         var (context, counter) = CountingContext();
         using (context)
         {
-            var service = new ActivityAnalyticsService(context);
+            var service = new ActivityAnalyticsService(context, TimeProvider.System);
             await service.GetActivity(Mcp.McpTestData.MetricsUserId, Ranged(), CancellationToken.None);
         }
 
@@ -117,7 +117,7 @@ public class AnalyticsRoundTripTests : IClassFixture<Mcp.McpDataWebApplicationFa
         var (context, counter) = CountingContext();
         using (context)
         {
-            var service = new CostAnalyticsService(context);
+            var service = new CostAnalyticsService(context, TimeProvider.System);
             await service.GetCosts(Mcp.McpTestData.MetricsUserId, Ranged(), CancellationToken.None);
         }
 
@@ -132,7 +132,7 @@ public class AnalyticsRoundTripTests : IClassFixture<Mcp.McpDataWebApplicationFa
         var (context, counter) = CountingContext();
         using (context)
         {
-            var service = new MaterialAnalyticsService(context);
+            var service = new MaterialAnalyticsService(context, TimeProvider.System);
             await service.GetMaterials(Mcp.McpTestData.MetricsUserId, Ranged(), CancellationToken.None);
         }
 
@@ -146,7 +146,7 @@ public class AnalyticsRoundTripTests : IClassFixture<Mcp.McpDataWebApplicationFa
         var (context, counter) = CountingContext();
         using (context)
         {
-            var service = new AnalyticsService(context);
+            var service = new AnalyticsService(context, TimeProvider.System);
             await service.GetOverview(Mcp.McpTestData.MetricsUserId, Ranged(), CancellationToken.None);
         }
 

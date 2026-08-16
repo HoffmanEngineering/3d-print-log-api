@@ -181,6 +181,13 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         services.AddTransient<IProjectService, ProjectService>();
         services.AddTransient<IFeedbackService, FeedbackService>();
         services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
+        // The wall clock, as a dependency. Every analytics service reads "now" to close an
+        // open-ended window (a filter with no ToDate means "up to now"), and a test that has
+        // to construct its fixture relative to the real current date can only assert what is
+        // true on most days — a streak that lapses at a month boundary, or a burn rate whose
+        // trailing window straddles one, is not expressible at all. Singleton because
+        // TimeProvider.System is stateless; tests substitute a FakeTimeProvider.
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
         services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
         services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();

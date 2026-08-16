@@ -10,7 +10,8 @@ namespace PrintLogApi.Services.Analytics;
 /// and has no CreatedById — and maintenance is scoped through its printer, so a maintenance
 /// row can never reach a user who does not own the machine it belongs to.
 /// </summary>
-public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterAnalyticsService
+public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IPrinterAnalyticsService
 {
     public const int MaxMaintenanceEvents = 500;
 
@@ -27,7 +28,7 @@ public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterA
     {
         var current = await Compute(userId, filter, ct);
 
-        var previousFilter = PreviousWindow.For(filter);
+        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
         if (previousFilter is null) return current;
 
         var previous = await Compute(userId, previousFilter, ct);
@@ -139,9 +140,10 @@ public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterA
         coverage.Exclude(ExclusionReason.DurationMissing,
             intervals.Where(i => i.Duration <= 0).Sum(i => i.Count));
 
+        var now = timeProvider.GetUtcNow();
         var windowFrom = filter.FromDate
-            ?? (intervals.Count > 0 ? intervals.Min(i => i.Start) : DateTimeOffset.UtcNow);
-        var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
+            ?? (intervals.Count > 0 ? intervals.Min(i => i.Start) : now);
+        var windowTo = filter.ToDate ?? now;
         var windowSeconds = Math.Max(0, (windowTo - windowFrom).TotalSeconds);
 
         var utilizationIntervals = seriesTruncated

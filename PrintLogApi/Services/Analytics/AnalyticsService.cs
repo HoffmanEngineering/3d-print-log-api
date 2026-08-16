@@ -9,7 +9,8 @@ namespace PrintLogApi.Services.Analytics;
 /// Two-stage aggregation. Stage 1 is SQL and groups to the smallest useful unit; stage 2 is
 /// bounded in-memory work over stage-1 rows only. Nothing materializes the user's print list.
 /// </summary>
-public sealed class AnalyticsService(PrintLogContext context) : IAnalyticsService
+public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IAnalyticsService
 {
     /// <summary>
     /// The cost tile is the only metric needing per-filament-row projection, so it is capped on
@@ -41,7 +42,7 @@ public sealed class AnalyticsService(PrintLogContext context) : IAnalyticsServic
         // The other five tabs use this helper, and one screen must not show the same delta
         // computed two ways.
         AggregateResult? previous = null;
-        var previousFilter = PreviousWindow.For(filter);
+        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
         if (previousFilter is not null)
         {
             previous = await Aggregate(
@@ -106,7 +107,8 @@ public sealed class AnalyticsService(PrintLogContext context) : IAnalyticsServic
         // A missing key reads as "unknown", not "none".
         foreach (var name in Enum.GetNames<Print.PrintStatus>()) statusCounts.TryAdd(name, 0);
 
-        var (series, seriesTruncated) = await BuildSeries(scoped, counts, from, to, zone, granularity, ct);
+        var (series, seriesTruncated) = await BuildSeries(
+            scoped, counts, from, to, zone, granularity, timeProvider.GetUtcNow(), ct);
         var (cost, costExclusions, currency, priciest) = await ComputeCost(userId, scoped, ct);
         var highlights = await BuildHighlights(scoped, userId, priciest, ct);
 
@@ -132,15 +134,15 @@ public sealed class AnalyticsService(PrintLogContext context) : IAnalyticsServic
     private static async Task<(IReadOnlyList<SeriesBucket> Series, bool Truncated)> BuildSeries(
         IQueryable<Print> scoped, ScopedPrintCounts counts,
         DateTimeOffset? from, DateTimeOffset? to,
-        TimeZoneInfo zone, AnalyticsGranularity granularity, CancellationToken ct)
+        TimeZoneInfo zone, AnalyticsGranularity granularity, DateTimeOffset now, CancellationToken ct)
     {
         var dated = scoped.Where(p => p.StartDate != null);
 
         // The window start and the row cap both come from the caller's single aggregate.
         // MIN ignores NULLs in SQL, so the earliest start over the whole scoped set is the
         // earliest DATED start — this is the same number the separate MinAsync returned.
-        var windowFrom = from ?? counts.EarliestStart ?? DateTimeOffset.UtcNow;
-        var windowTo = to ?? DateTimeOffset.UtcNow;
+        var windowFrom = from ?? counts.EarliestStart ?? now;
+        var windowTo = to ?? now;
         if (windowTo <= windowFrom) return (Array.Empty<SeriesBucket>(), false);
 
         var buckets = TimeBucketer.BuildBuckets(windowFrom, windowTo, zone, granularity, DayOfWeek.Sunday);

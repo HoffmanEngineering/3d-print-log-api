@@ -17,8 +17,15 @@ public static class PreviousWindow
     /// The filter re-pointed at the preceding window, or null when there is nothing to
     /// compare against — no explicit range, or comparison not requested. Callers treat null
     /// as "leave Previous alone", which is what suppresses the delta in the UI.
+    ///
+    /// <paramref name="now"/> exists only to feed the Normalize() below, and with the
+    /// HasRange gate above it that clamp is a no-op today — the previous window ends where
+    /// the current one starts, which is already in the past. It is threaded through anyway
+    /// so a caller running on a fake clock has no wall-clock read anywhere in its call tree;
+    /// a single hidden DateTimeOffset.UtcNow is what makes a pinned-date test quietly stop
+    /// being pinned.
     /// </summary>
-    public static AnalyticsFilter? For(AnalyticsFilter? filter)
+    public static AnalyticsFilter? For(AnalyticsFilter? filter, DateTimeOffset now)
     {
         if (filter is null || !filter.ComparePrevious || !filter.HasRange) return null;
 
@@ -42,7 +49,7 @@ public static class PreviousWindow
         // AnalyticsFilter's documented invariant is that Normalize() runs before the filter
         // is used. Inheriting already-normalized collections is not the same as being
         // normalized, and a future field could break that assumption silently.
-        previous.Normalize();
+        previous.Normalize(now);
         return previous;
     }
 

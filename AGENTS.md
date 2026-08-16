@@ -160,6 +160,36 @@ One thing `UseHttpMetrics` readers should know: the codec runs during the endpoi
 calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
 response-size metric, so no byte count is distorted.
 
+## The clock
+
+`TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
+`Services/Analytics/` takes `TimeProvider` by injection and reads it exactly **once per
+computation**, threading the resulting `DateTimeOffset` into the private helpers rather than letting
+each read the clock for itself. That is not tidiness: a filter with no `ToDate` means "up to now",
+several helpers close that window independently, and two reads a query apart could disagree — a
+runway computed against a window the chart beside it does not show. `AnalyticsController` passes the
+same injected clock to `AnalyticsFilter.Normalize(now)`, because the clamp ceiling that call
+produces becomes part of the cache key.
+
+`PreviousWindow.For` takes a `now` it barely uses; the comment there explains why it is threaded
+anyway. Do not "simplify" it back to a parameterless `Normalize()`.
+
+**`Now` and `UtcNow` are not interchangeable, and #71 deliberately did not normalise them.** Six
+sites outside analytics use `DateTimeOffset.Now` (server local time), and
+`PrinterService.setLoadedFilament` **persists** those values as `LoadedDateTime`/`UnloadedDateTime`.
+Converting one of those to `GetUtcNow()` is a data change, not a refactor — rows either side of the
+deploy would mean different things. When those sites are converted, `.Now` becomes `GetLocalNow()`;
+anything else needs its own issue, test and migration reasoning.
+
+The remaining direct clock reads (audit timestamps, `NotificationService`, `SubscriptionService`,
+blob SAS expiry, `PrinterService`) are untouched and still call the static properties.
+
+Tests substitute the clock with `SettableTimeProvider` (`PrintLogApi.IntegrationTests/Analytics/`),
+a five-line `TimeProvider`. `FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` was
+tried first and rejected — its `SetUtcNow` throws on any value earlier than the current one, so with
+one provider registered per shared host the second test to run fails purely because the first moved
+the clock forward. The reasoning is written out at the type.
+
 ## Database
 
 Migrations are auto-applied on startup in `Development` and `E2ETesting` only. Production applies

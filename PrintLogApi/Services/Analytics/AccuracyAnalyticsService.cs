@@ -10,7 +10,8 @@ namespace PrintLogApi.Services.Analytics;
 /// a measured duration and an estimated-only material amount, and requiring both would
 /// silently shrink each sample.
 /// </summary>
-public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccuracyAnalyticsService
+public sealed class AccuracyAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IAccuracyAnalyticsService
 {
     public const int ScatterBins = 24;
 
@@ -27,7 +28,7 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
     {
         var current = await Compute(userId, filter, ct);
 
-        var previousFilter = PreviousWindow.For(filter);
+        var previousFilter = PreviousWindow.For(filter, timeProvider.GetUtcNow());
         if (previousFilter is null) return current;
 
         var previous = await Compute(userId, previousFilter, ct);
@@ -49,6 +50,11 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
 
     private async Task<AccuracyResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
+        // One clock read per computation. A filter with no ToDate means "up to now", and
+        // reading the clock separately in each helper that closes that window lets two of
+        // them disagree by the width of a query.
+        var now = timeProvider.GetUtcNow();
+
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
         var granularity = filter.ResolveGranularity();
@@ -165,7 +171,7 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
             AccuracyStats.Bin(timeSamples, ScatterBins),
             byPrinter,
             byMaterial,
-            BiasTrend(rows, filter, zone, granularity),
+            BiasTrend(rows, filter, zone, granularity, now),
             Callouts(byPrinter, "time").Concat(Callouts(byMaterial, "material")).ToList(),
             coverage.Build());
     }
@@ -260,13 +266,13 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
 
     private static IReadOnlyList<AccuracyTrendBucket> BiasTrend(
         IReadOnlyList<Row> rows, AnalyticsFilter filter,
-        TimeZoneInfo zone, AnalyticsGranularity granularity)
+        TimeZoneInfo zone, AnalyticsGranularity granularity, DateTimeOffset now)
     {
         var dated = rows.Where(r => r.StartDate.HasValue).ToList();
         if (dated.Count == 0) return Array.Empty<AccuracyTrendBucket>();
 
         var from = filter.FromDate ?? dated.Min(r => r.StartDate!.Value);
-        var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<AccuracyTrendBucket>();
 
         var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);
