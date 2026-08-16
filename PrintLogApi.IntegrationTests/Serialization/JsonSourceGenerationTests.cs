@@ -18,19 +18,33 @@ namespace PrintLogApi.IntegrationTests.Serialization;
 /// performance change: it moves serialization metadata from runtime reflection to compile time
 /// and must leave the wire contract byte-for-byte identical.
 ///
-/// Three things can go wrong, and each has a test here:
+/// Four things can go wrong, and each has a test here:
 ///
 /// 1. The reflection fallback gets dropped. Assigning <c>TypeInfoResolver</c> instead of
 ///    inserting into the chain does exactly that, and the symptom appears on some unrelated
 ///    endpoint whose payload was never listed in the context — far from the edit that caused it.
 /// 2. The context is registered but never consulted, so the whole change is a no-op that still
 ///    passes every behavioural test in the suite.
-/// 3. A type is annotated to fit the generator — <c>required</c> or <c>[JsonRequired]</c> — which
+/// 3. The generated metadata describes a different shape than reflection did, for some type in
+///    the closure.
+/// 4. A type is annotated to fit the generator — <c>required</c> or <c>[JsonRequired]</c> — which
 ///    AGENTS.md bans because System.Text.Json <em>enforces</em> both, turning a tolerated missing
 ///    field into a 400.
 ///
-/// Uses the MCP-seeded factory so the endpoints return populated payloads; comparing two
-/// serializations of an empty object would prove very little.
+/// On (3), note what a resolver can and cannot change, because it bounds what is worth testing.
+/// A resolver supplies <em>metadata</em>: which members are written, under what names, in what
+/// order, and how instances are constructed. It does not supply converters — the same
+/// <c>DecimalConverter</c>, <c>DateOnlyConverter</c> and friends write the values on both paths, so
+/// no amount of fixture variety in the VALUES (offsets, trailing zeros, boundary dates) can make
+/// the two paths disagree. What varies per type is the shape, and shape does not depend on the
+/// values a fixture happens to carry. So the coverage here is structural and exhaustive —
+/// <see cref="GeneratedMetadata_MatchesReflectionMetadata"/> walks all ~100 types in the closure —
+/// rather than sampled through hand-built instances that could only ever cover a few of them.
+///
+/// The endpoint-driven comparison stays alongside it because structural equality is an argument
+/// and a real response body is evidence. It uses the MCP-seeded factory so the payloads are
+/// non-empty and representative, which is NOT the same as exercising every nested collection,
+/// nullable member or cost branch — the structural test is what covers those.
 /// </summary>
 public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplicationFactory>
 {
@@ -97,6 +111,22 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
         { typeof(PagedList<PrinterSummarySimpleDto>), "/api/printers/summary?pageNumber=1&pageSize=25" },
     };
 
+    /// <summary>
+    /// Every type the generator emitted metadata for, read off the context itself rather than
+    /// listed by hand.
+    ///
+    /// The generator emits one public <c>JsonTypeInfo&lt;T&gt;</c> property per type in the closure
+    /// of the declared roots, so this enumerates what was actually generated. That is the property
+    /// worth driving a test from: a hand-maintained list would go stale exactly when a root's
+    /// graph changes, which is the moment the check matters.
+    /// </summary>
+    public static IEnumerable<Type> GeneratedClosure() =>
+        typeof(PrintLogJsonSerializerContext)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType.IsGenericType
+                        && p.PropertyType.GetGenericTypeDefinition() == typeof(JsonTypeInfo<>))
+            .Select(p => p.PropertyType.GetGenericArguments()[0]);
+
     [Fact]
     public void ResolverChain_LeadsWithTheGeneratedContextAndKeepsReflectionBehindIt()
     {
@@ -123,6 +153,69 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
         Assert.Same(PrintLogJsonSerializerContext.Default, chain[0]);
         Assert.Contains(chain, resolver => resolver is DefaultJsonTypeInfoResolver);
     }
+
+    /// <summary>
+    /// The exhaustive half of the contract proof: for every type in the generated closure, the
+    /// source-generated metadata must describe the same shape reflection did.
+    ///
+    /// Compares what a resolver is actually responsible for — the kind of the type, and for object
+    /// types the ordered list of members with their names, declared types, accessor presence and
+    /// required-ness. Name and order together are the wire contract; accessor presence is what
+    /// separates a written member from a skipped one; required-ness is the 400-vs-null behaviour
+    /// AGENTS.md cares about.
+    ///
+    /// Reported as one aggregated list rather than a per-type theory: a generator or SDK change
+    /// that shifts a convention tends to move many types at once, and seeing all of them beats
+    /// fixing them one failing test at a time.
+    /// </summary>
+    [Fact]
+    public void GeneratedMetadata_MatchesReflectionMetadata()
+    {
+        var sourceGenerated = FormatterOptions();
+        var reflected = ReflectionOnlyOptions();
+        var mismatches = new List<string>();
+        var checkedCount = 0;
+
+        foreach (var type in GeneratedClosure())
+        {
+            var generatedInfo = sourceGenerated.GetTypeInfo(type);
+            var reflectedInfo = reflected.GetTypeInfo(type);
+
+            // Proves the type resolved through the context rather than falling through to the
+            // reflection resolver behind it, which would make the comparison below vacuous.
+            if (generatedInfo.OriginatingResolver is not PrintLogJsonSerializerContext)
+            {
+                mismatches.Add($"{type} resolved through {generatedInfo.OriginatingResolver?.GetType().Name ?? "null"}, not the generated context");
+                continue;
+            }
+
+            if (generatedInfo.Kind != reflectedInfo.Kind)
+            {
+                mismatches.Add($"{type} kind: generated {generatedInfo.Kind}, reflected {reflectedInfo.Kind}");
+            }
+
+            var generatedShape = Shape(generatedInfo);
+            var reflectedShape = Shape(reflectedInfo);
+            if (generatedShape != reflectedShape)
+            {
+                mismatches.Add($"{type} members:{Environment.NewLine}  generated: {generatedShape}{Environment.NewLine}  reflected: {reflectedShape}");
+            }
+
+            checkedCount++;
+        }
+
+        Assert.Empty(mismatches);
+
+        // A context that generated nothing would pass every assertion above vacuously.
+        Assert.True(checkedCount > 50, $"Expected the closure of the declared roots to be substantial; walked {checkedCount} types.");
+    }
+
+    private static string Shape(JsonTypeInfo typeInfo) =>
+        string.Join(
+            " | ",
+            typeInfo.Properties.Select(p =>
+                $"{p.Name}:{p.PropertyType.FullName}" +
+                $":get={p.Get is not null}:set={p.Set is not null}:required={p.IsRequired}"));
 
     /// <summary>
     /// Registration is not use. A context whose roots do not match the types MVC actually
@@ -165,6 +258,43 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
 
         Assert.Equal(viaReflection, viaSourceGeneration);
         Assert.Equal(body, viaSourceGeneration);
+    }
+
+    /// <summary>
+    /// Acceptance criterion 4 of #67: the published contract does not move.
+    ///
+    /// The full document was diffed byte-for-byte before and after the change and was identical;
+    /// this keeps the part of that result which can regress. It is deliberately NOT a snapshot of
+    /// the whole document — that churns on every new endpoint and would be deleted within a
+    /// release. What it pins is the property naming Swashbuckle emits for a source-generated type,
+    /// which is what a serializer-options edit would actually disturb.
+    ///
+    /// Swashbuckle reads <c>JsonSerializerOptions</c> for its naming policy but does not consult
+    /// the resolver chain, so today's answer is "the context is invisible to Swagger". This test is
+    /// what would notice if that stopped being true.
+    /// </summary>
+    [Fact]
+    public async Task SwaggerSchema_KeepsCamelCasePropertyNamesForAGeneratedType()
+    {
+        var response = await _httpClient.GetAsync("/swagger/v1/swagger.json");
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        // CustomSchemaIds is type.ToString(), so the schema is keyed by the full CLR name.
+        var schema = document.RootElement
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty(typeof(OverviewResponse).ToString());
+
+        var propertyNames = schema.GetProperty("properties")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .ToList();
+
+        Assert.Equal(
+            new[] { "from", "to", "timeZone", "granularity", "tiles", "statusBreakdown", "series", "highlights" },
+            propertyNames);
     }
 
     /// <summary>

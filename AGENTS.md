@@ -217,8 +217,19 @@ fallback, and the failure surfaces on some unrelated endpoint rather than at the
 Adding a `[JsonSerializable]` root is the whole change — the generator walks the type graph, so
 nested types need no attribute. Do **not** add `required` or `[JsonRequired]` to make a type fit;
 see the DTO rules above, both are enforced by `System.Text.Json` and turn a tolerated missing field
-into a 400. `JsonSourceGenerationTests` pairs each root with the endpoint that produces one and
-asserts the generated payload is byte-identical to the reflection-produced one.
+into a 400.
+
+`JsonSourceGenerationTests` covers this from two directions. The structural test enumerates the
+closure off the context's own generated `JsonTypeInfo<T>` properties — so it needs no maintenance
+when a root's graph changes — and compares member names, order, types, accessors and required-ness
+against the reflection resolver for all ~100 types. The endpoint test additionally pairs each root
+with a URL that produces one and asserts the body is byte-identical either way; that pairing *is*
+hand-maintained, so a new `[JsonSerializable]` root needs a new row in `HotResponses()`.
+
+Worth knowing when judging how much test coverage a change here needs: a resolver supplies metadata
+only. Converters are shared by both paths, so the two cannot disagree on how a `decimal`, `DateOnly`
+or `DateTimeOffset` is *formatted* — only on which members exist, their names and their order.
+Fixture variety in values proves nothing here; structural comparison proves everything.
 
 Two non-obvious facts, both verified rather than assumed:
 
