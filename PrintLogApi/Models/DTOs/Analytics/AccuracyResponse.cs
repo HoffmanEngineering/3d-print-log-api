@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Services.Analytics;
+﻿using System.ComponentModel;
+using PrintLogApi.Services.Analytics;
 
 namespace PrintLogApi.Models.DTOs.Analytics;
 
@@ -21,6 +22,10 @@ public sealed record AccuracyCallout(
 /// scatter from this same payload; a viewport-dependent response would break caching and
 /// typed clients (spec §11).
 /// </summary>
+// [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
+// shared from L1 rather than deserialized per hit. Truthful here - this is a positional
+// record with init-only members. See PagedList<T> for the full rationale.
+[ImmutableObject(true)]
 public sealed record AccuracyResponse(
     DateTimeOffset? From,
     DateTimeOffset? To,

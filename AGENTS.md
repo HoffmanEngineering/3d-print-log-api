@@ -26,6 +26,58 @@ version GUID + query parameters, so bumping a user's version invalidates every e
 at once. Applied to `GetPrintSummary()` and `GetPrinterSummary()`; every create/update/delete must
 invalidate, or callers keep reading stale summaries.
 
+### HybridCache for compute-on-miss, IMemoryCache for counters (#68)
+
+Everything that computes a value on a miss goes through `HybridCache.GetOrCreateAsync`, for
+stampede protection: concurrent callers on one key await a single computation. The cold window is
+not hypothetical — a version bump invalidates all of a user's entries at once, so their misses
+arrive together. Converted: both summary endpoints, all six analytics tabs, `ClaimsTransformer`
+and `UserApiKeyService.GetUserIdByApiKey`.
+
+The version GUID stays in the key exactly as before. No tag-based eviction, and **no L2** — L1-only
+was the scope, and a distributed store is a separate decision.
+
+Three sites stay on `IMemoryCache` deliberately, each with the reasoning at the site:
+
+- **`CacheVersionService`** — it is the _source_ of the GUIDs every HybridCache key is built from,
+  its contract is synchronous, and the "computation" on a miss is `Guid.NewGuid()`. Nothing to
+  deduplicate.
+- **`ApiKeyMiddleware`'s failed-attempt counter** and **`UserApiKeyService`'s last-used throttle
+  flag** — counters and flags, not caches. The value carries no information; its existence is the
+  signal.
+- **`Auth0Service`** — #68 listed it as a candidate and the code disagrees. Its TTL comes from the
+  token's own `expires_in`, which is only known _inside_ the factory, and `HybridCacheEntryOptions`
+  is fixed before the factory runs with no way to amend it after. Converting would swap a
+  token-derived expiry for a guessed constant. Its semaphore already provides exactly the stampede
+  protection HybridCache would add.
+
+**The memory budget is now denominated in bytes, and that was forced, not chosen.** HybridCache
+stores L1 entries in the DI-registered `IMemoryCache` — there is no second cache and no second
+budget — but it charges each entry the **serialized byte length** of its payload as `Size`, and
+that is not configurable. The old `SizeLimit = 8192` was in nominal ~1KB units; left alone it would
+have capped the whole process cache at 8 KB, which one print summary exceeds. `CacheBudget`
+carries the constants and the full reasoning; anything still writing to `IMemoryCache` directly
+must charge bytes too, or the two halves of one budget mean different things.
+**Total in-process cache ceiling after the change: 8 MiB**, the same ceiling the old units
+intended.
+
+Two consequences worth knowing before editing:
+
+- **Cached response types carry `[ImmutableObject(true)]`** (`PagedList<T>`, the six analytics
+  responses). That attribute is inert at runtime and exists solely to tell HybridCache it may share
+  the stored instance. Without it a cache _hit_ pays a full JSON deserialize — precisely the cost
+  #66 declined to spend on the serialize side, landing on endpoints whose expensive part the cache
+  already skips. `CachingConfigurationTests` enumerates the analytics responses off the
+  controller's own actions, so a seventh tab fails there by name rather than silently regressing.
+  Treat anything read out of the cache as read-only.
+- **Sliding expiration is gone.** HybridCache offers absolute expiry only, so entries that paired a
+  sliding window with a longer absolute cap are now flat (15 min for summaries and analytics,
+  24 h for the claims and API-key lookups). The cost is one extra query per hot key per window.
+- **A shared factory runs on the winning caller's scoped services.** If that request is aborted
+  mid-computation its `DbContext` can be disposed underneath the joiners waiting on the same key.
+  The blast radius is an exception for that key's waiters — nothing is cached and the next call
+  recomputes — but it is a real trade the previous one-query-per-caller shape did not have.
+
 ### Output caching was evaluated and declined (#66)
 
 `AddOutputCache` is deliberately **not** in the pipeline. It was proposed to skip the JSON

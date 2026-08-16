@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Security.Principal;
 using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Caching;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.Authentication.Middleware;
@@ -102,10 +103,16 @@ public class ApiKeyMiddleware
 
         // GetOrCreate is declared to return TItem? because a factory may return null; ours
         // always returns a counter, so the result is never null.
+        // Deliberately still IMemoryCache after #68, not HybridCache. This is a rate-limiting
+        // counter, not a compute-on-miss cache: there is no expensive computation to share
+        // between concurrent callers, and the mutable counter box below is incremented in place
+        // precisely so the value does NOT round-trip through the cache. Routing it through
+        // GetOrCreateAsync would change what Api:InvalidApiKeyAttemptsPerMinute counts.
         var counter = _cache.GetOrCreate(FailedAttemptCachePrefix + address, entry =>
         {
-            // The shared IMemoryCache is size-limited, so every entry must declare a size.
-            entry.SetSize(1);
+            // The shared IMemoryCache is size-limited, so every entry must declare a size, and
+            // the unit is bytes — see PrintLogApi.Caching.CacheBudget.
+            entry.SetSize(CacheBudget.SmallEntryBytes);
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1);
             return new FailedAttemptCounter();
         })!;

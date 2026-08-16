@@ -1,10 +1,19 @@
 ﻿using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Caching;
 
 namespace PrintLogApi.Services;
 
 /// <summary>
 /// Implementation of cache version service using in-memory cache.
 /// Manages per-user cache versions to enable efficient cache invalidation.
+///
+/// <para>Deliberately still on IMemoryCache after #68, on three counts. It is the <i>source</i>
+/// of the version GUIDs that every HybridCache key is built from, so putting it behind the
+/// cache it feeds inverts the dependency for no gain. Its contract is synchronous and
+/// HybridCache is async-only, which would push a Task up through every caller that composes a
+/// cache key. And there is nothing to deduplicate: the "computation" on a miss is
+/// Guid.NewGuid(), so a stampede costs a few wasted GUIDs, and two racing callers each minting
+/// their own is harmless — a version nobody has cached under yet invalidates nothing.</para>
 /// </summary>
 public class CacheVersionService(IMemoryCache cache) : ICacheVersionService
 {
@@ -20,7 +29,7 @@ public class CacheVersionService(IMemoryCache cache) : ICacheVersionService
             version = Guid.NewGuid().ToString("N");
 
             var cacheOptions = new MemoryCacheEntryOptions()
-                .SetSize(1) // Small size for version tracking
+                .SetSize(CacheBudget.SmallEntryBytes)
                 .SetSlidingExpiration(TimeSpan.FromHours(24))
                 .SetAbsoluteExpiration(TimeSpan.FromDays(7));
 
@@ -39,7 +48,7 @@ public class CacheVersionService(IMemoryCache cache) : ICacheVersionService
         var newVersion = Guid.NewGuid().ToString("N");
 
         var cacheOptions = new MemoryCacheEntryOptions()
-            .SetSize(1)
+            .SetSize(CacheBudget.SmallEntryBytes)
             .SetSlidingExpiration(TimeSpan.FromHours(24))
             .SetAbsoluteExpiration(TimeSpan.FromDays(7));
 

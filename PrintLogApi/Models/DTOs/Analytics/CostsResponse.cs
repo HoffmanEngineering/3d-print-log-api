@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Services.Analytics;
+﻿using System.ComponentModel;
+using PrintLogApi.Services.Analytics;
 
 namespace PrintLogApi.Models.DTOs.Analytics;
 
@@ -14,6 +15,10 @@ public sealed record PrintCostRef(long PrintId, string? Title, DateOnly? Date, d
 /// The Costs tab payload. CostOfFailureSharePercent is null when total spend is 0 — a share
 /// of nothing is undefined, not 0%, and 0% would read as "no failures".
 /// </summary>
+// [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
+// shared from L1 rather than deserialized per hit. Truthful here - this is a positional
+// record with init-only members. See PagedList<T> for the full rationale.
+[ImmutableObject(true)]
 public sealed record CostsResponse(
     DateTimeOffset? From,
     DateTimeOffset? To,

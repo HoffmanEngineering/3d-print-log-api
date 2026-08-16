@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Caching;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests.Auth0;
@@ -42,7 +43,10 @@ public static class Auth0TestHarness
             })
             .Build();
 
-        var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 100 });
+        // Sized from CacheBudget rather than a bare number: entries are charged in bytes, so a
+        // limit small enough to reject the token entry would silently turn the cache off and the
+        // token-reuse tests would still pass for the wrong reason.
+        var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = CacheBudget.SmallEntryBytes * 8 });
         return new Auth0Service(new StubHttpClientFactory(handler), config, cache);
     }
 

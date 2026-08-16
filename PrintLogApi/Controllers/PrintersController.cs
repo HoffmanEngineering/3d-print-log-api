@@ -4,7 +4,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
@@ -25,7 +25,7 @@ public class PrintersController(
     IFilamentService filamentService,
     IPrinterService printerService,
     IPrinterCategoryService printerCategoryService,
-    IMemoryCache cache,
+    HybridCache cache,
     ICacheVersionService cacheVersionService) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
@@ -53,46 +53,51 @@ public class PrintersController(
         var version = cacheVersionService.GetUserCacheVersion(userId.Value);
         var cacheKey = GeneratePrinterCacheKey(userId.Value, version, pagingRequest, searchText, includeInactive);
 
-        if (cache.TryGetValue(cacheKey, out PagedList<PrinterSummarySimpleDto>? cachedResult))
-        {
-            return Ok(cachedResult);
-        }
-
-        var printers = context.Printers
-            .AsNoTracking()
-            .Where(p => p.UserId == userId);
-
-        if (!includeInactive)
-        {
-            printers = printers.Where(p => p.IsActive == true);
-        }
-
-        if (!string.IsNullOrWhiteSpace(searchText))
-        {
-            printers = printers.Where(p => p.Name!.Contains(searchText) || p.Make!.Contains(searchText) || p.Model!.Contains(searchText));
-        }
-
-        var result = printers
-            .Include(p => p.Category)
-            .Include(p => p.LoadedFilaments!)
-                .ThenInclude(lf => lf.Filament)
-            .OrderByDescending(p => p.Name)
-            .ThenByDescending(p => p.Make)
-            .ThenByDescending(p => p.Model)
-            .ProjectTo<PrinterSummarySimpleDto>(mapper.ConfigurationProvider);
-
-        var response = await PagedList<PrinterSummarySimpleDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
-
-        var cacheOptions = new MemoryCacheEntryOptions()
-            .SetSize(EstimatePrinterCacheSize(response))
-            .SetSlidingExpiration(TimeSpan.FromMinutes(5))
-            .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
-            .SetPriority(CacheItemPriority.Normal);
-
-        cache.Set(cacheKey, response, cacheOptions);
+        // Stampede protection: concurrent misses on one key run the query once between them.
+        // See the equivalent block in PrintsController.GetPrintSummary — including why the
+        // sliding expiration is not reproduced.
+        var response = await cache.GetOrCreateAsync(
+            cacheKey,
+            _ => new ValueTask<PagedList<PrinterSummarySimpleDto>>(LoadPrinterSummary()),
+            SummaryCacheOptions,
+            cancellationToken: HttpContext.RequestAborted);
 
         return Ok(response);
+
+        Task<PagedList<PrinterSummarySimpleDto>> LoadPrinterSummary()
+        {
+            var printers = context.Printers
+                .AsNoTracking()
+                .Where(p => p.UserId == userId);
+
+            if (!includeInactive)
+            {
+                printers = printers.Where(p => p.IsActive == true);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                printers = printers.Where(p => p.Name!.Contains(searchText) || p.Make!.Contains(searchText) || p.Model!.Contains(searchText));
+            }
+
+            var result = printers
+                .Include(p => p.Category)
+                .Include(p => p.LoadedFilaments!)
+                    .ThenInclude(lf => lf.Filament)
+                .OrderByDescending(p => p.Name)
+                .ThenByDescending(p => p.Make)
+                .ThenByDescending(p => p.Model)
+                .ProjectTo<PrinterSummarySimpleDto>(mapper.ConfigurationProvider);
+
+            return PagedList<PrinterSummarySimpleDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+        }
     }
+
+    private static readonly HybridCacheEntryOptions SummaryCacheOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(15),
+        LocalCacheExpiration = TimeSpan.FromMinutes(15),
+    };
 
     /// <summary>
     /// Return a specific printer by id.
@@ -433,12 +438,6 @@ public class PrintersController(
                $"ia{includeInactive}";
     }
 
-    /// <summary>
-    /// Estimates the cache size for a paged list result in cache size units (approximate KB).
-    /// </summary>
-    private long EstimatePrinterCacheSize(PagedList<PrinterSummarySimpleDto> result)
-    {
-        // Rough estimate: ~1KB per printer summary item (lightweight DTO) + overhead
-        return (result?.Items?.Count ?? 0);
-    }
+    // EstimatePrinterCacheSize is gone for the same reason as PrintsController's counterpart:
+    // HybridCache charges the entry's real serialized byte length. See CacheBudget.
 }

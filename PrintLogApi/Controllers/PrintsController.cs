@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -35,7 +35,7 @@ public class PrintsController(
     IPrintService printService,
     IPrintImageService printImageService,
     ICommentService commentService,
-    IMemoryCache cache,
+    HybridCache cache,
     ICacheVersionService cacheVersionService,
     IBlobStorageService blobStorageService,
     IFileAttachmentService fileAttachmentService) : ControllerBase
@@ -125,24 +125,30 @@ public class PrintsController(
                                         filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
                                         fromDate, toDate);
 
-        // Null-forgiven: only a non-null result is ever stored under this key.
-        if (cache.TryGetValue(cacheKey, out PagedList<PrintSummaryDTO>? cachedResult))
-        {
-            return cachedResult!;
-        }
-
-        var result = await printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds, filterByFilamentIds, statuses, userId, currentUserId, projectIds, fromDate, toDate);
-
-        var cacheOptions = new MemoryCacheEntryOptions()
-            .SetSize(EstimateCacheSize(result))
-            .SetSlidingExpiration(TimeSpan.FromMinutes(5))
-            .SetAbsoluteExpiration(TimeSpan.FromMinutes(15))
-            .SetPriority(CacheItemPriority.Normal);
-
-        cache.Set(cacheKey, result, cacheOptions);
-
-        return result;
+        // Stampede protection is the point of routing this through HybridCache: concurrent
+        // misses on one key run SearchPrintSummary once between them. The cold window is not
+        // hypothetical here — every write bumps the user's cache version, which invalidates
+        // every summary key they have, so the misses arrive together.
+        //
+        // The sliding expiration the hand-rolled entry carried is gone: HybridCache exposes an
+        // absolute lifetime only. That shortens the life of a repeatedly-read entry from
+        // "15 minutes, extended while in use" to a flat 15 minutes, which costs an extra query
+        // on a hot key every 15 minutes and is not worth reproducing by hand.
+        return await cache.GetOrCreateAsync(
+            cacheKey,
+            _ => new ValueTask<PagedList<PrintSummaryDTO>>(
+                printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
+                                                filterByFilamentIds, statuses, userId, currentUserId, projectIds,
+                                                fromDate, toDate)),
+            SummaryCacheOptions,
+            cancellationToken: HttpContext.RequestAborted);
     }
+
+    private static readonly HybridCacheEntryOptions SummaryCacheOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(15),
+        LocalCacheExpiration = TimeSpan.FromMinutes(15),
+    };
 
 
     /// <summary>
@@ -1164,12 +1170,7 @@ public class PrintsController(
                $"df{fromKey}_dt{toKey}";
     }
 
-    /// <summary>
-    /// Estimates the cache size for a paged list result in cache size units (approximate KB).
-    /// </summary>
-    private long EstimateCacheSize(PagedList<PrintSummaryDTO> result)
-    {
-        // Rough estimate: ~2KB per print summary item + overhead
-        return (result?.Items?.Count ?? 0) * 2;
-    }
+    // EstimateCacheSize is gone: HybridCache charges the entry's real serialized byte length
+    // against the shared budget, so the "~2KB per item" guess is both unnecessary and less
+    // accurate than what replaces it. See PrintLogApi.Caching.CacheBudget.
 }

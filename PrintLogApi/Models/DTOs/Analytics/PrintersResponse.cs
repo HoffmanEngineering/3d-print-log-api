@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Analytics;
+﻿using System.ComponentModel;
+
+namespace PrintLogApi.Models.DTOs.Analytics;
 
 /// <summary>
 /// One printer's figures for the window. IsIdle is true when the printer produced nothing in
@@ -26,6 +28,10 @@ public sealed record PrinterSeriesBucket(
 public sealed record MaintenanceEvent(
     string Id, long PrinterId, DateOnly Date, string? Category, string? Description, decimal? Cost);
 
+// [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
+// shared from L1 rather than deserialized per hit. Truthful here - this is a positional
+// record with init-only members. See PagedList<T> for the full rationale.
+[ImmutableObject(true)]
 public sealed record PrintersResponse(
     DateTimeOffset? From,
     DateTimeOffset? To,
