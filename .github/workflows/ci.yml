@@ -21,18 +21,27 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      # Fails on any file whose line endings, UTF-8 BOM or whitespace drift from .editorconfig.
-      # Runs before the build because it takes seconds and needs no compilation.
+      # Fails on any file whose line endings, UTF-8 BOM, whitespace, using order or analyzer-fixable
+      # diagnostics drift from .editorconfig. Reproduce a failure locally with `dotnet format` and
+      # commit the result.
       #
       # This is the enforced half of the encoding policy. .gitattributes covers line endings at the
       # Git layer, but Git has no concept of a BOM, so `charset = utf-8-bom` is only real if
-      # something applies it -- this step is that something. Reproduce a failure locally with
-      # `dotnet format whitespace` and commit the result.
+      # something applies it -- this step is that something.
       #
-      # Scoped to `whitespace` deliberately: the full `dotnet format` would also enforce the style
-      # and analyzer rules in .editorconfig, which this codebase does not currently satisfy.
+      # Full `dotnet format`, i.e. all three of whitespace, style and analyzers. The scope was
+      # widened once the codebase actually satisfied the latter two (29 files); leaving a rule
+      # declared in .editorconfig but unenforced is what let `charset = utf-8-bom` sit true on paper
+      # and false in 233 files.
+      #
+      # Unlike the other steps this one needs the analyzers, so it cannot use --no-restore and it
+      # runs after restore rather than first.
+      #
+      # CA2017 is carved out because it has no automatic code fix -- `dotnet format` reports it and
+      # then cannot resolve it, so the gate would be permanently red. The ten offending logger calls
+      # are tracked in #60. Remove this exclusion when #60 closes, or the rule stays unenforced.
       - name: Verify formatting and encoding
-        run: dotnet format whitespace --verify-no-changes --verbosity diagnostic
+        run: dotnet format --verify-no-changes --verbosity diagnostic --exclude-diagnostics CA2017
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
