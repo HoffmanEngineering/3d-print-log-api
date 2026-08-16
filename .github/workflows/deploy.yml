@@ -32,7 +32,7 @@ jobs:
         run: dotnet publish PrintLogApi/PrintLogApi.csproj --configuration Release --output ./publish
 
       - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app
           path: ./publish
@@ -70,7 +70,7 @@ jobs:
           DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
 
       - name: Upload migration script artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: migration-script
           path: migrations.sql
@@ -82,7 +82,7 @@ jobs:
             --output ./efbundle
 
       - name: Upload migrations bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: migrations-bundle
           path: ./efbundle
