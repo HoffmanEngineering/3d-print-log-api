@@ -1,0 +1,59 @@
+# Line-ending policy. Without this file Git stores whatever bytes a tool happened to write, which
+# is how this repo ended up with 360 CRLF and 206 LF C# files (plus two that were mixed *within* a
+# single file). Nothing here touches the UTF-8 BOM — Git has no concept of one. That axis is
+# enforced by `charset = utf-8-bom` in .editorconfig, applied by `dotnet format whitespace`.
+#
+# The policy: normalize to LF in the repository, and check out per-type. Files with `eol=` are
+# deterministic on every machine regardless of the developer's core.autocrlf, which is what makes
+# this stick — core.autocrlf is currently `false` both locally and globally.
+
+# Anything Git decides is text gets normalized to LF on commit.
+* text=auto
+
+# Source and project files check out CRLF. This is a Windows/Visual Studio codebase and VS writes
+# CRLF on every new file; pinning it here means the formatter and the editor agree.
+*.cs        text eol=crlf diff=csharp
+*.csx       text eol=crlf diff=csharp
+*.vb        text eol=crlf
+*.csproj    text eol=crlf
+*.vbproj    text eol=crlf
+*.sln       text eol=crlf
+*.props     text eol=crlf
+*.targets   text eol=crlf
+*.config    text eol=crlf
+*.resx      text eol=crlf
+
+# Things that are consumed by non-Windows tooling must be LF. `coverage-check.sh` was committed as
+# CRLF, which fails under real bash with `\r: command not found`; CI runs on ubuntu-latest.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Dockerfile  text eol=lf
+*.dockerfile text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore  text eol=lf
+.git-blame-ignore-revs text eol=lf
+
+# PowerShell is Windows-first here but runs cross-platform; CRLF is safe for it either way.
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+
+# Markdown, JSON and SQL are read by both worlds. LF keeps diffs clean on the ubuntu runners.
+*.md        text eol=lf
+*.json      text eol=lf
+*.sql       text eol=lf
+
+# Binary — never touch, never diff.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.dll       binary
+*.exe       binary
+*.pfx       binary
+*.snk       binary

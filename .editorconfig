@@ -6,10 +6,24 @@
 [*]
 indent_style = space
 # Code files
+# end_of_line and charset are the enforced half of the encoding policy: `dotnet format whitespace`
+# reads both from here, and ci.yml fails the build on a difference. .gitattributes covers line
+# endings again at the Git layer, but it cannot see a BOM at all — charset below is the only thing
+# that manages one, so do not drop it assuming Git has it covered.
 [*.{cs,csx,vb,vbx}]
 indent_size = 4
 insert_final_newline = true
+end_of_line = crlf
 charset = utf-8-bom
+
+# Consumed by non-Windows tooling. CI runs on ubuntu-latest and bash rejects CRLF in a script.
+[*.{sh,yml,yaml}]
+end_of_line = lf
+charset = utf-8
+
+[*.{md,json,sql}]
+end_of_line = lf
+charset = utf-8
 ###############################
 # .NET Coding Conventions     #
 ###############################
