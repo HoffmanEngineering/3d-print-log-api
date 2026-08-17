@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           # Same pin as ci.yml. A release must not be built with a different SDK than the one CI
           # validated the commit against.
