@@ -86,11 +86,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
     }
 
@@ -101,7 +101,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -115,11 +115,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Contains(result, k => k.Id == activeKey.Id && !k.IsDeleted);
     }
@@ -132,11 +132,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         var key = result.FirstOrDefault(k => k.Id == apiKey.Id);
         Assert.NotNull(key);
         Assert.Equal("Details Test Key", key.Description);
@@ -156,11 +156,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("New Test API Key", result.Description);
         Assert.NotEqual(Guid.Empty, result.Id);
@@ -176,7 +176,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -191,11 +191,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.Id);
         Assert.False(string.IsNullOrEmpty(result.PublicKey));
@@ -210,11 +210,11 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.Id);
     }
@@ -233,15 +233,15 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         request2.Content = new StringContent(JsonSerializer.Serialize(dto2), Encoding.UTF8, "application/json");
 
         // Act
-        var response1 = await _httpClient.SendAsync(request1);
-        var response2 = await _httpClient.SendAsync(request2);
+        var response1 = await _httpClient.SendAsync(request1, TestContext.Current.CancellationToken);
+        var response2 = await _httpClient.SendAsync(request2, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
         Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
 
-        var result1 = (await response1.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
-        var result2 = (await response2.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var result1 = (await response1.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
+        var result2 = (await response2.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotEqual(result1.PublicKey, result2.PublicKey);
         Assert.NotEqual(result1.Id, result2.Id);
@@ -256,13 +256,13 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         createRequest.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act - Create key
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - Get keys
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Contains(keys, k => k.Id == created.Id && k.Description == "Appears In Get Test");
@@ -280,7 +280,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{apiKey.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -298,7 +298,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/UserApiKeys/{apiKeyId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -312,7 +312,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{nonExistentId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -359,7 +359,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         // Act & Assert - The controller calls Forbid() which throws in TestServer
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await _httpClient.SendAsync(request);
+            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
 
         // Verify the API key is not deleted
@@ -394,7 +394,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{apiKey.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -408,18 +408,18 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
 
         // Verify it appears in the list
         var getRequest1 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
-        var getResponse1 = await _httpClient.SendAsync(getRequest1);
-        var keys1 = (await getResponse1.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var getResponse1 = await _httpClient.SendAsync(getRequest1, TestContext.Current.CancellationToken);
+        var keys1 = (await getResponse1.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(keys1, k => k.Id == apiKey.Id);
 
         // Delete the key
         var deleteRequest = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{apiKey.Id}");
-        await _httpClient.SendAsync(deleteRequest);
+        await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Act - Get keys again
         var getRequest2 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
-        var getResponse2 = await _httpClient.SendAsync(getRequest2);
-        var keys2 = (await getResponse2.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var getResponse2 = await _httpClient.SendAsync(getRequest2, TestContext.Current.CancellationToken);
+        var keys2 = (await getResponse2.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - Deleted key should not appear (or be marked as deleted)
         var deletedKey = keys2.FirstOrDefault(k => k.Id == apiKey.Id);
@@ -438,22 +438,22 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         var createRequest = CreateAuthenticatedRequest(HttpMethod.Post, "/api/UserApiKeys");
         createRequest.Content = new StringContent(JsonSerializer.Serialize(createDto), Encoding.UTF8, "application/json");
 
-        var createResponse = await _httpClient.SendAsync(createRequest);
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
 
-        var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions))!;
+        var created = (await createResponse.Content.ReadFromJsonAsync<NewUserApiKeyDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(created);
         Assert.False(string.IsNullOrEmpty(created.PublicKey));
 
         // Verify it appears in the list
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/UserApiKeys");
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions))!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var keys = (await getResponse.Content.ReadFromJsonAsync<List<UserApiKeyDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(keys, k => k.Id == created.Id);
 
         // Delete the key
         var deleteRequest = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{created.Id}");
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // Verify it's deleted

@@ -36,7 +36,7 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
     public async Task ToolList_ExposesRenamedTools_WithAnnotations()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(tools, t => t.Name == "add_material");
 
@@ -55,7 +55,7 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
     public async Task ReadOnlyToken_CannotSeeMaterialWriteTools()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
-        var names = (await client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        var names = (await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
         Assert.DoesNotContain("create_material", names);
         Assert.DoesNotContain("update_material", names);
         Assert.Contains("get_material", names);
@@ -75,7 +75,7 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
         args["recommendedTempC"] = 205.0;
         args["idempotencyKey"] = "mat-proto-1";
 
-        var result = await client.CallToolAsync("create_material", args);
+        var result = await client.CallToolAsync("create_material", args, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         using var doc = JsonDocument.Parse(RawText(result));
@@ -97,7 +97,7 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
         var ok = await client.CallToolAsync("get_material", new Dictionary<string, object?>
         {
             ["materialId"] = McpTestData.ResinMaterialId,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(ok.IsError != true);
         using (var doc = JsonDocument.Parse(RawText(ok)))
         {
@@ -108,7 +108,7 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
         var foreign = await client.CallToolAsync("get_material", new Dictionary<string, object?>
         {
             ["materialId"] = McpTestData.ForeignMaterialId,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(foreign.IsError == true);
         Assert.StartsWith("not_found:", RawText(foreign));
     }
@@ -126,17 +126,17 @@ public class MaterialWriteToolsProtocolTests : IClassFixture<McpDataWebApplicati
             return a;
         }
 
-        var first = await client.CallToolAsync("create_material", Args("Original"));
+        var first = await client.CallToolAsync("create_material", Args("Original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
 
-        var replay = await client.CallToolAsync("create_material", Args("Original"));
+        var replay = await client.CallToolAsync("create_material", Args("Original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(replay.IsError != true);
         using (var replayDoc = JsonDocument.Parse(RawText(replay)))
         {
             Assert.True(replayDoc.RootElement.GetProperty("wasReplayed").GetBoolean());
         }
 
-        var conflict = await client.CallToolAsync("create_material", Args("CHANGED"));
+        var conflict = await client.CallToolAsync("create_material", Args("CHANGED"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(conflict.IsError == true);
         Assert.StartsWith("conflict:", RawText(conflict));
     }

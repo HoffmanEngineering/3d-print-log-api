@@ -20,12 +20,12 @@ public class McpWriteHardeningTests : IClassFixture<McpDataWebApplicationFactory
     public async Task WriteToken_SeesWriteTools_ReadOnlyDoesNot()
     {
         await using var writeClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var writeNames = (await writeClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        var writeNames = (await writeClient.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
         Assert.Contains("create_print", writeNames);
         Assert.Contains("create_material", writeNames);
 
         await using var readClient = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
-        var readNames = (await readClient.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        var readNames = (await readClient.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
         Assert.DoesNotContain("create_print", readNames);
         Assert.DoesNotContain("create_material", readNames);
     }
@@ -62,7 +62,7 @@ public class McpWriteHardeningTests : IClassFixture<McpDataWebApplicationFactory
             ["printerId"] = McpTestData.SearchPrinterId,
             ["status"] = "Success",
             ["idempotencyKey"] = "harden-cache",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         var after = cache.GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
@@ -80,7 +80,7 @@ public class McpWriteHardeningTests : IClassFixture<McpDataWebApplicationFactory
             ["printerId"] = McpTestData.SearchPrinterId,
             ["status"] = "Success",
             ["idempotencyKey"] = "harden-replay-del",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
 
         // Delete the created print out from under the idempotency record.

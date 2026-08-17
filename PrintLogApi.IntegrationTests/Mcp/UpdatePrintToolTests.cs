@@ -34,7 +34,7 @@ public class UpdatePrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         {
             ["id"] = McpTestData.ProjectPrintId,
             ["notes"] = "touch",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(McpTestData.ProjectId, ProjectIdOf(McpTestData.ProjectPrintId));
 
         // Naming projectId in 'clear' must remove it.
@@ -42,7 +42,7 @@ public class UpdatePrintToolTests : IClassFixture<McpDataWebApplicationFactory>
         {
             ["id"] = McpTestData.ProjectPrintId,
             ["clear"] = new[] { "projectId" },
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(ProjectIdOf(McpTestData.ProjectPrintId));
     }
 

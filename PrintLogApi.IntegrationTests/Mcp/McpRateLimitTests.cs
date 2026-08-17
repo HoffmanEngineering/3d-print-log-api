@@ -51,7 +51,7 @@ public class McpRateLimitTests : IClassFixture<McpRateLimitTests.LowLimitFactory
         var statuses = new List<HttpResponseMessage>();
         for (var i = 0; i < Limit + 1; i++)
         {
-            statuses.Add(await client.SendAsync(Rpc(token)));
+            statuses.Add(await client.SendAsync(Rpc(token), TestContext.Current.CancellationToken));
         }
 
         Assert.All(statuses.Take(Limit), r => Assert.NotEqual(HttpStatusCode.TooManyRequests, r.StatusCode));
@@ -71,11 +71,11 @@ public class McpRateLimitTests : IClassFixture<McpRateLimitTests.LowLimitFactory
         // Exhaust user A.
         for (var i = 0; i < Limit + 1; i++)
         {
-            await client.SendAsync(Rpc(tokenA));
+            await client.SendAsync(Rpc(tokenA), TestContext.Current.CancellationToken);
         }
 
         // User B still has a full budget.
-        var respB = await client.SendAsync(Rpc(tokenB));
+        var respB = await client.SendAsync(Rpc(tokenB), TestContext.Current.CancellationToken);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, respB.StatusCode);
     }
 
@@ -102,8 +102,8 @@ public class McpRateLimitTests : IClassFixture<McpRateLimitTests.LowLimitFactory
         string? body = null;
         try
         {
-            var resp = await client.SendAsync(request);
-            body = await resp.Content.ReadAsStringAsync();
+            var resp = await client.SendAsync(request, TestContext.Current.CancellationToken);
+            body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         }
         catch
         {
@@ -130,7 +130,7 @@ public class McpRateLimitTests : IClassFixture<McpRateLimitTests.LowLimitFactory
                 Content = new StringContent(
                     "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", Encoding.UTF8, "application/json"),
             };
-            var resp = await client.SendAsync(request);
+            var resp = await client.SendAsync(request, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         }
     }

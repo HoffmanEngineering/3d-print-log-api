@@ -23,10 +23,10 @@ public class HealthCheckTests : IClassFixture<CustomWebApplicationFactory>
         var client = _factory.CreateClient();
 
         // No authentication header at all — App Service polls this unauthenticated.
-        var response = await client.GetAsync("/health");
+        var response = await client.GetAsync("/health", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
+        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -34,8 +34,8 @@ public class HealthCheckTests : IClassFixture<CustomWebApplicationFactory>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/health/ready");
-        var body = await response.Content.ReadAsStringAsync();
+        var response = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
@@ -87,8 +87,8 @@ public class HealthCheckTests : IClassFixture<CustomWebApplicationFactory>
         using var factory = new FailingReadinessFactory();
         var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/health/ready");
-        var body = await response.Content.ReadAsStringAsync();
+        var response = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
 
@@ -119,8 +119,7 @@ public class HealthCheckTests : IClassFixture<CustomWebApplicationFactory>
         using var scope = _factory.Services.CreateScope();
         var healthCheckService = scope.ServiceProvider.GetRequiredService<HealthCheckService>();
 
-        var report = await healthCheckService.CheckHealthAsync(
-            registration => registration.Tags.Contains("live"));
+        var report = await healthCheckService.CheckHealthAsync(registration => registration.Tags.Contains("live"), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Healthy, report.Status);
         Assert.Equal(new[] { "self" }, report.Entries.Keys);

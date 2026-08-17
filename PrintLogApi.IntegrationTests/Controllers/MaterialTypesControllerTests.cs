@@ -21,7 +21,7 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -35,8 +35,8 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - multiple material types seeded via HasData
         Assert.NotNull(types);
@@ -51,8 +51,8 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - should be sorted alphabetically by Acronym
         Assert.NotNull(types);
@@ -68,8 +68,8 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - PLA should be in the seeded data
         var pla = types.Single(t => t.Acronym == "PLA");
@@ -85,8 +85,8 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var types = (await response.Content.ReadFromJsonAsync<List<MaterialTypeDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - Name is the expanded form of Acronym and is what the material
         // library renders, so a blank one shows up as an empty row to the user.
@@ -107,7 +107,7 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -120,7 +120,7 @@ public class MaterialTypesControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/MaterialTypes");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

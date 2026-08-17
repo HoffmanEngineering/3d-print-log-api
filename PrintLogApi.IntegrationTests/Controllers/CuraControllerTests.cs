@@ -57,7 +57,7 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = new StringContent(settingsJson, Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -78,8 +78,8 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = new StringContent(settingsJson, Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<NewCuraSettingsDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(result);
@@ -111,7 +111,7 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -127,8 +127,8 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var settings = (await response.Content.ReadFromJsonAsync<CuraSetting>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var settings = (await response.Content.ReadFromJsonAsync<CuraSetting>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(settings);
@@ -145,13 +145,13 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         var firstRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Cura/settings?id={settingId}");
         firstRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var firstResponse = await _httpClient.SendAsync(firstRequest);
+        var firstResponse = await _httpClient.SendAsync(firstRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
         // Act - retrieve again with the same user should still work
         var secondRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Cura/settings?id={settingId}");
         secondRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var secondResponse = await _httpClient.SendAsync(secondRequest);
+        var secondResponse = await _httpClient.SendAsync(secondRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
@@ -166,7 +166,7 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Cura/settings?id={settingId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -180,7 +180,7 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

@@ -87,14 +87,23 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     public async Task GetNotifications_WithAuthentication_ReturnsOkWithNotifications()
     {
         // Arrange
+        //
+        // This creates its own row rather than relying on the seeder's. Three tests in this class
+        // (DeleteAllNotifications_*) delete every notification the test user has, and the class
+        // fixture is one database shared by every test in the class - so "the seed is still there"
+        // only held while those happened to run last. xUnit v3 orders the cases in a class
+        // differently from v2 and they no longer do, which is what surfaced this (#70). The
+        // ordering was never guaranteed; the test was.
+        CreateTestNotification();
+
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<NotificationSummaryDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.True(result.Items.Count > 0);
@@ -107,7 +116,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -120,11 +129,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications?pageSize=2&page=1");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<NotificationSummaryDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.True(result.Items.Count <= 2);
@@ -138,11 +147,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications?unreadOnly=true");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<NotificationSummaryDto>>(content, JsonOptions);
         Assert.NotNull(result);
         Assert.All(result.Items, n => Assert.False(n.IsRead));
@@ -155,11 +164,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications?unreadOnly=false");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<NotificationSummaryDto>>(content, JsonOptions);
         Assert.NotNull(result);
         // Should include both read and unread notifications
@@ -174,11 +183,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var result = JsonSerializer.Deserialize<PagedList<NotificationSummaryDto>>(content, JsonOptions);
         Assert.NotNull(result);
 
@@ -202,11 +211,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.True(result.UnreadCount >= 0);
     }
@@ -218,7 +227,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Notifications/unread-count");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -232,11 +241,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(expectedCount, result.UnreadCount);
     }
@@ -253,11 +262,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(notification.Id, result.Id);
         Assert.Equal("Get Valid Test", result.Title);
@@ -271,7 +280,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Notifications/{notificationId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -285,7 +294,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{nonExistentId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -299,7 +308,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}", "auth0|different-user");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Returns Unauthorized because the user doesn't exist in the system
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -313,11 +322,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(notification.Id, result.Id);
         Assert.Equal(notification.Title, result.Title);
@@ -338,7 +347,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{notification.Id}/read");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -357,7 +366,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Notifications/{notificationId}/read");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -371,7 +380,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{nonExistentId}/read");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -385,7 +394,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{notification.Id}/read", "auth0|different-user");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Returns Unauthorized because the user doesn't exist in the system
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -403,7 +412,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{notification.Id}/read");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -423,7 +432,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Put, "/api/Notifications/read-all");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -440,7 +449,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Put, "/api/Notifications/read-all");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -451,13 +460,13 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     {
         // Arrange - First mark all as read
         var markAllRequest = CreateAuthenticatedRequest(HttpMethod.Put, "/api/Notifications/read-all");
-        await _httpClient.SendAsync(markAllRequest);
+        await _httpClient.SendAsync(markAllRequest, TestContext.Current.CancellationToken);
 
         // Then try again
         var request = CreateAuthenticatedRequest(HttpMethod.Put, "/api/Notifications/read-all");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -483,7 +492,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -508,7 +517,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -527,7 +536,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -546,7 +555,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -566,11 +575,11 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("100", content);
     }
 
@@ -587,7 +596,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -607,7 +616,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -629,7 +638,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/Notifications/{notification.Id}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -647,7 +656,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Notifications/{notificationId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -661,7 +670,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/Notifications/{nonExistentId}");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -675,7 +684,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/Notifications/{notification.Id}", "auth0|different-user");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Returns Unauthorized because the user doesn't exist in the system
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -699,7 +708,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -716,7 +725,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
         var request = new HttpRequestMessage(HttpMethod.Delete, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -727,13 +736,13 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     {
         // Arrange - First delete all
         var deleteAllRequest = CreateAuthenticatedRequest(HttpMethod.Delete, "/api/Notifications");
-        await _httpClient.SendAsync(deleteAllRequest);
+        await _httpClient.SendAsync(deleteAllRequest, TestContext.Current.CancellationToken);
 
         // Then try again
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, "/api/Notifications");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -751,31 +760,31 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
 
         // Read the notification
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
-        var getResponse = await _httpClient.SendAsync(getRequest);
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
-        var detail = (await getResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
+        var detail = (await getResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.False(detail.IsRead);
 
         // Mark as read
         var markRequest = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{notification.Id}/read");
-        var markResponse = await _httpClient.SendAsync(markRequest);
+        var markResponse = await _httpClient.SendAsync(markRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, markResponse.StatusCode);
 
         // Verify it's read
         var verifyRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
-        var verifyResponse = await _httpClient.SendAsync(verifyRequest);
-        var verifiedDetail = (await verifyResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions))!;
+        var verifyResponse = await _httpClient.SendAsync(verifyRequest, TestContext.Current.CancellationToken);
+        var verifiedDetail = (await verifyResponse.Content.ReadFromJsonAsync<NotificationDetailDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.True(verifiedDetail.IsRead);
         Assert.NotNull(verifiedDetail.ReadDate);
 
         // Delete the notification
         var deleteRequest = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/Notifications/{notification.Id}");
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // Verify it's deleted
         var deletedRequest = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/Notifications/{notification.Id}");
-        var deletedResponse = await _httpClient.SendAsync(deletedRequest);
+        var deletedResponse = await _httpClient.SendAsync(deletedRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, deletedResponse.StatusCode);
     }
 
@@ -787,18 +796,18 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
 
         // Get initial unread count
         var countRequest1 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
-        var countResponse1 = await _httpClient.SendAsync(countRequest1);
-        var count1 = (await countResponse1.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
+        var countResponse1 = await _httpClient.SendAsync(countRequest1, TestContext.Current.CancellationToken);
+        var count1 = (await countResponse1.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         var initialCount = count1.UnreadCount;
 
         // Mark as read
         var markRequest = CreateAuthenticatedRequest(HttpMethod.Put, $"/api/Notifications/{notification.Id}/read");
-        await _httpClient.SendAsync(markRequest);
+        await _httpClient.SendAsync(markRequest, TestContext.Current.CancellationToken);
 
         // Get updated unread count
         var countRequest2 = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Notifications/unread-count");
-        var countResponse2 = await _httpClient.SendAsync(countRequest2);
-        var count2 = (await countResponse2.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions))!;
+        var countResponse2 = await _httpClient.SendAsync(countRequest2, TestContext.Current.CancellationToken);
+        var count2 = (await countResponse2.Content.ReadFromJsonAsync<NotificationUnreadCountDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Verify count decreased
         Assert.Equal(initialCount - 1, count2.UnreadCount);

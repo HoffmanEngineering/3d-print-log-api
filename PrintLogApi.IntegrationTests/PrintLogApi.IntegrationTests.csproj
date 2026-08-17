@@ -11,22 +11,32 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+
+    <!-- xunit.v3's own props already set this, but it is stated here because it is the single fact
+         that explains everything else about this project under Microsoft.Testing.Platform: the test
+         assembly IS the runner. `dotnet run` on it executes the suite, `dotnet test` launches that
+         same executable, and there is no external VSTest host to attach a datacollector to. -->
+    <OutputType>Exe</OutputType>
+
+    <!-- Opts this project into MTP's `dotnet test` integration. Its partner is the
+         "test": { "runner": "Microsoft.Testing.Platform" } key in the repo-root global.json, which
+         makes the same choice for every project at once; this is the per-project half.
+
+         An earlier revision of this comment pointed at a root dotnet.config instead. That file was
+         written, tested, and deleted: the [dotnet.test.runner] section the preview documentation
+         describes is not read by the 10.0.1xx SDK band, and `dotnet test -h` names global.json. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="ModelContextProtocol" />
-    <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="coverlet.collector">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="xunit.v3" />
+    <!-- MTP's code-coverage extension, the replacement for the coverlet.collector datacollector.
+         Deliberately without PrivateAssets=all: it registers the coverage command-line options on
+         the test host at runtime, so its runtime assets have to flow into the output. -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
   </ItemGroup>
 
   <ItemGroup>

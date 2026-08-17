@@ -40,8 +40,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
     public async Task Stats_CountStatusesDurationAndRate_OrderedByName()
     {
         await using var client = await _factory.ConnectAsync();
-        var stats = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }));
+        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(2, stats.Count);
         Assert.Equal(new[] { IntegrationTestSeeder.TestPrinterId, IntegrationTestSeeder.TestPrinterId2 },
@@ -76,7 +75,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
         {
             ["from"] = McpTestData.RichPrint1Date.AddHours(-1),
             ["to"] = McpTestData.RichPrint2Date.AddHours(1),
-        }));
+        }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Single(stats);
         Assert.Equal(IntegrationTestSeeder.TestPrinterId2, stats[0].PrinterId);
@@ -87,8 +86,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
     public async Task OwnerIsolation_OtherUserSeesOnlyOwnPrinter()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.OtherUserOAuthId);
-        var stats = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }));
+        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["from"] = FullFrom, ["to"] = FullTo }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Single(stats);
         Assert.Equal(McpTestData.OtherPrinterId, stats[0].PrinterId);
@@ -116,7 +114,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
         // "How many prints has this printer done, ever?" previously required looping year by
         // year because the range was mandatory and capped at 366 days.
         await using var client = await _factory.ConnectAsync();
-        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>()));
+        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>(), cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.NotEmpty(stats);
         // The undated search fixtures live on their own printer, so all-time sees it while any
@@ -128,8 +126,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
     public async Task FilterByPrinterId_ReturnsOnlyThatPrinter()
     {
         await using var client = await _factory.ConnectAsync();
-        var stats = Parse(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["printerId"] = IntegrationTestSeeder.TestPrinterId2 }));
+        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["printerId"] = IntegrationTestSeeder.TestPrinterId2 }, cancellationToken: TestContext.Current.CancellationToken));
 
         var stat = Assert.Single(stats);
         Assert.Equal(IntegrationTestSeeder.TestPrinterId2, stat.PrinterId);
@@ -139,8 +136,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
     public async Task Results_ArePaginated()
     {
         await using var client = await _factory.ConnectAsync();
-        var page = ParsePage(await client.CallToolAsync(ToolName,
-            new Dictionary<string, object?> { ["pageSize"] = 1 }));
+        var page = ParsePage(await client.CallToolAsync(ToolName, new Dictionary<string, object?> { ["pageSize"] = 1 }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Single(page.Items);
         Assert.True(page.TotalCount > 1);
@@ -159,7 +155,7 @@ public class GetPrinterStatsToolTests : IClassFixture<McpDataWebApplicationFacto
     public async Task PrinterStats_Duration_UsesTheEstimate_AndCountsIt()
     {
         await using var client = await _factory.ConnectAsync(McpTestData.MetricsUserOAuthId);
-        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>()));
+        var stats = Parse(await client.CallToolAsync(ToolName, new Dictionary<string, object?>(), cancellationToken: TestContext.Current.CancellationToken));
 
         var printer = Assert.Single(stats);   // the metrics user owns exactly one printer
         Assert.Equal(McpTestData.DurationMatrixTotalSeconds, printer.TotalPrintTimeSeconds);

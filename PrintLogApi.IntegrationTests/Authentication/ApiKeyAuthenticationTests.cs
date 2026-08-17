@@ -36,7 +36,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         request.Headers.Add("X-Api-Key", key.PublicKey);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -47,7 +47,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         request.Headers.Add("X-Api-Key", "INVALIDKEY00000000000000000000000");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -62,7 +62,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
 
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         request.Headers.Add("X-Api-Key", key.PublicKey);
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var lastUsed = GetLastUsed(key.Id);
@@ -80,7 +80,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
 
         var first = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         first.Headers.Add("X-Api-Key", key.PublicKey);
-        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first, TestContext.Current.CancellationToken)).StatusCode);
 
         var stampedAt = GetLastUsed(key.Id);
         Assert.NotNull(stampedAt);
@@ -90,7 +90,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         // writing to the same row on every single request.
         var second = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         second.Headers.Add("X-Api-Key", key.PublicKey);
-        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second, TestContext.Current.CancellationToken)).StatusCode);
 
         Assert.Equal(stampedAt, GetLastUsed(key.Id));
     }
@@ -119,19 +119,19 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
 
         var warmupRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         warmupRequest.Headers.Add("X-Api-Key", key.PublicKey);
-        var warmupResponse = await _httpClient.SendAsync(warmupRequest);
+        var warmupResponse = await _httpClient.SendAsync(warmupRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, warmupResponse.StatusCode);
 
         // Deactivate the key
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/UserApiKeys/{key.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // The deactivated key must not authenticate even though it was recently cached
         var secondRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
         secondRequest.Headers.Add("X-Api-Key", key.PublicKey);
-        var secondResponse = await _httpClient.SendAsync(secondRequest);
+        var secondResponse = await _httpClient.SendAsync(secondRequest, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
     }

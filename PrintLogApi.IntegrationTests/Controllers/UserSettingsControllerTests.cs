@@ -111,11 +111,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
     }
 
@@ -126,7 +126,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me/user-settings");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -142,11 +142,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Contains(result, s => s.Id == setting.Id && s.Value == "my-setting-value");
     }
 
@@ -170,7 +170,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings", "auth0|no-settings-user-new");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - New user returns unauthorized (user doesn't exist with that OAuth ID)
         // or OK with empty list if user is auto-created
@@ -186,11 +186,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         var foundSetting = result.FirstOrDefault(s => s.Id == setting.Id);
         Assert.NotNull(foundSetting);
         Assert.Equal(settingTypeId, foundSetting.UserSettingTypeId);
@@ -217,11 +217,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(settingTypeId, result.UserSettingTypeId);
         Assert.Equal("new-setting-value", result.Value);
@@ -242,7 +242,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -266,11 +266,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("already exists", content);
     }
 
@@ -289,11 +289,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal("", result.Value);
     }
@@ -313,7 +313,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -334,13 +334,13 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         createRequest.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act - Create
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - Get
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Contains(settings, s => s.Id == created.Id && s.Value == "appears-in-get-value");
@@ -367,11 +367,11 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.Equal(setting.Id, result.Id);
         Assert.Equal("updated-value", result.Value);
@@ -391,7 +391,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -411,7 +411,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -468,7 +468,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Returns NotFound because the setting doesn't belong to the current user
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -491,7 +491,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        await _httpClient.SendAsync(request);
+        await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - Verify in database
         var updated = GetUserSettingById(setting.Id)!;
@@ -507,7 +507,7 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var originalUpdatedDate = setting.UpdatedDate;
 
         // Wait a bit to ensure timestamp difference
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         var dto = new UpdateUserSettingDto
         {
@@ -519,8 +519,8 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.True(result.UpdatedDate >= originalUpdatedDate);
@@ -546,9 +546,9 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var createRequest = CreateAuthenticatedRequest(HttpMethod.Post, "/api/Users/me/user-settings");
         createRequest.Content = new StringContent(JsonSerializer.Serialize(createDto), Encoding.UTF8, "application/json");
 
-        var createResponse = await _httpClient.SendAsync(createRequest);
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
-        var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var created = (await createResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal("initial-value", created.Value);
 
         // Update the setting
@@ -561,15 +561,15 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var updateRequest = CreateAuthenticatedRequest(HttpMethod.Put, "/api/Users/me/user-settings");
         updateRequest.Content = new StringContent(JsonSerializer.Serialize(updateDto), Encoding.UTF8, "application/json");
 
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
-        var updated = (await updateResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions))!;
+        var updated = (await updateResponse.Content.ReadFromJsonAsync<UserSettingDto>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.Equal("modified-value", updated.Value);
 
         // Read all settings and verify
         var getRequest = CreateAuthenticatedRequest(HttpMethod.Get, "/api/Users/me/user-settings");
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions))!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var settings = (await getResponse.Content.ReadFromJsonAsync<List<UserSettingDto>>(JsonOptions, cancellationToken: TestContext.Current.CancellationToken))!;
 
         var foundSetting = settings.FirstOrDefault(s => s.Id == created.Id);
         Assert.NotNull(foundSetting);

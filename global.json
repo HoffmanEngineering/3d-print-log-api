@@ -17,8 +17,27 @@
     "Bumping the feature band is a deliberate act: change `version` here, run `dotnet format`, and",
     "commit any resulting changes with the bump."
   ],
+  "testComment": [
+    "Selects Microsoft.Testing.Platform as the runner for `dotnet test` (#70). This is the opt-in",
+    "the 10.0.1xx SDK looks for; `dotnet test -h` names global.json explicitly, and the",
+    "[dotnet.test.runner] section of a root dotnet.config - which the preview documentation",
+    "described - is NOT read by this band. If it were ever honoured instead, this key would still",
+    "win, so leave it here rather than moving it.",
+    "",
+    "It is required, not a preference. The test project references xunit.v3 and no VSTest adapter,",
+    "so without this `dotnet test` routes to VSTest and Microsoft.Testing.Platform.MSBuild.targets",
+    "fails the build outright with 'Testing with VSTest target is no longer supported'. That is a",
+    "loud failure rather than a silent zero-test pass, which is the one piece of luck in this",
+    "migration - but it does mean this key and the xunit.v3 reference have to move together.",
+    "",
+    "It also puts the runner choice in the same file as the SDK pin, so the two facts that decide",
+    "how CI runs tests are read together."
+  ],
   "sdk": {
     "version": "10.0.102",
     "rollForward": "latestPatch"
+  },
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
   }
 }

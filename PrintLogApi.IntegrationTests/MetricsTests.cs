@@ -15,7 +15,7 @@ public class MetricsTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Metrics_ReturnsOk()
     {
-        var response = await _httpClient.GetAsync("/metrics");
+        var response = await _httpClient.GetAsync("/metrics", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
     }

@@ -171,7 +171,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = CreateWebhookPayload(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -198,7 +198,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -222,7 +222,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify a print was created with the expected filename
@@ -251,7 +251,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - title should be humanized and title-cased
@@ -282,7 +282,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
 
         // Act
         var beforeSend = DateTimeOffset.UtcNow;
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - StartDate should be set to approximately now
@@ -310,7 +310,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - verify filament usage was created
@@ -338,7 +338,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - FileName should be just the file name, not the full path
@@ -367,7 +367,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         // In TestServer, unhandled exceptions propagate to the test
         await Assert.ThrowsAsync<Exception>(async () =>
         {
-            await _httpClient.SendAsync(request);
+            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
     }
 
@@ -393,7 +393,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         // In TestServer, unhandled exceptions propagate to the test
         await Assert.ThrowsAsync<PrintLogApi.Exceptions.UserCannotAccessPrinterException>(async () =>
         {
-            await _httpClient.SendAsync(request);
+            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
     }
 
@@ -417,7 +417,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - AllowComments should be true based on user setting
@@ -446,7 +446,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - ViewStatus should be Public based on user setting
@@ -475,7 +475,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - should default to false for AllowComments and Private for ViewStatus
@@ -504,7 +504,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Assert - title should be truncated to 100 characters max
@@ -533,7 +533,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        var startResponse = await _httpClient.SendAsync(startRequest);
+        var startResponse = await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
         // Get the created print
@@ -553,7 +553,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var completeRequest = CreateAuthenticatedWebhookRequest(completeDto);
-        var completeResponse = await _httpClient.SendAsync(completeRequest);
+        var completeResponse = await _httpClient.SendAsync(completeRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
@@ -579,7 +579,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -596,7 +596,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var completeRequest = CreateAuthenticatedWebhookRequest(completeDto);
-        await _httpClient.SendAsync(completeRequest);
+        await _httpClient.SendAsync(completeRequest, TestContext.Current.CancellationToken);
 
         // Assert - PrintTimeInSeconds should come from TotalDuration (rounded)
         var updatedPrint = FindPrintByFileNameInDb(filename)!;
@@ -620,7 +620,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -638,7 +638,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var completeRequest = CreateAuthenticatedWebhookRequest(completeDto);
-        await _httpClient.SendAsync(completeRequest);
+        await _httpClient.SendAsync(completeRequest, TestContext.Current.CancellationToken);
 
         // Assert - verify filament usage was updated
         var updatedPrint = FindPrintByFileNameInDb(filename)!;
@@ -668,7 +668,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(completeDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - controller returns Ok even when no matching print is found
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -694,7 +694,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -711,7 +711,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var errorRequest = CreateAuthenticatedWebhookRequest(errorDto);
-        var errorResponse = await _httpClient.SendAsync(errorRequest);
+        var errorResponse = await _httpClient.SendAsync(errorRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, errorResponse.StatusCode);
@@ -736,7 +736,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -753,7 +753,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var errorRequest = CreateAuthenticatedWebhookRequest(errorDto);
-        await _httpClient.SendAsync(errorRequest);
+        await _httpClient.SendAsync(errorRequest, TestContext.Current.CancellationToken);
 
         // Assert - error handler uses PrintDuration (not TotalDuration)
         var updatedPrint = FindPrintByFileNameInDb(filename)!;
@@ -778,7 +778,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(errorDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - controller returns Ok even when no matching print is found
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -804,7 +804,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -821,7 +821,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var cancelledRequest = CreateAuthenticatedWebhookRequest(cancelledDto);
-        var cancelledResponse = await _httpClient.SendAsync(cancelledRequest);
+        var cancelledResponse = await _httpClient.SendAsync(cancelledRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, cancelledResponse.StatusCode);
@@ -847,7 +847,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(cancelledDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -874,7 +874,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - unhandled events are silently ignored and return Ok
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -902,7 +902,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        var startResponse = await _httpClient.SendAsync(startRequest);
+        var startResponse = await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
         // Verify print was created in Printing status
@@ -922,7 +922,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var completeRequest = CreateAuthenticatedWebhookRequest(completeDto);
-        var completeResponse = await _httpClient.SendAsync(completeRequest);
+        var completeResponse = await _httpClient.SendAsync(completeRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
 
         // Verify print was updated to Success
@@ -952,7 +952,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        var startResponse = await _httpClient.SendAsync(startRequest);
+        var startResponse = await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
@@ -970,7 +970,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var errorRequest = CreateAuthenticatedWebhookRequest(errorDto);
-        var errorResponse = await _httpClient.SendAsync(errorRequest);
+        var errorResponse = await _httpClient.SendAsync(errorRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, errorResponse.StatusCode);
 
         // Verify print was updated to Failed
@@ -1000,7 +1000,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -1017,7 +1017,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var cancelledRequest = CreateAuthenticatedWebhookRequest(cancelledDto);
-        var cancelledResponse = await _httpClient.SendAsync(cancelledRequest);
+        var cancelledResponse = await _httpClient.SendAsync(cancelledRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, cancelledResponse.StatusCode);
 
         // Verify print was updated to Failed (cancelled maps to Failed)
@@ -1047,7 +1047,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var startRequest = CreateAuthenticatedWebhookRequest(startedDto);
-        await _httpClient.SendAsync(startRequest);
+        await _httpClient.SendAsync(startRequest, TestContext.Current.CancellationToken);
 
         var createdPrint = FindPrintByFileNameInDb(filename)!;
         Assert.NotNull(createdPrint);
@@ -1064,7 +1064,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         };
 
         var completeRequest = CreateAuthenticatedWebhookRequest(completeDto);
-        var completeResponse = await _httpClient.SendAsync(completeRequest);
+        var completeResponse = await _httpClient.SendAsync(completeRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, completeResponse.StatusCode);
 
         // Assert - the print should be updated
@@ -1090,8 +1090,8 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = CreateAuthenticatedWebhookRequest(messageDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         // Assert - the response should contain the processed DTO
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1116,7 +1116,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
             TotalDuration = 0
         };
 
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(filename)!;
@@ -1139,7 +1139,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
             PrintDuration = 0,
             TotalDuration = 0
         };
-        await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto));
+        await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto), TestContext.Current.CancellationToken);
 
         var completeDto = new PrintEventMessageDto
         {
@@ -1150,7 +1150,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
             PrintDuration = 0,
             TotalDuration = 0
         };
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(filename)!;
@@ -1174,7 +1174,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
             PrintDuration = 0,
             TotalDuration = 0
         };
-        await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto));
+        await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(startDto), TestContext.Current.CancellationToken);
 
         var completeDto = new PrintEventMessageDto
         {
@@ -1185,7 +1185,7 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
             PrintDuration = 0.3,
             TotalDuration = 0.3
         };
-        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto));
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(completeDto), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var print = FindPrintByFileNameInDb(filename)!;

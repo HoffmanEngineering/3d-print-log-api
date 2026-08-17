@@ -78,7 +78,7 @@ public class PrintsControllerSummaryFilterTests : IClassFixture<CustomWebApplica
             HttpMethod.Get, $"/api/Prints/summary?pageNumber=1&pageSize=10&{rangeParam}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -90,7 +90,7 @@ public class PrintsControllerSummaryFilterTests : IClassFixture<CustomWebApplica
             "/api/Prints/summary?pageNumber=1&pageSize=10&fromDate=2026-07-01T00:00:00Z&toDate=2026-06-01T00:00:00Z");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 

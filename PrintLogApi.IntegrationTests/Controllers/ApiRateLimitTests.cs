@@ -128,7 +128,7 @@ public class ApiRateLimitTests
             var responses = new List<HttpResponseMessage>();
             for (var i = 0; i < Limit + 1; i++)
             {
-                responses.Add(await client.SendAsync(Authenticated(user)));
+                responses.Add(await client.SendAsync(Authenticated(user), TestContext.Current.CancellationToken));
             }
 
             // Assert success, not merely "not 429": a mistyped route 405s, which would satisfy
@@ -150,13 +150,13 @@ public class ApiRateLimitTests
             // Exhaust one user's budget.
             for (var i = 0; i < Limit + 1; i++)
             {
-                await client.SendAsync(Authenticated(spender));
+                await client.SendAsync(Authenticated(spender), TestContext.Current.CancellationToken);
             }
 
             // A different subject still has a full budget. Assert success rather than merely
             // "not 429" — a 401 or 404 would satisfy the weaker check without the partition
             // having held at all.
-            var other = await client.SendAsync(Authenticated(otherUserOAuthId));
+            var other = await client.SendAsync(Authenticated(otherUserOAuthId), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, other.StatusCode);
         }
     }
@@ -179,7 +179,7 @@ public class ApiRateLimitTests
             for (var i = 0; i < Limit + 1; i++)
             {
                 // A public endpoint, so the request is not rejected before reaching the limiter.
-                responses.Add(await client.GetAsync("/api/Prints/summary?userId=1"));
+                responses.Add(await client.GetAsync("/api/Prints/summary?userId=1", TestContext.Current.CancellationToken));
             }
 
             Assert.All(responses.Take(Limit), r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
@@ -201,13 +201,12 @@ public class ApiRateLimitTests
             // Exhaust the anonymous budget.
             for (var i = 0; i < Limit + 1; i++)
             {
-                await client.GetAsync("/api/Prints/summary?userId=1");
+                await client.GetAsync("/api/Prints/summary?userId=1", TestContext.Current.CancellationToken);
             }
 
             // An authenticated caller partitions on its user id instead, so it is unaffected
             // even though it shares the (single, loopback) test client IP.
-            var authenticated = await client.SendAsync(
-                Authenticated(IntegrationTestSeeder.TestUserOAuthId));
+            var authenticated = await client.SendAsync(Authenticated(IntegrationTestSeeder.TestUserOAuthId), TestContext.Current.CancellationToken);
             Assert.NotEqual(HttpStatusCode.TooManyRequests, authenticated.StatusCode);
         }
     }
@@ -252,12 +251,12 @@ public class ApiRateLimitTests
             // page produces, and it must survive.
             for (var i = 0; i < LowGeneralHighMediaFactory.MediaLimit; i++)
             {
-                var response = await client.SendAsync(Image(user));
+                var response = await client.SendAsync(Image(user), TestContext.Current.CancellationToken);
                 Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
             }
 
             // The media budget is still a budget.
-            var exhausted = await client.SendAsync(Image(user));
+            var exhausted = await client.SendAsync(Image(user), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
         }
 
@@ -278,7 +277,7 @@ public class ApiRateLimitTests
                     HttpMethod.Get, $"/api/Projects/{System.Guid.NewGuid()}/images/1");
                 request.Headers.Add(TestAuthHandler.TestUserIdHeader, user);
 
-                var response = await client.SendAsync(request);
+                var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
                 Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
             }
         }
@@ -292,11 +291,11 @@ public class ApiRateLimitTests
             // A burst of images large enough to have blown the general budget several times.
             for (var i = 0; i < Limit * 2; i++)
             {
-                await client.SendAsync(Image(user));
+                await client.SendAsync(Image(user), TestContext.Current.CancellationToken);
             }
 
             // The data calls on the same page are untouched, because media partitions apart.
-            var data = await client.SendAsync(Authenticated(user));
+            var data = await client.SendAsync(Authenticated(user), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, data.StatusCode);
         }
     }
@@ -327,7 +326,7 @@ public class ApiRateLimitTests
             var responses = new List<HttpResponseMessage>();
             for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 1; i++)
             {
-                responses.Add(await client.SendAsync(WithKey("INVALIDKEY00000000000000000000000")));
+                responses.Add(await client.SendAsync(WithKey("INVALIDKEY00000000000000000000000"), TestContext.Current.CancellationToken));
             }
 
             // Rejections up to the allowance still read as ordinary auth failures.
@@ -350,15 +349,15 @@ public class ApiRateLimitTests
             var create = new HttpRequestMessage(HttpMethod.Post, "/api/UserApiKeys");
             create.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
             create.Content = JsonContent.Create(new { Description = "Rate limit allowance test" });
-            var created = await client.SendAsync(create);
+            var created = await client.SendAsync(create, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, created.StatusCode);
 
-            var publicKey = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            var publicKey = (await created.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
                 .GetProperty("publicKey").GetString();
 
             for (var i = 0; i < LowInvalidKeyLimitFactory.AttemptLimit + 3; i++)
             {
-                var response = await client.SendAsync(WithKey(publicKey!));
+                var response = await client.SendAsync(WithKey(publicKey!), TestContext.Current.CancellationToken);
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             }
         }
@@ -380,9 +379,7 @@ public class ApiRateLimitTests
             // the failure this exemption exists to prevent.
             for (var i = 0; i < Limit + 3; i++)
             {
-                var response = await client.PostAsync(
-                    "/api/Subscription/webhook",
-                    new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
+                var response = await client.PostAsync("/api/Subscription/webhook", new StringContent("{}", System.Text.Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
 
                 // Assert the exact status the unsigned payload should produce, not just
                 // "not 429": the endpoint 404ing or 500ing would pass a NotEqual check while

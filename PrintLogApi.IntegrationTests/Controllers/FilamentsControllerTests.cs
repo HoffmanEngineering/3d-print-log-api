@@ -27,7 +27,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -41,8 +41,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -59,8 +59,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -88,8 +88,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -106,8 +106,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(model);
@@ -127,7 +127,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -141,8 +141,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(model);
@@ -172,14 +172,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createReq.Content = JsonContent.Create(rainbowFilament);
-        await _httpClient.SendAsync(createReq);
+        await _httpClient.SendAsync(createReq, TestContext.Current.CancellationToken);
 
         // Filter to Rainbow only
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments?colorPatterns={(int)ColorPatternType.Rainbow}&includeInactive=true");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(model);
@@ -206,14 +206,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createReq.Content = JsonContent.Create(sparkleFilament);
-        await _httpClient.SendAsync(createReq);
+        await _httpClient.SendAsync(createReq, TestContext.Current.CancellationToken);
 
         // Filter to Sparkle effect
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments?effects={(int)FilamentEffect.Sparkle}&includeInactive=true");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(model);
@@ -240,14 +240,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createReq.Content = JsonContent.Create(silkFilament);
-        await _httpClient.SendAsync(createReq);
+        await _httpClient.SendAsync(createReq, TestContext.Current.CancellationToken);
 
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Filaments?finishTypes={(int)FilamentFinishType.Silk}&includeInactive=true");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(model);
@@ -265,14 +265,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - first get a filament ID from the summary
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var filamentId = summary.Items.First().Id;
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filamentId}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -284,15 +284,15 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - find the Hatchbox PLA filament
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var hatchboxFilament = summary.Items.First(f => f.Brand == "Hatchbox");
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{hatchboxFilament.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(filament);
@@ -310,13 +310,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - get a valid filament ID first
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var filamentId = summary.Items.First().Id;
 
         // Act - no auth header
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filamentId}");
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -331,7 +331,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -363,7 +363,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(newFilament);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -397,8 +397,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(newFilament);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var createdFilament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var createdFilament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -430,7 +430,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(newFilament);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -458,8 +458,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newFilament);
 
-        var response = await _httpClient.SendAsync(request);
-        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.NotNull(created);
@@ -492,8 +492,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update (using FilamentDetailDto for PUT)
         var updateDto = new FilamentDetailDto
@@ -513,7 +513,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert - PUT endpoint returns CreatedAtAction (201)
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -539,8 +539,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update with changed fields
         var updateDto = new FilamentDetailDto
@@ -563,8 +563,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
-        var updatedFilament = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+        var updatedFilament = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -585,8 +585,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - get a valid filament ID first
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var filamentId = summary.Items.First().Id;
 
         var updateDto = new FilamentDetailDto
@@ -602,7 +602,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -614,8 +614,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - get a valid filament ID
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var filamentId = summary.Items.First().Id;
 
         // ID in DTO doesn't match route ID
@@ -633,7 +633,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -658,7 +658,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -682,8 +682,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Old client sends update with only ColorHex (no Colors)
         var updateDto = new FilamentDetailDto
@@ -702,8 +702,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         updateRequest.Content = JsonContent.Create(updateDto);
 
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
-        var updated = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+        var updated = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
         Assert.NotNull(updated);
@@ -736,13 +736,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{createdFilament.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
@@ -767,18 +767,18 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdFilament = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - delete the filament
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{createdFilament.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(deleteRequest);
+        await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - try to get the deleted filament
         var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{createdFilament.Id}");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
@@ -788,13 +788,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         // Arrange - get a valid filament ID first
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var filamentId = summary.Items.First().Id;
 
         // Act - no auth header
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{filamentId}");
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -809,7 +809,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -828,8 +828,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -852,8 +852,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -876,8 +876,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -894,8 +894,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<FilamentSummaryDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -917,8 +917,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
             $"/api/Filaments/{IntegrationTestSeeder.TestFilamentId1}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(filament);
@@ -951,8 +951,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
 
-        var response = await _httpClient.SendAsync(createRequest);
-        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.NotNull(created);
@@ -973,7 +973,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/storage-locations");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -983,7 +983,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/storage-locations");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -994,7 +994,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/purchase-locations");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1004,7 +1004,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/purchase-locations");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1015,7 +1015,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/brands");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1025,7 +1025,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Filaments/brands");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1053,14 +1053,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(filament);
@@ -1085,14 +1085,14 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(filament);
@@ -1118,8 +1118,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         var updateDto = new FilamentDetailDto
         {
@@ -1148,13 +1148,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
         putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         putRequest.Content = JsonContent.Create(updateDto);
-        await _httpClient.SendAsync(putRequest);
+        await _httpClient.SendAsync(putRequest, TestContext.Current.CancellationToken);
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(filament);
@@ -1180,8 +1180,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Create a print that uses 200,000 mg (actual weight) of that filament
         var newPrint = new AddPrintDTO
@@ -1205,13 +1205,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var printRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         printRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         printRequest.Content = JsonContent.Create(newPrint);
-        await _httpClient.SendAsync(printRequest);
+        await _httpClient.SendAsync(printRequest, TestContext.Current.CancellationToken);
 
         // Act
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - 1,000,000 nominal - 200,000 used = 800,000
         Assert.NotNull(filament);
@@ -1237,8 +1237,8 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newFilament);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var created = (await createResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - PUT a bogus FilamentRemaining that the server must ignore
         var updateDto = new FilamentDetailDto
@@ -1259,13 +1259,13 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
         putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         putRequest.Content = JsonContent.Create(updateDto);
-        await _httpClient.SendAsync(putRequest);
+        await _httpClient.SendAsync(putRequest, TestContext.Current.CancellationToken);
 
         // Assert - GET still computes remaining from nominal, not the provided value
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{created.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var filament = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(filament);
         Assert.Equal(1000000, filament.FilamentRemaining);

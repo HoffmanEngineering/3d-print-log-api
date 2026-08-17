@@ -29,7 +29,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task McpAccessPolicy_IsRegistered_AndGrantsValidMcpToken()
     {
         var token = TestJwt.Create(TestJwt.McpAudience, scopes: new[] { "read:printdata" });
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
 
@@ -37,7 +37,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task McpAccess_RejectsWebAudienceToken()
     {
         var token = TestJwt.Create(TestJwt.ApiAudience, scopes: new[] { "read:printdata" });
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -45,7 +45,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task NormalApiEndpoint_RejectsMcpAudienceToken()
     {
         var token = TestJwt.Create(TestJwt.McpAudience, scopes: new[] { "read:printdata" });
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/web-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/web-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -53,7 +53,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task NormalApiEndpoint_AcceptsWebAudienceToken()
     {
         var token = TestJwt.Create(TestJwt.ApiAudience);
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/web-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/web-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
 
@@ -61,7 +61,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task McpAccess_MissingScope_Is403()
     {
         var token = TestJwt.Create(TestJwt.McpAudience);
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -69,14 +69,14 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
     public async Task McpAccess_MissingSubject_Is403()
     {
         var token = TestJwt.Create(TestJwt.McpAudience, subject: null, scopes: new[] { "read:printdata" });
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task McpAccess_NoToken_Is401()
     {
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe"));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe"), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -88,7 +88,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
             scopes: new[] { "read:printdata" },
             notBefore: DateTime.UtcNow.AddHours(-2),
             expires: DateTime.UtcNow.AddHours(-1));
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -99,7 +99,7 @@ public class McpAuthTests : IClassFixture<CustomWebApplicationFactory>
             TestJwt.McpAudience,
             scopes: new[] { "read:printdata" },
             issuer: "https://evil-issuer/");
-        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token));
+        var resp = await _factory.CreateClient().SendAsync(Probe("/api/mcp-auth-probe", token), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 }

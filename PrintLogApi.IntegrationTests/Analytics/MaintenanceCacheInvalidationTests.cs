@@ -24,7 +24,7 @@ public class MaintenanceCacheInvalidationTests : IClassFixture<Mcp.McpDataWebApp
         var printerId = await db.Printers
             .Where(p => p.UserId == Mcp.McpTestData.MetricsUserId)
             .Select(p => p.Id)
-            .FirstAsync();
+            .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         string Version() => cacheVersions.GetUserCacheVersion(Mcp.McpTestData.MetricsUserId);
 

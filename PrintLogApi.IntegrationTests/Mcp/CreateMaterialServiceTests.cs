@@ -313,7 +313,7 @@ public class CreateMaterialServiceTests : IClassFixture<McpDataWebApplicationFac
             CreatedFilamentId = seeded.Material.Id,
             CreatedAt = DateTimeOffset.UtcNow,
         });
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Deliberately DIFFERENT arguments: with no stored fingerprint there is nothing to
         // contradict, so this replays rather than conflicting.
@@ -337,7 +337,7 @@ public class CreateMaterialServiceTests : IClassFixture<McpDataWebApplicationFac
             CreatedFilamentId = Guid.NewGuid(), // points at nothing
             CreatedAt = DateTimeOffset.UtcNow,
         });
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ex = await Assert.ThrowsAsync<McpToolException>(() => Create(scope, Basic("Ghost"), "mat-dangling"));
         Assert.Equal("not_found", ex.Code);
@@ -360,7 +360,7 @@ public class CreateMaterialServiceTests : IClassFixture<McpDataWebApplicationFac
             CreatedFilamentId = McpTestData.ForeignMaterialId,
             CreatedAt = DateTimeOffset.UtcNow,
         });
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ex = await Assert.ThrowsAsync<McpToolException>(() => Create(scope, Basic("Foreign"), "mat-foreign"));
         Assert.Equal("not_found", ex.Code);

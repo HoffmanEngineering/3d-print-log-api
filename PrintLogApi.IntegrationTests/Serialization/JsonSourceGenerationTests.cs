@@ -245,9 +245,9 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
     [MemberData(nameof(HotResponses))]
     public async Task GeneratedContract_MatchesTheReflectionContract(Type responseType, string url)
     {
-        var response = await _httpClient.SendAsync(Authed(url));
+        var response = await _httpClient.SendAsync(Authed(url), TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         var reflectionOnly = ReflectionOnlyOptions();
         var payload = JsonSerializer.Deserialize(body, responseType, reflectionOnly);
@@ -276,10 +276,10 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
     [Fact]
     public async Task SwaggerSchema_KeepsCamelCasePropertyNamesForAGeneratedType()
     {
-        var response = await _httpClient.GetAsync("/swagger/v1/swagger.json");
+        var response = await _httpClient.GetAsync("/swagger/v1/swagger.json", TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
 
         // CustomSchemaIds is type.ToString(), so the schema is keyed by the full CLR name.
         var schema = document.RootElement

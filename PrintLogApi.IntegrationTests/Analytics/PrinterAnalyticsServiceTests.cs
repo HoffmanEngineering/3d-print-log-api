@@ -126,7 +126,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
             UpdatedDate = DateTime.UtcNow,
         };
         db.PrinterMaintenance.Add(entry);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -153,7 +153,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
         {
             db.Remove(entry);
             db.Remove(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 
@@ -183,7 +183,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
             .ToList();
 
         db.PrinterMaintenance.AddRange(entries);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -209,7 +209,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
         {
             db.RemoveRange(entries);
             db.Remove(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 
@@ -239,7 +239,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
             UpdatedDate = DateTime.UtcNow,
         };
         db.Prints.Add(print);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -261,7 +261,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
         {
             db.Remove(print);
             db.Remove(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 
@@ -290,7 +290,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
             UpdatedDate = DateTime.UtcNow,
         };
         db.Prints.Add(print);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -315,7 +315,7 @@ public class PrinterAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplicat
         {
             db.Remove(print);
             db.Remove(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 

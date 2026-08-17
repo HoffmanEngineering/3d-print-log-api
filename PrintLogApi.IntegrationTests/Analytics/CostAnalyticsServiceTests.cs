@@ -123,7 +123,7 @@ public class CostAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplication
 
         var materialTypes = await db.Filaments
             .Where(f => f.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .Select(f => f.MaterialType ?? "Unknown").Distinct().ToListAsync();
+            .Select(f => f.MaterialType ?? "Unknown").Distinct().ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // Guard both preconditions: Assert.All over an empty list proves nothing, and this
         // bug produces two populated-but-identical charts, not empty ones.

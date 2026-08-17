@@ -32,7 +32,7 @@ public class PrintProfileMaterialTests : IClassFixture<Mcp.McpDataWebApplication
         var stats = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
             .ProjectTo<PrintStatistic>(mapper.ConfigurationProvider)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         // ActualWins carries FilamentUsageMg = -1 and NoDuration EstimatedFilamentUsageMg = -500.
         // Unguarded, they subtract: 12999 and 9500.
@@ -54,7 +54,7 @@ public class PrintProfileMaterialTests : IClassFixture<Mcp.McpDataWebApplication
         var rows = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
             .ProjectTo<PrintDetailReport>(mapper.ConfigurationProvider)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(
             Mcp.McpTestData.StatisticActualMaterialTotalMg / 1000.0,
@@ -74,7 +74,7 @@ public class PrintProfileMaterialTests : IClassFixture<Mcp.McpDataWebApplication
         var stats = await db.Prints.AsNoTracking()
             .Where(p => p.StartDate == null)
             .ProjectTo<PrintStatistic>(mapper.ConfigurationProvider)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(stats); // the seeder has undated prints
         Assert.All(stats, s => Assert.Null(s.StartDate));

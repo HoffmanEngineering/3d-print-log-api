@@ -47,7 +47,7 @@ public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicat
         // client-evaluating. That throw IS the assertion this test exists for.
         var total = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .SumAsync(PrintMetrics.DurationSecondsExpr);
+            .SumAsync(PrintMetrics.DurationSecondsExpr, cancellationToken: TestContext.Current.CancellationToken);
 
         // Exact, not "> 0": the metrics user owns nothing but the matrix.
         Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, total);
@@ -61,7 +61,7 @@ public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicat
 
         var estimated = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .CountAsync(PrintMetrics.DurationIsEstimatedExpr);
+            .CountAsync(PrintMetrics.DurationIsEstimatedExpr, cancellationToken: TestContext.Current.CancellationToken);
 
         // NoDuration must NOT count: it has no estimate to fall back to, so its 0 is not an estimate.
         Assert.Equal(Mcp.McpTestData.DurationMatrixEstimatedCount, estimated);
@@ -77,7 +77,7 @@ public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicat
         // An untranslatable expression throws here; that throw IS the assertion.
         var total = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .SumAsync(PrintMetrics.MaterialMgExpr);
+            .SumAsync(PrintMetrics.MaterialMgExpr, cancellationToken: TestContext.Current.CancellationToken);
 
         // Rows (21000) PLUS the "other filament" scalars (1000). The scalar is material
         // that was never attached to a tracked spool, so it is additive, not a duplicate.
@@ -92,7 +92,7 @@ public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicat
 
         var estimated = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .CountAsync(PrintMetrics.MaterialIsEstimatedExpr);
+            .CountAsync(PrintMetrics.MaterialIsEstimatedExpr, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(Mcp.McpTestData.MaterialEstimatedCountIncludingOtherFilament, estimated);
     }
@@ -109,10 +109,9 @@ public class PrintMetricsTranslationTests : IClassFixture<Mcp.McpDataWebApplicat
 
         var viaExpression = await db.Prints.AsNoTracking()
             .Where(p => p.CreatedById == Mcp.McpTestData.MetricsUserId)
-            .SumAsync(PrintMetrics.DurationSecondsExpr);
+            .SumAsync(PrintMetrics.DurationSecondsExpr, cancellationToken: TestContext.Current.CancellationToken);
 
-        var page = await stats.GetPrinterStats(
-            Mcp.McpTestData.MetricsUserId, null, null, null, 1, 100, default);
+        var page = await stats.GetPrinterStats(Mcp.McpTestData.MetricsUserId, null, null, null, 1, 100, TestContext.Current.CancellationToken);
         var viaService = page.Items.Sum(i => i.TotalPrintTimeSeconds);
 
         Assert.Equal(viaExpression, viaService);
@@ -138,11 +137,10 @@ public class RemainingMetricsReadersTests : IClassFixture<Mcp.McpDataWebApplicat
         // Was: PrintTimeInSeconds.HasValue ? actual : estimated. A stored 0 IS HasValue, so the
         // webhook's coerced zero silently suppressed a perfectly good estimate.
         var client = _factory.CreateClient();
-        var response = await client.GetAsync(
-            $"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-print-time{FullRange}");
+        var response = await client.GetAsync($"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-print-time{FullRange}", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var stat = (await response.Content.ReadFromJsonAsync<SinglePrintStat>())!;
+        var stat = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Exact: the metrics user owns nothing but the matrix. 6933 + 1800 + 7200 + 0.
         Assert.Equal(Mcp.McpTestData.DurationMatrixTotalSeconds, int.Parse(stat!.Stat!));
@@ -161,11 +159,10 @@ public class RemainingMetricsReadersTests : IClassFixture<Mcp.McpDataWebApplicat
         //    print contributed nothing instead of falling back to its 1000 estimate; and the
         //    legacy estimate was itself unguarded, so NoDurationPrint's -500 subtracted too.
         var client = _factory.CreateClient();
-        var response = await client.GetAsync(
-            $"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-filament-usage{FullRange}");
+        var response = await client.GetAsync($"/api/Users/{Mcp.McpTestData.MetricsUserId}/total-filament-usage{FullRange}", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var stat = (await response.Content.ReadFromJsonAsync<SinglePrintStat>())!;
+        var stat = (await response.Content.ReadFromJsonAsync<SinglePrintStat>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Rows: 5000 + 3000 + 9000 + 4000 = 21000.  Legacy: 1000 + 0 = 1000.  Total 22000.
         // The old code produced 20500: it dropped the legacy 1000 and subtracted the legacy -500.
@@ -184,7 +181,7 @@ public class RemainingMetricsReadersTests : IClassFixture<Mcp.McpDataWebApplicat
         var project = await db.Projects.AsNoTracking()
             .Include(p => p.Prints!)
                 .ThenInclude(p => p.FilamentUsage)
-            .FirstAsync(p => p.Id == Mcp.McpTestData.MetricsProjectId);
+            .FirstAsync(p => p.Id == Mcp.McpTestData.MetricsProjectId, cancellationToken: TestContext.Current.CancellationToken);
 
         var dto = mapper.Map<ProjectSummaryDto>(project);
 

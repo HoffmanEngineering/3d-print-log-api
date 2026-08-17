@@ -43,8 +43,8 @@ public class DatabaseDiagnosticsTests : IClassFixture<CustomWebApplicationFactor
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Verify counts match
         Assert.NotNull(model);

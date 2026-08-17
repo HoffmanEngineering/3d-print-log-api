@@ -80,7 +80,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetUserSummary_ById_ReturnsSuccess()
     {
         // Arrange - use the seeded test user ID
-        var response = await _httpClient.GetAsync($"/api/Users/{IntegrationTestSeeder.TestUserId}/summary");
+        var response = await _httpClient.GetAsync($"/api/Users/{IntegrationTestSeeder.TestUserId}/summary", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -90,8 +90,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetUserSummary_ById_ReturnsExpectedData()
     {
         // Act
-        var user = (await _httpClient.GetFromJsonAsync<UserSummaryDto>(
-            $"/api/Users/{IntegrationTestSeeder.TestUserId}/summary"))!;
+        var user = (await _httpClient.GetFromJsonAsync<UserSummaryDto>($"/api/Users/{IntegrationTestSeeder.TestUserId}/summary", cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user);
@@ -101,7 +100,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetUserSummary_NonExistent_ReturnsNotFound()
     {
-        var response = await _httpClient.GetAsync("/api/Users/999999/summary");
+        var response = await _httpClient.GetAsync("/api/Users/999999/summary", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -114,7 +113,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetUserById_PublicUser_ReturnsSuccess()
     {
         // Arrange - the seeded test user has ViewStatus = Public
-        var response = await _httpClient.GetAsync($"/api/Users/{IntegrationTestSeeder.TestUserId}");
+        var response = await _httpClient.GetAsync($"/api/Users/{IntegrationTestSeeder.TestUserId}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -124,8 +123,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetUserById_PublicUser_ReturnsExpectedData()
     {
         // Act
-        var user = (await _httpClient.GetFromJsonAsync<UserDetailDto>(
-            $"/api/Users/{IntegrationTestSeeder.TestUserId}"))!;
+        var user = (await _httpClient.GetFromJsonAsync<UserDetailDto>($"/api/Users/{IntegrationTestSeeder.TestUserId}", cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user);
@@ -136,7 +134,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetUserById_NonExistent_ReturnsNotFound()
     {
-        var response = await _httpClient.GetAsync("/api/Users/999999");
+        var response = await _httpClient.GetAsync("/api/Users/999999", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -153,7 +151,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -167,8 +165,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var user = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var user = (await response.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user);
@@ -182,7 +180,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -208,7 +206,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -230,8 +228,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(updatedUser);
@@ -253,7 +251,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -274,8 +272,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var updatedUser = (await response.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -290,7 +288,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         var restoreRequest = new HttpRequestMessage(HttpMethod.Put, "/api/Users/me");
         restoreRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         restoreRequest.Content = JsonContent.Create(restoreDto);
-        await _httpClient.SendAsync(restoreRequest);
+        await _httpClient.SendAsync(restoreRequest, TestContext.Current.CancellationToken);
     }
 
     #endregion
@@ -301,7 +299,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPublicUsers_ReturnsSuccess()
     {
         // Act - this endpoint is anonymous (for sitemaps)
-        var response = await _httpClient.GetAsync("/api/Users/public");
+        var response = await _httpClient.GetAsync("/api/Users/public", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -311,7 +309,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPublicUsers_ReturnsListOfIds()
     {
         // Act
-        var userIds = (await _httpClient.GetFromJsonAsync<IEnumerable<long>>("/api/Users/public"))!;
+        var userIds = (await _httpClient.GetFromJsonAsync<IEnumerable<long>>("/api/Users/public", cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(userIds);
@@ -330,7 +328,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -338,7 +336,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Cleanup - reactivate the user for other tests
         var reactivateRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/reactivate");
         reactivateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(reactivateRequest);
+        await _httpClient.SendAsync(reactivateRequest, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -348,7 +346,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/deactivate");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -360,12 +358,12 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - first deactivate
         var deactivateRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/deactivate");
         deactivateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(deactivateRequest);
+        await _httpClient.SendAsync(deactivateRequest, TestContext.Current.CancellationToken);
 
         // Act - then reactivate
         var reactivateRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/reactivate");
         reactivateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(reactivateRequest);
+        var response = await _httpClient.SendAsync(reactivateRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -378,7 +376,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/reactivate");
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -407,7 +405,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
                 ViewStatus = ProfileViewStatus.Public
             };
             db.Users.AddRange(deactivatedUser, recipientUser);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             var printer = new Printer
             {
@@ -416,7 +414,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
                 IsActive = true
             };
             db.Printers.Add(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             var print = new Print
             {
@@ -430,7 +428,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
                 UpdatedDate = now
             };
             db.Prints.Add(print);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             var notification = new Notification
             {
@@ -444,23 +442,23 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
                 PrintId = print.Id
             };
             db.Notifications.Add(notification);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             userId = deactivatedUser.Id;
             printId = print.Id;
             notificationId = notification.Id;
         }
 
-        var response = await _httpClient.DeleteAsync("/api/Users/pending-deactivation");
+        var response = await _httpClient.DeleteAsync("/api/Users/pending-deactivation", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.False(await db.Users.AnyAsync(u => u.Id == userId));
-            Assert.False(await db.Prints.AnyAsync(p => p.Id == printId));
-            Assert.False(await db.Notifications.AnyAsync(n => n.Id == notificationId));
+            Assert.False(await db.Users.AnyAsync(u => u.Id == userId, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.False(await db.Prints.AnyAsync(p => p.Id == printId, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.False(await db.Notifications.AnyAsync(n => n.Id == notificationId, cancellationToken: TestContext.Current.CancellationToken));
         }
     }
 
@@ -482,7 +480,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -501,8 +499,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(result);
@@ -524,8 +522,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -550,14 +548,14 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Get the updated user
         var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user);
@@ -574,7 +572,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = new MultipartFormDataContent();
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -594,7 +592,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -615,7 +613,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -633,7 +631,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -656,7 +654,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -675,8 +673,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(result);
@@ -698,8 +696,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -724,14 +722,14 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Get the updated user
         var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user);
@@ -748,7 +746,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = new MultipartFormDataContent();
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -768,7 +766,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -789,7 +787,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -807,7 +805,7 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -825,8 +823,8 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         firstFormContent.Add(firstImageContent, "image", "test-cover-first.jpg");
         firstRequest.Content = firstFormContent;
 
-        var firstResponse = await _httpClient.SendAsync(firstRequest);
-        var firstResult = (await firstResponse.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var firstResponse = await _httpClient.SendAsync(firstRequest, TestContext.Current.CancellationToken);
+        var firstResult = (await firstResponse.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - upload second cover image
         var secondImageContent = CreateTestImageContent();
@@ -837,14 +835,14 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         secondFormContent.Add(secondImageContent, "image", "test-cover-second.jpg");
         secondRequest.Content = secondFormContent;
 
-        var secondResponse = await _httpClient.SendAsync(secondRequest);
-        var secondResult = (await secondResponse.Content.ReadFromJsonAsync<UserUrlDto>())!;
+        var secondResponse = await _httpClient.SendAsync(secondRequest, TestContext.Current.CancellationToken);
+        var secondResult = (await secondResponse.Content.ReadFromJsonAsync<UserUrlDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Get the user - should have the second image URL
         var getRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var getResponse = await _httpClient.SendAsync(getRequest);
-        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>())!;
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        var user = (await getResponse.Content.ReadFromJsonAsync<UserDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(user.CoverPicture);

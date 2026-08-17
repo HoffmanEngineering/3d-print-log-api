@@ -132,7 +132,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         var result = await Create(scope, Basic("Owned Printer"));
 
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == result.Printer.Id);
+        var stored = await ctx.Printers.AsNoTracking().SingleAsync(p => p.Id == result.Printer.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(IntegrationTestSeeder.TestUserId, stored.UserId);
     }
 
@@ -142,11 +142,11 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
     {
         using var scope = _factory.Services.CreateScope();
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        var before = await ctx.Set<PrinterFilament>().CountAsync();
+        var before = await ctx.Set<PrinterFilament>().CountAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var result = await Create(scope, Basic("No Spools"));
 
-        Assert.Equal(before, await ctx.Set<PrinterFilament>().CountAsync());
+        Assert.Equal(before, await ctx.Set<PrinterFilament>().CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Empty(result.Printer.LoadedFilaments);
     }
 
@@ -235,7 +235,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         Assert.Equal(first.Printer.Id, replay.Printer.Id);
 
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        Assert.Equal(1, await ctx.Printers.CountAsync(p => p.Name == "Replay Me"));
+        Assert.Equal(1, await ctx.Printers.CountAsync(p => p.Name == "Replay Me", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     // Replaying would silently discard the new arguments, so a reused key with a different
@@ -258,7 +258,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         // A create_material record with the SAME user and key must not be seen by create_printer.
         ctx.McpIdempotencyRecords.Add(McpIdempotencyRecordFactory.ForMaterial(
             IntegrationTestSeeder.TestUserId, "shared-key", "some-fingerprint", McpTestData.ResinMaterialId));
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await Create(scope, Basic("Tool Scoped"), "shared-key");
         Assert.False(result.WasReplayed);
@@ -274,7 +274,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         ctx.McpIdempotencyRecords.Add(McpIdempotencyRecordFactory.ForPrinter(
             IntegrationTestSeeder.TestUserId, "prn-legacy", null, seeded.Printer.Id));
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var replay = await Create(scope, Basic("Totally Different Args") with { Make = "Nope" }, "prn-legacy");
         Assert.True(replay.WasReplayed);
@@ -290,7 +290,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         ctx.McpIdempotencyRecords.Add(McpIdempotencyRecordFactory.ForPrinter(
             IntegrationTestSeeder.TestUserId, "prn-dangling", null, printerId: 999_999));
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ex = await Assert.ThrowsAsync<McpToolException>(
             () => Create(scope, Basic("Dangling"), "prn-dangling"));
@@ -305,7 +305,7 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         ctx.McpIdempotencyRecords.Add(McpIdempotencyRecordFactory.ForPrinter(
             IntegrationTestSeeder.TestUserId, "prn-foreign", null, McpTestData.OtherPrinterId));
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ex = await Assert.ThrowsAsync<McpToolException>(
             () => Create(scope, Basic("Foreign"), "prn-foreign"));

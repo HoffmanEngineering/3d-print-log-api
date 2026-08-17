@@ -43,7 +43,7 @@ public class GetPrintDetailMcpTests : IClassFixture<McpDataWebApplicationFactory
                 },
             };
             db.Prints.Add(print);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             printId = print.Id;
         }
 

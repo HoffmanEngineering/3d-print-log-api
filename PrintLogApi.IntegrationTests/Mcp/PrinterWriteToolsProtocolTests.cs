@@ -32,7 +32,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
     public async Task ToolList_ExposesThePrinterWriteTools_WithAnnotations()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var create = Assert.Single(tools, t => t.Name == "create_printer");
         Assert.False(create.ProtocolTool.Annotations?.DestructiveHint);
@@ -51,7 +51,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
     public async Task ReadOnlyToken_CannotSeeThePrinterWriteTools()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
-        var names = (await client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        var names = (await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
         Assert.DoesNotContain("create_printer", names);
         Assert.DoesNotContain("update_printer", names);
         Assert.Contains("get_printer", names);
@@ -78,7 +78,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
         args["wattageW"] = 350.0;
         args["idempotencyKey"] = "prn-proto-1";
 
-        var result = await client.CallToolAsync("create_printer", args);
+        var result = await client.CallToolAsync("create_printer", args, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         using var doc = JsonDocument.Parse(RawText(result));
@@ -114,17 +114,17 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
             return a;
         }
 
-        var first = await client.CallToolAsync("create_printer", Args("Original"));
+        var first = await client.CallToolAsync("create_printer", Args("Original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
 
-        var replay = await client.CallToolAsync("create_printer", Args("Original"));
+        var replay = await client.CallToolAsync("create_printer", Args("Original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(replay.IsError != true);
         using (var replayDoc = JsonDocument.Parse(RawText(replay)))
         {
             Assert.True(replayDoc.RootElement.GetProperty("wasReplayed").GetBoolean());
         }
 
-        var conflict = await client.CallToolAsync("create_printer", Args("CHANGED"));
+        var conflict = await client.CallToolAsync("create_printer", Args("CHANGED"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(conflict.IsError == true);
         Assert.StartsWith("conflict:", RawText(conflict));
     }
@@ -137,7 +137,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
         var args = BasicArgs("proto-update-printer");
         args["description"] = "to be cleared";
         args["wattageW"] = 100.0;
-        var created = await client.CallToolAsync("create_printer", args);
+        var created = await client.CallToolAsync("create_printer", args, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(created.IsError != true);
 
         long id;
@@ -151,7 +151,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
             ["id"] = id,
             ["name"] = "proto-update-renamed",
             ["clear"] = new[] { "description" },
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(updated.IsError != true);
 
         using var updatedDoc = JsonDocument.Parse(RawText(updated));
@@ -171,7 +171,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-        var created = await client.CallToolAsync("create_printer", BasicArgs("proto-clear-typo"));
+        var created = await client.CallToolAsync("create_printer", BasicArgs("proto-clear-typo"), cancellationToken: TestContext.Current.CancellationToken);
         long id;
         using (var doc = JsonDocument.Parse(RawText(created)))
         {
@@ -182,7 +182,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
         {
             ["id"] = id,
             ["clear"] = new[] { "nozzleDiameter" }, // real field is nozzleDiameterMm
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError == true);
         Assert.StartsWith("invalid_arguments:", RawText(result));
     }
@@ -195,7 +195,7 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
         {
             ["id"] = McpTestData.OtherPrinterId,
             ["name"] = "Hijacked",
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError == true);
         Assert.StartsWith("not_found:", RawText(result));
     }

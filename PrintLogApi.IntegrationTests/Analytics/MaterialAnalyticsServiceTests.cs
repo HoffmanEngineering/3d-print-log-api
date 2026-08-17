@@ -56,7 +56,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         var canonical = await db.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == Mcp.McpTestData.MetricsUserId)
             .ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider)
-            .ToDictionaryAsync(f => f.Id, f => f.FilamentRemaining);
+            .ToDictionaryAsync(f => f.Id, f => f.FilamentRemaining, cancellationToken: TestContext.Current.CancellationToken);
 
         // Guard both preconditions: a `continue` past every row, or an empty TopSpools,
         // would let this test pass while comparing nothing at all.
@@ -90,7 +90,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         foreach (var spool in response.TopSpools)
         {
             var filament = await db.Filaments.AsNoTracking()
-                .FirstAsync(f => f.Id == Guid.Parse(spool.FilamentId));
+                .FirstAsync(f => f.Id == Guid.Parse(spool.FilamentId), cancellationToken: TestContext.Current.CancellationToken);
 
             var priceable = !string.IsNullOrWhiteSpace(filament.PurchasePriceValue)
                 || !string.IsNullOrWhiteSpace(inputs.DefaultFilamentPrice);
@@ -197,7 +197,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
                 ViewStatus = PrintLogApi.Models.User.ProfileViewStatus.Private,
             };
             db.Users.Add(user);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             userId = user.Id;
 
             var printer = new PrintLogApi.Models.Printer
@@ -209,7 +209,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
                 IsActive = true,
             };
             db.Printers.Add(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             // Descending amounts, so which types get truncated is deterministic.
             for (var i = 0; i < typeCount; i++)
@@ -234,7 +234,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
                     Source = PrintLogApi.Models.Filament.SourceMeasurement.Weight,
                 };
                 db.Filaments.Add(spool);
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
                 db.Prints.Add(new PrintLogApi.Models.Print
                 {
@@ -257,7 +257,7 @@ public class MaterialAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
                         },
                     },
                 });
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             }
         }
 

@@ -35,7 +35,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Suggestion",
             ["note"] = $"Please add a dark mode {marker}",
             ["idempotencyKey"] = Guid.NewGuid().ToString(),
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().First().Text);
@@ -47,7 +47,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
         var id = Guid.Parse(feedback.GetProperty("feedbackId").GetString()!);
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        var row = await context.Feedback.AsNoTracking().FirstAsync(f => f.Id == id);
+        var row = await context.Feedback.AsNoTracking().FirstAsync(f => f.Id == id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(IntegrationTestSeeder.TestUserId, row.CreatedById);
         // An agent submits no form, so the "what the user typed" column stays empty.
         Assert.Null(row.Email);
@@ -66,7 +66,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Bug",
             ["note"] = $"The spool weight resets {marker}",
             ["idempotencyKey"] = Guid.NewGuid().ToString(),
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().First().Text);
@@ -91,8 +91,8 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
         };
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
 
-        var first = await client.CallToolAsync("create_feedback", args);
-        var second = await client.CallToolAsync("create_feedback", args);
+        var first = await client.CallToolAsync("create_feedback", args, cancellationToken: TestContext.Current.CancellationToken);
+        var second = await client.CallToolAsync("create_feedback", args, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(first.IsError != true);
         Assert.True(second.IsError != true);
@@ -107,7 +107,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
 
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+        Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
         Assert.Single(_factory.EmailSender.Matching(marker));
     }
 
@@ -122,7 +122,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Question",
             ["note"] = $"Original {Marker()}",
             ["idempotencyKey"] = key,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
 
         var second = await client.CallToolAsync("create_feedback", new Dictionary<string, object?>
@@ -130,7 +130,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Question",
             ["note"] = $"Completely different {Marker()}",
             ["idempotencyKey"] = key,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(second.IsError == true);
         var text = second.Content.OfType<TextContentBlock>().First().Text;
@@ -192,7 +192,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = 99,
             ["note"] = "an undefined type",
             ["idempotencyKey"] = Guid.NewGuid().ToString(),
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError == true);
         var text = result.Content.OfType<TextContentBlock>().First().Text;
@@ -215,7 +215,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Suggestion",
             ["note"] = $"notify me {marker}",
             ["idempotencyKey"] = Guid.NewGuid().ToString(),
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         var email = Assert.Single(_factory.EmailSender.Matching(marker));
@@ -239,7 +239,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
                 ["type"] = "Bug",
                 ["note"] = $"auth0 is down {marker}",
                 ["idempotencyKey"] = Guid.NewGuid().ToString(),
-            });
+            }, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.True(result.IsError != true);
             var email = Assert.Single(_factory.EmailSender.Matching(marker));
@@ -247,7 +247,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
 
             using var scope = _factory.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -271,13 +271,13 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
                 ["type"] = "Other",
                 ["note"] = $"smtp is down {marker}",
                 ["idempotencyKey"] = Guid.NewGuid().ToString(),
-            });
+            }, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.True(result.IsError != true);
 
             using var scope = _factory.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -305,7 +305,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
                 ["type"] = "Bug",
                 ["note"] = $"auth0 cancelled {marker}",
                 ["idempotencyKey"] = Guid.NewGuid().ToString(),
-            });
+            }, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.True(result.IsError != true);
             var email = Assert.Single(_factory.EmailSender.Matching(marker));
@@ -313,7 +313,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
 
             using var scope = _factory.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -336,13 +336,13 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
                 ["type"] = "Other",
                 ["note"] = $"send cancelled {marker}",
                 ["idempotencyKey"] = key,
-            });
+            }, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.True(result.IsError != true);
 
             using var scope = _factory.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
 
             // The key must still be usable as a key: a retry replays the committed row rather
             // than writing a second one.
@@ -352,11 +352,11 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
                 ["type"] = "Other",
                 ["note"] = $"send cancelled {marker}",
                 ["idempotencyKey"] = key,
-            });
+            }, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(retry.IsError != true);
             using var doc = JsonDocument.Parse(retry.Content.OfType<TextContentBlock>().First().Text);
             Assert.True(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
-            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker)));
+            Assert.Equal(1, await context.Feedback.CountAsync(f => f.Note!.Contains(marker), cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -375,7 +375,7 @@ public class CreateFeedbackToolTests : IClassFixture<McpDataWebApplicationFactor
             ["type"] = "Other",
             ["note"] = $"   padded {marker}   ",
             ["idempotencyKey"] = Guid.NewGuid().ToString(),
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsError != true);
         using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().First().Text);

@@ -21,7 +21,7 @@ public class SetMaterialActiveToolTests : IClassFixture<McpDataWebApplicationFac
         {
             ["materialId"] = McpTestData.InactiveFilamentId,
             ["isActive"] = true,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         using var scope = _factory.Services.CreateScope();

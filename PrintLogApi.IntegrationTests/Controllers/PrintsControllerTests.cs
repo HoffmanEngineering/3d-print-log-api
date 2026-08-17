@@ -70,7 +70,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintSummary_WithUserId_ReturnsSuccess()
     {
         // Act - use the seeded test user ID (public prints only)
-        var response = await _httpClient.GetAsync($"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}");
+        var response = await _httpClient.GetAsync($"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -80,8 +80,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintSummary_WithUserId_ReturnsPagedResult()
     {
         // Act
-        var model = (await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>(
-            $"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}"))!;
+        var model = (await _httpClient.GetFromJsonAsync<PagedList<PrintSummaryDTO>>($"/api/Prints/summary?userId={IntegrationTestSeeder.TestUserId}", cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - verify we get a valid paged response
         Assert.NotNull(model);
@@ -94,7 +93,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintSummary_WithNonExistentUserId_ReturnsSuccess()
     {
         // Act - use a user ID that doesn't exist
-        var response = await _httpClient.GetAsync("/api/Prints/summary?userId=99999");
+        var response = await _httpClient.GetAsync("/api/Prints/summary?userId=99999", TestContext.Current.CancellationToken);
 
         // Assert - endpoint should still return 200 OK
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -112,7 +111,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert - authenticated request should succeed
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -126,8 +125,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - authenticated user should see their own prints
         Assert.NotNull(model);
@@ -139,12 +138,19 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintSummary_Authenticated_PrintsHaveExpectedData()
     {
         // Arrange
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+        //
+        // pageSize is explicit because the assertion below looks for a SEEDED print, and the
+        // seeded rows are the oldest ones this user has. The default page size is 10, so once
+        // enough sibling tests in this class have created prints in the shared fixture database,
+        // the seeded rows fall off page one and the assertion fails for a reason that has nothing
+        // to do with what it is testing. That is what xUnit v3's different in-class ordering
+        // exposed (#70) - the dependency on running early was always there.
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary?pageSize=1000");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - verify prints have expected structure
         Assert.NotNull(model);
@@ -168,8 +174,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var model = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - pagination should work
         Assert.NotNull(model);
@@ -192,14 +198,14 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             "/api/Prints/summary?pageNumber=2&pageSize=3&sortColumn=Title&sortDirection=Asc");
         page2Req.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var page1Resp = await _httpClient.SendAsync(page1Req);
-        var page2Resp = await _httpClient.SendAsync(page2Req);
+        var page1Resp = await _httpClient.SendAsync(page1Req, TestContext.Current.CancellationToken);
+        var page2Resp = await _httpClient.SendAsync(page2Req, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, page1Resp.StatusCode);
         Assert.Equal(HttpStatusCode.OK, page2Resp.StatusCode);
 
-        var page1 = (await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
-        var page2 = (await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var page1 = (await page1Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
+        var page2 = (await page2Resp.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(page1);
         Assert.NotNull(page2);
@@ -224,7 +230,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintSummary_NotAuthenticated_WithoutUserId_ReturnsBadRequest()
     {
         // Act & Assert - no auth header, no userId parameter should return BadRequest
-        var response = await _httpClient.GetAsync("/api/Prints/summary");
+        var response = await _httpClient.GetAsync("/api/Prints/summary", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -239,12 +245,12 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - first get a print ID from the summary
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var printId = summary.Items.First().Id;
 
         // Act - get the print by ID (anonymous request should work for public prints)
-        var response = await _httpClient.GetAsync($"/api/Prints/{printId}");
+        var response = await _httpClient.GetAsync($"/api/Prints/{printId}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -256,12 +262,12 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - find a seeded test print (other tests may have added prints)
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var seededPrint = summary.Items.First(p => p.Title!.Contains("Test Print"));
 
         // Act
-        var print = (await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}"))!;
+        var print = (await _httpClient.GetFromJsonAsync<PrintDetailDTO>($"/api/Prints/{seededPrint.Id}", cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.NotNull(print);
@@ -276,7 +282,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetPrintById_NonExistent_ReturnsNotFound()
     {
         // Act
-        var response = await _httpClient.GetAsync("/api/Prints/999999");
+        var response = await _httpClient.GetAsync("/api/Prints/999999", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -305,7 +311,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(newPrint);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -332,8 +338,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(newPrint);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
-        var createdPrint = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var createdPrint = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -362,7 +368,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(newPrint);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -385,7 +391,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(newPrint);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -420,8 +426,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newPrint);
 
-        var response = await _httpClient.SendAsync(request);
-        var responseBody = await response.Content.ReadAsStringAsync();
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {responseBody}");
     }
@@ -463,9 +469,9 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newPrint);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var created = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var created = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(created.FilamentUsage);
         Assert.Equal(2, created.FilamentUsage.Count);
 
@@ -515,7 +521,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         };
         request.Content = JsonContent.Create(newPrint);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -540,8 +546,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update
         var updateDto = new PutPrintDetailDto
@@ -560,7 +566,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         // Assert - PUT endpoint returns CreatedAtAction (201)
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -582,8 +588,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Arrange - prepare update with all fields changed
         var updateDto = new PutPrintDetailDto
@@ -604,8 +610,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         updateRequest.Content = JsonContent.Create(updateDto);
 
         // Act
-        var updateResponse = await _httpClient.SendAsync(updateRequest);
-        var updatedPrint = (await updateResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+        var updatedPrint = (await updateResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Assert - PUT endpoint returns CreatedAtAction (201)
         Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
@@ -646,7 +652,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -658,8 +664,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - get an existing print ID
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var printId = summary.Items.First().Id;
 
         var updateDto = new PutPrintDetailDto
@@ -676,7 +682,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -688,8 +694,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - get an existing print
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var printId = summary.Items.First().Id;
 
         // ID in DTO doesn't match route ID
@@ -708,7 +714,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = JsonContent.Create(updateDto);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -734,13 +740,13 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
@@ -762,16 +768,16 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Act - delete the print
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        await _httpClient.SendAsync(deleteRequest);
+        await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - try to get the deleted print
-        var getResponse = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}");
+        var getResponse = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
@@ -781,13 +787,13 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Arrange - get an existing print ID
         var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var summaryResponse = await _httpClient.SendAsync(summaryRequest);
-        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
+        var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         var printId = summary.Items.First().Id;
 
         // Act - try to delete without auth
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{printId}");
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -801,7 +807,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -835,7 +841,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Act
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/Prints/{createdPrint.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var deleteResponse = await _httpClient.SendAsync(deleteRequest);
+        var deleteResponse = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - delete succeeded and notification was cleaned up
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
@@ -861,7 +867,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/stats?fromDate={fromDate}&toDate={toDate}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -875,7 +881,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Prints/stats?fromDate={fromDate}&toDate={toDate}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -890,7 +896,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/octet-stream", response.Content.Headers.ContentType!.MediaType);
@@ -915,10 +921,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var csv = await response.Content.ReadAsStringAsync();
+        var csv = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         // Asserted on the raw payload before any normalization: the line ending and the trailing
         // newline are part of the byte-level CSV contract, and normalizing first would hide a
@@ -959,7 +965,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
         Assert.Null(response.Content.Headers.ContentLength);
@@ -1018,7 +1024,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1036,7 +1042,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{print.Id}/status/{(int)PrintStatus.Success}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
@@ -1058,7 +1064,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, otherUserOAuthId);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -1071,7 +1077,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/999999/status/{(int)PrintStatus.Success}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1082,7 +1088,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Put,
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/status/{(int)PrintStatus.Success}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1101,8 +1107,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newComment);
 
-        var response = await _httpClient.SendAsync(request);
-        var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var comment = (await response.Content.ReadFromJsonAsync<CommentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(comment);
@@ -1118,7 +1124,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment");
         request.Content = JsonContent.Create(newComment);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1132,7 +1138,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(newComment);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1151,15 +1157,15 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var commentRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{print.Id}/comment");
         commentRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         commentRequest.Content = JsonContent.Create(newComment);
-        var commentResponse = await _httpClient.SendAsync(commentRequest);
-        var comment = (await commentResponse.Content.ReadFromJsonAsync<CommentDetailDto>())!;
+        var commentResponse = await _httpClient.SendAsync(commentRequest, TestContext.Current.CancellationToken);
+        var comment = (await commentResponse.Content.ReadFromJsonAsync<CommentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Delete the comment
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{print.Id}/comment/{comment.Id}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(deleteRequest);
+        var response = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1170,7 +1176,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment/1");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1181,7 +1187,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Delete, "/api/Prints/999999/comment/1");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1193,7 +1199,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/comment/999999");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1205,7 +1211,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetPublicPrintIds_ReturnsSuccess()
     {
-        var response = await _httpClient.GetAsync("/api/Prints/public");
+        var response = await _httpClient.GetAsync("/api/Prints/public", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1213,7 +1219,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetPublicPrintIds_ReturnsListOfIds()
     {
-        var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public"))!;
+        var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public", cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(ids);
         Assert.True(ids.Count > 0, "Should have at least one public print");
@@ -1240,7 +1246,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(updateDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1256,7 +1262,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId2}/set-as-default");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1267,7 +1273,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId1}/set-as-default");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1279,7 +1285,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             "/api/Prints/999999/image/1/set-as-default");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1291,7 +1297,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/999999/set-as-default");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1317,7 +1323,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1337,7 +1343,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/images/reorder");
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1358,7 +1364,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1376,7 +1382,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -1398,7 +1404,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -1419,7 +1425,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(reorderDto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -1434,7 +1440,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/{IntegrationTestSeeder.TestPrintImageId1}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1446,7 +1452,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             "/api/Prints/999999/image/1");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1458,7 +1464,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/image/999999");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -1532,7 +1538,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{print.Id}/image/{nonDefaultImageId}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(deleteRequest);
+        var response = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - 200 OK
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1644,7 +1650,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{print.Id}/image/{imageIdOrder0}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(deleteRequest);
+        var response = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - 200 OK
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1716,7 +1722,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{print.Id}/image/{soleImageId}");
         deleteRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(deleteRequest);
+        var response = await _httpClient.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         // Assert - 200 OK
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1744,7 +1750,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = new MultipartFormDataContent();
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -1765,7 +1771,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -1787,7 +1793,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Content = formContent;
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -1803,7 +1809,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Prints/summary?searchText=Test&userId={IntegrationTestSeeder.TestUserId}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1814,7 +1820,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Prints/summary?filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}&userId={IntegrationTestSeeder.TestUserId}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1825,7 +1831,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Prints/summary?filterByStatus={(int)PrintStatus.Success}&userId={IntegrationTestSeeder.TestUserId}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1836,7 +1842,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/Prints/summary?filterByFilamentIds={IntegrationTestSeeder.TestFilamentId1}&userId={IntegrationTestSeeder.TestUserId}");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -1858,9 +1864,9 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createReq.Content = JsonContent.Create(printer2Print);
-        var createResp = await _httpClient.SendAsync(createReq);
+        var createResp = await _httpClient.SendAsync(createReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
-        var created = (await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var created = (await createResp.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Filter by both printers at once; use a large page size so the test is
         // not affected by how many prints previous tests created.
@@ -1868,10 +1874,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/summary?pageSize=200&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId}&filterByPrinterIds={IntegrationTestSeeder.TestPrinterId2}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         // Both printers should be represented.
         Assert.Contains(result.Items, p => p.Printer?.Id == IntegrationTestSeeder.TestPrinterId);
@@ -1890,11 +1896,11 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/summary?filterByFilamentIds={IntegrationTestSeeder.TestFilamentId1}&userId={IntegrationTestSeeder.TestUserId}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.All(result.Items, print =>
             Assert.Contains(print.FilamentUsage!, fu => fu.Filament?.Id == IntegrationTestSeeder.TestFilamentId1));
@@ -1908,9 +1914,9 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetFiles_ReturnsEmptyList_WhenNoneExist()
     {
         // GET /api/prints/{id}/files is AllowAnonymous
-        var response = await _httpClient.GetAsync($"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files");
+        var response = await _httpClient.GetAsync($"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files", TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
-        var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>())!;
+        var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(files);
         Assert.Empty(files);
     }
@@ -1929,7 +1935,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             SizeBytes = 1024,
         });
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -1946,7 +1952,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             SizeBytes = 1024,
         });
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -1955,7 +1961,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     public async Task GetFiles_NonExistentPrint_ReturnsNotFound()
     {
         // After the visibility fix, GetFiles now returns 404 for non-existent prints.
-        var response = await _httpClient.GetAsync("/api/Prints/999999/files");
+        var response = await _httpClient.GetAsync("/api/Prints/999999/files", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
@@ -1974,12 +1980,12 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Anonymous request for files on a private print should be forbidden.
-        var response = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}/files");
+        var response = await _httpClient.GetAsync($"/api/Prints/{createdPrint.Id}/files", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -1998,17 +2004,17 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         createRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         createRequest.Content = JsonContent.Create(newPrint);
-        var createResponse = await _httpClient.SendAsync(createRequest);
+        var createResponse = await _httpClient.SendAsync(createRequest, TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var createdPrint = (await createResponse.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Owner's authenticated request for files on their private print should succeed.
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/{createdPrint.Id}/files");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>())!;
+        var files = (await response.Content.ReadFromJsonAsync<List<PrintAttachmentDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(files);
         Assert.Empty(files);
     }
@@ -2030,7 +2036,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             SizeBytes = 1024,
         });
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Free user → AssertProAsync throws ForbiddenException → 403
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -2049,7 +2055,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             SizeBytes = 1024,
         });
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -2060,7 +2066,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Delete,
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files/999999");
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -2072,7 +2078,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             $"/api/Prints/{IntegrationTestSeeder.TestPrintId}/files/999999");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -2099,10 +2105,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         request.Content = JsonContent.Create(dto);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        var result = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result.ProjectId);
     }
 
@@ -2114,8 +2120,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var projReq = new HttpRequestMessage(HttpMethod.Post, "/api/Projects");
         projReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         projReq.Content = JsonContent.Create(projectDto);
-        var projResp = await _httpClient.SendAsync(projReq);
-        var project = (await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>())!;
+        var projResp = await _httpClient.SendAsync(projReq, TestContext.Current.CancellationToken);
+        var project = (await projResp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         // Create print assigned to project
         var printDto = new
@@ -2135,15 +2141,15 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var printReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         printReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         printReq.Content = JsonContent.Create(printDto);
-        await _httpClient.SendAsync(printReq);
+        await _httpClient.SendAsync(printReq, TestContext.Current.CancellationToken);
 
         // Filter by project
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/summary?PageNumber=1&PageSize=10&filterByProjectId={project.Id}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.All(result.Items, item => Assert.Equal(project.Id, item.ProjectId));
     }
 
@@ -2179,10 +2185,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
         Assert.NotNull(result);
         Assert.All(result.Items, item => Assert.Contains(item.Type, new[] { "project", "print" }));
     }
@@ -2197,7 +2203,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -2205,7 +2211,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetGrouped_NotAuthenticated_ReturnsUnauthorized()
     {
-        var response = await _httpClient.GetAsync("/api/Prints/grouped?pageNumber=1&pageSize=10");
+        var response = await _httpClient.GetAsync("/api/Prints/grouped?pageNumber=1&pageSize=10", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -2216,8 +2222,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=10");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         Assert.NotNull(result.Paging);
@@ -2232,8 +2238,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         Assert.Contains(result.Items, item => item.Type == "print");
@@ -2257,13 +2263,13 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             AllowComments = false,
             ProjectId = project.Id
         });
-        var printResp = await _httpClient.SendAsync(printRequest);
+        var printResp = await _httpClient.SendAsync(printRequest, TestContext.Current.CancellationToken);
         printResp.EnsureSuccessStatusCode();
 
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=1&pageSize=25");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         Assert.Contains(result.Items, item => item.Type == "project");
@@ -2278,8 +2284,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/grouped?pageNumber=2&pageSize=2");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         Assert.Equal(2, result.Paging.CurrentPage);
@@ -2295,8 +2301,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             "/api/Prints/grouped?pageNumber=1&pageSize=25&sortColumn=Title&sortDirection=Asc");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         for (int i = 0; i < result.Items.Count - 1; i++)
@@ -2329,7 +2335,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             AllowComments = false,
             ProjectId = project.Id
         });
-        (await _httpClient.SendAsync(successPrintReq)).EnsureSuccessStatusCode();
+        (await _httpClient.SendAsync(successPrintReq, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         var pendingPrintReq = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         pendingPrintReq.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
@@ -2342,15 +2348,15 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
             AllowComments = false,
             ProjectId = project.Id
         });
-        (await _httpClient.SendAsync(pendingPrintReq)).EnsureSuccessStatusCode();
+        (await _httpClient.SendAsync(pendingPrintReq, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         // Filter by Success status — only the one Success print matches.
         var request = new HttpRequestMessage(
             HttpMethod.Get,
             $"/api/Prints/grouped?pageNumber=1&pageSize=25&filterByStatus={(int)Print.PrintStatus.Success}");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        var response = await _httpClient.SendAsync(request);
-        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>())!;
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var result = (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
 
         Assert.NotNull(result);
         // The project should appear because it has at least one print matching the filter.

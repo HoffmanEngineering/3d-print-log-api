@@ -19,7 +19,7 @@ public class UserDeletionServiceTests
     {
         var commandInterceptor = new CommandRecordingInterceptor();
         await using var connection = new SqliteConnection("DataSource=:memory:");
-        await connection.OpenAsync();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var options = new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlite(connection)
@@ -27,7 +27,7 @@ public class UserDeletionServiceTests
             .Options;
 
         await using var context = new PrintLogContext(options);
-        await context.Database.EnsureCreatedAsync();
+        await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
 
         var user = new User
         {
@@ -40,7 +40,7 @@ public class UserDeletionServiceTests
             ViewStatus = ProfileViewStatus.Public
         };
         context.Users.AddRange(user, recipientUser);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var printer = new Printer
         {
@@ -49,7 +49,7 @@ public class UserDeletionServiceTests
             IsActive = true
         };
         context.Printers.Add(printer);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var now = DateTime.UtcNow;
         var print = new Print
@@ -64,7 +64,7 @@ public class UserDeletionServiceTests
             UpdatedDate = now
         };
         context.Prints.Add(print);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         context.Notifications.Add(new Notification
         {
@@ -77,11 +77,11 @@ public class UserDeletionServiceTests
             CreatedDate = now,
             PrintId = print.Id
         });
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         commandInterceptor.Clear();
         context.ChangeTracker.Clear();
-        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id);
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, cancellationToken: TestContext.Current.CancellationToken);
 
         var service = new UserDeletionService(
             context,

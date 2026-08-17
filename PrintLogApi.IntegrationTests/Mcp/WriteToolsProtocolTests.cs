@@ -27,7 +27,7 @@ public class WriteToolsProtocolTests : IClassFixture<McpDataWebApplicationFactor
     public async Task ToolList_ExposesRenamedTools_WithAnnotations()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(tools, t => t.Name == "log_print");
 
@@ -42,7 +42,7 @@ public class WriteToolsProtocolTests : IClassFixture<McpDataWebApplicationFactor
     public async Task ReadOnlyToken_CannotSeeWriteTools()
     {
         await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadOnly);
-        var names = (await client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        var names = (await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
         Assert.DoesNotContain("create_print", names);
         Assert.DoesNotContain("update_print", names);
     }
@@ -66,7 +66,7 @@ public class WriteToolsProtocolTests : IClassFixture<McpDataWebApplicationFactor
             ["viewStatus"] = "Unlisted",
             ["allowComments"] = true,
             ["allowFileDownloads"] = true,
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(result.IsError != true);
 
         using var doc = JsonDocument.Parse(RawText(result));
@@ -93,17 +93,17 @@ public class WriteToolsProtocolTests : IClassFixture<McpDataWebApplicationFactor
             ["idempotencyKey"] = "proto-conflict",
         };
 
-        var first = await client.CallToolAsync("create_print", Args("original"));
+        var first = await client.CallToolAsync("create_print", Args("original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.IsError != true);
 
-        var replay = await client.CallToolAsync("create_print", Args("original"));
+        var replay = await client.CallToolAsync("create_print", Args("original"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(replay.IsError != true);
         using (var replayDoc = JsonDocument.Parse(RawText(replay)))
         {
             Assert.True(replayDoc.RootElement.GetProperty("wasReplayed").GetBoolean());
         }
 
-        var conflict = await client.CallToolAsync("create_print", Args("CHANGED"));
+        var conflict = await client.CallToolAsync("create_print", Args("CHANGED"), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(conflict.IsError == true);
         Assert.StartsWith("conflict:", RawText(conflict));
     }

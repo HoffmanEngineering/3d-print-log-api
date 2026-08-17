@@ -31,7 +31,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -53,7 +53,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -74,7 +74,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -95,7 +95,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -115,7 +115,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -135,7 +135,7 @@ public class FeedbacksControllerTests : IClassFixture<CustomWebApplicationFactor
         request.Content = JsonContent.Create(feedback);
 
         // Act
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);

@@ -24,10 +24,10 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
             db, Mcp.McpTestData.MetricsUserId, scoped, CancellationToken.None);
 
         Assert.False(projection.RowCapExceeded);
-        Assert.Equal(await scoped.CountAsync(), projection.Prints.Count);
+        Assert.Equal(await scoped.CountAsync(cancellationToken: TestContext.Current.CancellationToken), projection.Prints.Count);
         Assert.Equal(projection.PrintCount, projection.Prints.Count);
 
-        var ownedIds = await scoped.Select(p => p.Id).ToListAsync();
+        var ownedIds = await scoped.Select(p => p.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.All(projection.Prints, p => Assert.Contains(p.PrintId, ownedIds));
     }
 
@@ -67,11 +67,11 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
         // exactly as if that row were absent — an unowned join is a cross-tenant read even
         // when the parent print is correctly scoped.
         var foreign = await db.Filaments.AsNoTracking()
-            .FirstOrDefaultAsync(f => f.CreatedById != Mcp.McpTestData.MetricsUserId);
+            .FirstOrDefaultAsync(f => f.CreatedById != Mcp.McpTestData.MetricsUserId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(foreign); // the seeder must provide a second user's spool
 
         var print = await db.Prints
-            .FirstAsync(p => p.CreatedById == Mcp.McpTestData.MetricsUserId);
+            .FirstAsync(p => p.CreatedById == Mcp.McpTestData.MetricsUserId, cancellationToken: TestContext.Current.CancellationToken);
 
         async Task<decimal?> CostOfThePrint()
         {
@@ -93,7 +93,7 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
             Source = PrintLogApi.Models.PrintFilament.SourceMeasurement.Weight,
         };
         db.Set<PrintLogApi.Models.PrintFilament>().Add(row);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -105,7 +105,7 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
         finally
         {
             db.Remove(row);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 
@@ -118,11 +118,11 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
         // The ownership guard on Printer.WattageW has its own path and its own way of
         // failing: a foreign printer's wattage would silently price this user's electricity.
         var print = await db.Prints
-            .FirstAsync(p => p.CreatedById == Mcp.McpTestData.MetricsUserId);
+            .FirstAsync(p => p.CreatedById == Mcp.McpTestData.MetricsUserId, cancellationToken: TestContext.Current.CancellationToken);
         var originalPrinterId = print.PrinterId;
 
         var foreignPrinter = await db.Printers.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId != Mcp.McpTestData.MetricsUserId && p.WattageW > 0);
+            .FirstOrDefaultAsync(p => p.UserId != Mcp.McpTestData.MetricsUserId && p.WattageW > 0, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(foreignPrinter); // the seeder must provide another user's printer
 
         async Task<decimal?> ElectricityOfThePrint()
@@ -136,7 +136,7 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
         }
 
         print.PrinterId = foreignPrinter.Id;
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -154,7 +154,7 @@ public class AnalyticsCostProjectionTests : IClassFixture<Mcp.McpDataWebApplicat
         finally
         {
             print.PrinterId = originalPrinterId;
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 

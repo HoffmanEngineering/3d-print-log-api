@@ -46,9 +46,9 @@ public class ActivityAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
         var undated = await db.Prints.CountAsync(p =>
-            p.CreatedById == Mcp.McpTestData.MetricsUserId && p.StartDate == null);
+            p.CreatedById == Mcp.McpTestData.MetricsUserId && p.StartDate == null, cancellationToken: TestContext.Current.CancellationToken);
         var dated = await db.Prints.CountAsync(p =>
-            p.CreatedById == Mcp.McpTestData.MetricsUserId && p.StartDate != null);
+            p.CreatedById == Mcp.McpTestData.MetricsUserId && p.StartDate != null, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(undated > 0, "the fixture must contain an undated print or this asserts nothing");
 
@@ -132,7 +132,7 @@ public class ActivityAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
             IsActive = true,
         };
         db.Printers.Add(printer);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         PrintLogApi.Models.Print Print(string title, DateTimeOffset start) => new()
         {
@@ -157,7 +157,7 @@ public class ActivityAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
             Print("mis-dated into next month", today.AddDays(30)),
         };
         db.Prints.AddRange(prints);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         try
         {
@@ -175,7 +175,7 @@ public class ActivityAnalyticsServiceTests : IClassFixture<Mcp.McpDataWebApplica
         {
             db.RemoveRange(prints);
             db.Remove(printer);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
     }
 
