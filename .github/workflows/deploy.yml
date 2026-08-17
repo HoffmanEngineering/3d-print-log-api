@@ -96,13 +96,13 @@ jobs:
 
     steps:
       - name: Download migrations bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: migrations-bundle
           path: ./migrations-bundle
 
       - name: Download app artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: app
           path: ./publish
