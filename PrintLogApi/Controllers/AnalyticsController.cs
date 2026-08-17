@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Caching;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Analytics;
 using PrintLogApi.Services;
@@ -19,18 +20,17 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [Authorize]
 public class AnalyticsController(
-    IAnalyticsService analytics,
-    IActivityAnalyticsService activity,
-    IPrinterAnalyticsService printers,
-    IMaterialAnalyticsService materials,
-    ICostAnalyticsService costs,
-    IAccuracyAnalyticsService accuracy,
-    IMemoryCache cache,
+    HybridCache cache,
+    CachedComputation computation,
     ICacheVersionService cacheVersionService) : ControllerBase
 {
     // Correctness comes from the per-user cache version, not from this window. The TTL only
     // stops the cache growing without bound.
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(15);
+    private static readonly HybridCacheEntryOptions CacheTtl = new()
+    {
+        Expiration = TimeSpan.FromMinutes(15),
+        LocalCacheExpiration = TimeSpan.FromMinutes(15),
+    };
 
     /// <summary>
     /// Every analytics endpoint validates, caches and authorizes identically. Written once so
@@ -40,9 +40,26 @@ public class AnalyticsController(
     /// exactly as PrintsController does) and every normalized filter value. A TTL alone
     /// would serve stale analytics right after a user logs a print — the single most
     /// likely moment for them to open this page.
+    ///
+    /// <para>Validation runs before the lookup, not inside the factory, and must stay there:
+    /// only a successful load is cacheable, and a BadRequest is not a <typeparamref name="T"/>.
+    /// The factory is reached only once the request is known to be well-formed and
+    /// authorized.</para>
+    ///
+    /// <para>GetOrCreateAsync gives these six endpoints stampede protection: concurrent misses
+    /// on one key run the aggregation once. Every analytics query for a user misses at the same
+    /// instant — a version bump invalidates all six tabs together — so this is the site where
+    /// the old get/compute/set shape was most exposed.</para>
+    ///
+    /// <para>The analytics service comes from <see cref="CachedComputation"/>'s scope and the
+    /// query runs on the token HybridCache supplies, never on the calling action's. Both matter
+    /// once one caller's factory serves every caller on the key: the originating request may
+    /// abort while the others are still waiting, and its token and its DbContext would take
+    /// them down with it. Read CachedComputation before changing either.</para>
     /// </summary>
     private async Task<ActionResult<T>> Cached<T>(
-        string name, AnalyticsFilter filter, Func<long, AnalyticsFilter, Task<T>> load) where T : class
+        string name, AnalyticsFilter filter,
+        Func<IServiceProvider, long, AnalyticsFilter, CancellationToken, Task<T>> load) where T : class
     {
         var userId = User.GetUserId();
         if (!userId.HasValue) return Unauthorized();
@@ -55,17 +72,14 @@ public class AnalyticsController(
 
         var version = cacheVersionService.GetUserCacheVersion(userId.Value);
         var cacheKey = $"{name}:v{version}:{filter.CacheKey(userId.Value)}";
-        // Null-forgiven: only `load`'s non-null result is ever stored under this key.
-        if (cache.TryGetValue(cacheKey, out T? cached)) return cached!;
 
-        var result = await load(userId.Value, filter);
-
-        cache.Set(cacheKey, result, new MemoryCacheEntryOptions()
-            .SetAbsoluteExpiration(CacheTtl)
-            .SetSize(1)
-            .SetPriority(CacheItemPriority.Low));
-
-        return result;
+        return await cache.GetOrCreateAsync(
+            cacheKey,
+            (userId: userId.Value, filter, load, computation),
+            static (state, ct) => state.computation.RunAsync(
+                (services, token) => state.load(services, state.userId, state.filter, token), ct),
+            CacheTtl,
+            cancellationToken: HttpContext.RequestAborted);
     }
 
     [HttpGet("overview")]
@@ -73,46 +87,52 @@ public class AnalyticsController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<OverviewResponse>> GetOverview(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("overview", filter, (userId, f) => analytics.GetOverview(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("overview", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<IAnalyticsService>().GetOverview(userId, f, token));
 
     [HttpGet("activity")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<ActivityResponse>> GetActivity(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("activity", filter, (userId, f) => activity.GetActivity(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("activity", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<IActivityAnalyticsService>().GetActivity(userId, f, token));
 
     [HttpGet("printers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<PrintersResponse>> GetPrinters(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("printers", filter, (userId, f) => printers.GetPrinters(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("printers", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<IPrinterAnalyticsService>().GetPrinters(userId, f, token));
 
     [HttpGet("materials")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<MaterialsResponse>> GetMaterials(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("materials", filter, (userId, f) => materials.GetMaterials(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("materials", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<IMaterialAnalyticsService>().GetMaterials(userId, f, token));
 
     [HttpGet("costs")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<CostsResponse>> GetCosts(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("costs", filter, (userId, f) => costs.GetCosts(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("costs", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<ICostAnalyticsService>().GetCosts(userId, f, token));
 
     [HttpGet("accuracy")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public Task<ActionResult<AccuracyResponse>> GetAccuracy(
-        [FromQuery] AnalyticsFilter filter, CancellationToken ct) =>
-        Cached("accuracy", filter, (userId, f) => accuracy.GetAccuracy(userId, f, ct));
+        [FromQuery] AnalyticsFilter filter) =>
+        Cached("accuracy", filter, (sp, userId, f, token) =>
+            sp.GetRequiredService<IAccuracyAnalyticsService>().GetAccuracy(userId, f, token));
 }

@@ -5,7 +5,9 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserApiKeys;
@@ -17,10 +19,18 @@ public class UserApiKeyService(
     IMapper mapper,
     TelemetryClient telemetry,
     INotificationService notificationService,
-    IMemoryCache cache) : IUserApiKeyService
+    IMemoryCache cache,
+    HybridCache hybridCache,
+    CachedComputation computation) : IUserApiKeyService
 {
     private static string UserIdCacheKey(string hashedKey) => $"apikey_userid:{hashedKey}";
     private static string LastUsedThrottleKey(string hashedKey) => $"apikey_lastused:{hashedKey}";
+
+    private static readonly HybridCacheEntryOptions ApiKeyCacheOptions = new()
+    {
+        Expiration = TimeSpan.FromHours(24),
+        LocalCacheExpiration = TimeSpan.FromHours(24),
+    };
 
     public async Task<List<UserApiKeyDto>> GetApiKeySummaryForUser(long userId)
     {
@@ -50,7 +60,12 @@ public class UserApiKeyService(
 
         await context.SaveChangesAsync();
 
-        cache.Remove(UserIdCacheKey(existingKey.HashedKey));
+        // Two caches, because these two entries are different kinds of thing: the owner lookup
+        // is a compute-on-miss cache and lives in HybridCache, while the last-used throttle is a
+        // flag whose value IS its existence and stays on IMemoryCache. Revocation must clear
+        // both, and removing from the wrong one would silently leave a revoked key working for
+        // up to a day.
+        await hybridCache.RemoveAsync(UserIdCacheKey(existingKey.HashedKey));
         cache.Remove(LastUsedThrottleKey(existingKey.HashedKey));
 
         await notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
@@ -91,27 +106,44 @@ public class UserApiKeyService(
         return response;
     }
 
+    /// <summary>
+    /// Resolves an API key to its owner, on the hot path of every API-key-authenticated request.
+    ///
+    /// <para>The unknown-key branch still throws rather than caching a sentinel, which keeps the
+    /// existing property that an invalid key is never cached — so re-issuing a key is not
+    /// blocked by a negative entry. HybridCache stores nothing when the factory throws, and it
+    /// propagates that exception to every caller waiting on the same key, so a burst of requests
+    /// bearing one bad key now costs a single query between them instead of one each.</para>
+    ///
+    /// <para>The old entry combined a 24h sliding window with a 7-day absolute cap. HybridCache
+    /// has absolute expiry only, so this is a flat 24 hours: at worst one extra indexed lookup
+    /// per key per day, against a revoked key no longer being able to stay resident for a week
+    /// of continuous use. Revocation does not wait for expiry in any case — see
+    /// DeactivateApiKey, which removes the entry explicitly.</para>
+    /// </summary>
     public async Task<long> GetUserIdByApiKey(string? publicKey)
     {
         var hashedKey = GetSHA256Hash(publicKey);
 
-        if (cache.TryGetValue(UserIdCacheKey(hashedKey), out long cachedUserId))
-            return cachedUserId;
+        // The context comes from CachedComputation's scope, not the injected one: this factory's
+        // result is served to every concurrent caller presenting the same key, so it must not
+        // run on a DbContext disposed when one of those requests ends. See CachedComputation.
+        return await hybridCache.GetOrCreateAsync(
+            UserIdCacheKey(hashedKey),
+            (computation, hashedKey),
+            static (state, ct) => state.computation.RunAsync(async (services, token) =>
+            {
+                var userId = await services.GetRequiredService<PrintLogContext>().UserApiKeys
+                    .Where(u => u.HashedKey == state.hashedKey && u.IsDeleted == false)
+                    .Select(u => u.UserId)
+                    .SingleOrDefaultAsync(token);
 
-        var userId = await context.UserApiKeys
-            .Where(u => u.HashedKey == hashedKey && u.IsDeleted == false)
-            .Select(u => u.UserId)
-            .SingleOrDefaultAsync();
+                if (userId == default)
+                    throw new ApiKeyIsNotValidException();
 
-        if (userId == default)
-            throw new ApiKeyIsNotValidException();
-
-        cache.Set(UserIdCacheKey(hashedKey), userId, new MemoryCacheEntryOptions()
-            .SetSize(1)
-            .SetSlidingExpiration(TimeSpan.FromHours(24))
-            .SetAbsoluteExpiration(TimeSpan.FromDays(7)));
-
-        return userId;
+                return userId;
+            }, ct),
+            ApiKeyCacheOptions);
     }
 
     public async Task UpdateApiKeyLastUsed(string? publicKey)
@@ -134,8 +166,12 @@ public class UserApiKeyService(
         if (rowsUpdated == 0)
             throw new ApiKeyIsNotValidException();
 
+        // Deliberately still IMemoryCache, not HybridCache: this is a throttle flag, not a
+        // cached computation. Its value carries no information — its presence is the whole
+        // signal — so there is no miss to deduplicate and GetOrCreateAsync would only obscure
+        // that. Same category as ApiKeyMiddleware's failed-attempt counter.
         cache.Set(LastUsedThrottleKey(hashedKey), true, new MemoryCacheEntryOptions()
-            .SetSize(1)
+            .SetSize(CacheBudget.SmallEntryBytes)
             .SetAbsoluteExpiration(TimeSpan.FromHours(1)));
     }
 

@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Services.Analytics;
+﻿using System.ComponentModel;
+using PrintLogApi.Services.Analytics;
 
 namespace PrintLogApi.Models.DTOs.Analytics;
 
@@ -16,6 +17,12 @@ public sealed record CalendarDay(DateOnly Date, int Count);
 /// The Activity tab payload. CalendarFrom/CalendarTo carry the window the calendar actually
 /// covers, which may be narrower than the filter's, so the UI never has to infer it.
 /// </summary>
+// [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
+// shared from L1 rather than deserialized per hit. The record'''s own members are init-only,
+// but its IReadOnlyList/IReadOnlyDictionary members are backed by mutable collections, so
+// this asserts a convention - nothing mutates a cached response - not a guarantee the type
+// system enforces. See PagedList<T> for the full rationale.
+[ImmutableObject(true)]
 public sealed record ActivityResponse(
     DateTimeOffset? From,
     DateTimeOffset? To,

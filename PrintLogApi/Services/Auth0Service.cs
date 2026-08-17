@@ -2,6 +2,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
+using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models.DTOs;
 
@@ -28,6 +29,22 @@ public class Auth0Service(
         return $"Bearer {token}";
     }
 
+    /// <summary>
+    /// Deliberately still on IMemoryCache with a hand-rolled lock, and NOT on HybridCache —
+    /// #68 listed this as a conversion candidate and the code disagrees, for two reasons.
+    ///
+    /// <para><b>The entry's lifetime is only knowable from inside the factory.</b> It comes from
+    /// the token's own <c>expires_in</c>, minus a minute. HybridCacheEntryOptions is supplied
+    /// before the factory runs and there is no way to amend it afterwards, so converting this
+    /// would mean replacing a token-derived expiry with a guessed constant. Guess long and the
+    /// service serves an expired token until the TTL catches up; guess short and it re-fetches
+    /// a token that had hours left.</para>
+    ///
+    /// <para><b>The stampede protection HybridCache would add is already here.</b> That is what
+    /// the semaphore plus the second TryGetValue under it is: concurrent callers on a cold
+    /// cache produce one token request. There is one key, process-wide, so the narrow lock is
+    /// not a scalability concern.</para>
+    /// </summary>
     private async Task<string?> GetCachedAccessTokenAsync(CancellationToken ct)
     {
         if (cache.TryGetValue(TokenCacheKey, out string? cached) && !string.IsNullOrEmpty(cached))
@@ -47,7 +64,7 @@ public class Auth0Service(
             // Refresh a minute before actual expiry to avoid using an about-to-expire token.
             var lifetime = TimeSpan.FromSeconds(Math.Max(30, jwt.ExpiresIn - 60));
             cache.Set(TokenCacheKey, jwt.AccessToken, new MemoryCacheEntryOptions()
-                .SetSize(1)
+                .SetSize(CacheBudget.SmallEntryBytes)
                 .SetAbsoluteExpiration(lifetime));
             return jwt.AccessToken;
         }

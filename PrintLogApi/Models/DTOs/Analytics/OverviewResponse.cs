@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Models.DTOs.Analytics;
+﻿using System.ComponentModel;
+
+namespace PrintLogApi.Models.DTOs.Analytics;
 
 public sealed record StatusCount(string Status, int Count);
 
@@ -21,6 +23,12 @@ public sealed record OverviewTiles(
     MoneyMetric TotalCost,
     Metric AvgPrintTimeSeconds);
 
+// [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
+// shared from L1 rather than deserialized per hit. The record'''s own members are init-only,
+// but its IReadOnlyList/IReadOnlyDictionary members are backed by mutable collections, so
+// this asserts a convention - nothing mutates a cached response - not a guarantee the type
+// system enforces. See PagedList<T> for the full rationale.
+[ImmutableObject(true)]
 public sealed record OverviewResponse(
     DateTimeOffset? From,
     DateTimeOffset? To,

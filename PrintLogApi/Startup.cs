@@ -9,12 +9,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.Caching;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
@@ -149,13 +151,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         ConfigureHealthChecks(services);
 
-        // Configure memory cache with size limit
-        services.AddMemoryCache(options =>
-        {
-            options.SizeLimit = 8192; // 8192 "units" - each unit ~= 1KB
-            options.CompactionPercentage = 0.25; // Remove 25% of entries when limit reached
-            options.ExpirationScanFrequency = TimeSpan.FromMinutes(2);
-        });
+        ConfigureCaching(services);
 
         services.AddSingleton<IAuthorizationHandler, HasScopeHandler>();
         services.AddTransient<IClaimsTransformation, ClaimsTransformer>();
@@ -386,6 +382,62 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
         services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+    }
+
+    /// <summary>
+    /// One memory cache, one budget, two APIs over it.
+    ///
+    /// <c>HybridCache</c> is the API for every compute-on-miss site, and the reason is stampede
+    /// protection rather than tidiness: concurrent callers that miss on the same key await a
+    /// single computation instead of each running the query. That matters most immediately
+    /// after <see cref="ICacheVersionService"/> bumps a user's version, which invalidates all of
+    /// their entries at exactly the moment their concurrency is highest.
+    ///
+    /// It does NOT stand up its own store. HybridCache resolves the <c>IMemoryCache</c>
+    /// registered here for L1, so the ceiling below is the process-wide total and there is no
+    /// second, untracked memory budget. No L2 is registered, deliberately — this is a
+    /// single-instance app today, and adding a distributed store is a separate decision with its
+    /// own consistency and latency arguments. The seam is now here if that changes.
+    ///
+    /// <c>IMemoryCache</c> stays injected at the sites that are not compute-on-miss: see
+    /// <see cref="CacheVersionService"/> (the source of the version GUIDs, and synchronous),
+    /// <c>ApiKeyMiddleware</c>'s failed-attempt counter and <c>UserApiKeyService</c>'s last-used
+    /// throttle flag. Each is a counter or a flag whose value is the entry's existence, not the
+    /// result of a computation worth sharing; routing them through GetOrCreateAsync would buy
+    /// nothing and would change throttle semantics.
+    ///
+    /// On <see cref="CacheBudget.SizeLimitBytes"/> and why the unit changed, read
+    /// <see cref="CacheBudget"/> — the limit is enforced in bytes because HybridCache charges
+    /// serialized payload length and does not let you override it.
+    ///
+    /// <para>Expiration here is a memory bound, not a correctness mechanism: correctness comes
+    /// from the version GUID in every key. Both windows are set because they answer different
+    /// questions — <c>LocalCacheExpiration</c> caps how long L1 serves an entry, while
+    /// <c>Expiration</c> is the overall lifetime a future L2 would also honour. Leaving the
+    /// latter at its default while setting the former would put the two out of step the day an
+    /// L2 is added.</para>
+    /// </summary>
+    private static void ConfigureCaching(IServiceCollection services)
+    {
+        services.AddMemoryCache(options =>
+        {
+            options.SizeLimit = CacheBudget.SizeLimitBytes;
+            options.CompactionPercentage = 0.25; // Remove 25% of entries when limit reached
+            options.ExpirationScanFrequency = TimeSpan.FromMinutes(2);
+        });
+
+        services.AddHybridCache(options =>
+        {
+            options.DefaultEntryOptions = new HybridCacheEntryOptions
+            {
+                Expiration = TimeSpan.FromMinutes(15),
+                LocalCacheExpiration = TimeSpan.FromMinutes(15),
+            };
+        });
+
+        // Singleton: it holds only the scope factory, and the scopes it creates must be
+        // independent of any request scope — which is the entire point. See CachedComputation.
+        services.AddSingleton<CachedComputation>();
     }
 
     /// <summary>
