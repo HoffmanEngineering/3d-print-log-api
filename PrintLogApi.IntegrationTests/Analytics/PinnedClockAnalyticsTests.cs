@@ -141,10 +141,10 @@ public class PinnedClockAnalyticsTests : IClassFixture<PinnedClockDataFactory>
             "/api/Analytics/activity"
             + $"?fromDate={Uri.EscapeDataString(from.ToString("O"))}"
             + $"&toDate={Uri.EscapeDataString(requestedTo.ToString("O"))}"
-            + "&timeZone=UTC");
+            + "&timeZone=UTC", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ActivityResponse>();
+        var body = await response.Content.ReadFromJsonAsync<ActivityResponse>(TestContext.Current.CancellationToken);
         Assert.NotNull(body);
 
         // ClampCeiling rounds UP to the next whole UTC hour, so a midday pinned clock gives
