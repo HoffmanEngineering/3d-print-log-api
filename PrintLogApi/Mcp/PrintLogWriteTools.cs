@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.Frozen;
+using System.ComponentModel;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
 using PrintLogApi.Enums;
@@ -32,10 +33,10 @@ public class PrintLogWriteTools(
     private const int MaxMaterialRows = 50;
 
     /// <summary>The nullable print fields update_print will clear on request.</summary>
-    public static readonly HashSet<string> ClearablePrintFields = new()
+    public static readonly IReadOnlySet<string> ClearablePrintFields = new[]
     {
         "fileName", "url", "notes", "startedAt", "estimatedDurationSeconds", "durationSeconds", "projectId",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
     /// A usage row must carry an actual pair, an estimated pair, or both; a source without its
@@ -372,7 +373,7 @@ public class PrintLogWriteTools(
         CancellationToken ct = default)
     {
         var clearFields = McpWriteValidation.RequireAllowedClearFields(
-            clear, new HashSet<string>(McpMaterialValidation.ClearableFields));
+            clear, McpMaterialValidation.ClearableFields);
 
         var input = new MaterialAttributesInput
         {
@@ -489,7 +490,7 @@ public class PrintLogWriteTools(
         CancellationToken ct = default)
     {
         var clearFields = McpWriteValidation.RequireAllowedClearFields(
-            clear, new HashSet<string>(McpPrinterValidation.ClearableFields));
+            clear, McpPrinterValidation.ClearableFields);
 
         return await printerService.UpdatePrinterForMcp(
             CurrentUserId, id, BuildPrinterInput(
