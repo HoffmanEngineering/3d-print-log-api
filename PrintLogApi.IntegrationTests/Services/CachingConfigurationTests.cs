@@ -98,7 +98,7 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
             return "computed";
         }, cancellationToken: abortedRequest.Token).AsTask();
 
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         var joiner = cache.GetOrCreateAsync(goodKey, async ct =>
         {
@@ -106,7 +106,7 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
             return "computed";
         }, cancellationToken: CancellationToken.None).AsTask();
 
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
         abortedRequest.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => aborted);
@@ -128,7 +128,7 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
         var key = $"shared-store-probe:{Guid.NewGuid():N}";
         Assert.DoesNotContain(key, memory.Keys.OfType<string>());
 
-        await hybrid.GetOrCreateAsync(key, _ => new ValueTask<string>("value"));
+        await hybrid.GetOrCreateAsync(key, _ => new ValueTask<string>("value"), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains(memory.Keys.OfType<string>(), k => k.Contains(key, StringComparison.Ordinal));
     }
@@ -225,11 +225,11 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
         // Under a flat one-unit-per-entry charge this would be admitted; under a byte charge it
         // cannot be.
         var tight = BuildWithLimit(64);
-        await tight.Cache.GetOrCreateAsync("k", _ => new ValueTask<string>(payload));
+        await tight.Cache.GetOrCreateAsync("k", _ => new ValueTask<string>(payload), cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(0, tight.Store.Count);
 
         var roomy = BuildWithLimit(64 * 1024);
-        await roomy.Cache.GetOrCreateAsync("k", _ => new ValueTask<string>(payload));
+        await roomy.Cache.GetOrCreateAsync("k", _ => new ValueTask<string>(payload), cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, roomy.Store.Count);
     }
 
