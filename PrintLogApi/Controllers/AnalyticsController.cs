@@ -22,7 +22,8 @@ namespace PrintLogApi.Controllers;
 public class AnalyticsController(
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    ICacheVersionService cacheVersionService,
+    TimeProvider timeProvider) : ControllerBase
 {
     // Correctness comes from the per-user cache version, not from this window. The TTL only
     // stops the cache growing without bound.
@@ -65,7 +66,11 @@ public class AnalyticsController(
         if (!userId.HasValue) return Unauthorized();
 
         filter ??= new AnalyticsFilter();
-        filter.Normalize();
+        // The injected clock, not the parameterless overload: Normalize()'s clamp ceiling
+        // becomes part of the cache key below, so a test running on a substituted clock would
+        // otherwise key its entries off the real wall clock and stop being reproducible.
+        // PinnedClockAnalyticsTests.Controller_Clamps... fails if this reverts.
+        filter.Normalize(timeProvider.GetUtcNow());
 
         var errors = filter.Validate();
         if (errors.Count > 0) return BadRequest(new { errors });

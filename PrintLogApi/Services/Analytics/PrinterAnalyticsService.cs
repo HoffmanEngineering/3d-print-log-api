@@ -10,7 +10,8 @@ namespace PrintLogApi.Services.Analytics;
 /// and has no CreatedById — and maintenance is scoped through its printer, so a maintenance
 /// row can never reach a user who does not own the machine it belongs to.
 /// </summary>
-public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterAnalyticsService
+public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IPrinterAnalyticsService
 {
     public const int MaxMaintenanceEvents = 500;
 
@@ -25,12 +26,18 @@ public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterA
 
     public async Task<PrintersResponse> GetPrinters(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
-        var current = await Compute(userId, filter, ct);
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per computation would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
 
-        var previousFilter = PreviousWindow.For(filter);
+        var current = await Compute(userId, filter, now, ct);
+
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, ct);
+        var previous = await Compute(userId, previousFilter, now, ct);
 
         // Fleet utilization is the tab's only scalar tile; the per-printer rows are a table,
         // not tiles, and a delta column there is a different feature.
@@ -43,7 +50,13 @@ public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterA
         };
     }
 
-    private async Task<PrintersResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+    /// <param name="now">
+    /// The caller's single clock read. A filter with no ToDate means "up to now", so this is
+    /// what closes the window — it is a parameter rather than a field read so that the two
+    /// computations behind one response cannot disagree about when "now" was.
+    /// </param>
+    private async Task<PrintersResponse> Compute(
+        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
     {
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
@@ -140,8 +153,8 @@ public sealed class PrinterAnalyticsService(PrintLogContext context) : IPrinterA
             intervals.Where(i => i.Duration <= 0).Sum(i => i.Count));
 
         var windowFrom = filter.FromDate
-            ?? (intervals.Count > 0 ? intervals.Min(i => i.Start) : DateTimeOffset.UtcNow);
-        var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
+            ?? (intervals.Count > 0 ? intervals.Min(i => i.Start) : now);
+        var windowTo = filter.ToDate ?? now;
         var windowSeconds = Math.Max(0, (windowTo - windowFrom).TotalSeconds);
 
         var utilizationIntervals = seriesTruncated

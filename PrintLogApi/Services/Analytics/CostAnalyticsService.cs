@@ -9,7 +9,8 @@ namespace PrintLogApi.Services.Analytics;
 /// currency, default-price and parse rules as the cost tile on Overview — the two surfaces
 /// disagreeing is the failure mode this design exists to prevent.
 /// </summary>
-public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyticsService
+public sealed class CostAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : ICostAnalyticsService
 {
     public const int MaxExtremes = 5;
     public const int MaxCostGroups = 15;
@@ -26,12 +27,18 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
 
     public async Task<CostsResponse> GetCosts(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
-        var current = await Compute(userId, filter, ct);
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per computation would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
 
-        var previousFilter = PreviousWindow.For(filter);
+        var current = await Compute(userId, filter, now, ct);
+
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, ct);
+        var previous = await Compute(userId, previousFilter, now, ct);
 
         // Only the SCALAR tiles carry a delta. A bucket-by-bucket delta on a series is a
         // different chart, not a delta, and the spec asks for tile deltas.
@@ -45,7 +52,13 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
         };
     }
 
-    private async Task<CostsResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+    /// <param name="now">
+    /// The caller's single clock read. A filter with no ToDate means "up to now", so this is
+    /// what closes the window — it is a parameter rather than a field read so that the two
+    /// computations behind one response cannot disagree about when "now" was.
+    /// </param>
+    private async Task<CostsResponse> Compute(
+        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
     {
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
@@ -98,7 +111,7 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
             new MoneyMetric(filamentSpend, null, currency, costCoverage),
             new MoneyMetric(electricitySpend, null, currency, costCoverage),
             new MoneyMetric(maintenanceSpend, null, currency, costCoverage),
-            BuildSeries(projection.Prints, maintenance, filter, zone, granularity),
+            BuildSeries(projection.Prints, maintenance, filter, zone, granularity, now),
             Distribution(projection.Prints),
             byMaterialType,
             byBrand,
@@ -160,7 +173,8 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
     private static IReadOnlyList<CostSeriesBucket> BuildSeries(
         IReadOnlyList<CostedPrint> prints,
         IReadOnlyList<(long PrinterId, DateOnly Date, DateTimeOffset Instant, decimal Cost)> maintenance,
-        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity)
+        AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity,
+        DateTimeOffset now)
     {
         var dated = prints.Where(p => p.StartDate.HasValue).ToList();
 
@@ -171,11 +185,11 @@ public sealed class CostAnalyticsService(PrintLogContext context) : ICostAnalyti
         var earliest = dated
             .Select(p => p.StartDate!.Value)
             .Concat(maintenance.Select(m => m.Instant))
-            .DefaultIfEmpty(DateTimeOffset.UtcNow)
+            .DefaultIfEmpty(now)
             .Min();
 
         var from = filter.FromDate ?? earliest;
-        var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<CostSeriesBucket>();
 
         var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);

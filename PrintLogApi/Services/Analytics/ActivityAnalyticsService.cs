@@ -10,7 +10,8 @@ namespace PrintLogApi.Services.Analytics;
 /// five widgets that must agree, so they are derived from one set of rows rather than five
 /// queries that can drift.
 /// </summary>
-public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivityAnalyticsService
+public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IActivityAnalyticsService
 {
     /// <summary>53 weeks. Beyond this a calendar heatmap is unreadable, not merely large.</summary>
     public const int MaxCalendarDays = 371;
@@ -19,8 +20,15 @@ public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivit
 
     public async Task<ActivityResponse> GetActivity(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
+        // Read the clock ONCE. Three things below close on "now" — the window's open end, and
+        // the local today the streaks are measured against — and reading it separately for
+        // each let a request that straddled midnight build a calendar whose last day was not
+        // the day the streak thought it was.
+        var now = timeProvider.GetUtcNow();
+
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
+        var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
         var granularity = filter.ResolveGranularity();
 
         var scoped = AnalyticsQueryScope.Scope(
@@ -36,13 +44,13 @@ public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivit
         coverage.Total = printCounts.Total;
         coverage.UndatedCount = filter.HasRange ? 0 : printCounts.Undated;
 
-        var windowFrom = filter.FromDate ?? printCounts.EarliestStart ?? DateTimeOffset.UtcNow;
-        var windowTo = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var windowFrom = filter.FromDate ?? printCounts.EarliestStart ?? now;
+        var windowTo = filter.ToDate ?? now;
 
         if (windowTo <= windowFrom || printCounts.Dated > AnalyticsService.MaxSeriesRows)
         {
             coverage.Exclude(ExclusionReason.RowCapExceeded, coverage.Total);
-            return Empty(filter, granularity, null, coverage.Build());
+            return Empty(filter, granularity, null, coverage.Build(), localToday);
         }
 
         // Grouping by { instant, duration } rather than by instant alone: the histogram needs
@@ -141,8 +149,6 @@ public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivit
             BuildCalendar(calendarCounts, windowFrom, windowTo, zone);
         if (truncated) coverage.Exclude(ExclusionReason.WindowTruncated, 1);
 
-        var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).DateTime);
-
         // Future-dated days are excluded from the streak input. An all-time query has no
         // upper bound, so a print mis-dated into next month becomes the most recent day in
         // the set — and because that day is neither today nor yesterday, Streaks reports a
@@ -232,11 +238,18 @@ public sealed class ActivityAnalyticsService(PrintLogContext context) : IActivit
         return (days, first, last, truncated);
     }
 
+    /// <summary>
+    /// <paramref name="localToday"/> is the same local today the populated path measures
+    /// streaks against. Streaks over an empty day list ignores it, so this is inert today —
+    /// but it took the caller's UTC today where the real path takes the user's local one, and
+    /// leaving that asymmetry in place is how an inert difference becomes a live bug.
+    /// </summary>
     private static ActivityResponse Empty(
-        AnalyticsFilter filter, AnalyticsGranularity granularity, string? currency, Coverage coverage) =>
+        AnalyticsFilter filter, AnalyticsGranularity granularity, string? currency, Coverage coverage,
+        DateOnly localToday) =>
         new(filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(), currency,
             Array.Empty<ActivitySeriesBucket>(), Array.Empty<CalendarDay>(), null, null,
-            ActivityStats.Streaks(Array.Empty<DayCount>(), DateOnly.FromDateTime(DateTime.UtcNow)),
+            ActivityStats.Streaks(Array.Empty<DayCount>(), localToday),
             ActivityStats.DurationHistogram(Array.Empty<(int, int)>()),
             ActivityStats.StartTimeMatrix(Array.Empty<(int, int, int)>()),
             coverage);

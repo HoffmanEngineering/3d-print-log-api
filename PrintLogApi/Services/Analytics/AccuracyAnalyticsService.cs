@@ -10,7 +10,8 @@ namespace PrintLogApi.Services.Analytics;
 /// a measured duration and an estimated-only material amount, and requiring both would
 /// silently shrink each sample.
 /// </summary>
-public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccuracyAnalyticsService
+public sealed class AccuracyAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
+    : IAccuracyAnalyticsService
 {
     public const int ScatterBins = 24;
 
@@ -25,12 +26,18 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
 
     public async Task<AccuracyResponse> GetAccuracy(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
-        var current = await Compute(userId, filter, ct);
+        // ONE clock read per request, taken here at the entry point and threaded down. A
+        // request can compute two windows (current and previous), and each of those closes an
+        // open end at "now" — reading the clock per computation would let a single response
+        // measure its two halves against two different instants.
+        var now = timeProvider.GetUtcNow();
 
-        var previousFilter = PreviousWindow.For(filter);
+        var current = await Compute(userId, filter, now, ct);
+
+        var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, ct);
+        var previous = await Compute(userId, previousFilter, now, ct);
 
         // Only the SCALAR medians carry a delta. The scatter, the trend and the per-group
         // rows are not tiles, and a per-bucket delta is a different chart.
@@ -47,7 +54,13 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
         };
     }
 
-    private async Task<AccuracyResponse> Compute(long userId, AnalyticsFilter filter, CancellationToken ct)
+    /// <param name="now">
+    /// The caller's single clock read. A filter with no ToDate means "up to now", so this is
+    /// what closes the window — it is a parameter rather than a field read so that the two
+    /// computations behind one response cannot disagree about when "now" was.
+    /// </param>
+    private async Task<AccuracyResponse> Compute(
+        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
     {
         filter.TryResolveTimeZone(out var zone);
         zone ??= TimeZoneInfo.Utc;
@@ -165,7 +178,7 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
             AccuracyStats.Bin(timeSamples, ScatterBins),
             byPrinter,
             byMaterial,
-            BiasTrend(rows, filter, zone, granularity),
+            BiasTrend(rows, filter, zone, granularity, now),
             Callouts(byPrinter, "time").Concat(Callouts(byMaterial, "material")).ToList(),
             coverage.Build());
     }
@@ -260,13 +273,13 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context) : IAccurac
 
     private static IReadOnlyList<AccuracyTrendBucket> BiasTrend(
         IReadOnlyList<Row> rows, AnalyticsFilter filter,
-        TimeZoneInfo zone, AnalyticsGranularity granularity)
+        TimeZoneInfo zone, AnalyticsGranularity granularity, DateTimeOffset now)
     {
         var dated = rows.Where(r => r.StartDate.HasValue).ToList();
         if (dated.Count == 0) return Array.Empty<AccuracyTrendBucket>();
 
         var from = filter.FromDate ?? dated.Min(r => r.StartDate!.Value);
-        var to = filter.ToDate ?? DateTimeOffset.UtcNow;
+        var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<AccuracyTrendBucket>();
 
         var buckets = TimeBucketer.BuildBuckets(from, to, zone, granularity, DayOfWeek.Sunday);
