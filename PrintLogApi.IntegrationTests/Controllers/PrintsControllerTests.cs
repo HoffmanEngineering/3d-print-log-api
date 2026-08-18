@@ -259,8 +259,11 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetPrintById_ReturnsExpectedData()
     {
-        // Arrange - find a seeded test print (other tests may have added prints)
-        var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary");
+        // Arrange - find a seeded test print. The search term is load-bearing: the summary
+        // endpoint returns one page of a list every other test in the suite appends to, so
+        // taking the first page and filtering it in memory finds nothing once enough
+        // siblings have run.
+        var summaryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/summary?searchText=Test%20Print");
         summaryRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
         var summaryResponse = await _httpClient.SendAsync(summaryRequest, TestContext.Current.CancellationToken);
         var summary = (await summaryResponse.Content.ReadFromJsonAsync<PagedList<PrintSummaryDTO>>(cancellationToken: TestContext.Current.CancellationToken))!;

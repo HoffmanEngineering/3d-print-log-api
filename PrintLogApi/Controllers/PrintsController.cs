@@ -345,7 +345,10 @@ public class PrintsController(
         {
             var updatedPrint = await printService.UpdatePrint(id, printDTO, userId.Value);
 
-            cacheVersionService.InvalidateUserCache(userId.Value);
+            // The summary cache is keyed by the print's owner, and this endpoint lets the
+            // printer's owner edit somebody else's print - invalidating only the caller
+            // would leave the creator reading a stale list.
+            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
 
             return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(updatedPrint));
         }
@@ -398,7 +401,9 @@ public class PrintsController(
         {
             var updatedPrint = await printService.UpdatePrintStatus(id, newStatus, userId.Value);
 
-            cacheVersionService.InvalidateUserCache(userId.Value);
+            // Same reason as PutPrint: the printer's owner can move a print another user
+            // created, and that user's cached summary list has to notice.
+            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
 
             return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(existingPrint));
         }
@@ -450,7 +455,7 @@ public class PrintsController(
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
 
-        InvalidateAffectedUserCaches(operation.AffectedUserIds);
+        InvalidateAffectedUserCaches([.. operation.AffectedUserIds]);
 
         // The touched-field list is what makes this event answer "which bulk actions do
         // people actually use", which is the question that justified building them.
@@ -476,12 +481,13 @@ public class PrintsController(
     }
 
     /// <summary>
-    ///     Invalidates the summary cache for every user a bulk operation touched, once each.
-    ///     A single request can name the same user many times - every print in it may share one
-    ///     owner - and each invalidation issues a fresh version GUID, so the set is deduplicated
-    ///     before it is walked.
+    ///     Invalidates each distinct user's cached summaries exactly once. Callers pass every
+    ///     user a write could be visible to: the caller, the print's creator, and the owner of
+    ///     the printer it ran on. A single request can name the same user many times, and each
+    ///     invalidation issues a fresh version GUID, so the set is deduplicated before it is
+    ///     walked.
     /// </summary>
-    private void InvalidateAffectedUserCaches(IEnumerable<long> userIds)
+    private void InvalidateAffectedUserCaches(params long[] userIds)
     {
         foreach (var affectedUserId in userIds.Distinct())
         {

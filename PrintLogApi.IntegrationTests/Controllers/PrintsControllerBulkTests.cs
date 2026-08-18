@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -505,5 +506,83 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
         });
 
         await AssertProblemDetailAsync(response, "not a clearable field");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_AsPrinterOwner_InvalidatesTheCreatorsCacheToo()
+    {
+        // Arrange - a guest's print on the seeded user's printer.
+        const string creatorOAuthId = "auth0|test-bulk-cache-creator";
+        var creatorId = await CreateOtherUserAsync(creatorOAuthId);
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Cache Invalidation Print", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        string versionBefore;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var cacheVersions = scope.ServiceProvider.GetRequiredService<ICacheVersionService>();
+            versionBefore = cacheVersions.GetUserCacheVersion(creatorId);
+        }
+
+        // Act - the printer's owner, not the creator, performs the update.
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { printId },
+            status = (int)PrintStatus.Success
+        });
+        response.EnsureSuccessStatusCode();
+
+        // Assert - the creator's cached summaries were invalidated, not just the caller's.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var cacheVersions = scope.ServiceProvider.GetRequiredService<ICacheVersionService>();
+            Assert.NotEqual(versionBefore, cacheVersions.GetUserCacheVersion(creatorId));
+        }
+    }
+
+    [Fact]
+    public async Task UpdatePrintStatus_AsPrinterOwner_InvalidatesTheCreatorsCacheToo()
+    {
+        // The same invariant on the single-item endpoint the bulk path replaces. Without
+        // this, a printer owner's status change leaves the creator reading a stale list.
+        const string creatorOAuthId = "auth0|test-single-status-cache-creator";
+        var creatorId = await CreateOtherUserAsync(creatorOAuthId);
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Single Status Cache Print", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        string versionBefore;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            versionBefore = scope.ServiceProvider.GetRequiredService<ICacheVersionService>()
+                .GetUserCacheVersion(creatorId);
+        }
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Put, $"/api/Prints/{printId}/status/{(int)PrintStatus.Success}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            Assert.NotEqual(versionBefore, scope.ServiceProvider
+                .GetRequiredService<ICacheVersionService>().GetUserCacheVersion(creatorId));
+        }
     }
 }
