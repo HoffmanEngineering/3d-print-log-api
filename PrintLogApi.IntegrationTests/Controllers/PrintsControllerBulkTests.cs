@@ -311,4 +311,199 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
         Assert.Equal([printId], result.Succeeded);
         Assert.Empty(result.Failed);
     }
+
+    private static async Task AssertProblemDetailAsync(HttpResponseMessage response, string expectedFragment)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(problem);
+        Assert.False(string.IsNullOrWhiteSpace(problem!.Detail), "Phase-one rejections must carry a readable detail.");
+        Assert.Contains(expectedFragment, problem.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_EmptyPrintIds_ReturnsProblemDetails()
+    {
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = Array.Empty<long>(),
+            status = (int)PrintStatus.Success
+        });
+
+        await AssertProblemDetailAsync(response, "at least one id");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_TooManyPrintIds_ReturnsProblemDetails()
+    {
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = Enumerable.Range(1, 201).Select(i => (long)i).ToArray(),
+            status = (int)PrintStatus.Success
+        });
+
+        await AssertProblemDetailAsync(response, "at most 200");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_NoFieldsSet_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Empty Patch");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id }
+        });
+
+        await AssertProblemDetailAsync(response, "at least one field");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_DuplicatePrintIds_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Duplicate Ids");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id, print.Id },
+            status = (int)PrintStatus.Success
+        });
+
+        await AssertProblemDetailAsync(response, "must not contain duplicates");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_ProjectSetAndCleared_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Conflicting Project");
+        var project = await CreateProjectAsync("Bulk Conflict Project");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            projectId = project.Id,
+            clear = new[] { "projectId" }
+        });
+
+        await AssertProblemDetailAsync(response, "both set and cleared");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_NonExistentProject_ReturnsProblemDetailsAndWritesNothing()
+    {
+        var print = await CreatePrintAsync("Bulk Missing Project");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            projectId = Guid.NewGuid()
+        });
+
+        await AssertProblemDetailAsync(response, "Project not found");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await db.Prints.AsNoTracking().FirstAsync(p => p.Id == print.Id, TestContext.Current.CancellationToken);
+        Assert.Null(stored.ProjectId);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_ProjectOwnedBySomeoneElse_ReturnsProblemDetails()
+    {
+        // A real project that exists but belongs to another user. Without this case, a
+        // service that checks existence and forgets ownership still passes.
+        const string ownerOAuthId = "auth0|test-bulk-foreign-project-owner";
+        var ownerId = await CreateOtherUserAsync(ownerOAuthId);
+        var print = await CreatePrintAsync("Bulk Foreign Project");
+
+        Guid foreignProjectId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var now = DateTime.UtcNow;
+            var project = new PrintLogApi.Models.Project
+            {
+                Id = Guid.NewGuid(),
+                Name = "Not Your Project",
+                Status = Project.ProjectStatus.InProgress,
+                ViewStatus = Project.ProjectViewStatus.Private,
+                CreatedById = ownerId,
+                CreatedDate = now,
+                UpdatedById = ownerId,
+                UpdatedDate = now
+            };
+            db.Projects.Add(project);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            foreignProjectId = project.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            projectId = foreignProjectId
+        });
+
+        await AssertProblemDetailAsync(response, "Project not found");
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await verifyDb.Prints.AsNoTracking()
+            .FirstAsync(p => p.Id == print.Id, TestContext.Current.CancellationToken);
+        Assert.Null(stored.ProjectId);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_NonExistentPrinter_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Missing Printer");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            printerId = 999_999_999L
+        });
+
+        await AssertProblemDetailAsync(response, "Printer not found");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_PrinterOwnedBySomeoneElse_ReturnsProblemDetails()
+    {
+        const string ownerOAuthId = "auth0|test-bulk-foreign-printer-owner";
+        var ownerId = await CreateOtherUserAsync(ownerOAuthId);
+        var print = await CreatePrintAsync("Bulk Foreign Printer");
+
+        long foreignPrinterId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var printer = new PrintLogApi.Models.Printer { Name = "Not Your Printer", UserId = ownerId };
+            db.Printers.Add(printer);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            foreignPrinterId = printer.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            printerId = foreignPrinterId
+        });
+
+        await AssertProblemDetailAsync(response, "Printer not found");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_UnknownClearField_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Bad Clear Field");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            clear = new[] { "notes" }
+        });
+
+        await AssertProblemDetailAsync(response, "not a clearable field");
+    }
 }
