@@ -137,4 +137,178 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
             .FirstAsync(p => p.Id == print.Id, TestContext.Current.CancellationToken);
         Assert.Null(stored.ProjectId);
     }
+
+    /// <summary>
+    /// Creates a user who owns neither the seeded print nor the seeded printer.
+    /// </summary>
+    private async Task<long> CreateOtherUserAsync(string oauthId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var existing = await db.Users.FirstOrDefaultAsync(u => u.OAuthUserId == oauthId, TestContext.Current.CancellationToken);
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
+        var user = new User { OAuthUserId = oauthId, ViewStatus = User.ProfileViewStatus.Public };
+        db.Users.Add(user);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return user.Id;
+    }
+
+    /// <summary>
+    /// Inserts a print directly, bypassing the API, so a test can own a print it could not
+    /// create through an endpoint - one created by another user, say. The timestamp columns
+    /// are set explicitly because <c>UpdatedById</c> is a non-nullable foreign key and the
+    /// default 0 does not name a user.
+    /// </summary>
+    private static PrintLogApi.Models.Print NewPrint(string title, long printerId, long userId)
+    {
+        var now = DateTime.UtcNow;
+        return new PrintLogApi.Models.Print
+        {
+            Title = title,
+            PrinterId = printerId,
+            Status = PrintStatus.Pending,
+            ViewStatus = PrintViewStatus.Private,
+            CreatedById = userId,
+            CreatedDate = now,
+            UpdatedById = userId,
+            UpdatedDate = now
+        };
+    }
+
+    [Fact]
+    public async Task BulkUpdate_UnknownId_ReportsNotFoundAndStillUpdatesTheRest()
+    {
+        var print = await CreatePrintAsync("Bulk Mixed Known");
+        const long missingId = 999_999_999;
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id, missingId },
+            status = (int)PrintStatus.Failed
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+
+        Assert.Equal([print.Id], result.Succeeded);
+        var failure = Assert.Single(result.Failed);
+        Assert.Equal(missingId, failure.Id);
+        Assert.Equal("NotFound", failure.Reason);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_PrintOwnedBySomeoneElse_ReportsForbidden()
+    {
+        const string otherUserOAuthId = "auth0|test-bulk-update-outsider";
+        await CreateOtherUserAsync(otherUserOAuthId);
+        var print = await CreatePrintAsync("Bulk Forbidden");
+
+        // The outsider owns neither the print nor the printer it ran on.
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            status = (int)PrintStatus.Success
+        }, otherUserOAuthId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+
+        Assert.Empty(result.Succeeded);
+        var failure = Assert.Single(result.Failed);
+        Assert.Equal(print.Id, failure.Id);
+        Assert.Equal("Forbidden", failure.Reason);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await db.Prints.AsNoTracking().FirstAsync(p => p.Id == print.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(PrintStatus.Pending, stored.Status);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_MixedBatch_UpdatesTheAuthorizedIdsAndReportsTheRest()
+    {
+        // One request containing an authorized print, a forbidden one, and a missing one.
+        // Testing these in separate requests would let an implementation that aborts the
+        // whole batch on its first refusal pass.
+        const string outsiderOAuthId = "auth0|test-bulk-update-mixed-outsider";
+        var outsiderId = await CreateOtherUserAsync(outsiderOAuthId);
+
+        var mine = await CreatePrintAsync("Bulk Mixed Mine");
+        const long missingId = 999_999_997;
+
+        long theirs;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var theirPrinter = new PrintLogApi.Models.Printer
+            {
+                Name = "Outsider Printer",
+                UserId = outsiderId
+            };
+            db.Printers.Add(theirPrinter);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            var print = NewPrint("Bulk Mixed Theirs", theirPrinter.Id, outsiderId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            theirs = print.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { mine.Id, theirs, missingId },
+            status = (int)PrintStatus.Success
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+
+        Assert.Equal([mine.Id], result.Succeeded);
+        Assert.Equal("Forbidden", result.Failed.Single(f => f.Id == theirs).Reason);
+        Assert.Equal("NotFound", result.Failed.Single(f => f.Id == missingId).Reason);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        // The authorized print was written even though the same request contained a refusal.
+        Assert.Equal(PrintStatus.Success,
+            (await verifyDb.Prints.AsNoTracking().FirstAsync(p => p.Id == mine.Id, TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(PrintStatus.Pending,
+            (await verifyDb.Prints.AsNoTracking().FirstAsync(p => p.Id == theirs, TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task BulkUpdate_AsPrinterOwnerWhoDidNotCreateThePrint_Succeeds()
+    {
+        // Arrange - a second user creates a print on the seeded user's printer, so the
+        // seeded user is the printer's owner but not the print's creator.
+        const string creatorOAuthId = "auth0|test-bulk-update-guest-creator";
+        var creatorId = await CreateOtherUserAsync(creatorOAuthId);
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Guest Print On My Printer", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        // Act - the printer's owner updates it.
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { printId },
+            status = (int)PrintStatus.Success
+        });
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal([printId], result.Succeeded);
+        Assert.Empty(result.Failed);
+    }
 }
