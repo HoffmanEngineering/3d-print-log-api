@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Print;
+﻿namespace PrintLogApi.Models.DTOs.Print;
 
 /// <summary>
 /// The per-id outcome of a bulk operation. A bulk request is a 200 even when some ids

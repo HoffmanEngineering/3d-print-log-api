@@ -1,4 +1,4 @@
-using static PrintLogApi.Models.Print;
+﻿using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print;
 

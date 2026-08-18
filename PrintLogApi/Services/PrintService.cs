@@ -1514,6 +1514,125 @@ public sealed class PrintService(
         await context.SaveChangesAsync();
     }
 
+    public async Task<BulkPrintOperationResult> BulkDeletePrints(long userId, IReadOnlyList<long> printIds, CancellationToken ct)
+    {
+        if (printIds.Count == 0)
+        {
+            throw new BulkRequestInvalidException("printIds must contain at least one id.");
+        }
+        if (printIds.Count > MaxBulkPrintIds)
+        {
+            throw new BulkRequestInvalidException($"printIds must contain at most {MaxBulkPrintIds} ids.");
+        }
+        if (printIds.Count != printIds.Distinct().Count())
+        {
+            throw new BulkRequestInvalidException("printIds must not contain duplicates.");
+        }
+
+        // The delete cascade dereferences Comments, Images and FilamentUsage with the
+        // null-forgiving operator and lazy loading is off, so the graph must be loaded here.
+        // This mirrors GetPrintById.
+        var prints = await context.Prints
+            .Include(p => p.Printer)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.File)
+            .Include(p => p.Comments!)
+                .ThenInclude(c => c.Comment)
+            .Include(p => p.FilamentUsage!)
+            .Where(p => printIds.Contains(p.Id))
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        var byId = prints.ToDictionary(p => p.Id);
+        var result = new BulkPrintResultDto();
+        var affectedUserIds = new HashSet<long> { userId };
+        var toDelete = new List<Print>();
+
+        foreach (var printId in printIds)
+        {
+            if (!byId.TryGetValue(printId, out var print))
+            {
+                // Already gone is the goal state, not a failure.
+                result.Succeeded.Add(printId);
+                continue;
+            }
+
+            // Parity with the single-item DeletePrint: creator only.
+            if (print.CreatedById != userId)
+            {
+                result.Failed.Add(new BulkPrintFailureDto { Id = printId, Reason = "Forbidden" });
+                continue;
+            }
+
+            affectedUserIds.Add(print.CreatedById);
+            affectedUserIds.Add(print.Printer.UserId);
+            toDelete.Add(print);
+            result.Succeeded.Add(printId);
+        }
+
+        if (toDelete.Count > 0)
+        {
+            await RemovePrintGraph(toDelete, ct);
+            await context.SaveChangesAsync(ct);
+        }
+
+        return new BulkPrintOperationResult(
+            result, affectedUserIds, toDelete.Select(p => p.Id).ToList());
+    }
+
+    /// <summary>
+    /// Queues one or more fully-loaded prints and everything hanging off them for removal.
+    /// Does not save - the caller decides the transaction boundary. The prints must have been
+    /// loaded with their Comments, Images and FilamentUsage, which this dereferences.
+    /// </summary>
+    private async Task RemovePrintGraph(IReadOnlyList<Print> prints, CancellationToken ct)
+    {
+        var printIds = prints.Select(p => p.Id).ToList();
+
+        foreach (var print in prints)
+        {
+            // Remove Print Comments.
+            foreach (var comment in print.Comments!.ToArray())
+            {
+                context.Comments.Remove(comment.Comment);
+            }
+            context.PrintComments.RemoveRange(print.Comments!.ToArray());
+
+            // Remove Print Images.
+            foreach (var image in print.Images!.ToArray())
+            {
+                context.Files.Remove(image.File);
+            }
+            context.PrintImages.RemoveRange(print.Images!.ToArray());
+
+            // Remove PrintFilament for this print.
+            context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
+        }
+
+        // Remove Print Attachments.
+        var attachments = await context.PrintAttachments
+            .Include(a => a.File)
+            .Where(a => printIds.Contains(a.PrintId))
+            .ToListAsync(ct);
+        foreach (var attachment in attachments)
+        {
+            context.Files.Remove(attachment.File);
+        }
+        context.PrintAttachments.RemoveRange(attachments);
+
+        // Remove Notifications referencing these prints.
+        var notifications = await context.Notifications
+            .Where(n => n.PrintId.HasValue && printIds.Contains(n.PrintId.Value))
+            .ToListAsync(ct);
+        context.Notifications.RemoveRange(notifications);
+
+        context.Prints.RemoveRange(prints);
+    }
+
+    /// <summary>
+    /// Deletes one print and everything hanging off it. Shares <see cref="RemovePrintGraph"/>
+    /// with the bulk path so the two cannot drift apart on what a delete cascades to.
+    /// </summary>
     public async Task DeletePrint(Print print)
     {
         if (print == null)
@@ -1521,42 +1640,7 @@ public sealed class PrintService(
             throw new ArgumentNullException(nameof(print));
         }
 
-        // Remove Print Comments.
-        foreach (var comment in print.Comments!.ToArray())
-        {
-            context.Comments.Remove(comment.Comment);
-        }
-        context.PrintComments.RemoveRange(print.Comments!.ToArray());
-
-        // Remove Print Images.
-        foreach (var image in print.Images!.ToArray())
-        {
-            context.Files.Remove(image.File);
-        }
-        context.PrintImages.RemoveRange(print.Images!.ToArray());
-
-        // Remove Print Attachments.
-        var attachments = await context.PrintAttachments
-            .Include(a => a.File)
-            .Where(a => a.PrintId == print.Id)
-            .ToListAsync();
-        foreach (var attachment in attachments)
-        {
-            context.Files.Remove(attachment.File);
-        }
-        context.PrintAttachments.RemoveRange(attachments);
-
-        // Remove PrintFilament for this print.
-        context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
-
-        // Remove Notifications referencing this print.
-        var notifications = await context.Notifications
-            .Where(n => n.PrintId == print.Id)
-            .ToListAsync();
-        context.Notifications.RemoveRange(notifications);
-
-        context.Prints.Remove(print);
-
+        await RemovePrintGraph([print], CancellationToken.None);
         await context.SaveChangesAsync();
     }
 

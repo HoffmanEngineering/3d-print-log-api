@@ -1,4 +1,4 @@
-namespace PrintLogApi.Exceptions;
+﻿namespace PrintLogApi.Exceptions;
 
 /// <summary>
 /// A phase-one validation failure: the request as a whole is invalid, so nothing was

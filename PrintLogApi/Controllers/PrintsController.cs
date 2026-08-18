@@ -583,6 +583,65 @@ public class PrintsController(
     }
 
     /// <summary>
+    ///     Permanently delete many prints in a single request.
+    /// </summary>
+    /// <remarks>
+    ///     Ids that no longer exist are reported as succeeded - the goal state is that the
+    ///     print is gone. Only the print's creator may delete it.
+    /// </remarks>
+    /// <param name="dto">The ids to delete.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <response code="200">The per-id outcome of the operation.</response>
+    /// <response code="400">The request as a whole was invalid. Nothing was deleted.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpPost("bulk-delete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BulkPrintResultDto>> BulkDeletePrints(
+        BulkDeletePrintsDto dto, CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        BulkPrintOperationResult operation;
+        try
+        {
+            operation = await printService.BulkDeletePrints(userId.Value, dto.PrintIds, cancellationToken);
+        }
+        catch (BulkRequestInvalidException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        InvalidateAffectedUserCaches([.. operation.AffectedUserIds]);
+
+        // One PrintDeleted per print, matching the single-item endpoint's payload. Without
+        // this, migrating the UI's bulk delete onto this endpoint would silently break
+        // every existing report built on PrintDeleted.
+        foreach (var deletedPrintId in operation.DeletedPrintIds)
+        {
+            telemetry.TrackEvent("PrintDeleted", new Dictionary<string, string>
+            {
+                { "PrintId", deletedPrintId.ToString(CultureInfo.InvariantCulture) },
+                { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) }
+            });
+        }
+
+        telemetry.TrackEvent("PrintsBulkDeleted", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+            { "Attempted", dto.PrintIds.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Succeeded", operation.Response.Succeeded.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Failed", operation.Response.Failed.Count.ToString(CultureInfo.InvariantCulture) }
+        });
+
+        return Ok(operation.Response);
+    }
+
+    /// <summary>
     /// Gets an image attached to a print.
     /// </summary>
     /// <param name="printId">The Id of the print.</param>

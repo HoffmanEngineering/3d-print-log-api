@@ -97,4 +97,11 @@ public interface IPrintService
     /// otherwise resolves each id to a per-id outcome and saves once.
     /// </summary>
     Task<BulkPrintOperationResult> BulkUpdatePrints(long userId, BulkUpdatePrintsDto dto, CancellationToken ct);
+
+    /// <summary>
+    /// Permanently deletes many prints. Ids that no longer exist are reported as succeeded:
+    /// the goal state is that the print is gone, which makes a retry after a lost response
+    /// report the truth. Only the print's creator may delete it.
+    /// </summary>
+    Task<BulkPrintOperationResult> BulkDeletePrints(long userId, IReadOnlyList<long> printIds, CancellationToken ct);
 }

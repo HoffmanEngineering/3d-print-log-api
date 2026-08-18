@@ -1,7 +1,5 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
@@ -584,5 +582,224 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
             Assert.NotEqual(versionBefore, scope.ServiceProvider
                 .GetRequiredService<ICacheVersionService>().GetUserCacheVersion(creatorId));
         }
+    }
+
+    [Fact]
+    public async Task BulkDelete_RemovesThePrintsAndTheirRelatedRows()
+    {
+        var printOne = await CreatePrintAsync("Bulk Delete One");
+        var printTwo = await CreatePrintAsync("Bulk Delete Two");
+
+        // Seed the related rows first. Without this the assertions below are vacuous:
+        // a freshly created print has no comments, images, attachments or notifications,
+        // so "none exist afterwards" would already be true with the cascade removed.
+        Guid fileId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var now = DateTime.UtcNow;
+            var userId = IntegrationTestSeeder.TestUserId;
+
+            var comment = new Comment
+            {
+                Body = "Nice print",
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            };
+            db.Comments.Add(comment);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            db.PrintComments.Add(new PrintComment
+            {
+                PrintId = printOne.Id,
+                CommentId = comment.Id,
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            });
+
+            var file = new PrintLogApi.Models.File
+            {
+                Id = Guid.NewGuid(),
+                Path = "attachments/test.gcode",
+                Size = 42,
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            };
+            db.Files.Add(file);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            fileId = file.Id;
+            db.PrintAttachments.Add(new PrintAttachment
+            {
+                PrintId = printOne.Id,
+                FileId = file.Id,
+                OriginalFileName = "test.gcode",
+                ContentType = "text/plain",
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            });
+
+            db.PrintFilament.Add(new PrintFilament
+            {
+                PrintId = printTwo.Id,
+                FilamentId = IntegrationTestSeeder.TestFilamentId1,
+                AmountMg = 1200,
+                Source = PrintFilament.SourceMeasurement.Weight,
+                EstimatedSource = PrintFilament.SourceMeasurement.Weight
+            });
+
+            db.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Type = NotificationType.PrintCompleted,
+                Title = "Print finished",
+                CreatedDate = now,
+                PrintId = printTwo.Id
+            });
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = new[] { printOne.Id, printTwo.Id }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(2, result.Succeeded.Count);
+        Assert.Empty(result.Failed);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.False(await verifyDb.Prints.AnyAsync(p => p.Id == printOne.Id || p.Id == printTwo.Id,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.PrintFilament.AnyAsync(pf => pf.PrintId == printOne.Id || pf.PrintId == printTwo.Id,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.PrintImages.AnyAsync(pi => pi.PrintId == printOne.Id || pi.PrintId == printTwo.Id,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.PrintComments.AnyAsync(pc => pc.PrintId == printOne.Id || pc.PrintId == printTwo.Id,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.PrintAttachments.AnyAsync(a => a.PrintId == printOne.Id || a.PrintId == printTwo.Id,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.Files.AnyAsync(f => f.Id == fileId, TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.Notifications.AnyAsync(n => n.PrintId == printOne.Id || n.PrintId == printTwo.Id,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BulkDelete_AlreadyMissingId_IsReportedAsSucceeded()
+    {
+        // Delete is idempotent: the goal state is "this print is gone". A retry after a
+        // lost response must not report the prints it already deleted as failures.
+        var print = await CreatePrintAsync("Bulk Delete Idempotent");
+        const long missingId = 999_999_998;
+
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = new[] { print.Id, missingId }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Contains(missingId, result.Succeeded);
+        Assert.Contains(print.Id, result.Succeeded);
+        Assert.Empty(result.Failed);
+    }
+
+    [Fact]
+    public async Task BulkDelete_AsPrinterOwnerWhoDidNotCreateThePrint_IsForbidden()
+    {
+        // Delete is creator-only, unlike update. This asymmetry is deliberate.
+        const string creatorOAuthId = "auth0|test-bulk-delete-guest-creator";
+        var creatorId = await CreateOtherUserAsync(creatorOAuthId);
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Guest Print Not Mine To Delete", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new { printIds = new[] { printId } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Empty(result.Succeeded);
+        Assert.Equal("Forbidden", Assert.Single(result.Failed).Reason);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.True(await verifyDb.Prints.AnyAsync(p => p.Id == printId, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BulkDelete_MixedBatch_DeletesTheOwnedPrintAndRefusesTheRest()
+    {
+        // A refusal in the middle of a batch must not stop the ids around it from being
+        // deleted, and must not take the whole request down with it.
+        const string creatorOAuthId = "auth0|test-bulk-delete-mixed-creator";
+        var creatorId = await CreateOtherUserAsync(creatorOAuthId);
+
+        var mine = await CreatePrintAsync("Bulk Delete Mixed Mine");
+        const long missingId = 999_999_996;
+
+        long theirs;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Bulk Delete Mixed Theirs", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            theirs = print.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = new[] { theirs, mine.Id, missingId }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Contains(mine.Id, result.Succeeded);
+        Assert.Contains(missingId, result.Succeeded);
+        Assert.Equal("Forbidden", Assert.Single(result.Failed).Reason);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.False(await verifyDb.Prints.AnyAsync(p => p.Id == mine.Id, TestContext.Current.CancellationToken));
+        Assert.True(await verifyDb.Prints.AnyAsync(p => p.Id == theirs, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BulkDelete_EmptyPrintIds_ReturnsProblemDetails()
+    {
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = Array.Empty<long>()
+        });
+
+        await AssertProblemDetailAsync(response, "at least one id");
+    }
+
+    [Fact]
+    public async Task BulkDelete_TooManyPrintIds_ReturnsProblemDetails()
+    {
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = Enumerable.Range(1, 201).Select(i => (long)i).ToArray()
+        });
+
+        await AssertProblemDetailAsync(response, "at most 200");
     }
 }
