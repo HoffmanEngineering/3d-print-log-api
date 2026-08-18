@@ -468,6 +468,25 @@ public class PrintsController(
         if (dto.AllowFileDownloads.HasValue) touchedFields.Add("allowFileDownloads");
         touchedFields.AddRange((dto.Clear ?? []).Select(field => $"clear:{field}"));
 
+        // PrintEdit and PrintStatusEdit are property-less counters the single-item paths
+        // have always emitted. Once the print list's actions move onto this endpoint those
+        // counters would drop to zero for that traffic, so the bulk path emits them per
+        // successfully-updated print too. A request that touches the status and something
+        // else is honestly both.
+        var touchedStatus = dto.Status.HasValue;
+        var touchedSomethingElse = touchedFields.Count > (touchedStatus ? 1 : 0);
+        foreach (var _ in operation.Response.Succeeded)
+        {
+            if (touchedStatus)
+            {
+                telemetry.TrackEvent("PrintStatusEdit");
+            }
+            if (touchedSomethingElse)
+            {
+                telemetry.TrackEvent("PrintEdit");
+            }
+        }
+
         telemetry.TrackEvent("PrintsBulkUpdated", new Dictionary<string, string>
         {
             { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
@@ -621,12 +640,13 @@ public class PrintsController(
         // One PrintDeleted per print, matching the single-item endpoint's payload. Without
         // this, migrating the UI's bulk delete onto this endpoint would silently break
         // every existing report built on PrintDeleted.
-        foreach (var deletedPrintId in operation.DeletedPrintIds)
+        foreach (var deleted in operation.DeletedPrints)
         {
             telemetry.TrackEvent("PrintDeleted", new Dictionary<string, string>
             {
-                { "PrintId", deletedPrintId.ToString(CultureInfo.InvariantCulture) },
-                { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) }
+                { "PrintId", deleted.Id.ToString(CultureInfo.InvariantCulture) },
+                { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+                { "PrintCreated", deleted.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
             });
         }
 

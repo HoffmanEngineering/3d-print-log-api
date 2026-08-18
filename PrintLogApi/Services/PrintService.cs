@@ -35,6 +35,15 @@ public sealed class PrintService(
     /// <summary>The only fields a bulk update may reset to null.</summary>
     private static readonly HashSet<string> ClearableBulkFields = new(StringComparer.Ordinal) { "projectId" };
 
+    /// <remarks>
+    /// Two races are known and deliberately unhandled, both for the same reason: the write
+    /// is one transaction, so either outcome is "nothing happened", and the operation is
+    /// idempotent, so a retry gets the right answer. A project or printer deleted between
+    /// phase one and the save fails the foreign key rather than returning the phase-one 400;
+    /// a print deleted in the same window fails the save. Neither leaves a partial write,
+    /// and adding row versions here would make this one endpoint pair unlike every other
+    /// write in the API, which is last-write-wins throughout.
+    /// </remarks>
     public async Task<BulkPrintOperationResult> BulkUpdatePrints(long userId, BulkUpdatePrintsDto dto, CancellationToken ct)
     {
         // ---- Phase one: validate the shared inputs. A bad project id is one clean 400,
@@ -127,6 +136,11 @@ public sealed class PrintService(
             if (dto.AllowFileDownloads.HasValue) print.AllowFileDownloads = dto.AllowFileDownloads.Value;
             if (dto.ProjectId.HasValue) print.ProjectId = dto.ProjectId.Value;
             if (clear.Contains("projectId")) print.ProjectId = null;
+
+            // UpdateTimestamps sets UpdatedDate but never UpdatedById, so without this the
+            // row would claim it changed just now while still naming the previous editor.
+            // UpdatePrintStatus assigns it for the same reason.
+            print.UpdatedById = userId;
 
             // The print's owner and the printer's owner both read cached summaries containing it.
             affectedUserIds.Add(print.CreatedById);
@@ -1577,7 +1591,9 @@ public sealed class PrintService(
         }
 
         return new BulkPrintOperationResult(
-            result, affectedUserIds, toDelete.Select(p => p.Id).ToList());
+            result,
+            affectedUserIds,
+            toDelete.Select(p => new DeletedPrintInfo(p.Id, p.CreatedDate)).ToList());
     }
 
     /// <summary>

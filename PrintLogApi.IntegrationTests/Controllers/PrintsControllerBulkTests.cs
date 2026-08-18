@@ -594,6 +594,8 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
         // a freshly created print has no comments, images, attachments or notifications,
         // so "none exist afterwards" would already be true with the cascade removed.
         Guid fileId;
+        Guid imageFileId;
+        long commentId;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
@@ -620,6 +622,8 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
                 UpdatedDate = now
             });
 
+            commentId = comment.Id;
+
             var file = new PrintLogApi.Models.File
             {
                 Id = Guid.NewGuid(),
@@ -630,9 +634,32 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
                 UpdatedById = userId,
                 UpdatedDate = now
             };
-            db.Files.Add(file);
+            var imageFile = new PrintLogApi.Models.File
+            {
+                Id = Guid.NewGuid(),
+                Path = "printimages/test.png",
+                Size = 128,
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            };
+            db.Files.AddRange(file, imageFile);
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             fileId = file.Id;
+            imageFileId = imageFile.Id;
+
+            db.PrintImages.Add(new PrintImage
+            {
+                PrintId = printOne.Id,
+                FileId = imageFile.Id,
+                IsDefault = true,
+                DisplayOrder = 0,
+                CreatedById = userId,
+                CreatedDate = now,
+                UpdatedById = userId,
+                UpdatedDate = now
+            });
             db.PrintAttachments.Add(new PrintAttachment
             {
                 PrintId = printOne.Id,
@@ -689,7 +716,12 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
             TestContext.Current.CancellationToken));
         Assert.False(await verifyDb.PrintAttachments.AnyAsync(a => a.PrintId == printOne.Id || a.PrintId == printTwo.Id,
             TestContext.Current.CancellationToken));
-        Assert.False(await verifyDb.Files.AnyAsync(f => f.Id == fileId, TestContext.Current.CancellationToken));
+        // The join rows going away is not the interesting half - the rows they pointed at
+        // have to go too, or a delete leaks a comment and two blobs per print.
+        Assert.False(await verifyDb.Comments.AnyAsync(c => c.Id == commentId,
+            TestContext.Current.CancellationToken));
+        Assert.False(await verifyDb.Files.AnyAsync(f => f.Id == fileId || f.Id == imageFileId,
+            TestContext.Current.CancellationToken));
         Assert.False(await verifyDb.Notifications.AnyAsync(n => n.PrintId == printOne.Id || n.PrintId == printTwo.Id,
             TestContext.Current.CancellationToken));
     }
@@ -801,5 +833,191 @@ public class PrintsControllerBulkTests : IClassFixture<CustomWebApplicationFacto
         });
 
         await AssertProblemDetailAsync(response, "at most 200");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_TwoPrintsWithDifferentCreators_InvalidatesBothCaches()
+    {
+        // One request, two prints, two different creators. An implementation that
+        // invalidated only the first successful id - or only the caller - still passes
+        // the single-print cache test, so the fan-out needs its own case.
+        var firstCreatorId = await CreateOtherUserAsync("auth0|test-bulk-fanout-creator-one");
+        var secondCreatorId = await CreateOtherUserAsync("auth0|test-bulk-fanout-creator-two");
+
+        long firstPrintId;
+        long secondPrintId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var first = NewPrint("Fan Out One", IntegrationTestSeeder.TestPrinterId, firstCreatorId);
+            var second = NewPrint("Fan Out Two", IntegrationTestSeeder.TestPrinterId, secondCreatorId);
+            db.Prints.AddRange(first, second);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            firstPrintId = first.Id;
+            secondPrintId = second.Id;
+        }
+
+        string firstBefore;
+        string secondBefore;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var versions = scope.ServiceProvider.GetRequiredService<ICacheVersionService>();
+            firstBefore = versions.GetUserCacheVersion(firstCreatorId);
+            secondBefore = versions.GetUserCacheVersion(secondCreatorId);
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { firstPrintId, secondPrintId },
+            status = (int)PrintStatus.Success
+        });
+        response.EnsureSuccessStatusCode();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var versions = scope.ServiceProvider.GetRequiredService<ICacheVersionService>();
+            Assert.NotEqual(firstBefore, versions.GetUserCacheVersion(firstCreatorId));
+            Assert.NotEqual(secondBefore, versions.GetUserCacheVersion(secondCreatorId));
+        }
+    }
+
+    [Fact]
+    public async Task BulkDelete_InvalidatesThePrinterOwnersCacheToo()
+    {
+        // The deleted print ran on the seeded user's printer, so that user's cached
+        // summaries counted it and have to notice it is gone.
+        var creatorId = await CreateOtherUserAsync("auth0|test-bulk-delete-cache-creator");
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Delete Cache Print", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        string printerOwnerBefore;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            printerOwnerBefore = scope.ServiceProvider.GetRequiredService<ICacheVersionService>()
+                .GetUserCacheVersion(IntegrationTestSeeder.TestUserId);
+        }
+
+        // The creator deletes their own print; delete is creator-only.
+        var response = await PostBulkAsync(
+            "/api/Prints/bulk-delete",
+            new { printIds = new[] { printId } },
+            "auth0|test-bulk-delete-cache-creator");
+        response.EnsureSuccessStatusCode();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            Assert.NotEqual(printerOwnerBefore, scope.ServiceProvider
+                .GetRequiredService<ICacheVersionService>()
+                .GetUserCacheVersion(IntegrationTestSeeder.TestUserId));
+        }
+    }
+
+    [Fact]
+    public async Task BulkUpdate_UndefinedStatusValue_ReturnsProblemDetails()
+    {
+        // Enums travel as integers, so an out-of-range number binds successfully and would
+        // be written straight to the column without this check.
+        var print = await CreatePrintAsync("Bulk Bogus Status");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            status = 99
+        });
+
+        await AssertProblemDetailAsync(response, "status is not a defined value");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_UndefinedViewStatusValue_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Bogus View Status");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { print.Id },
+            viewStatus = 99
+        });
+
+        await AssertProblemDetailAsync(response, "viewStatus is not a defined value");
+    }
+
+    [Fact]
+    public async Task BulkUpdate_ExactlyTwoHundredIds_IsAccepted()
+    {
+        // The cap is inclusive. An off-by-one in the guard would reject the largest chunk
+        // the client is allowed to send, and only at the boundary.
+        var print = await CreatePrintAsync("Bulk At The Cap");
+        var ids = new List<long> { print.Id };
+        ids.AddRange(Enumerable.Range(0, 199).Select(i => 900_000_000L + i));
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = ids,
+            status = (int)PrintStatus.Success
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BulkPrintResultDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal([print.Id], result.Succeeded);
+        Assert.Equal(199, result.Failed.Count);
+    }
+
+    [Fact]
+    public async Task BulkDelete_DuplicatePrintIds_ReturnsProblemDetails()
+    {
+        var print = await CreatePrintAsync("Bulk Delete Duplicate Ids");
+
+        var response = await PostBulkAsync("/api/Prints/bulk-delete", new
+        {
+            printIds = new[] { print.Id, print.Id }
+        });
+
+        await AssertProblemDetailAsync(response, "must not contain duplicates");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.True(await db.Prints.AnyAsync(p => p.Id == print.Id, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BulkUpdate_RecordsTheCallerAsTheUpdater()
+    {
+        // UpdateTimestamps refreshes UpdatedDate on every save, so a bulk update that
+        // forgot UpdatedById would leave a row claiming the previous editor made a change
+        // that just happened. The printer-owner case is where the two ids differ.
+        var creatorId = await CreateOtherUserAsync("auth0|test-bulk-updated-by-creator");
+
+        long printId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var print = NewPrint("Updated By Print", IntegrationTestSeeder.TestPrinterId, creatorId);
+            db.Prints.Add(print);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printId = print.Id;
+        }
+
+        var response = await PostBulkAsync("/api/Prints/bulk-update", new
+        {
+            printIds = new[] { printId },
+            status = (int)PrintStatus.Success
+        });
+        response.EnsureSuccessStatusCode();
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await verifyDb.Prints.AsNoTracking()
+            .FirstAsync(p => p.Id == printId, TestContext.Current.CancellationToken);
+        Assert.Equal(IntegrationTestSeeder.TestUserId, stored.UpdatedById);
+        Assert.Equal(creatorId, stored.CreatedById);
     }
 }
