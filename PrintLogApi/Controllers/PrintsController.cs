@@ -414,6 +414,82 @@ public class PrintsController(
     }
 
     /// <summary>
+    ///     Apply one set of field values to many prints in a single request.
+    /// </summary>
+    /// <remarks>
+    ///     Every field is optional and omitted fields are left untouched. Enum values are
+    ///     integers. The request is a 200 even when individual ids could not be acted on;
+    ///     the response body reports each id as succeeded or failed.
+    /// </remarks>
+    /// <param name="dto">The ids to update and the values to apply.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <response code="200">The per-id outcome of the operation.</response>
+    /// <response code="400">The request as a whole was invalid. Nothing was written.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpPost("bulk-update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BulkPrintResultDto>> BulkUpdatePrints(
+        BulkUpdatePrintsDto dto, CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        BulkPrintOperationResult operation;
+        try
+        {
+            operation = await printService.BulkUpdatePrints(userId.Value, dto, cancellationToken);
+        }
+        catch (BulkRequestInvalidException ex)
+        {
+            // ProblemDetails, not BadRequest(string): one schema for every phase-one
+            // rejection, so the client can always read `detail`.
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        InvalidateAffectedUserCaches(operation.AffectedUserIds);
+
+        // The touched-field list is what makes this event answer "which bulk actions do
+        // people actually use", which is the question that justified building them.
+        var touchedFields = new List<string>();
+        if (dto.Status.HasValue) touchedFields.Add("status");
+        if (dto.ProjectId.HasValue) touchedFields.Add("projectId");
+        if (dto.ViewStatus.HasValue) touchedFields.Add("viewStatus");
+        if (dto.PrinterId.HasValue) touchedFields.Add("printerId");
+        if (dto.AllowComments.HasValue) touchedFields.Add("allowComments");
+        if (dto.AllowFileDownloads.HasValue) touchedFields.Add("allowFileDownloads");
+        touchedFields.AddRange((dto.Clear ?? []).Select(field => $"clear:{field}"));
+
+        telemetry.TrackEvent("PrintsBulkUpdated", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+            { "Attempted", dto.PrintIds.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Succeeded", operation.Response.Succeeded.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Failed", operation.Response.Failed.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Fields", string.Join(",", touchedFields) }
+        });
+
+        return Ok(operation.Response);
+    }
+
+    /// <summary>
+    ///     Invalidates the summary cache for every user a bulk operation touched, once each.
+    ///     A single request can name the same user many times - every print in it may share one
+    ///     owner - and each invalidation issues a fresh version GUID, so the set is deduplicated
+    ///     before it is walked.
+    /// </summary>
+    private void InvalidateAffectedUserCaches(IEnumerable<long> userIds)
+    {
+        foreach (var affectedUserId in userIds.Distinct())
+        {
+            cacheVersionService.InvalidateUserCache(affectedUserId);
+        }
+    }
+
+    /// <summary>
     ///    Create a new Print.
     /// </summary>
     /// <param name="print">The print details to create.</param>

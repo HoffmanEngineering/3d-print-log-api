@@ -90,4 +90,11 @@ public interface IPrintService
     Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
+
+    /// <summary>
+    /// Applies one set of field values to many prints. Validates shared inputs first and
+    /// throws <see cref="Exceptions.BulkRequestInvalidException"/> without writing anything;
+    /// otherwise resolves each id to a per-id outcome and saves once.
+    /// </summary>
+    Task<BulkPrintOperationResult> BulkUpdatePrints(long userId, BulkUpdatePrintsDto dto, CancellationToken ct);
 }

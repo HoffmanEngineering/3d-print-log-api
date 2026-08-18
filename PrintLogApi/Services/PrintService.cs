@@ -29,6 +29,120 @@ public sealed class PrintService(
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
 
+    /// <summary>Most ids a single bulk request may carry.</summary>
+    private const int MaxBulkPrintIds = 200;
+
+    /// <summary>The only fields a bulk update may reset to null.</summary>
+    private static readonly HashSet<string> ClearableBulkFields = new(StringComparer.Ordinal) { "projectId" };
+
+    public async Task<BulkPrintOperationResult> BulkUpdatePrints(long userId, BulkUpdatePrintsDto dto, CancellationToken ct)
+    {
+        // ---- Phase one: validate the shared inputs. A bad project id is one clean 400,
+        // not 200 prints' worth of identical per-item failures. ----
+        var printIds = dto.PrintIds ?? [];
+        if (printIds.Count == 0)
+        {
+            throw new BulkRequestInvalidException("printIds must contain at least one id.");
+        }
+        if (printIds.Count > MaxBulkPrintIds)
+        {
+            throw new BulkRequestInvalidException($"printIds must contain at most {MaxBulkPrintIds} ids.");
+        }
+        if (printIds.Count != printIds.Distinct().Count())
+        {
+            throw new BulkRequestInvalidException("printIds must not contain duplicates.");
+        }
+
+        var clear = new HashSet<string>(dto.Clear ?? [], StringComparer.Ordinal);
+        foreach (var field in clear)
+        {
+            if (!ClearableBulkFields.Contains(field))
+            {
+                throw new BulkRequestInvalidException($"'{field}' is not a clearable field.");
+            }
+        }
+
+        var hasUpdate = dto.Status.HasValue || dto.ProjectId.HasValue || dto.ViewStatus.HasValue
+            || dto.PrinterId.HasValue || dto.AllowComments.HasValue || dto.AllowFileDownloads.HasValue;
+        if (!hasUpdate && clear.Count == 0)
+        {
+            throw new BulkRequestInvalidException("At least one field must be set or cleared.");
+        }
+
+        if (dto.ProjectId.HasValue && clear.Contains("projectId"))
+        {
+            throw new BulkRequestInvalidException("'projectId' cannot be both set and cleared.");
+        }
+
+        if (dto.Status.HasValue && !Enum.IsDefined(dto.Status.Value))
+        {
+            throw new BulkRequestInvalidException("status is not a defined value.");
+        }
+        if (dto.ViewStatus.HasValue && !Enum.IsDefined(dto.ViewStatus.Value))
+        {
+            throw new BulkRequestInvalidException("viewStatus is not a defined value.");
+        }
+
+        if (dto.ProjectId.HasValue &&
+            !await context.Projects.AnyAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId, ct))
+        {
+            throw new BulkRequestInvalidException("Project not found.");
+        }
+        if (dto.PrinterId.HasValue &&
+            !await context.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value && p.UserId == userId, ct))
+        {
+            throw new BulkRequestInvalidException("Printer not found.");
+        }
+
+        // ---- Phase two: resolve each id, then write once. ----
+        // Printer is included because the authorization rule reads Printer.UserId.
+        var prints = await context.Prints
+            .Include(p => p.Printer)
+            .Where(p => printIds.Contains(p.Id))
+            .ToListAsync(ct);
+
+        var byId = prints.ToDictionary(p => p.Id);
+        var result = new BulkPrintResultDto();
+        var affectedUserIds = new HashSet<long> { userId };
+
+        foreach (var printId in printIds)
+        {
+            if (!byId.TryGetValue(printId, out var print))
+            {
+                result.Failed.Add(new BulkPrintFailureDto { Id = printId, Reason = "NotFound" });
+                continue;
+            }
+
+            // Parity with PutPrint and UpdatePrintStatus: the creator or the printer's owner.
+            if (print.CreatedById != userId && print.Printer.UserId != userId)
+            {
+                result.Failed.Add(new BulkPrintFailureDto { Id = printId, Reason = "Forbidden" });
+                continue;
+            }
+
+            if (dto.Status.HasValue) print.Status = dto.Status.Value;
+            if (dto.ViewStatus.HasValue) print.ViewStatus = dto.ViewStatus.Value;
+            if (dto.PrinterId.HasValue) print.PrinterId = dto.PrinterId.Value;
+            if (dto.AllowComments.HasValue) print.AllowComments = dto.AllowComments.Value;
+            if (dto.AllowFileDownloads.HasValue) print.AllowFileDownloads = dto.AllowFileDownloads.Value;
+            if (dto.ProjectId.HasValue) print.ProjectId = dto.ProjectId.Value;
+            if (clear.Contains("projectId")) print.ProjectId = null;
+
+            // The print's owner and the printer's owner both read cached summaries containing it.
+            affectedUserIds.Add(print.CreatedById);
+            affectedUserIds.Add(print.Printer.UserId);
+
+            result.Succeeded.Add(printId);
+        }
+
+        if (result.Succeeded.Count > 0)
+        {
+            await context.SaveChangesAsync(ct);
+        }
+
+        return new BulkPrintOperationResult(result, affectedUserIds);
+    }
+
     public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
         long userId, int page, int pageSize, PrintStatus? status, long? printerId,
         Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? searchQuery,
