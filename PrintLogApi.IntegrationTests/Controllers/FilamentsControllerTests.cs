@@ -1272,4 +1272,181 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     #endregion
+    #region GET Detail - Remaining Length/Volume and Usage Totals
+
+    /// <summary>
+    /// Creates a filament owned by the test user and returns the created detail.
+    /// Every test here builds its own rows: the seeder creates no PrintFilament or
+    /// FilamentAdjustment records, and the class shares one database seeded once, so
+    /// mutating a seeded filament would leak into the rest of the file.
+    /// </summary>
+    private async Task<FilamentDetailDto> CreateUsageTotalsFilamentAsync(string displayName, long? nominalWeightMg = 1000000)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddFilamentDto
+        {
+            DisplayName = displayName,
+            Brand = "Test Brand",
+            MaterialType = "PLA",
+            ColorName = "Green",
+            ColorHex = "00FF00",
+            DiameterMm = 1.75,
+            InitialNominalWeightMg = nominalWeightMg,
+            MaterialDensityGramPerCubicCm = 1.24,
+            IsActive = true
+        });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Creates one print that consumes the given filament once per entry in usageMg.
+    /// </summary>
+    private async Task CreatePrintUsingFilamentAsync(Guid filamentId, params int[] usageMg)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = "Usage Totals Print",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Public,
+            AllowComments = true,
+            FilamentUsage = usageMg
+                .Select(mg => new PrintFilamentSummaryDto
+                {
+                    Id = Guid.NewGuid(),
+                    Filament = new FilamentSummaryDto { Id = filamentId },
+                    Source = PrintFilament.SourceMeasurement.Weight,
+                    AmountMg = mg
+                })
+                .ToList<PrintFilamentSummaryDto>()
+        });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {body}");
+    }
+
+    private async Task<FilamentDetailDto> GetFilamentDetailAsync(Guid id)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{id}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    [Fact]
+    public async Task GetFilamentById_WithUsageHistory_ReturnsSuccessNotServerError()
+    {
+        // Regression guard: a mapped field reached through PrintFilament.Print would
+        // dereference an un-Included navigation and 500 here.
+        var filament = await CreateUsageTotalsFilamentAsync("Usage History Filament");
+        await CreatePrintUsingFilamentAsync(filament.Id, 12000);
+
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filament.Id}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_ReturnsRemainingLengthVolumeAndUsageTotals()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Usage Totals Filament");
+        await CreatePrintUsingFilamentAsync(filament.Id, 12000);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.NotNull(model.FilamentLengthRemainingInM);
+        Assert.NotNull(model.FilamentVolumeRemainingInMl);
+        Assert.Equal(1, model.PrintCount);
+        Assert.Equal(12000, model.TotalUsedMg);
+        Assert.Equal(1000000 - 12000, model.FilamentRemaining);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_PrintCountIsDistinctPrints_NotUsageRows()
+    {
+        // A print may hold two PrintFilament rows for one spool: there is no unique index
+        // on (PrintId, FilamentId). PrintCount counts prints; TotalUsedMg counts rows.
+        var filament = await CreateUsageTotalsFilamentAsync("Duplicate Usage Filament");
+        await CreatePrintUsingFilamentAsync(filament.Id, 12000, 30000);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.Equal(1, model.PrintCount);
+        Assert.Equal(42000, model.TotalUsedMg);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_UntrackedSpool_ReturnsNullRemainingLengthAndVolume()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Untracked Spool Filament", nominalWeightMg: null);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        // The whole point of the guard: remaining, length and volume agree that the
+        // spool is untracked rather than reporting null alongside a contradictory 0.
+        Assert.Null(model.FilamentRemaining);
+        Assert.Null(model.FilamentLengthRemainingInM);
+        Assert.Null(model.FilamentVolumeRemainingInMl);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_NoUsage_ReturnsZeroTotals()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Unused Spool Filament");
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.Equal(0, model.PrintCount);
+        Assert.Equal(0, model.TotalUsedMg);
+    }
+
+    [Fact]
+    public async Task PutFilament_IgnoresClientSuppliedUsageTotals()
+    {
+        var created = await CreateUsageTotalsFilamentAsync("Ignore Usage Totals Filament");
+        await CreatePrintUsingFilamentAsync(created.Id, 12000);
+
+        var updateDto = new FilamentDetailDto
+        {
+            Id = created.Id,
+            DisplayName = created.DisplayName,
+            Brand = created.Brand,
+            MaterialType = created.MaterialType,
+            MaterialCategoryNickname = created.MaterialCategoryNickname,
+            ColorName = created.ColorName,
+            ColorHex = created.ColorHex,
+            DiameterMm = created.DiameterMm,
+            InitialNominalWeightMg = created.InitialNominalWeightMg,
+            MaterialDensityGramPerCubicCm = created.MaterialDensityGramPerCubicCm,
+            IsActive = created.IsActive,
+            PrintCount = 9999,
+            TotalUsedMg = 123456789,
+            FilamentLengthRemainingInM = 42,
+            FilamentVolumeRemainingInMl = 42
+        };
+        var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
+        putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        putRequest.Content = JsonContent.Create(updateDto);
+        var putResponse = await _httpClient.SendAsync(putRequest, TestContext.Current.CancellationToken);
+        Assert.True(putResponse.IsSuccessStatusCode, $"PUT failed: {putResponse.StatusCode}");
+
+        var after = await GetFilamentDetailAsync(created.Id);
+
+        Assert.Equal(1, after.PrintCount);
+        Assert.Equal(12000, after.TotalUsedMg);
+    }
+
+    #endregion
+
 }

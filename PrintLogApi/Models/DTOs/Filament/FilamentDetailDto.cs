@@ -74,6 +74,29 @@ public class FilamentDetailDto
     /// Null when nominal weight is not set. Read-only: ignored on write.
     /// </summary>
     public long? FilamentRemaining { get; set; }
+
+    /// <summary>
+    /// Server-computed remaining length in meters. Null when nominal weight is not
+    /// tracked, matching FilamentRemaining. Read-only: ignored on write.
+    /// </summary>
+    public double? FilamentLengthRemainingInM { get; set; }
+
+    /// <summary>
+    /// Server-computed remaining volume in milliliters. Null when nominal weight is not
+    /// tracked, matching FilamentRemaining. Read-only: ignored on write.
+    /// </summary>
+    public double? FilamentVolumeRemainingInMl { get; set; }
+
+    /// <summary>
+    /// Distinct prints that used this filament. Read-only: ignored on write.
+    /// </summary>
+    public int PrintCount { get; set; }
+
+    /// <summary>
+    /// Total milligrams consumed by prints, actual where recorded and estimated
+    /// otherwise - the same rule FilamentRemaining subtracts. Read-only: ignored on write.
+    /// </summary>
+    public long TotalUsedMg { get; set; }
     public double? TempRangeStart { get; set; }
     public double? TempRangeEnd { get; set; }
     /// <summary>

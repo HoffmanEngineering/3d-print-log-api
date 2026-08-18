@@ -79,6 +79,31 @@ public class FilamentProfile : Profile
                                                                                                                 (long)p.EstimatedAmountMg : (long)0)
                                                                                 + src.FilamentAdjustments!.Sum(adj => adj.AmountMg))
                                                                                 : (long?)null))
+            // Length and volume remaining mirror the FilamentSummaryDto expressions, but are
+            // gated on the same HasValue check FilamentRemaining uses above. Without the gate an
+            // untracked spool would return remaining null alongside length 0 and volume 0, and the
+            // UI would render "Not tracked" with a contradictory "0.0 m" beside it.
+            .ForMember(dest => dest.FilamentLengthRemainingInM, src => src.MapFrom(src => !src.InitialNominalWeightMg.HasValue ? (double?)null
+                                                                                : src.DiameterMm > 0 && src.MaterialDensityGramPerCubicCm > 0 ? (((src.InitialNominalWeightMg ?? 0)
+                                                                                - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
+                                                                                                                (long)p.AmountMg :
+                                                                                                                p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
+                                                                                                                (long)p.EstimatedAmountMg : (long)0)
+                                                                                + src.FilamentAdjustments!.Sum(adj => adj.AmountMg)) ?? 0) / (250 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm * src.DiameterMm) : 0))
+            .ForMember(dest => dest.FilamentVolumeRemainingInMl, src => src.MapFrom(src => !src.InitialNominalWeightMg.HasValue ? (double?)null
+                                                                                : ((src.InitialNominalVolumeMl ?? 0)
+                                                                                - src.PrintFilaments!.Sum(p => p.VolumeMl.HasValue && p.VolumeMl > 0 ?
+                                                                                                                p.VolumeMl :
+                                                                                                                p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ?
+                                                                                                                p.EstimatedVolumeMl : 0)
+                                                                                + src.FilamentAdjustments!.Sum(adj => adj.VolumeMl) ?? 0)))
+            // Distinct prints, not usage rows: there is no unique index on (PrintId, FilamentId),
+            // so one print may hold two rows for the same spool.
+            .ForMember(dest => dest.PrintCount, src => src.MapFrom(src => src.PrintFilaments!.Select(p => p.PrintId).Distinct().Count()))
+            .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(src => src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
+                                                                                                                (long)p.AmountMg :
+                                                                                                                p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ?
+                                                                                                                (long)p.EstimatedAmountMg : (long)0)))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
