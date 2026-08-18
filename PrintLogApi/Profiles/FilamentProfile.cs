@@ -99,6 +99,10 @@ public class FilamentProfile : Profile
                                                                                 + src.FilamentAdjustments!.Sum(adj => adj.VolumeMl) ?? 0)))
             // Distinct prints, not usage rows: there is no unique index on (PrintId, FilamentId),
             // so one print may hold two rows for the same spool.
+            //
+            // Read PrintId, never p.Print. GetFilamentById Includes PrintFilaments but not the
+            // Print behind each one, and there is no lazy-loading proxy, so reaching through that
+            // navigation here would NullReferenceException on every filament that has usage.
             .ForMember(dest => dest.PrintCount, src => src.MapFrom(src => src.PrintFilaments!.Select(p => p.PrintId).Distinct().Count()))
             .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(src => src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ?
                                                                                                                 (long)p.AmountMg :

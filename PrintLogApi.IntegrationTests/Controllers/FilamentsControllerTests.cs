@@ -1303,9 +1303,10 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     /// <summary>
-    /// Creates one print that consumes the given filament once per entry in usageMg.
+    /// Creates one print that consumes the given filament once per entry in usageMg,
+    /// and returns the created print so callers can read the server-derived volumes.
     /// </summary>
-    private async Task CreatePrintUsingFilamentAsync(Guid filamentId, params int[] usageMg)
+    private async Task<PrintDetailDTO> CreatePrintUsingFilamentAsync(Guid filamentId, params int[] usageMg)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
@@ -1330,6 +1331,75 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {body}");
+        return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Creates one print whose usage is recorded as an ESTIMATE only, with no actual weight.
+    /// </summary>
+    private async Task CreatePrintWithEstimatedUsageAsync(Guid filamentId, int estimatedMg)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = "Estimated Usage Print",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Public,
+            AllowComments = true,
+            FilamentUsage = new List<PrintFilamentSummaryDto>
+            {
+                new PrintFilamentSummaryDto
+                {
+                    Id = Guid.NewGuid(),
+                    Filament = new FilamentSummaryDto { Id = filamentId },
+                    EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                    EstimatedAmountMg = estimatedMg
+                }
+            }
+        });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {body}");
+    }
+
+    /// <summary>
+    /// Adds a weight adjustment to an existing filament through the PUT endpoint.
+    /// </summary>
+    private async Task AddWeightAdjustmentAsync(FilamentDetailDto filament, long amountMg)
+    {
+        var updateDto = new FilamentDetailDto
+        {
+            Id = filament.Id,
+            DisplayName = filament.DisplayName,
+            Brand = filament.Brand,
+            MaterialType = filament.MaterialType,
+            MaterialCategoryNickname = filament.MaterialCategoryNickname,
+            ColorName = filament.ColorName,
+            ColorHex = filament.ColorHex,
+            DiameterMm = filament.DiameterMm,
+            InitialNominalWeightMg = filament.InitialNominalWeightMg,
+            MaterialDensityGramPerCubicCm = filament.MaterialDensityGramPerCubicCm,
+            IsActive = filament.IsActive,
+            FilamentAdjustments = new List<FilamentAdjustmentDto>
+            {
+                new FilamentAdjustmentDto
+                {
+                    FilamentId = filament.Id,
+                    Source = FilamentAdjustment.SourceMeasurement.Weight,
+                    AmountMg = amountMg,
+                    Notes = "Measured adjustment"
+                }
+            }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{filament.Id}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(updateDto);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.True(response.IsSuccessStatusCode, $"PUT failed: {response.StatusCode}");
     }
 
     private async Task<FilamentDetailDto> GetFilamentDetailAsync(Guid id)
@@ -1342,34 +1412,57 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task GetFilamentById_WithUsageHistory_ReturnsSuccessNotServerError()
-    {
-        // Regression guard: a mapped field reached through PrintFilament.Print would
-        // dereference an un-Included navigation and 500 here.
-        var filament = await CreateUsageTotalsFilamentAsync("Usage History Filament");
-        await CreatePrintUsingFilamentAsync(filament.Id, 12000);
-
-        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filament.Id}");
-        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-
-        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
     public async Task GetFilamentById_ReturnsRemainingLengthVolumeAndUsageTotals()
     {
         var filament = await CreateUsageTotalsFilamentAsync("Usage Totals Filament");
-        await CreatePrintUsingFilamentAsync(filament.Id, 12000);
+        var print = await CreatePrintUsingFilamentAsync(filament.Id, 12000);
 
         var model = await GetFilamentDetailAsync(filament.Id);
 
-        Assert.NotNull(model.FilamentLengthRemainingInM);
-        Assert.NotNull(model.FilamentVolumeRemainingInMl);
         Assert.Equal(1, model.PrintCount);
         Assert.Equal(12000, model.TotalUsedMg);
         Assert.Equal(1000000 - 12000, model.FilamentRemaining);
+
+        // 988,000 mg of 1.75mm PLA at 1.24 g/cm3, via mg / (250 * pi * density * d^2).
+        Assert.NotNull(model.FilamentLengthRemainingInM);
+        Assert.Equal(331.26, model.FilamentLengthRemainingInM!.Value, 2);
+
+        // The spool's nominal volume is derived on save from its nominal weight
+        // (1,000,000 mg / 1.24 g/cm3 = 806.45 ml); remaining volume subtracts the
+        // volume the server derived for the print's usage.
+        var usedVolumeMl = print.FilamentUsage!.Single().VolumeMl;
+        Assert.NotNull(usedVolumeMl);
+        Assert.NotNull(model.FilamentVolumeRemainingInMl);
+        Assert.Equal(1000000d / 1000 / 1.24 - usedVolumeMl!.Value, model.FilamentVolumeRemainingInMl!.Value, 6);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_RemainingLength_ReflectsWeightAdjustments()
+    {
+        // Guards the adjustment sign convention: adjustments are ADDED to the
+        // remaining figure, so a negative adjustment shortens the spool.
+        var filament = await CreateUsageTotalsFilamentAsync("Adjusted Length Filament");
+        await AddWeightAdjustmentAsync(filament, -200000);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.Equal(800000, model.FilamentRemaining);
+        // 800,000 mg is 4/5 of the full spool's 335.28 m.
+        Assert.NotNull(model.FilamentLengthRemainingInM);
+        Assert.Equal(268.23, model.FilamentLengthRemainingInM!.Value, 2);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_TotalUsedMg_FallsBackToEstimatedWhenNoActualRecorded()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Estimated Usage Filament");
+        await CreatePrintWithEstimatedUsageAsync(filament.Id, 25000);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.Equal(1, model.PrintCount);
+        Assert.Equal(25000, model.TotalUsedMg);
+        Assert.Equal(1000000 - 25000, model.FilamentRemaining);
     }
 
     [Fact]
@@ -1416,6 +1509,7 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
     {
         var created = await CreateUsageTotalsFilamentAsync("Ignore Usage Totals Filament");
         await CreatePrintUsingFilamentAsync(created.Id, 12000);
+        var before = await GetFilamentDetailAsync(created.Id);
 
         var updateDto = new FilamentDetailDto
         {
@@ -1445,6 +1539,10 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
 
         Assert.Equal(1, after.PrintCount);
         Assert.Equal(12000, after.TotalUsedMg);
+        Assert.Equal(before.FilamentLengthRemainingInM, after.FilamentLengthRemainingInM);
+        Assert.Equal(before.FilamentVolumeRemainingInMl, after.FilamentVolumeRemainingInMl);
+        Assert.NotEqual(42, after.FilamentLengthRemainingInM);
+        Assert.NotEqual(42, after.FilamentVolumeRemainingInMl);
     }
 
     #endregion
