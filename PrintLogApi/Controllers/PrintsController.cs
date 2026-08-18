@@ -345,7 +345,10 @@ public class PrintsController(
         {
             var updatedPrint = await printService.UpdatePrint(id, printDTO, userId.Value);
 
-            cacheVersionService.InvalidateUserCache(userId.Value);
+            // The summary cache is keyed by the print's owner, and this endpoint lets the
+            // printer's owner edit somebody else's print - invalidating only the caller
+            // would leave the creator reading a stale list.
+            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
 
             return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(updatedPrint));
         }
@@ -398,7 +401,9 @@ public class PrintsController(
         {
             var updatedPrint = await printService.UpdatePrintStatus(id, newStatus, userId.Value);
 
-            cacheVersionService.InvalidateUserCache(userId.Value);
+            // Same reason as PutPrint: the printer's owner can move a print another user
+            // created, and that user's cached summary list has to notice.
+            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
 
             return CreatedAtAction("GetPrintById", new { id = existingPrint.Id }, mapper.Map<PrintDetailDTO>(existingPrint));
         }
@@ -411,6 +416,102 @@ public class PrintsController(
             return BadRequest("Selected filament does not belong to currently logged in user.");
         }
 
+    }
+
+    /// <summary>
+    ///     Apply one set of field values to many prints in a single request.
+    /// </summary>
+    /// <remarks>
+    ///     Every field is optional and omitted fields are left untouched. Enum values are
+    ///     integers. The request is a 200 even when individual ids could not be acted on;
+    ///     the response body reports each id as succeeded or failed.
+    /// </remarks>
+    /// <param name="dto">The ids to update and the values to apply.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <response code="200">The per-id outcome of the operation.</response>
+    /// <response code="400">The request as a whole was invalid. Nothing was written.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpPost("bulk-update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BulkPrintResultDto>> BulkUpdatePrints(
+        BulkUpdatePrintsDto dto, CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        BulkPrintOperationResult operation;
+        try
+        {
+            operation = await printService.BulkUpdatePrints(userId.Value, dto, cancellationToken);
+        }
+        catch (BulkRequestInvalidException ex)
+        {
+            // ProblemDetails, not BadRequest(string): one schema for every phase-one
+            // rejection, so the client can always read `detail`.
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        InvalidateAffectedUserCaches([.. operation.AffectedUserIds]);
+
+        // The touched-field list is what makes this event answer "which bulk actions do
+        // people actually use", which is the question that justified building them.
+        var touchedFields = new List<string>();
+        if (dto.Status.HasValue) touchedFields.Add("status");
+        if (dto.ProjectId.HasValue) touchedFields.Add("projectId");
+        if (dto.ViewStatus.HasValue) touchedFields.Add("viewStatus");
+        if (dto.PrinterId.HasValue) touchedFields.Add("printerId");
+        if (dto.AllowComments.HasValue) touchedFields.Add("allowComments");
+        if (dto.AllowFileDownloads.HasValue) touchedFields.Add("allowFileDownloads");
+        touchedFields.AddRange((dto.Clear ?? []).Select(field => $"clear:{field}"));
+
+        // PrintEdit and PrintStatusEdit are property-less counters the single-item paths
+        // have always emitted. Once the print list's actions move onto this endpoint those
+        // counters would drop to zero for that traffic, so the bulk path emits them per
+        // successfully-updated print too. A request that touches the status and something
+        // else is honestly both.
+        var touchedStatus = dto.Status.HasValue;
+        var touchedSomethingElse = touchedFields.Count > (touchedStatus ? 1 : 0);
+        foreach (var _ in operation.Response.Succeeded)
+        {
+            if (touchedStatus)
+            {
+                telemetry.TrackEvent("PrintStatusEdit");
+            }
+            if (touchedSomethingElse)
+            {
+                telemetry.TrackEvent("PrintEdit");
+            }
+        }
+
+        telemetry.TrackEvent("PrintsBulkUpdated", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+            { "Attempted", dto.PrintIds.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Succeeded", operation.Response.Succeeded.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Failed", operation.Response.Failed.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Fields", string.Join(",", touchedFields) }
+        });
+
+        return Ok(operation.Response);
+    }
+
+    /// <summary>
+    ///     Invalidates each distinct user's cached summaries exactly once. Callers pass every
+    ///     user a write could be visible to: the caller, the print's creator, and the owner of
+    ///     the printer it ran on. A single request can name the same user many times, and each
+    ///     invalidation issues a fresh version GUID, so the set is deduplicated before it is
+    ///     walked.
+    /// </summary>
+    private void InvalidateAffectedUserCaches(params long[] userIds)
+    {
+        foreach (var affectedUserId in userIds.Distinct())
+        {
+            cacheVersionService.InvalidateUserCache(affectedUserId);
+        }
     }
 
     /// <summary>
@@ -498,6 +599,66 @@ public class PrintsController(
         telemetry.TrackEvent("PrintDeleted", properties);
 
         return Ok();
+    }
+
+    /// <summary>
+    ///     Permanently delete many prints in a single request.
+    /// </summary>
+    /// <remarks>
+    ///     Ids that no longer exist are reported as succeeded - the goal state is that the
+    ///     print is gone. Only the print's creator may delete it.
+    /// </remarks>
+    /// <param name="dto">The ids to delete.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <response code="200">The per-id outcome of the operation.</response>
+    /// <response code="400">The request as a whole was invalid. Nothing was deleted.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpPost("bulk-delete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BulkPrintResultDto>> BulkDeletePrints(
+        BulkDeletePrintsDto dto, CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        BulkPrintOperationResult operation;
+        try
+        {
+            operation = await printService.BulkDeletePrints(userId.Value, dto.PrintIds, cancellationToken);
+        }
+        catch (BulkRequestInvalidException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        InvalidateAffectedUserCaches([.. operation.AffectedUserIds]);
+
+        // One PrintDeleted per print, matching the single-item endpoint's payload. Without
+        // this, migrating the UI's bulk delete onto this endpoint would silently break
+        // every existing report built on PrintDeleted.
+        foreach (var deleted in operation.DeletedPrints)
+        {
+            telemetry.TrackEvent("PrintDeleted", new Dictionary<string, string>
+            {
+                { "PrintId", deleted.Id.ToString(CultureInfo.InvariantCulture) },
+                { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+                { "PrintCreated", deleted.CreatedDate.ToString("O", CultureInfo.InvariantCulture) }
+            });
+        }
+
+        telemetry.TrackEvent("PrintsBulkDeleted", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+            { "Attempted", dto.PrintIds.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Succeeded", operation.Response.Succeeded.Count.ToString(CultureInfo.InvariantCulture) },
+            { "Failed", operation.Response.Failed.Count.ToString(CultureInfo.InvariantCulture) }
+        });
+
+        return Ok(operation.Response);
     }
 
     /// <summary>
