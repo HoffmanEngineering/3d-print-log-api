@@ -181,6 +181,10 @@ public static class DataSeeder
                     EstimatedAmountMg = id,
                     EstimatedSource = PrintFilament.SourceMeasurement.Weight,
                     Source = PrintFilament.SourceMeasurement.Weight,
+                    // PrintService derives the two measures the user did not enter; a seeded
+                    // row bypasses it, so the estimates carry weight only unless derived here.
+                    EstimatedVolumeMl = MeasurementUtilities.GetVolumeInMlFromAmount(id, filaments[id - 1].MaterialDensityGramPerCubicCm),
+                    EstimatedLengthInM = MeasurementUtilities.GetLengthInMetersFromAmount(id, filaments[id - 1].DiameterMm!.Value, filaments[id - 1].MaterialDensityGramPerCubicCm),
                     Notes = $"This is filament {id}"
                 }
             },

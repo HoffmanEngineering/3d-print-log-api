@@ -2,6 +2,7 @@
 using PrintLogApi.Enums;
 using PrintLogApi.Models.DTOs.MaterialCategory;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Models.DTOs.Filament;
 
@@ -53,9 +54,16 @@ public class FilamentSummaryDto
 
     public long? FilamentRemaining { get; set; }
 
-    public double? FilamentLengthRemainingInM { get; set; }
+    /// <summary>
+    /// Converted from FilamentRemaining rather than accumulated separately, so the list and
+    /// the detail page cannot disagree. See FilamentDetailDto for why the per-usage volume
+    /// and length columns are not summed. Get-only: computed on read.
+    /// </summary>
+    public double? FilamentLengthRemainingInM =>
+        MeasurementUtilities.GetLengthRemainingInM(FilamentRemaining, DiameterMm, MaterialDensityGramPerCubicCm);
 
-    public double? FilamentVolumeRemainingInMl { get; set; }
+    public double? FilamentVolumeRemainingInMl =>
+        MeasurementUtilities.GetVolumeRemainingInMl(FilamentRemaining, MaterialDensityGramPerCubicCm);
     /// <summary>
     /// Any notes about the purchase price
     /// </summary>

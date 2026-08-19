@@ -1,4 +1,6 @@
 ﻿using System.Net;
+using System.Text;
+using System.Text.Json;
 using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -11,9 +13,11 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _httpClient;
+    private readonly CustomWebApplicationFactory _factory;
 
     public FilamentsControllerTests(CustomWebApplicationFactory factory)
     {
+        _factory = factory;
         _httpClient = factory.CreateClient();
     }
 
@@ -1402,6 +1406,74 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         Assert.True(response.IsSuccessStatusCode, $"PUT failed: {response.StatusCode}");
     }
 
+    /// <summary>
+    /// Creates a print whose single usage row is recorded in something other than weight -
+    /// the caller sets the measure it entered, and PrintService derives the rest on save.
+    /// </summary>
+    private async Task<PrintDetailDTO> CreatePrintUsingFilamentAsync(
+        Guid filamentId,
+        Action<PrintFilamentSummaryDto> configureUsage,
+        PrintFilament.SourceMeasurement source)
+    {
+        var usage = new PrintFilamentSummaryDto
+        {
+            Id = Guid.NewGuid(),
+            Filament = new FilamentSummaryDto { Id = filamentId },
+            Source = source
+        };
+        configureUsage(usage);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = "Usage Source Print",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Public,
+            AllowComments = true,
+            FilamentUsage = new List<PrintFilamentSummaryDto> { usage }
+        });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected 201, got {(int)response.StatusCode}. Body: {body}");
+        return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Writes a usage row straight to the database, bypassing the normalization PrintService
+    /// applies on save. This is the shape seeded data and imports leave behind: milligrams
+    /// recorded, no volume or length beside them.
+    /// </summary>
+    private async Task AddRawUsageRowAsync(Guid filamentId, int amountMg)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+        var print = new Print
+        {
+            Title = "Raw Usage Print",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Public,
+            CreatedById = IntegrationTestSeeder.TestUserId,
+            UpdatedById = IntegrationTestSeeder.TestUserId,
+        };
+        context.Prints.Add(print);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        context.PrintFilament.Add(new PrintFilament
+        {
+            PrintId = print.Id,
+            FilamentId = filamentId,
+            AmountMg = amountMg,
+            Source = PrintFilament.SourceMeasurement.Weight,
+            EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
     private async Task<FilamentDetailDto> GetFilamentDetailAsync(Guid id)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{id}");
@@ -1427,13 +1499,81 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         Assert.NotNull(model.FilamentLengthRemainingInM);
         Assert.Equal(331.26, model.FilamentLengthRemainingInM!.Value, 2);
 
-        // The spool's nominal volume is derived on save from its nominal weight
-        // (1,000,000 mg / 1.24 g/cm3 = 806.45 ml); remaining volume subtracts the
-        // volume the server derived for the print's usage.
+        // Remaining volume is the remaining WEIGHT converted, not the nominal volume with
+        // per-usage volumes subtracted from it. Both routes agree here, because this print
+        // was saved through PrintService and carries the volume it derived - the assertion
+        // is written both ways to record that they must not diverge.
         var usedVolumeMl = print.FilamentUsage!.Single().VolumeMl;
         Assert.NotNull(usedVolumeMl);
         Assert.NotNull(model.FilamentVolumeRemainingInMl);
+        Assert.Equal(988000d / 1000 / 1.24, model.FilamentVolumeRemainingInMl!.Value, 6);
         Assert.Equal(1000000d / 1000 / 1.24 - usedVolumeMl!.Value, model.FilamentVolumeRemainingInMl!.Value, 6);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_UsageRecordedInVolume_CountsAgainstRemainingWeight()
+    {
+        // A usage row entered in milliliters: PrintService converts it to milligrams on save,
+        // and the remaining figures must reflect it exactly as a weight-entered row would.
+        var filament = await CreateUsageTotalsFilamentAsync("Volume Usage Filament");
+        await CreatePrintUsingFilamentAsync(filament.Id, usage => usage.VolumeMl = 20, PrintFilament.SourceMeasurement.Volume);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        // 20 ml of 1.24 g/cm3 is 24,800 mg.
+        Assert.Equal(24800, model.TotalUsedMg);
+        Assert.Equal(1000000 - 24800, model.FilamentRemaining);
+        Assert.Equal(975200d / 1000 / 1.24, model.FilamentVolumeRemainingInMl!.Value, 6);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_UsageRecordedInLength_CountsAgainstRemainingWeight()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Length Usage Filament");
+        await CreatePrintUsingFilamentAsync(filament.Id, usage => usage.LengthInM = 10, PrintFilament.SourceMeasurement.Length);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        // 10 m of 1.75mm PLA at 1.24 g/cm3, via 250 * pi * density * d^2 * m.
+        var expectedUsedMg = (long)Math.Round(250.0 * Math.PI * 1.24 * 1.75 * 1.75 * 10);
+        Assert.Equal(expectedUsedMg, model.TotalUsedMg);
+        Assert.Equal(1000000 - expectedUsedMg, model.FilamentRemaining);
+        Assert.Equal((1000000 - expectedUsedMg) / 1000d / 1.24, model.FilamentVolumeRemainingInMl!.Value, 6);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_UsageRowWithoutDerivedVolume_StillCountsAgainstRemainingVolume()
+    {
+        // The shape behind the reported bug: a usage row holding milligrams and no VolumeMl
+        // (seeded data, an import - anything written around PrintService). Accumulating the
+        // volume column skipped this row entirely and reported the spool fuller than its own
+        // weight said; on a spool whose nominal volume was also never derived, the same sum
+        // started from zero and went negative. Converting the remaining weight cannot do
+        // either, because there is only one number to convert.
+        var filament = await CreateUsageTotalsFilamentAsync("Unnormalized Usage Filament");
+        await AddRawUsageRowAsync(filament.Id, amountMg: 25000);
+
+        var model = await GetFilamentDetailAsync(filament.Id);
+
+        Assert.Equal(25000, model.TotalUsedMg);
+        Assert.Equal(1000000 - 25000, model.FilamentRemaining);
+        Assert.NotNull(model.FilamentVolumeRemainingInMl);
+        Assert.True(model.FilamentVolumeRemainingInMl > 0, $"Remaining volume went negative: {model.FilamentVolumeRemainingInMl}");
+        Assert.Equal(975000d / 1000 / 1.24, model.FilamentVolumeRemainingInMl!.Value, 6);
+    }
+
+    [Fact]
+    public async Task GetFilamentById_MaterialWithoutDiameter_ReturnsVolumeAndNullLength()
+    {
+        // Resin and powder have no diameter, so they have no length. Reporting 0 m there
+        // reads as an empty container beside a perfectly full one. The seeded resin is
+        // 1,000,000 mg of 1.1 g/cm3 with DiameterMm deliberately null.
+        var model = await GetFilamentDetailAsync(IntegrationTestSeeder.TestResinFilamentId);
+
+        Assert.NotNull(model.FilamentRemaining);
+        Assert.Null(model.FilamentLengthRemainingInM);
+        Assert.NotNull(model.FilamentVolumeRemainingInMl);
+        Assert.Equal(model.FilamentRemaining!.Value / 1000d / 1.1, model.FilamentVolumeRemainingInMl!.Value, 6);
     }
 
     [Fact]
@@ -1526,12 +1666,18 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
             IsActive = created.IsActive,
             PrintCount = 9999,
             TotalUsedMg = 123456789,
-            FilamentLengthRemainingInM = 42,
-            FilamentVolumeRemainingInMl = 42
         };
+
+        // Remaining length and volume are get-only on the DTO, so they cannot be assigned
+        // here at all - they are injected straight into the request body instead, which is
+        // what a hand-rolled client would do and the only way left to try to write them.
+        var payload = JsonSerializer.SerializeToNode(updateDto)!.AsObject();
+        payload["filamentLengthRemainingInM"] = 42;
+        payload["filamentVolumeRemainingInMl"] = 42;
+
         var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
         putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
-        putRequest.Content = JsonContent.Create(updateDto);
+        putRequest.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
         var putResponse = await _httpClient.SendAsync(putRequest, TestContext.Current.CancellationToken);
         Assert.True(putResponse.IsSuccessStatusCode, $"PUT failed: {putResponse.StatusCode}");
 

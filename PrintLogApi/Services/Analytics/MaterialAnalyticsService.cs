@@ -171,9 +171,20 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                 x.pf.Filament.Effects,
                 x.p.StartDate,
                 x.p.Status,
-                UsedMg = (long)(x.pf.AmountMg.HasValue && x.pf.AmountMg > 0 ? x.pf.AmountMg.Value
-                    : x.pf.EstimatedAmountMg.HasValue && x.pf.EstimatedAmountMg > 0 ? x.pf.EstimatedAmountMg.Value
-                    : 0),
+                // Usage folded into milligrams, whatever measure the row was recorded in -
+                // the same fallback order FilamentProfile uses, so analytics and the spool
+                // pages resolve a row identically. PrintService normally fills all three
+                // measures in; a row written around it carries only what the user entered.
+                UsedMg = (long)Math.Round(
+                    x.pf.AmountMg.HasValue && x.pf.AmountMg > 0 ? (double)x.pf.AmountMg.Value
+                    : x.pf.VolumeMl.HasValue && x.pf.VolumeMl > 0 ? x.pf.VolumeMl.Value * x.pf.Filament.MaterialDensityGramPerCubicCm * 1000.0
+                    : x.pf.LengthInM.HasValue && x.pf.LengthInM > 0 && x.pf.Filament.DiameterMm.HasValue && x.pf.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * x.pf.Filament.MaterialDensityGramPerCubicCm * x.pf.Filament.DiameterMm.Value * x.pf.Filament.DiameterMm.Value * x.pf.LengthInM.Value
+                    : x.pf.EstimatedAmountMg.HasValue && x.pf.EstimatedAmountMg > 0 ? (double)x.pf.EstimatedAmountMg.Value
+                    : x.pf.EstimatedVolumeMl.HasValue && x.pf.EstimatedVolumeMl > 0 ? x.pf.EstimatedVolumeMl.Value * x.pf.Filament.MaterialDensityGramPerCubicCm * 1000.0
+                    : x.pf.EstimatedLengthInM.HasValue && x.pf.EstimatedLengthInM > 0 && x.pf.Filament.DiameterMm.HasValue && x.pf.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * x.pf.Filament.MaterialDensityGramPerCubicCm * x.pf.Filament.DiameterMm.Value * x.pf.Filament.DiameterMm.Value * x.pf.EstimatedLengthInM.Value
+                    : 0.0),
             })
             .ToListAsync(ct))
             .Select(r => new UsageRow(
@@ -359,12 +370,18 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                 f.MaterialDensityGramPerCubicCm,
                 f.DiameterMm,
                 RemainingMg = f.InitialNominalWeightMg.HasValue
-                    ? (long?)(f.InitialNominalWeightMg.Value
+                    ? (long?)Math.Round(f.InitialNominalWeightMg.Value
                         - f.PrintFilaments!.Sum(pf =>
-                            pf.AmountMg.HasValue && pf.AmountMg > 0 ? (long)pf.AmountMg
-                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (long)pf.EstimatedAmountMg
-                            : (long)0)
-                        + f.FilamentAdjustments!.Sum(adj => adj.AmountMg))
+                            pf.AmountMg.HasValue && pf.AmountMg > 0 ? (double)pf.AmountMg.Value
+                            : pf.VolumeMl.HasValue && pf.VolumeMl > 0 ? pf.VolumeMl.Value * f.MaterialDensityGramPerCubicCm * 1000.0
+                            : pf.LengthInM.HasValue && pf.LengthInM > 0 && f.DiameterMm.HasValue && f.DiameterMm > 0
+                                ? 250.0 * Math.PI * f.MaterialDensityGramPerCubicCm * f.DiameterMm.Value * f.DiameterMm.Value * pf.LengthInM.Value
+                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (double)pf.EstimatedAmountMg.Value
+                            : pf.EstimatedVolumeMl.HasValue && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl.Value * f.MaterialDensityGramPerCubicCm * 1000.0
+                            : pf.EstimatedLengthInM.HasValue && pf.EstimatedLengthInM > 0 && f.DiameterMm.HasValue && f.DiameterMm > 0
+                                ? 250.0 * Math.PI * f.MaterialDensityGramPerCubicCm * f.DiameterMm.Value * f.DiameterMm.Value * pf.EstimatedLengthInM.Value
+                            : 0.0)
+                        + f.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
                     : null,
             })
             .ToListAsync(ct);

@@ -1,5 +1,6 @@
 ﻿using PrintLogApi.Enums;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.TestData;
 
@@ -129,6 +130,22 @@ public static class E2EDataSeeder
         {
             filament.CreatedById = userId;
             filament.UpdatedById = userId;
+
+            // Seeded rows never pass through FilamentService, which is what normally
+            // derives the two non-source nominal measures from the one the user entered.
+            // Deriving them here keeps a seeded spool shaped like a saved one - otherwise
+            // the seeds are the only spools in the system with a null nominal volume, and
+            // they quietly become the odd case every remaining calculation has to survive.
+            // Every seeded spool above is weight-source, so weight is the source measure.
+            if (filament.InitialNominalWeightMg is { } nominalWeightMg)
+            {
+                filament.InitialNominalVolumeMl = MeasurementUtilities.GetVolumeInMlFromAmount(
+                    nominalWeightMg, filament.MaterialDensityGramPerCubicCm);
+
+                filament.InitialNominalLengthM = filament.DiameterMm is { } diameterMm
+                    ? MeasurementUtilities.GetLengthInMetersFromAmount(nominalWeightMg, diameterMm, filament.MaterialDensityGramPerCubicCm)
+                    : null;
+            }
         }
 
         context.Filaments.AddRange(filaments);
@@ -217,15 +234,30 @@ public static class E2EDataSeeder
         // One print carries filament usage, so the material swatch renders in the
         // print row and the filament-usage screens have a row to act on.
         // Note the DbSet is singular: `PrintFilament`, not `PrintFilaments`.
-        context.PrintFilament.Add(new PrintFilament
+        var usedFilament = filaments[1];
+        var usage = new PrintFilament
         {
             PrintId = prints[0].Id,
-            FilamentId = filaments[1].Id,
+            FilamentId = usedFilament.Id,
             AmountMg = 25000,
             EstimatedAmountMg = 24000,
             Source = PrintFilament.SourceMeasurement.Weight,
             EstimatedSource = PrintFilament.SourceMeasurement.Weight,
-        });
+        };
+
+        // Same reason the spools above derive their nominal measures: PrintService fills in
+        // the two measures the user did not enter, and a seeded row that skips it is a usage
+        // row recorded in weight with no volume or length beside it.
+        usage.VolumeMl = MeasurementUtilities.GetVolumeInMlFromAmount(usage.AmountMg.Value, usedFilament.MaterialDensityGramPerCubicCm);
+        usage.EstimatedVolumeMl = MeasurementUtilities.GetVolumeInMlFromAmount(usage.EstimatedAmountMg.Value, usedFilament.MaterialDensityGramPerCubicCm);
+
+        if (usedFilament.DiameterMm is { } usedDiameterMm)
+        {
+            usage.LengthInM = MeasurementUtilities.GetLengthInMetersFromAmount(usage.AmountMg.Value, usedDiameterMm, usedFilament.MaterialDensityGramPerCubicCm);
+            usage.EstimatedLengthInM = MeasurementUtilities.GetLengthInMetersFromAmount(usage.EstimatedAmountMg.Value, usedDiameterMm, usedFilament.MaterialDensityGramPerCubicCm);
+        }
+
+        context.PrintFilament.Add(usage);
 
         context.SaveChanges();
     }
