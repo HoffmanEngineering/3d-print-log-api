@@ -373,13 +373,13 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                     ? (long?)Math.Round(f.InitialNominalWeightMg.Value
                         - f.PrintFilaments!.Sum(pf =>
                             pf.AmountMg.HasValue && pf.AmountMg > 0 ? (double)pf.AmountMg.Value
-                            : pf.VolumeMl.HasValue && pf.VolumeMl > 0 ? pf.VolumeMl.Value * f.MaterialDensityGramPerCubicCm * 1000.0
-                            : pf.LengthInM.HasValue && pf.LengthInM > 0 && f.DiameterMm.HasValue && f.DiameterMm > 0
-                                ? 250.0 * Math.PI * f.MaterialDensityGramPerCubicCm * f.DiameterMm.Value * f.DiameterMm.Value * pf.LengthInM.Value
+                            : pf.VolumeMl.HasValue && pf.VolumeMl > 0 ? pf.VolumeMl.Value * pf.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                            : pf.LengthInM.HasValue && pf.LengthInM > 0 && pf.Filament!.DiameterMm.HasValue && pf.Filament.DiameterMm > 0
+                                ? 250.0 * Math.PI * pf.Filament!.MaterialDensityGramPerCubicCm * pf.Filament.DiameterMm!.Value * pf.Filament.DiameterMm!.Value * pf.LengthInM.Value
                             : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (double)pf.EstimatedAmountMg.Value
-                            : pf.EstimatedVolumeMl.HasValue && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl.Value * f.MaterialDensityGramPerCubicCm * 1000.0
-                            : pf.EstimatedLengthInM.HasValue && pf.EstimatedLengthInM > 0 && f.DiameterMm.HasValue && f.DiameterMm > 0
-                                ? 250.0 * Math.PI * f.MaterialDensityGramPerCubicCm * f.DiameterMm.Value * f.DiameterMm.Value * pf.EstimatedLengthInM.Value
+                            : pf.EstimatedVolumeMl.HasValue && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl.Value * pf.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                            : pf.EstimatedLengthInM.HasValue && pf.EstimatedLengthInM > 0 && pf.Filament!.DiameterMm.HasValue && pf.Filament.DiameterMm > 0
+                                ? 250.0 * Math.PI * pf.Filament!.MaterialDensityGramPerCubicCm * pf.Filament.DiameterMm!.Value * pf.Filament.DiameterMm!.Value * pf.EstimatedLengthInM.Value
                             : 0.0)
                         + f.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
                     : null,

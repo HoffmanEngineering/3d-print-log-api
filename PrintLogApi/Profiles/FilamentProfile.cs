@@ -29,13 +29,13 @@ public class FilamentProfile : Profile
             // denominator every other figure here converts from.
             .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => (long?)Math.Round((src.InitialNominalWeightMg ?? 0)
                 - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.LengthInM.HasValue && p.LengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.LengthInM.Value
+                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
                 : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.EstimatedLengthInM.Value
+                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
                 : 0.0)
                 + src.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
@@ -85,13 +85,13 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg.HasValue
                 ? (long?)Math.Round(src.InitialNominalWeightMg.Value
                 - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.LengthInM.HasValue && p.LengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.LengthInM.Value
+                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
                 : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.EstimatedLengthInM.Value
+                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
                 : 0.0)
                 + src.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
                 : (long?)null))
@@ -103,13 +103,13 @@ public class FilamentProfile : Profile
             // navigation here would NullReferenceException on every filament that has usage.
             .ForMember(dest => dest.PrintCount, src => src.MapFrom(src => src.PrintFilaments!.Select(p => p.PrintId).Distinct().Count()))
             .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(src => (long)Math.Round(src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.LengthInM.HasValue && p.LengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.LengthInM.Value
+                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
                 : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * src.MaterialDensityGramPerCubicCm * 1000.0
-                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && src.DiameterMm.HasValue && src.DiameterMm > 0
-                    ? 250.0 * Math.PI * src.MaterialDensityGramPerCubicCm * src.DiameterMm.Value * src.DiameterMm.Value * p.EstimatedLengthInM.Value
+                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
                 : 0.0))))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
