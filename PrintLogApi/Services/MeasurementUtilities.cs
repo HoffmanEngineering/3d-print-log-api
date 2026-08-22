@@ -60,4 +60,34 @@ public static class MeasurementUtilities
     {
         return ((1 / 4.00) * Math.PI * lengthInMeters * filamentDiameterInMM * filamentDiameterInMM);
     }
+
+    /// <summary>
+    /// Remaining volume for a spool, derived from its remaining weight so the weight,
+    /// volume and length readouts can never disagree with one another. Null when the
+    /// spool is untracked, or when the material carries no usable density to convert with.
+    /// </summary>
+    public static double? GetVolumeRemainingInMl(long? remainingMg, double materialDensityGramPerCubicCm)
+    {
+        if (!remainingMg.HasValue || materialDensityGramPerCubicCm <= 0)
+        {
+            return null;
+        }
+
+        return GetVolumeInMlFromAmount(remainingMg.Value, materialDensityGramPerCubicCm);
+    }
+
+    /// <summary>
+    /// Remaining length for a spool, derived from its remaining weight. Null when the spool
+    /// is untracked, or when the material has no diameter to convert with - resins and
+    /// powders have no length, and reporting 0 there reads as an empty spool.
+    /// </summary>
+    public static double? GetLengthRemainingInM(long? remainingMg, double? diameterMm, double materialDensityGramPerCubicCm)
+    {
+        if (!remainingMg.HasValue || materialDensityGramPerCubicCm <= 0 || diameterMm is not > 0)
+        {
+            return null;
+        }
+
+        return GetLengthInMetersFromAmount(remainingMg.Value, diameterMm.Value, materialDensityGramPerCubicCm);
+    }
 }

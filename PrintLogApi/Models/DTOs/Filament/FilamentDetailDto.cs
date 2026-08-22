@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Enums;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament;
@@ -74,6 +75,36 @@ public class FilamentDetailDto
     /// Null when nominal weight is not set. Read-only: ignored on write.
     /// </summary>
     public long? FilamentRemaining { get; set; }
+
+    /// <summary>
+    /// Server-computed remaining length in meters, converted from FilamentRemaining so the
+    /// three readouts always describe the same spool. Null when the nominal weight is not
+    /// tracked, and null for materials with no diameter - resin and powder have no length.
+    /// Get-only: a client-supplied value cannot reach the server.
+    /// </summary>
+    public double? FilamentLengthRemainingInM =>
+        MeasurementUtilities.GetLengthRemainingInM(FilamentRemaining, DiameterMm, MaterialDensityGramPerCubicCm);
+
+    /// <summary>
+    /// Server-computed remaining volume in milliliters, converted from FilamentRemaining.
+    /// Deliberately NOT accumulated from the per-usage VolumeMl columns: a usage row written
+    /// without normalization carries milligrams and no volume, and summing the volume column
+    /// then silently under-counts the spool. Get-only: a client-supplied value cannot reach
+    /// the server.
+    /// </summary>
+    public double? FilamentVolumeRemainingInMl =>
+        MeasurementUtilities.GetVolumeRemainingInMl(FilamentRemaining, MaterialDensityGramPerCubicCm);
+
+    /// <summary>
+    /// Distinct prints that used this filament. Read-only: ignored on write.
+    /// </summary>
+    public int PrintCount { get; set; }
+
+    /// <summary>
+    /// Total milligrams consumed by prints, actual where recorded and estimated
+    /// otherwise - the same rule FilamentRemaining subtracts. Read-only: ignored on write.
+    /// </summary>
+    public long TotalUsedMg { get; set; }
     public double? TempRangeStart { get; set; }
     public double? TempRangeEnd { get; set; }
     /// <summary>
