@@ -1,8 +1,6 @@
-using AutoMapper;
+﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using Xunit;
 
