@@ -45,6 +45,12 @@ The production environment runs on Azure (App Service, SQL Server, Blob Storage)
 
 If your contribution requires infrastructure changes (new environment variables, Azure resource configuration, etc.), call this out explicitly in your PR description so the maintainer can coordinate the changes before the code ships.
 
+## Questions & Discussions
+
+Usage questions are best asked in [**3D Print Log Discussions**](https://github.com/HoffmanEngineering/3d-print-log-ui/discussions/categories/q-a). That board is the front door for the whole project — the web app, this repository, and both slicer plugins — so you do not have to work out which repository your question belongs to, and answers stay searchable for whoever asks next.
+
+Bug reports and feature requests still belong in this repository's issues.
+
 ## Support Development
 
 If you find 3D Print Log useful, consider supporting its development:
