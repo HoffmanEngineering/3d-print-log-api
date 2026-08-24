@@ -6,6 +6,23 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only by default. Nothing in CI writes to the repository, and an explicit
+# block replaces whatever the repository-wide default happens to be -- which is a
+# setting that can change outside this file.
+permissions:
+  contents: read
+
+# A newer push to the same ref makes an in-flight run obsolete. This suite runs
+# restore, a full format-and-analyzer pass, a build, the EF model check and the test
+# suite, so cancelling the superseded run returns a runner instead of racing to a
+# result nobody reads.
+#
+# Keyed on the PR number when there is one, so a push to a branch and the pull_request
+# run for that same branch do not cancel each other.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest

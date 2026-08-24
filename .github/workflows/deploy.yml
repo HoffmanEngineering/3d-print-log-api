@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
 
+# Read-only by default, so the third-party actions in the build and deploy jobs never
+# receive a token that can write to the repository. Only publish-release widens it.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -120,3 +125,26 @@ jobs:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ./publish
+
+  # Separate job so `contents: write` is scoped to publishing alone, and it runs only
+  # after a successful deploy -- the Releases feed should never announce a version that
+  # is not actually live.
+  #
+  # Unlike the UI repo, there is no hand-written per-version prose here to extract, so
+  # --generate-notes is the right source: squash-merged PR titles on this repo are
+  # descriptive, and an auto-generated changelog beats the nothing that exists today.
+  publish-release:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # No checkout: `gh release create` acts on the API, and GH_REPO tells it which
+      # repository without cloning the tree just to cut a release.
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
