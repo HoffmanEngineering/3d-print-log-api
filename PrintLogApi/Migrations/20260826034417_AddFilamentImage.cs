@@ -49,18 +49,24 @@ namespace PrintLogApi.Migrations
                         principalTable: "Files",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
+                    // NoAction, not the Cascade the model implies. Users -> Filaments ->
+                    // FilamentImages is already a cascade path, so a second one through the
+                    // audit columns makes SQL Server reject the table with error 1785.
+                    // The model keeps Cascade and this migration overrides it, which is the
+                    // same split AddProjects made for ProjectImages; account deletion removes
+                    // these rows explicitly through UserDeletionService, not by cascade.
                     table.ForeignKey(
                         name: "FK_FilamentImages_Users_CreatedById",
                         column: x => x.CreatedById,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.NoAction);
                     table.ForeignKey(
                         name: "FK_FilamentImages_Users_UpdatedById",
                         column: x => x.UpdatedById,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.NoAction);
                 });
 
             migrationBuilder.CreateIndex(
