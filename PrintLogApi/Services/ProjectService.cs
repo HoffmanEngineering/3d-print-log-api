@@ -303,7 +303,7 @@ public class ProjectService(
         foreach (var image in project.Images!)
         {
             if (image.File != null)
-                await blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
+                await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
         }
 
         context.ProjectImages.RemoveRange(project.Images!);
@@ -318,7 +318,7 @@ public class ProjectService(
 
         var blobName = $"{Guid.NewGuid()}{System.IO.Path.GetExtension(file.FileName)}";
         using var stream = file.OpenReadStream();
-        await blobStorageService.UploadAsync("projectimages", blobName, stream);
+        await blobStorageService.UploadAsync(BlobContainers.ProjectImages, blobName, stream);
 
         var fileEntity = new Models.File { Path = blobName, Size = file.Length, CreatedById = userId, UpdatedById = userId };
         context.Files.Add(fileEntity);
@@ -347,7 +347,7 @@ public class ProjectService(
         if (image == null) throw new DoesNotExistException();
 
         if (image.File != null)
-            await blobStorageService.DeleteBlobAsync("projectimages", Path.GetFileName(image.File.Path!));
+            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
 
         context.ProjectImages.Remove(image);
         await context.SaveChangesAsync();
@@ -402,6 +402,6 @@ public class ProjectService(
             return null;
 
         var blobName = Path.GetFileName(data.Path!);
-        return await blobStorageService.DownloadAsync("projectimages", blobName);
+        return await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
     }
 }

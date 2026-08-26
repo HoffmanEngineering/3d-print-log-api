@@ -1,4 +1,4 @@
-using SkiaSharp;
+﻿using SkiaSharp;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Services;

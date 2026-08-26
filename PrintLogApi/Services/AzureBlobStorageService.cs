@@ -1,4 +1,5 @@
 ﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 
 namespace PrintLogApi.Services;
@@ -9,13 +10,20 @@ namespace PrintLogApi.Services;
 public class AzureBlobStorageService : IBlobStorageService
 {
     private readonly BlobServiceClient _blobServiceClient;
+    private readonly TimeProvider _timeProvider;
+    private readonly IBlobContainerProvisioner _containerProvisioner;
 
-    public AzureBlobStorageService(IConfiguration configuration)
+    public AzureBlobStorageService(
+        IConfiguration configuration,
+        TimeProvider timeProvider,
+        IBlobContainerProvisioner containerProvisioner)
     {
         var connectionString = configuration["AZURE_STORAGE_CONNECTION_STRING"];
         if (string.IsNullOrWhiteSpace(connectionString))
             throw new InvalidOperationException("Azure Storage connection string is required for blob operations.");
         _blobServiceClient = new BlobServiceClient(connectionString);
+        _timeProvider = timeProvider;
+        _containerProvisioner = containerProvisioner;
     }
 
     /// <summary>
@@ -24,6 +32,10 @@ public class AzureBlobStorageService : IBlobStorageService
     public async Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        await _containerProvisioner.EnsureAsync(
+            containerName,
+            () => containerClient.CreateIfNotExistsAsync(PublicAccessType.None));
+
         var blobClient = containerClient.GetBlobClient(blobName);
 
         await blobClient.UploadAsync(stream, overwrite: true);

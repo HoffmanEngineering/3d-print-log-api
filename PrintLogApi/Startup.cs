@@ -197,6 +197,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         services.AddScoped<Services.Analytics.ICostAnalyticsService, Services.Analytics.CostAnalyticsService>();
         services.AddScoped<Services.Analytics.IAccuracyAnalyticsService, Services.Analytics.AccuracyAnalyticsService>();
 
+        services.AddSingleton<IBlobContainerProvisioner, BlobContainerProvisioner>();
         services.AddTransient<IBlobStorageService, AzureBlobStorageService>();
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
