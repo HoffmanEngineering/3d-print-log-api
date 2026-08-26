@@ -293,6 +293,58 @@ public class UserDeletionService : IUserDeletionService
                 .Where(fa => fa.Filament.CreatedById == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete FilamentImages, their blobs, and their associated Files for user's filaments.
+            // This MUST precede the Filaments delete below: ExecuteDeleteAsync bypasses the change
+            // tracker and hits the FilamentImage -> File Restrict FKs directly.
+            var filamentImageData = await _context.FilamentImages
+                .Where(fi => fi.Filament.CreatedById == userId)
+                .Select(fi => new
+                {
+                    fi.FileId,
+                    fi.ThumbnailFileId,
+                    Path = fi.File.Path,
+                    ThumbnailPath = fi.ThumbnailFile != null ? fi.ThumbnailFile.Path : null
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            if (filamentImageData.Count > 0)
+            {
+                var blobNames = filamentImageData
+                    .SelectMany(fi => new[] { fi.Path, fi.ThumbnailPath })
+                    .Where(path => !string.IsNullOrEmpty(path))
+                    .Select(path => System.IO.Path.GetFileName(path)!);
+
+                foreach (var name in blobNames)
+                {
+                    try
+                    {
+                        await _blobStorageService.DeleteBlobAsync(BlobContainers.FilamentImages, name);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete blob {BlobName} during user deletion; continuing", name);
+                    }
+                }
+
+                await _context.FilamentImages
+                    .Where(fi => fi.Filament.CreatedById == userId)
+                    .ExecuteDeleteAsync();
+
+                var filamentImageFileIds = filamentImageData
+                    .SelectMany(fi => new[] { fi.FileId, fi.ThumbnailFileId })
+                    .Where(id => id.HasValue)
+                    .Select(id => id!.Value)
+                    .ToList();
+
+                if (filamentImageFileIds.Count > 0)
+                {
+                    await _context.Files
+                        .Where(f => filamentImageFileIds.Contains(f.Id))
+                        .ExecuteDeleteAsync();
+                }
+            }
+
             // Delete Filaments
             await _context.Filaments
                 .Where(f => f.CreatedById == userId)

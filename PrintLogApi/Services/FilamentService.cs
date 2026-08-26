@@ -1673,8 +1673,33 @@ public class FilamentService(
             context.FilamentAdjustments.RemoveRange(filament.FilamentAdjustments!);
         }
 
+        // Images must go before the filament row: the FilamentImage -> File FKs are Restrict,
+        // so leaving them would either block this delete or orphan every blob.
+        var images = await context.FilamentImages
+            .Include(fi => fi.File)
+            .Include(fi => fi.ThumbnailFile)
+            .Where(fi => fi.FilamentId == filamentId)
+            .ToListAsync();
+
+        var blobNames = images
+            .SelectMany(fi => new[] { fi.File?.Path, fi.ThumbnailFile?.Path })
+            .Where(path => path is not null)
+            .Select(path => Path.GetFileName(path)!)
+            .ToList();
+
+        context.FilamentImages.RemoveRange(images);
+        context.Files.RemoveRange(images
+            .SelectMany(fi => new[] { fi.File, fi.ThumbnailFile })
+            .Where(file => file is not null)
+            .Select(file => file!));
+
         context.Filaments.Remove(filament);
         await context.SaveChangesAsync();
+
+        // Blobs LAST, matching FilamentImageService.DeleteImageAsync: this ordering fails
+        // toward an orphaned blob rather than a row pointing at destroyed bytes.
+        foreach (var name in blobNames)
+            await blobStorage.DeleteBlobAsync(BlobContainers.FilamentImages, name);
 
         telemetry.TrackEvent("FilamentDelete");
 
