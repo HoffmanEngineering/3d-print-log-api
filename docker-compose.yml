@@ -18,7 +18,10 @@ services:
       - '10002:10002'
     volumes:
       - azurite-data:/data
-    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    # --skipApiVersionCheck: the Azure.Storage.Blobs SDK sends a newer x-ms-version than the
+    # Azurite image knows, and Azurite rejects it with a 400 rather than degrading. Without
+    # this flag every blob write against local storage fails.
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
 
 volumes:
   sqlserver-data:
