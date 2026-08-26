@@ -62,9 +62,18 @@ public class SubscriptionService : ISubscriptionService
         dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
         dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
         dto.MaxFileStorageBytes = isPro ? SubscriptionLimits.ProMaxFileStorageBytes : SubscriptionLimits.FreeMaxFileStorageBytes;
-        dto.UsedFileStorageBytes = await _context.PrintAttachments
+        // Must count exactly what FilamentImageService.EnsureAccountStorageQuotaAsync counts.
+        // Reporting only attachments here while enforcement also counts filament images shows
+        // the user less usage than the number they are actually rejected against.
+        var attachmentBytes = await _context.PrintAttachments
             .Where(pa => pa.CreatedById == userId)
             .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
+
+        var filamentImageBytes = await _context.FilamentImages
+            .Where(fi => fi.CreatedById == userId)
+            .SumAsync(fi => (long?)fi.File.Size + (fi.ThumbnailFile != null ? fi.ThumbnailFile.Size : 0L)) ?? 0L;
+
+        dto.UsedFileStorageBytes = attachmentBytes + filamentImageBytes;
 
         return dto;
     }

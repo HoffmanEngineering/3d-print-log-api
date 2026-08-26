@@ -1,8 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Services;
@@ -163,6 +161,26 @@ public class FilamentImagesControllerTests(CustomWebApplicationFactory factory)
 
         var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Filaments/{filamentId}/images");
         req.Content = Form(oversized, "image/png", "huge.png");
+
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Upload_PastPerFilamentQuota_Returns400NotAServerError()
+    {
+        // The service throws for quota; the action has to translate that. Both quota
+        // exceptions matter here - ArgumentException for the per-filament cap and
+        // BadRequestException for the account byte cap - and this app has no global
+        // exception-to-status mapping, so an uncaught one is a 500, not a 400.
+        var filamentId = await CreateFilamentAsync(TestContext.Current.CancellationToken);
+
+        for (var i = 0; i < SubscriptionLimits.FreeMaxImagesPerFilament; i++)
+            await UploadAsync(filamentId, TestContext.Current.CancellationToken);
+
+        var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Filaments/{filamentId}/images");
+        req.Content = Form(PngBytes(50, 50), "image/png", "spool.png");
 
         var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
 

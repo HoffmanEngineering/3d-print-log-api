@@ -26,6 +26,12 @@ public class FilamentsController(
     IBlobStorageService blobStorageService) : ControllerBase
 {
     /// <summary>
+    /// Largest accepted image upload. Referenced by the action's [RequestSizeLimit] as well
+    /// as its body check, so the two cannot drift apart.
+    /// </summary>
+    private const int MaxImageSizeBytes = 10 * 1024 * 1024;
+
+    /// <summary>
     /// Gets a Paged Result of filament summaries for the current user.
     /// </summary>
     /// <param name="pagingRequest">The paging request information.</param>
@@ -309,6 +315,16 @@ public class FilamentsController(
     /// <response code="400">The file is missing, too large, or not a supported image.</response>
     /// <response code="404">No such filament belonging to the current user.</response>
     [HttpPost("{id}/images")]
+    // Enforced BEFORE model binding, unlike the file.Length check in the body: by the time
+    // IFormFile has materialized, a much larger multipart body has already been buffered.
+    // This lowers Kestrel's 30MB default to roughly the real limit for this one endpoint;
+    // the allowance over MaxImageSizeBytes covers multipart framing overhead.
+    //
+    // Not covered by an integration test on purpose: the limit is a Kestrel feature and
+    // TestServer does not implement IHttpMaxRequestBodySizeFeature, so an oversized body
+    // there falls through to the file.Length check and reports 400 instead of 413. A test
+    // asserting 413 would be asserting something the harness cannot produce.
+    [RequestSizeLimit(MaxImageSizeBytes + (1024 * 1024))]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -319,8 +335,7 @@ public class FilamentsController(
 
         if (file is null || file.Length == 0) return BadRequest("Image file is required.");
 
-        const long maxImageSizeBytes = 10 * 1024 * 1024;
-        if (file.Length > maxImageSizeBytes) return BadRequest("Image must be under 10MB.");
+        if (file.Length > MaxImageSizeBytes) return BadRequest("Image must be under 10MB.");
 
         try
         {
@@ -333,6 +348,9 @@ public class FilamentsController(
             return CreatedAtAction(nameof(GetFilamentImage), new { id, imageId = image.Id }, dto);
         }
         catch (InvalidImageException ex) { return BadRequest(ex.Message); }
+        // The account storage quota throws this. There is no global exception-to-status
+        // mapping in this app, so without the catch it surfaces as a 500.
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
         catch (ArgumentException ex) { return BadRequest(ex.Message); }
         catch (DoesNotExistException) { return NotFound(); }
     }

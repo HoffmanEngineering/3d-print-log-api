@@ -29,50 +29,88 @@ public class FilamentImageService(
 
         await using var transaction = await context.Database.BeginTransactionAsync(ct);
 
-        var existingCount = await context.FilamentImages
-            .CountAsync(fi => fi.FilamentId == filamentId, ct);
-
-        if (existingCount >= maxImages)
-            throw new ArgumentException($"Maximum of {maxImages} images per filament allowed");
-
-        var originalFile = await UploadAndRecordAsync(processed.Original, ".jpg", userId, ct);
-        var thumbnailFile = processed.Thumbnail is null
-            ? null
-            : await UploadAndRecordAsync(processed.Thumbnail, ".webp", userId, ct);
-
-        await context.SaveChangesAsync(ct);
-
-        var image = new FilamentImage
-        {
-            FilamentId = filamentId,
-            FileId = originalFile.Id,
-            ThumbnailFileId = thumbnailFile?.Id,
-            ContentType = processed.ContentType,
-            IsDefault = existingCount == 0,
-            DisplayOrder = existingCount,
-            CreatedById = userId,
-            UpdatedById = userId
-        };
-        context.FilamentImages.Add(image);
+        // Blobs are written before the transaction commits and are not covered by its
+        // rollback, so anything already uploaded has to be cleaned up by hand if the
+        // database work then fails. Without this a failed or cancelled upload leaves bytes
+        // in the container that no row references and no quota counts.
+        var uploadedBlobNames = new List<string>();
 
         try
         {
-            await context.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException) when (image.IsDefault)
-        {
-            // A transaction at the default isolation level does NOT serialize the two
-            // CountAsync calls, so two concurrent first uploads can both read zero. The
-            // filtered unique index rejects the loser; demote and retry once rather
-            // than surfacing a 500.
-            image.IsDefault = false;
-            image.DisplayOrder = await context.FilamentImages
+            var existingCount = await context.FilamentImages
                 .CountAsync(fi => fi.FilamentId == filamentId, ct);
-            await context.SaveChangesAsync(ct);
-        }
 
-        await transaction.CommitAsync(ct);
-        return image;
+            if (existingCount >= maxImages)
+                throw new ArgumentException($"Maximum of {maxImages} images per filament allowed");
+
+            var originalFile = await UploadAndRecordAsync(
+                processed.Original, ".jpg", userId, uploadedBlobNames, ct);
+            var thumbnailFile = processed.Thumbnail is null
+                ? null
+                : await UploadAndRecordAsync(
+                    processed.Thumbnail, ".webp", userId, uploadedBlobNames, ct);
+
+            await context.SaveChangesAsync(ct);
+
+            var image = new FilamentImage
+            {
+                FilamentId = filamentId,
+                FileId = originalFile.Id,
+                ThumbnailFileId = thumbnailFile?.Id,
+                ContentType = processed.ContentType,
+                IsDefault = existingCount == 0,
+                DisplayOrder = existingCount,
+                CreatedById = userId,
+                UpdatedById = userId
+            };
+            context.FilamentImages.Add(image);
+
+            try
+            {
+                await context.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException) when (image.IsDefault)
+            {
+                // A transaction at the default isolation level does NOT serialize the two
+                // CountAsync calls, so two concurrent first uploads can both read zero. The
+                // filtered unique index rejects the loser; demote and retry once rather
+                // than surfacing a 500.
+                image.IsDefault = false;
+                image.DisplayOrder = await context.FilamentImages
+                    .CountAsync(fi => fi.FilamentId == filamentId, ct);
+                await context.SaveChangesAsync(ct);
+            }
+
+            await transaction.CommitAsync(ct);
+            return image;
+        }
+        catch
+        {
+            await DeleteUploadedBlobsAsync(uploadedBlobNames);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort cleanup of blobs written for an upload that then failed. Deliberately
+    /// swallows its own failures and takes no cancellation token: it runs on the way out of a
+    /// failed request, frequently a cancelled one, and a throw here would replace the real
+    /// exception with a less useful one. The worst case is the orphaned blob we already
+    /// tolerate on the delete path.
+    /// </summary>
+    private async Task DeleteUploadedBlobsAsync(List<string> blobNames)
+    {
+        foreach (var name in blobNames)
+        {
+            try
+            {
+                await blobStorage.DeleteBlobAsync(BlobContainers.FilamentImages, name);
+            }
+            catch
+            {
+                // Intentionally ignored - see the summary above.
+            }
+        }
     }
 
     public async Task DeleteImageAsync(
@@ -93,6 +131,12 @@ public class FilamentImageService(
 
         var wasDefault = image.IsDefault;
 
+        // Removal and promotion are two saves, because the filtered unique index would
+        // reject an intermediate state with two defaults. One transaction around both keeps
+        // them atomic anyway: without it, a failure in between leaves a non-empty filament
+        // with no default at all.
+        await using var transaction = await context.Database.BeginTransactionAsync(ct);
+
         context.FilamentImages.Remove(image);
         if (image.File is not null) context.Files.Remove(image.File);
         if (image.ThumbnailFile is not null) context.Files.Remove(image.ThumbnailFile);
@@ -101,8 +145,7 @@ public class FilamentImageService(
 
         if (wasDefault)
         {
-            // Separate save, after the old default row is gone, so the filtered unique
-            // index never sees two defaults at once.
+            // Read after the delete is applied, so the old default is already gone.
             var next = await context.FilamentImages
                 .Where(fi => fi.FilamentId == filamentId)
                 .OrderBy(fi => fi.DisplayOrder).ThenBy(fi => fi.Id)
@@ -113,6 +156,8 @@ public class FilamentImageService(
                 await context.SaveChangesAsync(ct);
             }
         }
+
+        await transaction.CommitAsync(ct);
 
         // Blobs LAST. ProjectService deletes them first, so a failed SaveChangesAsync
         // there leaves a row pointing at destroyed bytes. This ordering fails toward an
@@ -187,11 +232,15 @@ public class FilamentImageService(
     /// added but NOT saved: the caller saves it inside the same transaction as the image row.
     /// </summary>
     private async Task<Models.File> UploadAndRecordAsync(
-        byte[] bytes, string extension, long userId, CancellationToken ct)
+        byte[] bytes, string extension, long userId, List<string> uploadedBlobNames, CancellationToken ct)
     {
         var blobName = $"{Guid.NewGuid()}{extension}";
         using var stream = new MemoryStream(bytes);
         await blobStorage.UploadAsync(BlobContainers.FilamentImages, blobName, stream);
+
+        // Recorded only after the upload succeeds, so the compensating delete never targets
+        // a blob that was never written.
+        uploadedBlobNames.Add(blobName);
 
         var file = new Models.File
         {

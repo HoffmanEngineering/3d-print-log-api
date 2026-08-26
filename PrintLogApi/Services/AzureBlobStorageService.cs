@@ -136,6 +136,14 @@ public class AzureBlobStorageService : IBlobStorageService
     /// <summary>
     /// Rounds an instant up to the next multiple of <paramref name="bucketSize"/>, so every
     /// caller inside one bucket signs the same expiry and therefore the same URL.
+    ///
+    /// <para><b>The resulting signature lives between one and two bucket widths</b>, because
+    /// the caller adds a further <c>bucketSize</c> to what this returns. That second term is
+    /// not padding: without it a URL signed just before a boundary would expire almost
+    /// immediately, which is the failure bucketing exists to prevent. The cost is that a
+    /// six-hour bucket can hand out a signature valid for nearly twelve hours, so a leaked
+    /// URL stays usable that long without authentication. Shorten the bucket if that window
+    /// is ever judged too wide - do not drop the second term.</para>
     /// </summary>
     private static DateTimeOffset CeilingToBucket(DateTimeOffset instant, TimeSpan bucketSize)
     {

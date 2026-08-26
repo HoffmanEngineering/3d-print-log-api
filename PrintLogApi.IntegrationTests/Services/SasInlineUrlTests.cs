@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
-using PrintLogApi.IntegrationTests.Analytics;
+﻿using PrintLogApi.IntegrationTests.Analytics;
 using PrintLogApi.Services;
 using Xunit;
 
@@ -77,6 +76,33 @@ public class SasInlineUrlTests
         Assert.DoesNotContain("attachment", query);
         Assert.Contains("private", query);
         Assert.Contains("max-age=18000", query);
+    }
+
+    [Fact]
+    public async Task Signature_NeverOutlivesTwoBuckets()
+    {
+        // Bucketing rounds the expiry UP and then adds another full bucket, so a signature
+        // signed just after a boundary lives nearly two bucket widths - not the one width
+        // the configured constant suggests. That is deliberate (a URL signed just before a
+        // boundary would otherwise expire immediately), but it is the real exposure window
+        // for a leaked URL, so pin it.
+        var justAfterBoundary = new DateTimeOffset(2026, 8, 25, 0, 0, 1, TimeSpan.Zero);
+        var clock = new SettableTimeProvider(justAfterBoundary);
+        var service = CreateService(clock);
+
+        var uri = await service.GenerateSasInlineUrlAsync(
+            BlobContainers.FilamentImages, "a.webp", "image/webp", Bucket, MaxAge);
+
+        var expiry = DateTimeOffset.Parse(
+            System.Web.HttpUtility.ParseQueryString(uri.Query)["se"]!,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal
+                | System.Globalization.DateTimeStyles.AssumeUniversal);
+
+        var lifetime = expiry - justAfterBoundary;
+
+        Assert.True(lifetime > Bucket, $"expected more than one bucket, got {lifetime}");
+        Assert.True(lifetime <= Bucket + Bucket, $"expected at most two buckets, got {lifetime}");
     }
 
     [Fact]

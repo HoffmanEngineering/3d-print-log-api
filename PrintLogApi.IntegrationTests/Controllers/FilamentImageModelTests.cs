@@ -1,6 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.Extensions.DependencyInjection;
 using PrintLogApi.Models;
 using Xunit;
 
@@ -24,17 +23,20 @@ public class FilamentImageModelTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
-    public void DefaultImage_HasAUniqueFilteredIndex()
+    public void DefaultImage_HasAUniqueIndexFilteredOnIsDefault()
     {
-        // Enforces "exactly one default per filament" in the database. Without it,
-        // two concurrent first uploads both become default.
+        // Enforces "at MOST one default per filament" - a filtered unique index cannot
+        // require that a default exists. Without it, two concurrent first uploads both
+        // become default.
         var entity = Model().FindEntityType(typeof(FilamentImage))!;
         var index = entity.GetIndexes().Single(i =>
             i.Properties.Count == 1 &&
             i.Properties[0].Name == nameof(FilamentImage.FilamentId) &&
             i.IsUnique);
 
-        Assert.NotNull(index.GetFilter());
+        // The predicate itself, not merely that some filter exists: a regression to
+        // [IsDefault] = 0 would invert the constraint and still pass a null check.
+        Assert.Equal("[IsDefault] = 1", index.GetFilter());
     }
 
     [Fact]
