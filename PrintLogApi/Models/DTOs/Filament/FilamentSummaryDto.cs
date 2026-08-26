@@ -83,4 +83,12 @@ public class FilamentSummaryDto
     public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// Signed thumbnail URL for the default image. Populated ONLY by FilamentService's
+    /// explicit hydration for the owner's filament list. Null everywhere else —
+    /// including inside print responses, which are anonymous.
+    /// Never populate this via AutoMapper.
+    /// </summary>
+    public string? DefaultImageThumbnailUrl { get; set; }
 }

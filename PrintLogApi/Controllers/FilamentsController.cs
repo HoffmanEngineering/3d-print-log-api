@@ -100,7 +100,11 @@ public class FilamentsController(IFilamentService filamentService, IMapper mappe
             return Forbid();
         }
 
-        return mapper.Map<FilamentDetailDto>(filament);
+        // Hydration runs here rather than in the service because GetFilamentById returns the
+        // entity and the controller owns the map. Signing is never a member mapping.
+        var dto = mapper.Map<FilamentDetailDto>(filament);
+        await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+        return dto;
     }
 
     /// <summary>
@@ -147,7 +151,10 @@ public class FilamentsController(IFilamentService filamentService, IMapper mappe
         {
             var updatedPrint = await filamentService.UpdateFilament(id, filamentDto, userId.Value);
 
-            return CreatedAtAction("GetFilament", new { id = existingFilament.Id }, mapper.Map<FilamentDetailDto>(updatedPrint));
+            var updatedDto = mapper.Map<FilamentDetailDto>(updatedPrint);
+            await filamentService.HydrateDetailImageUrlsAsync(updatedDto, HttpContext.RequestAborted);
+
+            return CreatedAtAction("GetFilament", new { id = existingFilament.Id }, updatedDto);
         }
         catch (DoesNotExistException)
         {

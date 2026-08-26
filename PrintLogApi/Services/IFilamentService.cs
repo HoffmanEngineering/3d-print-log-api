@@ -17,6 +17,20 @@ public interface IFilamentService
     Task<int> GetMaxImagesPerFilament(long userId);
 
     /// <summary>
+    /// Signs the default-image thumbnail URL on a materialized page of summaries.
+    /// Explicit and post-materialization on purpose: signing must never be an AutoMapper
+    /// member mapping, because <see cref="FilamentSummaryDto"/> also nests inside the
+    /// anonymous print responses.
+    /// </summary>
+    Task HydrateImageUrlsAsync(IList<FilamentSummaryDto> summaries, CancellationToken ct = default);
+
+    /// <summary>
+    /// Signs the full image set on a filament detail response. Same rule as
+    /// <see cref="HydrateImageUrlsAsync"/>.
+    /// </summary>
+    Task HydrateDetailImageUrlsAsync(FilamentDetailDto detail, CancellationToken ct = default);
+
+    /// <summary>
     /// Read-only, creator-only, paginated filament inventory for the MCP server. Reuses the
     /// existing remaining-weight expression; results are grams and ordered by display name.
     /// </summary>

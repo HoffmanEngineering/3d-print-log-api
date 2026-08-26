@@ -16,8 +16,135 @@ public class FilamentService(
     PrintLogContext context,
     IMapper mapper,
     TelemetryClient telemetry,
-    ICacheVersionService cacheVersionService) : IFilamentService
+    ICacheVersionService cacheVersionService,
+    IBlobStorageService blobStorage,
+    ILogger<FilamentService> logger) : IFilamentService
 {
+    private static readonly TimeSpan SasBucket = TimeSpan.FromHours(6);
+    private static readonly TimeSpan SasCacheMaxAge = TimeSpan.FromHours(5);
+
+    /// <summary>
+    /// Signs thumbnail URLs for a materialized page of summaries.
+    /// Signing cannot live in AutoMapper: the list is built inside a ProjectTo
+    /// expression paginated in SQL, and SAS generation is async. Keeping it here also
+    /// keeps signed URLs out of the anonymous print responses that reuse
+    /// FilamentSummaryDto. See the design doc, section 6.
+    /// </summary>
+    public async Task HydrateImageUrlsAsync(
+        IList<FilamentSummaryDto> summaries, CancellationToken ct = default)
+    {
+        if (summaries.Count == 0) return;
+
+        var ids = summaries.Select(s => s.Id).ToList();
+
+        // One query for the whole page, never one per row.
+        var defaults = await context.FilamentImages
+            .AsNoTracking()
+            .Where(fi => ids.Contains(fi.FilamentId) && fi.IsDefault)
+            .Select(fi => new
+            {
+                fi.FilamentId,
+                fi.ContentType,
+                OriginalPath = fi.File.Path,
+                ThumbnailPath = fi.ThumbnailFile != null ? fi.ThumbnailFile.Path : null
+            })
+            .ToListAsync(ct);
+
+        var byFilament = defaults.ToDictionary(d => d.FilamentId);
+
+        foreach (var summary in summaries)
+        {
+            if (!byFilament.TryGetValue(summary.Id, out var image)) continue;
+
+            var path = image.ThumbnailPath ?? image.OriginalPath;
+            if (path is null) continue;
+
+            var contentType = image.ThumbnailPath is not null ? "image/webp" : image.ContentType;
+
+            try
+            {
+                summary.DefaultImageThumbnailUrl = (await blobStorage.GenerateSasInlineUrlAsync(
+                    BlobContainers.FilamentImages, Path.GetFileName(path),
+                    contentType, SasBucket, SasCacheMaxAge)).ToString();
+            }
+            catch (Exception ex)
+            {
+                // The DTO documents this field as nullable on signing failure. One bad
+                // blob must not fail the user's entire material list.
+                logger.LogWarning(ex, "Failed to sign filament image URL for {FilamentId}", summary.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Signs the full image set for one filament's detail response. Same reasoning as
+    /// <see cref="HydrateImageUrlsAsync"/>: explicit and post-materialization, never a
+    /// member mapping.
+    /// </summary>
+    public async Task HydrateDetailImageUrlsAsync(
+        FilamentDetailDto detail, CancellationToken ct = default)
+    {
+        var images = await context.FilamentImages
+            .AsNoTracking()
+            .Where(fi => fi.FilamentId == detail.Id)
+            // (DisplayOrder, Id): two concurrent uploads may share a DisplayOrder, so
+            // ordering on it alone is not deterministic.
+            .OrderBy(fi => fi.DisplayOrder).ThenBy(fi => fi.Id)
+            .Select(fi => new
+            {
+                fi.Id,
+                fi.IsDefault,
+                fi.DisplayOrder,
+                fi.ContentType,
+                OriginalPath = fi.File.Path,
+                ThumbnailPath = fi.ThumbnailFile != null ? fi.ThumbnailFile.Path : null
+            })
+            .ToListAsync(ct);
+
+        var hydrated = new List<FilamentImageDto>(images.Count);
+
+        foreach (var image in images)
+        {
+            var dto = new FilamentImageDto
+            {
+                Id = image.Id,
+                IsDefault = image.IsDefault,
+                DisplayOrder = image.DisplayOrder
+            };
+
+            dto.Url = await SignOrNullAsync(image.OriginalPath, image.ContentType, detail.Id, ct);
+
+            // Falls back to the original when thumbnail generation failed at upload time.
+            dto.ThumbnailUrl = image.ThumbnailPath is null
+                ? dto.Url
+                : await SignOrNullAsync(image.ThumbnailPath, "image/webp", detail.Id, ct);
+
+            hydrated.Add(dto);
+        }
+
+        detail.Images = hydrated;
+    }
+
+    private async Task<string?> SignOrNullAsync(
+        string? path, string contentType, Guid filamentId, CancellationToken ct)
+    {
+        if (path is null) return null;
+
+        try
+        {
+            return (await blobStorage.GenerateSasInlineUrlAsync(
+                BlobContainers.FilamentImages, Path.GetFileName(path),
+                contentType, SasBucket, SasCacheMaxAge)).ToString();
+        }
+        catch (Exception ex)
+        {
+            // Each URL is signed independently so one unsignable blob costs one image,
+            // not the whole detail response.
+            logger.LogWarning(ex, "Failed to sign filament image URL for {FilamentId}", filamentId);
+            return null;
+        }
+    }
+
     private IQueryable<FilamentSummaryDto> OwnedInventoryForMcp(
         long userId, string? material, string? color, bool includeInactive)
     {
@@ -984,6 +1111,12 @@ public class FilamentService(
         List<FilamentFinishType>? finishTypes = null,
         List<FilamentEffect>? effects = null)
     {
+        // PagedRequest.PageSize is an unconstrained int that flows straight into Take().
+        // Hydration now signs one URL per row, so an unbounded page is a request-thread
+        // cost as well as a response-size one.
+        const int MaxPageSize = 100;
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+
         var filament = context.Filaments
             .Include(f => f.MaterialCategory)
             .Where(f => f.CreatedById == userId);
@@ -1129,8 +1262,12 @@ public class FilamentService(
 
         }
 
-        return await PagedList<FilamentSummaryDto>.CreateAsync(filamentsBase, pageNumber, pageSize);
+        var page = await PagedList<FilamentSummaryDto>.CreateAsync(filamentsBase, pageNumber, pageSize);
 
+        // After materialization, never inside the ProjectTo expression.
+        await HydrateImageUrlsAsync(page.Items);
+
+        return page;
     }
 
     public async Task<Filament?> GetFilamentById(Guid id)
