@@ -11,6 +11,12 @@ public interface IFilamentService
     Task<Filament> AddFilament(AddFilamentDto filament, long userId);
 
     /// <summary>
+    /// Subscription-tier cap on images per filament, mirroring
+    /// <see cref="IPrintService.GetMaxImagesPerPrint"/>.
+    /// </summary>
+    Task<int> GetMaxImagesPerFilament(long userId);
+
+    /// <summary>
     /// Read-only, creator-only, paginated filament inventory for the MCP server. Reuses the
     /// existing remaining-weight expression; results are grams and ordered by display name.
     /// </summary>

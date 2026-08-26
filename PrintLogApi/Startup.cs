@@ -171,6 +171,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         services.AddTransient<ICommentService, CommentService>();
         services.AddTransient<IPrintImageService, PrintImageService>();
         services.AddTransient<IFilamentService, FilamentService>();
+        services.AddTransient<IFilamentImageService, FilamentImageService>();
         services.AddTransient<IUserApiKeyService, UserApiKeyService>();
         services.AddTransient<IUserDeletionService, UserDeletionService>();
         services.AddTransient<IAuth0Service, Auth0Service>();

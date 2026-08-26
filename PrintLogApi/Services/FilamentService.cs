@@ -1150,6 +1150,18 @@ public class FilamentService(
     /// <param name="filament">The filament to add</param>
     /// <param name="userId">The user adding the filament</param>
     /// <returns></returns>
+    public async Task<int> GetMaxImagesPerFilament(long userId)
+    {
+        var subscription = await context.Subscriptions
+            .Where(s => s.UserId == userId)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
+
+        return subscription?.Status == SubscriptionStatus.Active
+            ? SubscriptionLimits.ProMaxImagesPerFilament
+            : SubscriptionLimits.FreeMaxImagesPerFilament;
+    }
+
     public async Task<Filament> AddFilament(AddFilamentDto filament, long userId)
     {
         // Backward-compat: old clients send ColorHex only — normalize to Colors array
