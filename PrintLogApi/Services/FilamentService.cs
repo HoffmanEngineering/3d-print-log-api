@@ -125,6 +125,42 @@ public class FilamentService(
         detail.Images = hydrated;
     }
 
+    /// <summary>
+    /// Signs one just-uploaded image into its response DTO. Same explicit-hydration rule as
+    /// the list and detail paths; the upload response would otherwise carry no usable URL.
+    /// </summary>
+    public async Task<FilamentImageDto> HydrateImageDtoAsync(
+        FilamentImage image, CancellationToken ct = default)
+    {
+        // The File rows were just written by FilamentImageService inside this same scope, so
+        // read them back rather than assuming the navigations were loaded.
+        var paths = await context.FilamentImages
+            .AsNoTracking()
+            .Where(fi => fi.Id == image.Id)
+            .Select(fi => new
+            {
+                OriginalPath = fi.File.Path,
+                ThumbnailPath = fi.ThumbnailFile != null ? fi.ThumbnailFile.Path : null
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var dto = new FilamentImageDto
+        {
+            Id = image.Id,
+            IsDefault = image.IsDefault,
+            DisplayOrder = image.DisplayOrder
+        };
+
+        if (paths is null) return dto;
+
+        dto.Url = await SignOrNullAsync(paths.OriginalPath, image.ContentType, image.FilamentId, ct);
+        dto.ThumbnailUrl = paths.ThumbnailPath is null
+            ? dto.Url
+            : await SignOrNullAsync(paths.ThumbnailPath, "image/webp", image.FilamentId, ct);
+
+        return dto;
+    }
+
     private async Task<string?> SignOrNullAsync(
         string? path, string contentType, Guid filamentId, CancellationToken ct)
     {

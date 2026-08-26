@@ -31,6 +31,11 @@ public interface IFilamentService
     Task HydrateDetailImageUrlsAsync(FilamentDetailDto detail, CancellationToken ct = default);
 
     /// <summary>
+    /// Signs a single just-uploaded image into its response DTO.
+    /// </summary>
+    Task<FilamentImageDto> HydrateImageDtoAsync(FilamentImage image, CancellationToken ct = default);
+
+    /// <summary>
     /// Read-only, creator-only, paginated filament inventory for the MCP server. Reuses the
     /// existing remaining-weight expression; results are grams and ordered by display name.
     /// </summary>

@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -17,7 +18,12 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class FilamentsController(IFilamentService filamentService, IMapper mapper) : ControllerBase
+public class FilamentsController(
+    IFilamentService filamentService,
+    IMapper mapper,
+    IFilamentImageService filamentImageService,
+    PrintLogContext context,
+    IBlobStorageService blobStorageService) : ControllerBase
 {
     /// <summary>
     /// Gets a Paged Result of filament summaries for the current user.
@@ -290,5 +296,140 @@ public class FilamentsController(IFilamentService filamentService, IMapper mappe
         var brands = await filamentService.GetFilamentBrands(currentUserId.Value);
 
         return new FilamentBrandsDto { Brands = brands };
+    }
+
+    /// <summary>
+    /// Upload an image to a filament.
+    /// </summary>
+    /// <remarks>
+    /// The uploaded bytes are decoded server-side; the client's declared content type is
+    /// not trusted. An undecodable or disallowed file is rejected before anything is stored.
+    /// </remarks>
+    /// <response code="201">The stored image, with signed URLs.</response>
+    /// <response code="400">The file is missing, too large, or not a supported image.</response>
+    /// <response code="404">No such filament belonging to the current user.</response>
+    [HttpPost("{id}/images")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FilamentImageDto>> PostFilamentImage(Guid id, IFormFile file)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        if (file is null || file.Length == 0) return BadRequest("Image file is required.");
+
+        const long maxImageSizeBytes = 10 * 1024 * 1024;
+        if (file.Length > maxImageSizeBytes) return BadRequest("Image must be under 10MB.");
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var image = await filamentImageService.AddImageAsync(
+                id, stream, userId.Value, HttpContext.RequestAborted);
+
+            var dto = await filamentService.HydrateImageDtoAsync(image, HttpContext.RequestAborted);
+
+            return CreatedAtAction(nameof(GetFilamentImage), new { id, imageId = image.Id }, dto);
+        }
+        catch (InvalidImageException ex) { return BadRequest(ex.Message); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Redirects to a signed URL for a filament image.
+    /// </summary>
+    /// <remarks>
+    /// For non-browser API consumers (MCP server, scripts) holding a bearer token.
+    /// The UI does not use this - it reads pre-signed URLs from the filament DTO.
+    /// NOT usable from &lt;img src&gt;: the redirect itself requires the bearer token.
+    /// </remarks>
+    [HttpGet("{id}/images/{imageId}")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetFilamentImage(Guid id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        // Ownership is part of the predicate, so a foreign image is indistinguishable
+        // from a missing one. The endpoint must not be an existence oracle.
+        var image = await context.FilamentImages
+            .AsNoTracking()
+            .Include(fi => fi.File)
+            .FirstOrDefaultAsync(fi => fi.FilamentId == id
+                                    && fi.Id == imageId
+                                    && fi.Filament.CreatedById == userId.Value,
+                                 HttpContext.RequestAborted);
+        if (image?.File?.Path is null) return NotFound();
+
+        var uri = await blobStorageService.GenerateSasInlineUrlAsync(
+            BlobContainers.FilamentImages, Path.GetFileName(image.File.Path),
+            image.ContentType, TimeSpan.FromHours(6), TimeSpan.FromHours(5));
+
+        return Redirect(uri.ToString());
+    }
+
+    /// <summary>
+    /// Deletes a filament image, its file rows, and its blobs.
+    /// </summary>
+    [HttpDelete("{id}/images/{imageId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteFilamentImage(Guid id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await filamentImageService.DeleteImageAsync(
+                id, imageId, userId.Value, HttpContext.RequestAborted);
+            return NoContent();
+        }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Reorders a filament's images. The supplied IDs must be the filament's exact image set.
+    /// </summary>
+    [HttpPut("{id}/images/reorder")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReorderFilamentImages(Guid id, [FromBody] List<int> orderedImageIds)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await filamentImageService.ReorderImagesAsync(
+                id, orderedImageIds, userId.Value, HttpContext.RequestAborted);
+            return NoContent();
+        }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Makes one of a filament's images its default.
+    /// </summary>
+    [HttpPost("{id}/images/{imageId}/set-as-default")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetDefaultFilamentImage(Guid id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await filamentImageService.SetDefaultImageAsync(
+                id, imageId, userId.Value, HttpContext.RequestAborted);
+            return NoContent();
+        }
+        catch (DoesNotExistException) { return NotFound(); }
     }
 }
