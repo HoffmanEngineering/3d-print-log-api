@@ -56,6 +56,15 @@ public class InMemoryBlobStorageService : IBlobStorageService
         => Task.FromResult(new Uri("https://fake-blob-storage.example.com/download-sas"));
 
     /// <summary>
+    /// Returns a deterministic dummy inline SAS URI, so URL-stability assertions in tests
+    /// that go through this double do not depend on a real signer.
+    /// </summary>
+    public Task<Uri> GenerateSasInlineUrlAsync(
+        string containerName, string blobName, string contentType,
+        TimeSpan bucketSize, TimeSpan cacheControlMaxAge)
+        => Task.FromResult(new Uri(BaseUri, $"{containerName}/{blobName}?sig=fake-inline"));
+
+    /// <summary>
     /// Downloads a blob from in-memory storage. Returns null if it does not exist.
     /// </summary>
     public Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)

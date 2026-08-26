@@ -96,6 +96,55 @@ public class AzureBlobStorageService : IBlobStorageService
     }
 
     /// <summary>
+    /// Generates a time-limited SAS URL for displaying a blob inline in the browser.
+    /// Expiry is bucketed so repeated calls within a window return a byte-identical URL,
+    /// which is what lets the browser's image cache hit at all.
+    /// </summary>
+    public Task<Uri> GenerateSasInlineUrlAsync(
+        string containerName, string blobName, string contentType,
+        TimeSpan bucketSize, TimeSpan cacheControlMaxAge)
+    {
+        if (cacheControlMaxAge >= bucketSize)
+            throw new ArgumentException(
+                "Cache max-age must be shorter than the bucket size, otherwise a cached " +
+                "response can outlive the SAS signature that fetched it.",
+                nameof(cacheControlMaxAge));
+
+        var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        var blobClient = containerClient.GetBlobClient(blobName);
+
+        if (!blobClient.CanGenerateSasUri)
+            throw new InvalidOperationException(
+                "Blob client cannot generate a SAS URI. Filament images require a " +
+                "shared-key connection string.");
+
+        var sasBuilder = new BlobSasBuilder
+        {
+            BlobContainerName = containerName,
+            BlobName = blobName,
+            Resource = "b",
+            ExpiresOn = CeilingToBucket(_timeProvider.GetUtcNow(), bucketSize) + bucketSize,
+            ContentType = contentType,
+            ContentDisposition = "inline",
+            CacheControl = $"private, max-age={(int)cacheControlMaxAge.TotalSeconds}",
+        };
+        sasBuilder.SetPermissions(BlobSasPermissions.Read);
+
+        return Task.FromResult(blobClient.GenerateSasUri(sasBuilder));
+    }
+
+    /// <summary>
+    /// Rounds an instant up to the next multiple of <paramref name="bucketSize"/>, so every
+    /// caller inside one bucket signs the same expiry and therefore the same URL.
+    /// </summary>
+    private static DateTimeOffset CeilingToBucket(DateTimeOffset instant, TimeSpan bucketSize)
+    {
+        var ticks = bucketSize.Ticks;
+        var rounded = (instant.UtcTicks + ticks - 1) / ticks * ticks;
+        return new DateTimeOffset(rounded, TimeSpan.Zero);
+    }
+
+    /// <summary>
     /// Downloads a blob from Azure Blob Storage. Returns null if the blob does not exist.
     /// </summary>
     public async Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)
