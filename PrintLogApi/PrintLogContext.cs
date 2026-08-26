@@ -49,6 +49,8 @@ public class PrintLogContext : DbContext
     public DbSet<Project> Projects { get; set; }
     public DbSet<ProjectImage> ProjectImages { get; set; }
 
+    public DbSet<FilamentImage> FilamentImages { get; set; } = null!;
+
     public DbSet<Feedback> Feedback { get; set; }
 
     public DbSet<UserApiKey> UserApiKeys { get; set; }
@@ -526,6 +528,35 @@ public class PrintLogContext : DbContext
             })
             .HasDatabaseName("IX_PrintImages_PrintId_Default")
             .HasFilter("[IsDefault] = 1");
+
+        modelBuilder.Entity<FilamentImage>(entity =>
+        {
+            // Exactly one default per filament, enforced by the database rather than by
+            // convention: two concurrent "first" uploads would otherwise both win.
+            entity.HasIndex(fi => fi.FilamentId)
+                .HasFilter("[IsDefault] = 1")
+                .IsUnique()
+                .HasDatabaseName("IX_FilamentImages_FilamentId_IsDefault");
+
+            entity.HasIndex(fi => new { fi.FilamentId, fi.DisplayOrder });
+
+            entity.HasOne(fi => fi.Filament)
+                .WithMany()
+                .HasForeignKey(fi => fi.FilamentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict, not Cascade: the service removes File rows explicitly so the
+            // blobs go with them. A cascade would delete the row and orphan the blob.
+            entity.HasOne(fi => fi.File)
+                .WithMany()
+                .HasForeignKey(fi => fi.FileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(fi => fi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(fi => fi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<ProjectImage>()
             .HasIndex(pi => pi.ProjectId)

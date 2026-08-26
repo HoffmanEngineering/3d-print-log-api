@@ -47,6 +47,7 @@
        between PrintCostCalculator and print.service.ts fails both suites. -->
   <ItemGroup>
     <None Include="..\tests-fixtures\cost-fixtures.json" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\cost-fixtures.json" />
+    <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
   </ItemGroup>
 
 </Project>

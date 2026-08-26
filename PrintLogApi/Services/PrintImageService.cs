@@ -6,7 +6,7 @@ namespace PrintLogApi.Services;
 
 public class PrintImageService : IPrintImageService
 {
-    private readonly string printImageContainerName = "printimages";
+    private const string printImageContainerName = BlobContainers.PrintImages;
     private readonly BlobContainerClient printImageContainer;
 
     public PrintImageService(IConfiguration config)

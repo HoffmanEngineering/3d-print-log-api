@@ -42,7 +42,7 @@ public class PrintsController(
     IBlobStorageService blobStorageService,
     IFileAttachmentService fileAttachmentService) : ControllerBase
 {
-    private readonly string printImageContainerName = "printimages";
+    private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
     /// <summary>

@@ -8,6 +8,9 @@ public static class SubscriptionLimits
     public const int FreeMaxImagesPerPrint = 5;
     public const int ProMaxImagesPerPrint = 20;
 
+    public const int FreeMaxImagesPerFilament = 3;
+    public const int ProMaxImagesPerFilament = 10;
+
     public const int FreeMaxFilesPerPrint = 0;
     public const int ProMaxFilesPerPrint = 5;
 

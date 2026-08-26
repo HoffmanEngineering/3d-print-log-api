@@ -26,7 +26,7 @@ public class OctoprintController(
     IBlobStorageService blobStorageService,
     ICacheVersionService cacheVersionService) : ControllerBase
 {
-    private readonly string printImageContainerName = "printimages";
+    private const string printImageContainerName = BlobContainers.PrintImages;
 
     /// <summary>
     /// Webhook endpoint for the Octoprint Webhooks plugin. Takes in webhook data and uses that to create or 

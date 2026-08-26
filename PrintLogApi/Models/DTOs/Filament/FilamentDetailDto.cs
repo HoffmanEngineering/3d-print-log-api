@@ -181,4 +181,14 @@ public class FilamentDetailDto
     public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// Response-only, populated by <c>FilamentService.HydrateDetailImageUrlsAsync</c>.
+    /// This DTO doubles as the PUT request body, so a caller can send anything here —
+    /// nothing reads it inbound. <c>Filament</c> has no <c>Images</c> navigation, so
+    /// AutoMapper has nowhere to map it to; if one is ever added, this needs an
+    /// explicit <c>Ignore()</c> on the <c>FilamentDetailDto -> Filament</c> map or it
+    /// becomes an injection path.
+    /// </summary>
+    public IList<FilamentImageDto> Images { get; set; } = new List<FilamentImageDto>();
 }

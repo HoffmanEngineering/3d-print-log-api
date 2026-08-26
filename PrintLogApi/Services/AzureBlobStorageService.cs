@@ -1,4 +1,5 @@
 ﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 
 namespace PrintLogApi.Services;
@@ -9,13 +10,20 @@ namespace PrintLogApi.Services;
 public class AzureBlobStorageService : IBlobStorageService
 {
     private readonly BlobServiceClient _blobServiceClient;
+    private readonly TimeProvider _timeProvider;
+    private readonly IBlobContainerProvisioner _containerProvisioner;
 
-    public AzureBlobStorageService(IConfiguration configuration)
+    public AzureBlobStorageService(
+        IConfiguration configuration,
+        TimeProvider timeProvider,
+        IBlobContainerProvisioner containerProvisioner)
     {
         var connectionString = configuration["AZURE_STORAGE_CONNECTION_STRING"];
         if (string.IsNullOrWhiteSpace(connectionString))
             throw new InvalidOperationException("Azure Storage connection string is required for blob operations.");
         _blobServiceClient = new BlobServiceClient(connectionString);
+        _timeProvider = timeProvider;
+        _containerProvisioner = containerProvisioner;
     }
 
     /// <summary>
@@ -24,6 +32,10 @@ public class AzureBlobStorageService : IBlobStorageService
     public async Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        await _containerProvisioner.EnsureAsync(
+            containerName,
+            () => containerClient.CreateIfNotExistsAsync(PublicAccessType.None));
+
         var blobClient = containerClient.GetBlobClient(blobName);
 
         await blobClient.UploadAsync(stream, overwrite: true);
@@ -81,6 +93,63 @@ public class AzureBlobStorageService : IBlobStorageService
         sasBuilder.SetPermissions(BlobSasPermissions.Read);
 
         return Task.FromResult(blobClient.GenerateSasUri(sasBuilder));
+    }
+
+    /// <summary>
+    /// Generates a time-limited SAS URL for displaying a blob inline in the browser.
+    /// Expiry is bucketed so repeated calls within a window return a byte-identical URL,
+    /// which is what lets the browser's image cache hit at all.
+    /// </summary>
+    public Task<Uri> GenerateSasInlineUrlAsync(
+        string containerName, string blobName, string contentType,
+        TimeSpan bucketSize, TimeSpan cacheControlMaxAge)
+    {
+        if (cacheControlMaxAge >= bucketSize)
+            throw new ArgumentException(
+                "Cache max-age must be shorter than the bucket size, otherwise a cached " +
+                "response can outlive the SAS signature that fetched it.",
+                nameof(cacheControlMaxAge));
+
+        var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        var blobClient = containerClient.GetBlobClient(blobName);
+
+        if (!blobClient.CanGenerateSasUri)
+            throw new InvalidOperationException(
+                "Blob client cannot generate a SAS URI. Filament images require a " +
+                "shared-key connection string.");
+
+        var sasBuilder = new BlobSasBuilder
+        {
+            BlobContainerName = containerName,
+            BlobName = blobName,
+            Resource = "b",
+            ExpiresOn = CeilingToBucket(_timeProvider.GetUtcNow(), bucketSize) + bucketSize,
+            ContentType = contentType,
+            ContentDisposition = "inline",
+            CacheControl = $"private, max-age={(int)cacheControlMaxAge.TotalSeconds}",
+        };
+        sasBuilder.SetPermissions(BlobSasPermissions.Read);
+
+        return Task.FromResult(blobClient.GenerateSasUri(sasBuilder));
+    }
+
+    /// <summary>
+    /// Rounds an instant up to the next multiple of <paramref name="bucketSize"/>, so every
+    /// caller inside one bucket signs the same expiry and therefore the same URL.
+    ///
+    /// <para><b>The resulting signature lives between one and two bucket widths</b>, because
+    /// the caller adds a further <c>bucketSize</c> to what this returns. That second term is
+    /// not padding: without it a URL signed just before a boundary would expire almost
+    /// immediately, which is the failure bucketing exists to prevent. The cost is that a
+    /// six-hour bucket can hand out a signature valid for nearly twelve hours, so a leaked
+    /// URL stays usable that long without authentication. Shorten the bucket if that window
+    /// is ever judged too wide - do not drop the second term.</para>
+    /// </summary>
+    private static DateTimeOffset CeilingToBucket(DateTimeOffset instant, TimeSpan bucketSize)
+    {
+        var ticks = bucketSize.Ticks;
+        var rounded = (instant.UtcTicks + ticks - 1) / ticks * ticks;
+        return new DateTimeOffset(rounded, TimeSpan.Zero);
     }
 
     /// <summary>

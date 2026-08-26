@@ -51,6 +51,25 @@ public interface IBlobStorageService
         TimeSpan expiry);
 
     /// <summary>
+    /// Generates a time-limited SAS URL for displaying a blob inline in the browser.
+    /// </summary>
+    /// <param name="bucketSize">
+    /// Expiry is rounded up to a multiple of this, so repeated calls within a window
+    /// return a byte-identical URL. Browsers key their image cache on the URL, so an
+    /// unstable URL means the cache never hits and SAS buys nothing over proxying.
+    /// </param>
+    /// <param name="cacheControlMaxAge">
+    /// Emitted as Cache-Control. Must be strictly less than <paramref name="bucketSize"/>
+    /// so a cached response cannot outlive the signature that fetched it.
+    /// </param>
+    Task<Uri> GenerateSasInlineUrlAsync(
+        string containerName,
+        string blobName,
+        string contentType,
+        TimeSpan bucketSize,
+        TimeSpan cacheControlMaxAge);
+
+    /// <summary>
     /// Downloads a blob and returns its content as a stream.
     /// Returns null if the blob does not exist.
     /// </summary>
