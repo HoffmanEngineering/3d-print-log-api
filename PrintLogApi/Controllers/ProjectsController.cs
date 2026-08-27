@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Exceptions;
@@ -15,7 +16,8 @@ namespace PrintLogApi.Controllers;
 public class ProjectsController(
     IProjectService projectService,
     IMapper mapper,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    ICacheVersionService cacheVersionService,
+    TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>Get a paged list of the current user's projects.</summary>
     [HttpGet]
@@ -183,6 +185,7 @@ public class ProjectsController(
         {
             var image = await projectService.AddImageAsync(id, file, userId.Value);
             cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectPictureAdded");
             return CreatedAtAction(nameof(GetProjectImage), new { id, imageId = image.Id }, mapper.Map<ProjectImageDto>(image));
         }
         catch (DoesNotExistException)
