@@ -147,4 +147,49 @@ public class GroupedFeedProjectDateTests(CustomWebApplicationFactory factory)
         Assert.Equal(5, ours.Distinct().Count());
         Assert.Equal(ours.Count, ours.Distinct().Count());
     }
+
+    /// <summary>
+    /// The feed must expose the project's start date as a CIVIL date, not only as the
+    /// sort instant.
+    /// </summary>
+    /// <remarks>
+    /// A pinned 2026-01-01 sorts at UTC midnight. Rendering that instant in the viewer's
+    /// timezone shows December 31 anywhere west of UTC, contradicting the project's own
+    /// detail page. The dedicated field is what clients display.
+    /// </remarks>
+    [Fact]
+    public async Task GroupedFeed_ExposesTheResolvedStartDateAsACivilDate()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(factory, TestUserId, $"civ-{Guid.NewGuid():N}");
+        await SetStartOverrideAsync(factory, projectId, new DateOnly(2026, 1, 1));
+
+        var feed = await GetGroupedFeedAsync();
+        var item = Assert.Single(feed.Items!, i => i.ProjectId == projectId);
+
+        Assert.Equal(new DateOnly(2026, 1, 1), item.ProjectStartDate);
+    }
+
+    [Fact]
+    public async Task GroupedFeed_CivilStartDate_MatchesTheDerivedPrintDate()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(factory, TestUserId, $"civd-{Guid.NewGuid():N}");
+
+        var feed = await GetGroupedFeedAsync();
+        var item = Assert.Single(feed.Items!, i => i.ProjectId == projectId);
+
+        // Same value the project detail page resolves, so the two surfaces cannot disagree.
+        Assert.Equal(new DateOnly(2026, 3, 2), item.ProjectStartDate);
+    }
+
+    [Fact]
+    public async Task GroupedFeed_PrintRows_HaveNoProjectStartDate()
+    {
+        var printId = await SeedStandalonePrintAsync(
+            factory, TestUserId, "2026-04-03T10:00:00Z", $"solo-{Guid.NewGuid():N}");
+
+        var feed = await GetGroupedFeedAsync();
+        var item = Assert.Single(feed.Items!, i => i.Print != null && i.Print.Id == printId);
+
+        Assert.Null(item.ProjectStartDate);
+    }
 }

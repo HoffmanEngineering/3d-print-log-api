@@ -2191,6 +2191,10 @@ public sealed class PrintService(
                 {
                     Type = "project",
                     SortDate = key.SortDate,
+                    // The UTC civil date of the sort instant is exactly the resolved start
+                    // date: an override sorts at UTC midnight of that day, and the derived
+                    // cases already reduce to their UTC civil date in ProjectDateResolver.
+                    ProjectStartDate = DateOnly.FromDateTime(key.SortDate.UtcDateTime),
                     ProjectId = p.Id,
                     ProjectName = p.Name,
                     ProjectReference = p.Reference,

@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services;
+﻿namespace PrintLogApi.Services;
 
 /// <summary>
 /// Resolves a project's start and finish dates from its manual overrides and its prints.
@@ -86,7 +86,17 @@ public static class ProjectDateResolver
         if (seconds <= 0)
             return value;
 
-        var remainingSeconds = (DateTimeOffset.MaxValue - value).TotalSeconds;
-        return seconds >= remainingSeconds ? DateTimeOffset.MaxValue : value.AddSeconds(seconds);
+        // Deliberately does the arithmetic in UTC. Measuring headroom against
+        // DateTimeOffset.MaxValue (a UTC value) but adding to the original LOCAL clock
+        // representation let a far-eastern offset slip through: at 9999-12-31T23:59:58+14:00
+        // the UTC instant still has fourteen hours of room while the clock datetime is already
+        // at the DateTime ceiling, so the guard passed and AddSeconds overflowed anyway.
+        // Every caller reduces this to a UTC civil date, so returning a UTC-based value loses
+        // nothing.
+        var utc = value.UtcDateTime;
+        var remainingSeconds = (DateTime.MaxValue - utc).TotalSeconds;
+        return seconds >= remainingSeconds
+            ? DateTimeOffset.MaxValue
+            : new DateTimeOffset(utc.AddSeconds(seconds), TimeSpan.Zero);
     }
 }

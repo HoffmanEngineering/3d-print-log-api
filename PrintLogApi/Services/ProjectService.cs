@@ -99,17 +99,6 @@ public class ProjectService(
     {
         const string toolName = "create_project";
 
-        // Same reason as the REST create path: CreatedDate is not stamped until SaveChanges, so
-        // validate against the timestamp the row is about to receive rather than 0001-01-01.
-        try
-        {
-            ValidateProjectDates(startDate, finishDate, DateTime.UtcNow, null);
-        }
-        catch (BadRequestException ex)
-        {
-            throw Mcp.McpToolException.InvalidArguments(ex.Message);
-        }
-
         idempotencyKey = RequireIdempotencyKey(idempotencyKey);
         string? fingerprint = null;
         if (idempotencyKey != null)
@@ -121,6 +110,23 @@ public class ProjectService(
             {
                 return replay;
             }
+        }
+
+        // Validated AFTER the replay lookup, deliberately. A create with a finish override and
+        // no start override resolves its start from "now", so the same arguments drift out of
+        // validity once the clock passes that date. Validating first meant a legitimate retry
+        // of an already-created project failed as invalid instead of replaying — losing the
+        // retry safety the idempotency key exists to provide.
+        //
+        // DateTime.UtcNow rather than project.CreatedDate: CreatedDate is stamped by the
+        // SaveChanges override, so before the save it is still 0001-01-01.
+        try
+        {
+            ValidateProjectDates(startDate, finishDate, DateTime.UtcNow, null);
+        }
+        catch (BadRequestException ex)
+        {
+            throw Mcp.McpToolException.InvalidArguments(ex.Message);
         }
 
         var project = new Project

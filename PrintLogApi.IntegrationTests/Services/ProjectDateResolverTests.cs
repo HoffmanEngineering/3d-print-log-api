@@ -1,4 +1,4 @@
-using PrintLogApi.Services;
+﻿using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Services.ProjectDateResolver;
 
@@ -116,6 +116,33 @@ public class ProjectDateResolverTests
         Assert.Null(ex);
         Assert.Equal(DateOnly.FromDateTime(DateTimeOffset.MaxValue.UtcDateTime),
             Resolve(null, null, Created, prints).Finish);
+    }
+
+    /// <summary>
+    /// The saturation guard measured remaining capacity against DateTimeOffset.MaxValue, which
+    /// is a UTC value, but added to the ORIGINAL local-clock representation. Far east of UTC
+    /// the clock datetime is already at the DateTime ceiling while the UTC instant still has
+    /// hours of room, so the guard passed and AddSeconds overflowed anyway — turning every
+    /// read of that project into a 500, which is exactly what the guard exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// Only non-negative offsets appear here: at a clock time of 9999-12-31T23:59:58 a NEGATIVE
+    /// offset puts the UTC instant past DateTimeOffset.MaxValue, so such a value cannot be
+    /// constructed or persisted in the first place and never reaches the resolver.
+    /// </remarks>
+    [Theory]
+    [InlineData("+14:00")]
+    [InlineData("+09:00")]
+    [InlineData("+00:00")]
+    public void SaturatesAtEveryOffset_InsteadOfThrowing(string offset)
+    {
+        var prints = new[]
+        {
+            new PrintDates(DateTimeOffset.Parse($"9999-12-31T23:59:58{offset}"), 2, null),
+        };
+
+        var ex = Record.Exception(() => Resolve(null, null, Created, prints));
+        Assert.Null(ex);
     }
 
     [Fact]

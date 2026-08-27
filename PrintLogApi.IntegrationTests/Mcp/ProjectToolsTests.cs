@@ -1,5 +1,9 @@
 ﻿using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.Mcp;
+using PrintLogApi.IntegrationTests.Support;
+using PrintLogApi.Models;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp;
@@ -413,16 +417,112 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     [Fact]
     public async Task ListProjects_ResolvesDatesFromPrints()
     {
-        // The seeded "Rocket Build" project has prints, so its dates must be derived from them
-        // rather than reported as its creation date.
+        // Seeds a project with KNOWN prints and asserts the exact resolved dates. Asserting
+        // only that startDate is date-shaped would pass just as happily on the creation-date
+        // fallback, which is the bug this is meant to catch.
+        var name = $"list-{Guid.NewGuid():N}";
+        await ProjectDateSeedHelpers.SeedProjectWithPrintsAsync(
+            _factory, IntegrationTestSeeder.TestUserId, name);
+
         using var page = await CallJsonAsync("list_projects", new Dictionary<string, object?>
         {
-            ["search"] = "Rocket",
+            ["search"] = name,
         });
 
-        var item = page.RootElement.GetProperty("items")[0];
-        Assert.Equal(JsonValueKind.String, item.GetProperty("startDate").ValueKind);
-        // YYYY-MM-DD, not an ISO instant: a civil date must not acquire a time or an offset.
-        Assert.Matches(@"^\d{4}-\d{2}-\d{2}$", item.GetProperty("startDate").GetString()!);
+        var items = page.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var item = Assert.Single(items, i => i.GetProperty("name").GetString() == name);
+
+        // Prints run 2026-03-02 (4 days) and 2026-03-05 (1 hour): the LONG one finishes last.
+        Assert.Equal("2026-03-02", item.GetProperty("startDate").GetString());
+        Assert.Equal("2026-03-06", item.GetProperty("finishDate").GetString());
+    }
+
+    [Fact]
+    public async Task ListProjects_HonorsAStartOverrideRatherThanThePrintDates()
+    {
+        var name = $"list-ovr-{Guid.NewGuid():N}";
+        var projectId = await ProjectDateSeedHelpers.SeedProjectWithPrintsAsync(
+            _factory, IntegrationTestSeeder.TestUserId, name);
+        await ProjectDateSeedHelpers.SetStartOverrideAsync(
+            _factory, projectId, new DateOnly(2026, 1, 1));
+
+        using var page = await CallJsonAsync("list_projects", new Dictionary<string, object?>
+        {
+            ["search"] = name,
+        });
+
+        var items = page.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var item = Assert.Single(items, i => i.GetProperty("name").GetString() == name);
+
+        Assert.Equal("2026-01-01", item.GetProperty("startDate").GetString());
+        // The finish stays derived — the two overrides are independent.
+        Assert.Equal("2026-03-06", item.GetProperty("finishDate").GetString());
+    }
+
+    /// <summary>
+    /// A keyed create that was valid when it was first made must still REPLAY later, even if
+    /// the same arguments would no longer pass validation.
+    /// </summary>
+    /// <remarks>
+    /// Validation of a create with no start override resolves the start from "now", so a
+    /// finish-only override drifts out of validity as soon as the clock passes it. Validating
+    /// before the idempotency lookup meant a legitimate retry of an already-created project
+    /// came back as an invalid-argument error instead of the original project — the retry
+    /// safety the key exists to provide, lost precisely when a caller needs it.
+    ///
+    /// Seeds the stored record directly rather than waiting for midnight: a finish date in the
+    /// past is invalid for a NEW project today, which is the same condition a cross-midnight
+    /// retry hits.
+    /// </remarks>
+    [Fact]
+    public async Task CreateProject_ReplaysEvenWhenTheArgumentsAreNoLongerValid()
+    {
+        var name = $"stale-{Guid.NewGuid():N}";
+        var key = NewKey();
+        var staleFinish = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-5);
+
+        Guid projectId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var userId = context.Users.Single(u => u.OAuthUserId == IntegrationTestSeeder.TestUserOAuthId).Id;
+
+            var project = new Models.Project
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Status = Models.Project.ProjectStatus.InProgress,
+                ViewStatus = Models.Project.ProjectViewStatus.Private,
+                FinishDateOverride = staleFinish,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            context.Projects.Add(project);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            projectId = project.Id;
+
+            // The fingerprint the original create would have recorded for these arguments.
+            var fingerprint = McpRequestFingerprint.ComputeCreateProject(
+                name, null, null, null,
+                Models.Project.ProjectStatus.InProgress,
+                Models.Project.ProjectViewStatus.Private,
+                null, staleFinish);
+
+            context.McpIdempotencyRecords.Add(
+                McpIdempotencyRecordFactory.ForProject(userId, key, fingerprint, projectId));
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var doc = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["finishDate"] = staleFinish.ToString("yyyy-MM-dd"),
+            ["idempotencyKey"] = key,
+        });
+
+        Assert.True(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
+        Assert.Equal(
+            projectId.ToString(),
+            doc.RootElement.GetProperty("project").GetProperty("projectId").GetString());
     }
 }
