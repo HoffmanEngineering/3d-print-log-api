@@ -2,7 +2,7 @@
 
 namespace PrintLogApi.Models.DTOs.Project;
 
-public class ProjectDetailDto
+public class ProjectDetailDto : IProjectDates
 {
     public Guid Id { get; set; }
     public string? Name { get; set; }
@@ -18,4 +18,16 @@ public class ProjectDetailDto
     public int TotalEstimatedPrintTimeInSeconds { get; set; }
     public long TotalFilamentWeightMg { get; set; }
     public IList<ProjectImageDto>? Images { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly StartDate { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? FinishDate { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? StartDateOverride { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? FinishDateOverride { get; set; }
 }
