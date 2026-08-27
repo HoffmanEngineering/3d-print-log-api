@@ -523,4 +523,115 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         // Dates are computed on read, so one representative path proves recomputation for all of them.
         Assert.Equal(new DateOnly(2026, 2, 1), (await GetProjectDetailAsync(projectId)).StartDate);
     }
+
+    // ---------------------------------------------------------------------
+    // Inverted-interval validation
+    // ---------------------------------------------------------------------
+
+    private async Task<HttpResponseMessage> PutProjectRawAsync(Guid id, PutProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Put, $"/api/Projects/{id}");
+        req.Content = JsonContent.Create(dto);
+        return await _client.SendAsync(req, TestContext.Current.CancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> PostProjectRawAsync(AddProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+        req.Content = JsonContent.Create(dto);
+        return await _client.SendAsync(req, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task PutProject_RejectsInvertedOverridePair()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"inv-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 5, 1);
+        dto.FinishDateOverride = new DateOnly(2026, 4, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutProject_RejectsFinishOverrideBeforeDerivedStart()
+    {
+        // Prints start 2026-03-02. A finish-only override in January is inverted on arrival,
+        // even though only one override is present.
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"fin-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.FinishDateOverride = new DateOnly(2026, 1, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutProject_AllowsStartOverrideBeforeDerivedFinish()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"ok-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 1, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectsInvertedOverridePair()
+    {
+        var dto = new AddProjectDto
+        {
+            Name = $"post-inv-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            StartDateOverride = new DateOnly(2026, 5, 1),
+            FinishDateOverride = new DateOnly(2026, 4, 1),
+        };
+
+        var response = await PostProjectRawAsync(dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectsFinishOverrideBeforeToday()
+    {
+        // A brand-new project has no prints, so its derived start is TODAY. A finish override in
+        // the past is inverted the moment it is created — and this only passes if validation uses
+        // the timestamp the row is about to receive, not the unstamped default of 0001-01-01.
+        var dto = new AddProjectDto
+        {
+            Name = $"post-past-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            FinishDateOverride = new DateOnly(2020, 1, 1),
+        };
+
+        var response = await PostProjectRawAsync(dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectingInvertedDates_PersistsNothing()
+    {
+        var name = $"post-rollback-{Guid.NewGuid():N}";
+        var dto = new AddProjectDto
+        {
+            Name = name,
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            StartDateOverride = new DateOnly(2026, 5, 1),
+            FinishDateOverride = new DateOnly(2026, 4, 1),
+        };
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostProjectRawAsync(dto)).StatusCode);
+
+        // A rejected create must not leave a half-written row behind.
+        var page = await GetProjectSummariesAsync(search: name);
+        Assert.DoesNotContain(page.Items!, i => i.Name == name);
+    }
 }

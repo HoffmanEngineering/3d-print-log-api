@@ -69,11 +69,15 @@ public class ProjectsController(
         if (!userId.HasValue)
             return Unauthorized();
 
-        var project = await projectService.CreateProjectAsync(dto, userId.Value);
-        cacheVersionService.InvalidateUserCache(userId.Value);
+        try
+        {
+            var project = await projectService.CreateProjectAsync(dto, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
-            mapper.Map<ProjectDetailDto>(project));
+            return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
+                mapper.Map<ProjectDetailDto>(project));
+        }
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
     }
 
     /// <summary>Update a project's metadata.</summary>
@@ -97,10 +101,16 @@ public class ProjectsController(
         if (existing.CreatedById != userId.Value)
             return Forbid();
 
-        var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
-        cacheVersionService.InvalidateUserCache(userId.Value);
+        try
+        {
+            var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
 
-        return Ok(mapper.Map<ProjectDetailDto>(updated));
+            return Ok(mapper.Map<ProjectDetailDto>(updated));
+        }
+        // There is no global exception-to-status mapping in this app, so without the catch an
+        // inverted date range surfaces as a 500.
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
     }
 
     /// <summary>

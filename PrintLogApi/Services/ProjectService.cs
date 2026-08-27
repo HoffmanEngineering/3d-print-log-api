@@ -251,6 +251,13 @@ public class ProjectService(
 
     public async Task<Project> CreateProjectAsync(AddProjectDto dto, long userId)
     {
+        // DateTime.UtcNow, not project.CreatedDate: CreatedDate is stamped by the SaveChanges
+        // override in PrintLogContext, so before the save it is still default(DateTime) —
+        // 0001-01-01. Validating against that would let every past-dated finish override
+        // through, and the row would be inverted the instant it was persisted.
+        // Validating before Add/SaveChanges also means a rejected create writes nothing.
+        ValidateProjectDates(dto.StartDateOverride, dto.FinishDateOverride, DateTime.UtcNow, null);
+
         var project = mapper.Map<Project>(dto);
         project.Id = Guid.NewGuid();
         project.CreatedById = userId;
@@ -265,9 +272,17 @@ public class ProjectService(
 
     public async Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId)
     {
-        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        // Include the prints on the EXISTING query rather than adding a second one: the
+        // validation below needs them, and without the include project.Prints is null, so a
+        // finish override before the derived start would silently pass.
+        var project = await context.Projects
+            .Include(p => p.Prints!)
+            .FirstOrDefaultAsync(p => p.Id == id);
         if (project == null)
             throw new DoesNotExistException();
+
+        ValidateProjectDates(
+            dto.StartDateOverride, dto.FinishDateOverride, project.CreatedDate, project.Prints);
 
         mapper.Map(dto, project);
         project.UpdatedById = userId;
@@ -403,5 +418,32 @@ public class ProjectService(
 
         var blobName = Path.GetFileName(data.Path!);
         return await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
+    }
+
+    /// <summary>
+    /// Rejects a write whose RESOLVED interval is inverted, not merely one carrying two
+    /// conflicting overrides — a finish-only override landing before the derived start is just
+    /// as wrong, and is detectable here because the prints are loaded.
+    /// </summary>
+    /// <remarks>
+    /// The invariant is deliberately NOT maintained afterward: editing an unrelated print can
+    /// invert a stored interval later, and failing that print edit to protect a project's
+    /// display date would be the worse outcome.
+    /// </remarks>
+    private static void ValidateProjectDates(
+        DateOnly? startOverride,
+        DateOnly? finishOverride,
+        DateTime createdDate,
+        IEnumerable<Print>? prints)
+    {
+        var (start, finish) = ProjectDateResolver.Resolve(
+            startOverride,
+            finishOverride,
+            createdDate,
+            (prints ?? []).Select(p => new ProjectDateResolver.PrintDates(
+                p.StartDate, p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds)));
+
+        if (finish.HasValue && finish.Value < start)
+            throw new BadRequestException("A project's finish date cannot be before its start date.");
     }
 }
