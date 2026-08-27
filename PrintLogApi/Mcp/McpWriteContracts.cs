@@ -54,7 +54,8 @@ public sealed record MaterialWriteResult(
 /// </summary>
 public sealed record ProjectWriteResult(
     Guid ProjectId, string Name, string? Reference, string? Description, string? Url,
-    string Status, string ViewStatus);
+    string Status, string ViewStatus,
+    DateOnly StartDate, DateOnly? FinishDate);
 
 public sealed record CreateProjectResult(ProjectWriteResult Project, bool WasReplayed);
 
@@ -66,8 +67,13 @@ public sealed record FeedbackWriteResult(Guid FeedbackId, string Type, string No
 
 public sealed record CreateFeedbackResult(FeedbackWriteResult Feedback, bool WasReplayed);
 
+/// <summary>
+/// StartDate and FinishDate are RESOLVED values — a manual override when one is set, otherwise
+/// derived from the project's prints. FinishDate is null for a project with no dated prints.
+/// </summary>
 public sealed record ProjectListItem(
-    Guid Id, string Name, string? Reference, string Status, string ViewStatus);
+    Guid Id, string Name, string? Reference, string Status, string ViewStatus,
+    DateOnly StartDate, DateOnly? FinishDate);
 
 /// <summary>
 /// Caller-supplied material attributes for create_material / update_material. Every property is
