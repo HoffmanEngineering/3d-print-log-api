@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +24,8 @@ public class FilamentsController(
     IMapper mapper,
     IFilamentImageService filamentImageService,
     PrintLogContext context,
-    IBlobStorageService blobStorageService) : ControllerBase
+    IBlobStorageService blobStorageService,
+    TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
     /// Largest accepted image upload. Referenced by the action's [RequestSizeLimit] as well
@@ -344,6 +346,8 @@ public class FilamentsController(
                 id, stream, userId.Value, HttpContext.RequestAborted);
 
             var dto = await filamentService.HydrateImageDtoAsync(image, HttpContext.RequestAborted);
+
+            telemetry.TrackEvent("FilamentPictureAdded");
 
             return CreatedAtAction(nameof(GetFilamentImage), new { id, imageId = image.Id }, dto);
         }
