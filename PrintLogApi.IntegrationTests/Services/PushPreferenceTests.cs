@@ -1,4 +1,4 @@
-using PrintLogApi.Services;
+﻿using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Services;

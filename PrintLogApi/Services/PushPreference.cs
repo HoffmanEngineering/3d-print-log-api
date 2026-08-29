@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services;
+﻿namespace PrintLogApi.Services;
 
 /// <summary>
 /// Interpretation of the strings stored in UserSettings for push preferences.

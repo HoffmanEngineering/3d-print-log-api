@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Push;

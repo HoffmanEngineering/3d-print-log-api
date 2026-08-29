@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Push;

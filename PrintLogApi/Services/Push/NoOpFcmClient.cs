@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services.Push;
+﻿namespace PrintLogApi.Services.Push;
 
 /// <summary>
 /// Registered when push is disabled, unconfigured, or misconfigured. Push is an optional

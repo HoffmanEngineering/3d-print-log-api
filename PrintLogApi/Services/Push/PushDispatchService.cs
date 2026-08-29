@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.Services.Push;

@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services.Push;
+﻿namespace PrintLogApi.Services.Push;
 
 /// <summary>One push to one device.</summary>
 /// <remarks>
