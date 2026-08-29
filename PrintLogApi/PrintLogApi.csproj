@@ -44,6 +44,7 @@
     <PackageReference Include="AutoMapper" />
     <PackageReference Include="Azure.Storage.Blobs" />
     <PackageReference Include="CsvHelper" />
+    <PackageReference Include="FirebaseAdmin" />
     <PackageReference Include="Humanizer" />
     <PackageReference Include="JsonModelBinder" />
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" />

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi;
 
@@ -11,9 +12,11 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    partial class PrintLogContextModelSnapshot : ModelSnapshot
+    [Migration("20260829105948_AddUniqueUserSettingIndex")]
+    partial class AddUniqueUserSettingIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -82,45 +85,6 @@ namespace PrintLogApi.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("CuraSettings");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.DeviceToken", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("AppVersion")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("LastSeenDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Platform")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Token")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Token")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("DeviceTokens");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Feedback", b =>
@@ -1856,18 +1820,6 @@ namespace PrintLogApi.Migrations
                             Id = 14,
                             Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume).",
                             Name = "Prints_PreferredFilamentDisplayUnit"
-                        },
-                        new
-                        {
-                            Id = 15,
-                            Description = "Send a push notification to the user's devices when a print completes.",
-                            Name = "Push_PrintCompleted"
-                        },
-                        new
-                        {
-                            Id = 16,
-                            Description = "Send a push notification to the user's devices when a print fails.",
-                            Name = "Push_PrintFailed"
                         });
                 });
 
@@ -1888,17 +1840,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("UpdatedBy");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.DeviceToken", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Feedback", b =>

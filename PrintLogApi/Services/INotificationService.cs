@@ -18,6 +18,12 @@ public interface INotificationService
     Task<int> DeleteAllNotifications(long userId);
 
     // Create methods
+    //
+    // INVARIANT: notification creation must not run inside an ambient transaction. Push
+    // dispatch fires immediately after SaveChangesAsync, and a sent push cannot be recalled if
+    // the surrounding transaction later rolls back. If a caller ever needs transactional
+    // notification creation, add an outbox behind IPushDispatchService rather than moving this
+    // call — see the spec's "Delivery is best-effort" section.
     Task<Notification> CreateNotification(long userId, NotificationType type, string title, string message, string? actionUrl = null, long? printId = null, long? commentId = null, long? triggeredByUserId = null, string? metadata = null);
     Task<Notification> CreateCommentNotification(long recipientUserId, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName, bool isRecipientPrintOwner);
     Task CreateCommentNotifications(IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName);
