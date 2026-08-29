@@ -177,6 +177,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         services.AddTransient<IAuth0Service, Auth0Service>();
         services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
         services.AddTransient<INotificationService, NotificationService>();
+        services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();
         services.AddTransient<IProjectService, ProjectService>();
