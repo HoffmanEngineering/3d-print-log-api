@@ -56,6 +56,7 @@ public class PrintLogContext : DbContext
     public DbSet<UserApiKey> UserApiKeys { get; set; }
 
     public DbSet<UserSetting> UserSettings { get; set; }
+    public DbSet<DeviceToken> DeviceTokens { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -395,6 +396,12 @@ public class PrintLogContext : DbContext
         // Filtered because UserId is nullable and SQL Server treats NULLs as EQUAL in a unique
         // index: without the filter, a second row with a null UserId and the same type would be
         // rejected as a duplicate of the first.
+        // The token identifies the installation, so registration upserts on it rather than on the
+        // user: one physical device must never hold two rows. Not filtered — Token is non-nullable.
+        modelBuilder.Entity<DeviceToken>()
+            .HasIndex(dt => dt.Token)
+            .IsUnique();
+
         modelBuilder.Entity<UserSetting>()
             .HasIndex(us => new { us.UserId, us.UserSettingTypeId })
             .IsUnique()

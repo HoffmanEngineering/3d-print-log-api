@@ -10,8 +10,15 @@ public static class IntegrationTestSeeder
 {
     public const string TestUserOAuthId = "auth0|test-integration-user";
 
+    /// <summary>
+    /// A second account, for tests that need a non-owner: device-token reassignment and
+    /// ownership checks are meaningless with only one user in the database.
+    /// </summary>
+    public const string SecondaryUserOAuthId = "auth0|integration-secondary";
+
     // These are populated after seeding
     public static long TestUserId { get; private set; }
+    public static long SecondaryUserId { get; private set; }
     public static long TestPrinterId { get; private set; }
     public static long TestPrinterId2 { get; private set; }
     public static long TestPrintId { get; private set; }
@@ -37,6 +44,7 @@ public static class IntegrationTestSeeder
     {
         var user = SeedUser(context);
         TestUserId = user.Id;
+        SecondaryUserId = SeedSecondaryUser(context).Id;
 
         var (printer, printer2) = SeedPrinter(context, user.Id);
         TestPrinterId = printer.Id;
@@ -59,6 +67,18 @@ public static class IntegrationTestSeeder
         var user = new User
         {
             OAuthUserId = TestUserOAuthId,
+            ViewStatus = User.ProfileViewStatus.Public
+        };
+        context.Users.Add(user);
+        context.SaveChanges();
+        return user;
+    }
+
+    private static User SeedSecondaryUser(PrintLogContext context)
+    {
+        var user = new User
+        {
+            OAuthUserId = SecondaryUserOAuthId,
             ViewStatus = User.ProfileViewStatus.Public
         };
         context.Users.Add(user);
