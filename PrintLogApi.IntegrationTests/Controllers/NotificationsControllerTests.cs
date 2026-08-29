@@ -816,13 +816,13 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     #endregion
 
     /// <summary>
-    /// Asserts on the raw wire text, not the deserialised value. The bug being guarded is a
-    /// serialisation one: a bare DateTime emits no timezone designator, and JavaScript reads
+    /// Asserts on the raw wire text, not the deserialized value. The bug being guarded is a
+    /// serialization one: a bare DateTime emits no timezone designator, and JavaScript reads
     /// a designator-less ISO string as local time, silently shifting every timestamp by the
-    /// viewer's UTC offset. Deserialising into a typed DTO would hide exactly that.
+    /// viewer's UTC offset. Deserializing into a typed DTO would hide exactly that.
     /// </summary>
     [Fact]
-    public async Task ListSerialisesCreatedDateWithATimezoneDesignator()
+    public async Task ListSerializesCreatedDateWithATimezoneDesignator()
     {
         CreateTestNotification();
 
@@ -845,7 +845,7 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     }
 
     [Fact]
-    public async Task DetailSerialisesReadDateWithATimezoneDesignator()
+    public async Task DetailSerializesReadDateWithATimezoneDesignator()
     {
         var notification = CreateTestNotification(isRead: true);
 

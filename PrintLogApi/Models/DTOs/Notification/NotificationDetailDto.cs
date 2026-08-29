@@ -15,7 +15,7 @@ public class NotificationDetailDto
     public bool IsRead { get; set; }
 
     /// <summary>
-    /// UTC, with an explicit offset. A bare DateTime serialises without a designator, and
+    /// UTC, with an explicit offset. A bare DateTime serializes without a designator, and
     /// JavaScript reads a designator-less ISO string as local time — which silently shifted
     /// every notification timestamp in the web and mobile clients by the viewer's offset.
     /// </summary>
