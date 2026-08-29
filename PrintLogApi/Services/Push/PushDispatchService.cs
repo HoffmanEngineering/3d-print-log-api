@@ -60,8 +60,15 @@ public class PushDispatchService(
                 data["printId"] = notification.PrintId.Value.ToString();
             }
 
+            // SpecifyKind, not ToUniversalTime: CreatedDate is written as UTC but comes back
+            // from SQL Server as Unspecified, and converting an Unspecified value shifts it
+            // by the server's zone.
+            var eventTime = new DateTimeOffset(
+                DateTime.SpecifyKind(notification.CreatedDate, DateTimeKind.Utc));
+
             var messages = tokens
-                .Select(t => new FcmMessage(t, notification.Title, notification.Message ?? string.Empty, data))
+                .Select(t => new FcmMessage(
+                    t, notification.Title, notification.Message ?? string.Empty, data, eventTime))
                 .ToList();
 
             var result = await fcmClient.SendAsync(messages, ct);

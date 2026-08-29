@@ -51,7 +51,11 @@ public class FirebaseFcmClient : IFcmClient
                     ChannelId = _options.ChannelId,
                     // Tagging on the notification id means a redelivered duplicate replaces
                     // the existing card instead of stacking a second one.
-                    Tag = m.Data.TryGetValue("notificationId", out var id) ? id : null
+                    Tag = m.Data.TryGetValue("notificationId", out var id) ? id : null,
+                    // Non-nullable, so an unset value is 0001-01-01 rather than absent: the
+                    // card then shows its age as roughly two thousand years. Android also
+                    // sorts the panel by this.
+                    EventTimestamp = m.EventTime.UtcDateTime
                 },
                 // A phone offline for a week should not announce on reconnect that a print
                 // "just failed".
