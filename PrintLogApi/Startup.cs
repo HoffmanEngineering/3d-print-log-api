@@ -22,6 +22,8 @@ using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Push;
+using Google.Apis.Auth.OAuth2;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -149,7 +151,38 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         });
 
-        ConfigureHealthChecks(services);
+        services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
+
+        var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
+        var pushConfigured = false;
+
+        if (pushOptions.Enabled && !string.IsNullOrWhiteSpace(pushOptions.ServiceAccountJson))
+        {
+            // Parse the credential HERE rather than lazily inside the client. Otherwise malformed
+            // JSON deploys "healthy" and only surfaces as a swallowed exception on the first real
+            // print failure — the worst possible time to discover it.
+            try
+            {
+                GoogleCredential.FromJson(pushOptions.ServiceAccountJson);
+                pushConfigured = true;
+            }
+            catch (Exception ex)
+            {
+                // Degraded, never fatal. See NoOpFcmClient.
+                Console.Error.WriteLine($"Push credentials are invalid; push disabled. {ex.Message}");
+            }
+        }
+
+        if (pushConfigured)
+        {
+            services.AddSingleton<IFcmClient, FirebaseFcmClient>();
+        }
+        else
+        {
+            services.AddSingleton<IFcmClient, NoOpFcmClient>();
+        }
+
+        ConfigureHealthChecks(services, pushConfigured);
 
         ConfigureCaching(services);
 
@@ -468,11 +501,18 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     /// checks, and is the endpoint a post-deploy smoke test should call if one is ever added
     /// to the deploy workflow.
     /// </summary>
-    private static void ConfigureHealthChecks(IServiceCollection services)
+    private static void ConfigureHealthChecks(IServiceCollection services, bool pushConfigured)
     {
         services.AddHealthChecks()
             .AddCheck(LiveCheckName, () => HealthCheckResult.Healthy("Process is serving requests."), tags: [LiveTag])
-            .AddDbContextCheck<PrintLogContext>(ReadyCheckName, tags: [ReadyTag]);
+            .AddDbContextCheck<PrintLogContext>(ReadyCheckName, tags: [ReadyTag])
+            // Tagged "ready" deliberately: an untagged check appears on no endpoint at all, and a
+            // deployment with bad Firebase credentials would look perfectly healthy while every
+            // push is silently dropped.
+            .AddCheck(PushCheckName, () => pushConfigured
+                    ? HealthCheckResult.Healthy("Push notifications configured.")
+                    : HealthCheckResult.Degraded("Push notifications are disabled or unconfigured."),
+                tags: [ReadyTag]);
     }
 
     /// <summary>
@@ -505,6 +545,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     private const string ReadyTag = "ready";
     private const string LiveCheckName = "self";
     private const string ReadyCheckName = "database";
+    private const string PushCheckName = "push";
 
     private void ConfigureMcpServer(IServiceCollection services)
     {
