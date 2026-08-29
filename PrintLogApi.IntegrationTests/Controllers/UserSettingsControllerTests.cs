@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
 using Xunit;
@@ -574,6 +575,43 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
         var foundSetting = settings.FirstOrDefault(s => s.Id == created.Id);
         Assert.NotNull(foundSetting);
         Assert.Equal("modified-value", foundSetting.Value);
+    }
+
+    #endregion
+
+    #region Uniqueness Tests
+
+    [Fact]
+    public async Task DuplicateUserSettingForSameType_IsRejectedByDatabase()
+    {
+        // CreateUserSetting does check-then-insert with SingleOrDefaultAsync, so a duplicate
+        // (UserId, UserSettingTypeId) pair permanently breaks creation of that setting for the
+        // account. Push dispatch now reads this table too, so the database has to enforce it.
+        var settingTypeId = CreateUniqueSettingType();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+        // CreatedById/UpdatedById are required FKs inherited from TimestampEntity.
+        // Leaving them at zero trips the constraint before the index is ever exercised.
+        UserSetting Row(string value) => new()
+        {
+            UserId = IntegrationTestSeeder.TestUserId,
+            UserSettingTypeId = settingTypeId,
+            Value = value,
+            CreatedDate = DateTime.UtcNow,
+            UpdatedDate = DateTime.UtcNow,
+            CreatedById = IntegrationTestSeeder.TestUserId,
+            UpdatedById = IntegrationTestSeeder.TestUserId
+        };
+
+        db.UserSettings.Add(Row("1"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.UserSettings.Add(Row("2"));
+
+        await Assert.ThrowsAnyAsync<DbUpdateException>(
+            () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
     }
 
     #endregion

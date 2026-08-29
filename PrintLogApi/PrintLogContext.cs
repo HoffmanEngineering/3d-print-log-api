@@ -386,6 +386,18 @@ public class PrintLogContext : DbContext
 
         modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
 
+        // One preference row per user per setting type. CreateUserSetting reads with
+        // SingleOrDefaultAsync, so a duplicate pair makes that setting permanently uncreatable
+        // for the account — and push delivery now reads this table.
+        //
+        // Filtered because UserId is nullable and SQL Server treats NULLs as EQUAL in a unique
+        // index: without the filter, a second row with a null UserId and the same type would be
+        // rejected as a duplicate of the first.
+        modelBuilder.Entity<UserSetting>()
+            .HasIndex(us => new { us.UserId, us.UserSettingTypeId })
+            .IsUnique()
+            .HasFilter("[UserId] IS NOT NULL");
+
         modelBuilder.Entity<CuraSetting>()
             .Property(c => c._Settings)
             .HasColumnName("Settings");
