@@ -814,4 +814,53 @@ public class NotificationsControllerTests : IClassFixture<CustomWebApplicationFa
     }
 
     #endregion
+
+    /// <summary>
+    /// Asserts on the raw wire text, not the deserialised value. The bug being guarded is a
+    /// serialisation one: a bare DateTime emits no timezone designator, and JavaScript reads
+    /// a designator-less ISO string as local time, silently shifting every timestamp by the
+    /// viewer's UTC offset. Deserialising into a typed DTO would hide exactly that.
+    /// </summary>
+    [Fact]
+    public async Task ListSerialisesCreatedDateWithATimezoneDesignator()
+    {
+        CreateTestNotification();
+
+        var request = CreateAuthenticatedRequest(HttpMethod.Get, "/api/notifications?pageSize=1");
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(json);
+        var createdDate = document.RootElement
+            .GetProperty("items")[0]
+            .GetProperty("createdDate")
+            .GetString();
+
+        Assert.NotNull(createdDate);
+        Assert.True(
+            createdDate!.EndsWith('Z') || createdDate.Contains('+') || createdDate[10..].Contains('-'),
+            $"createdDate carried no timezone designator: {createdDate}");
+    }
+
+    [Fact]
+    public async Task DetailSerialisesReadDateWithATimezoneDesignator()
+    {
+        var notification = CreateTestNotification(isRead: true);
+
+        var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/notifications/{notification.Id}");
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(json);
+        var readDate = document.RootElement.GetProperty("readDate").GetString();
+
+        Assert.NotNull(readDate);
+        Assert.True(
+            readDate!.EndsWith('Z') || readDate.Contains('+') || readDate[10..].Contains('-'),
+            $"readDate carried no timezone designator: {readDate}");
+    }
 }

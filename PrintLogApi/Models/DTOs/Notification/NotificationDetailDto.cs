@@ -21,7 +21,10 @@ public class NotificationDetailDto
     /// </summary>
     public DateTimeOffset CreatedDate { get; set; }
 
-    public DateTime? ReadDate { get; set; }
+    /// <summary>
+    /// UTC, with an explicit offset, for the same reason as <see cref="CreatedDate"/>.
+    /// </summary>
+    public DateTimeOffset? ReadDate { get; set; }
 
     public string? ActionUrl { get; set; }
 
