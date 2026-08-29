@@ -50,6 +50,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["FeedbackEmailAddress"] = TestFeedbackEmailAddress,
+                // The InteractiveUserOnly policy pins the scheme an interactive user
+                // authenticates with. This host replaces authentication with TestAuthHandler,
+                // so without this override the policy would pin "Bearer" and 403 every
+                // authenticated test that touches it.
+                ["Auth:InteractiveScheme"] = TestAuthHandler.AuthenticationScheme,
             }));
 
         builder.ConfigureServices(services =>

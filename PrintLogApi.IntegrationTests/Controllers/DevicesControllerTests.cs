@@ -1,5 +1,8 @@
+using System.Net;
+using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Controllers;
@@ -41,5 +44,103 @@ public class DevicesControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         await Assert.ThrowsAnyAsync<DbUpdateException>(
             () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
+    }
+
+    private HttpRequestMessage AuthedRequest(HttpMethod method, string url)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        return request;
+    }
+
+    /// <summary>
+    /// Mints a real API key through the production service, so the key presented here is
+    /// hashed and looked up by exactly the routine ApiKeyMiddleware uses. Re-implementing the
+    /// hash in the seeder would let the two drift and the rejection test would prove nothing.
+    /// </summary>
+    private async Task<string> CreateRealApiKey()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var keys = scope.ServiceProvider.GetRequiredService<IUserApiKeyService>();
+        var created = await keys.GenerateNewApiKey(IntegrationTestSeeder.TestUserId, "devices-controller-test");
+        return created.PublicKey!;
+    }
+
+    [Fact]
+    public async Task RegisterDevice_ReturnsNoContent_AndPersistsToken()
+    {
+        var token = $"tok-{Guid.NewGuid():N}";
+        var request = AuthedRequest(HttpMethod.Post, "/api/devices");
+        request.Content = JsonContent.Create(new { token, platform = 1, appVersion = "1.3.0" });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.Single(db.DeviceTokens.Where(d => d.Token == token));
+    }
+
+    [Fact]
+    public async Task RegisterDevice_RejectsApiKeyPrincipal()
+    {
+        var apiKey = await CreateRealApiKey();
+        var token = $"tok-{Guid.NewGuid():N}";
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/devices");
+        request.Headers.Add("X-Api-Key", apiKey);
+        request.Content = JsonContent.Create(new { token, platform = 1, appVersion = "1.3.0" });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // 401, not 403: pinning the scheme makes authorization re-authenticate with the
+        // interactive scheme, which discards the GenericPrincipal ApiKeyMiddleware built, so
+        // the request arrives anonymous and is challenged rather than forbidden. Either way
+        // the API key never reaches the handler.
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.Empty(db.DeviceTokens.Where(d => d.Token == token));
+    }
+
+    [Fact]
+    public async Task RegisterDevice_RejectsApiKeyInQueryString()
+    {
+        var apiKey = await CreateRealApiKey();
+        var token = $"tok-{Guid.NewGuid():N}";
+        var request = new HttpRequestMessage(
+            HttpMethod.Post, $"/api/devices?api_key={apiKey}");
+        request.Content = JsonContent.Create(new { token, platform = 1, appVersion = "1.3.0" });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // 401, not 403: pinning the scheme makes authorization re-authenticate with the
+        // interactive scheme, which discards the GenericPrincipal ApiKeyMiddleware built, so
+        // the request arrives anonymous and is challenged rather than forbidden. Either way
+        // the API key never reaches the handler.
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.Empty(db.DeviceTokens.Where(d => d.Token == token));
+    }
+
+    [Fact]
+    public async Task DeleteDevice_RemovesOnlyCallersToken()
+    {
+        var token = $"tok-{Guid.NewGuid():N}";
+        var post = AuthedRequest(HttpMethod.Post, "/api/devices");
+        post.Content = JsonContent.Create(new { token, platform = 1, appVersion = "1.3.0" });
+        await _httpClient.SendAsync(post, TestContext.Current.CancellationToken);
+
+        var response = await _httpClient.SendAsync(
+            AuthedRequest(HttpMethod.Delete, $"/api/devices/{token}"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.Empty(db.DeviceTokens.Where(d => d.Token == token));
     }
 }

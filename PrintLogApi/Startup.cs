@@ -582,6 +582,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         var domain = $"https://{Configuration["Auth0:Domain"]}/";
         var bypassAuth = Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting");
 
+        // The scheme an interactive user (browser or mobile app) authenticates with, as opposed
+        // to the long-lived API keys ApiKeyMiddleware accepts. Normally the app's bearer scheme,
+        // or the dev bypass handler when auth is bypassed.
+        //
+        // Overridable by configuration because the integration test host replaces authentication
+        // wholesale with its own scheme; pinning "Bearer" there would 403 every authenticated
+        // test. This is deployment configuration, never request input, and no deployed
+        // environment sets it.
+        var interactiveScheme = Configuration["Auth:InteractiveScheme"]
+            ?? (bypassAuth ? "DevAuth" : JwtBearerDefaults.AuthenticationScheme);
+
         if (bypassAuth)
         {
             services.AddAuthentication(options =>
@@ -644,6 +655,21 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // These policies use custom requirements (not scope-based) and are needed in all environments
         services.AddAuthorization(options =>
         {
+            // ApiKeyMiddleware authenticates any /api request bearing a valid X-Api-Key header or
+            // api_key query parameter, in the "ApiUser" role. Those are long-lived credentials
+            // living in printer config files; they must not be able to register or delete the
+            // phones a user receives push notifications on.
+            //
+            // The scheme is pinned rather than only blacklisting the role, so a future
+            // authentication scheme does not silently gain access. The role check stays as
+            // defence in depth.
+            options.AddPolicy("InteractiveUserOnly", policy =>
+            {
+                policy.AuthenticationSchemes.Add(interactiveScheme);
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser"));
+            });
+
             options.AddPolicy("ViewPrint", policy =>
                 policy.Requirements.Add(new PublicOrCreatorRequirement()));
 
