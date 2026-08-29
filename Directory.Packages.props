@@ -32,7 +32,7 @@
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.1" />
     <PackageVersion Include="CsvHelper" Version="33.0.1" />
     <PackageVersion Include="FirebaseAdmin" Version="3.3.0" />
-    <PackageVersion Include="Humanizer" Version="2.14.1" />
+    <PackageVersion Include="Humanizer" Version="3.0.10" />
     <PackageVersion Include="JsonModelBinder" Version="2.1.1" />
     <PackageVersion Include="MailKit" Version="4.15.1" />
     <PackageVersion Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.22.0" />
