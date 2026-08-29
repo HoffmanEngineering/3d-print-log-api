@@ -614,5 +614,20 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
             () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
     }
 
+
+    [Theory]
+    [InlineData(15, "Push_PrintCompleted")]
+    [InlineData(16, "Push_PrintFailed")]
+    public async Task PushNotificationSettingTypes_AreSeeded(int id, string expectedName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+        var type = await db.UserSettingTypes.FindAsync([id], TestContext.Current.CancellationToken);
+
+        Assert.NotNull(type);
+        Assert.Equal(expectedName, type!.Name);
+    }
+
     #endregion
 }
