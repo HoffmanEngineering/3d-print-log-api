@@ -1,4 +1,5 @@
-﻿using FirebaseAdmin;
+﻿using System.Globalization;
+using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.Extensions.Options;
@@ -56,6 +57,27 @@ public class FirebaseFcmClient : IFcmClient
                 // "just failed".
                 TimeToLive = TimeSpan.FromHours(_options.TimeToLiveHours),
                 Priority = Priority.High
+            },
+            // The same staleness limit for APNs. AndroidConfig.TimeToLive governs Android
+            // only, so without this an iOS device — DevicePlatform.Ios is accepted at
+            // registration — has no expiry at all and can announce on reconnect that a print
+            // "just failed" days later. APNs takes an absolute Unix expiry, not a duration.
+            Apns = new ApnsConfig
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["apns-expiration"] = DateTimeOffset.UtcNow
+                        .AddHours(_options.TimeToLiveHours)
+                        .ToUnixTimeSeconds()
+                        .ToString(CultureInfo.InvariantCulture),
+                    ["apns-priority"] = "10"
+                },
+                Aps = new Aps
+                {
+                    // Mirrors the Android Tag above: same collapse identity, so a redelivered
+                    // duplicate replaces the existing notification instead of stacking.
+                    ThreadId = m.Data.TryGetValue("notificationId", out var apnsId) ? apnsId : null
+                }
             }
         }).ToList();
 

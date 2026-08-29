@@ -156,7 +156,14 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
         var pushConfigured = false;
 
-        if (pushOptions.Enabled && !string.IsNullOrWhiteSpace(pushOptions.ServiceAccountJson))
+        if (pushOptions.Enabled && !pushOptions.HasValidOperationalValues())
+        {
+            // Degraded, never fatal — same contract as bad credentials below. Without this an
+            // out-of-range timeout or TTL reports healthy at startup and then drops every push
+            // at send time.
+            Console.Error.WriteLine("Push options are out of range; push disabled.");
+        }
+        else if (pushOptions.Enabled && !string.IsNullOrWhiteSpace(pushOptions.ServiceAccountJson))
         {
             // Parse the credential HERE rather than lazily inside the client. Otherwise malformed
             // JSON deploys "healthy" and only surfaces as a swallowed exception on the first real

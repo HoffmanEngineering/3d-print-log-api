@@ -630,4 +630,42 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
     }
 
     #endregion
+
+
+    [Fact]
+    public async Task CreateUserSetting_LosingAnInsertRace_ReturnsConflictNotServerError()
+    {
+        var settingTypeId = EnsureUserSettingTypeExists($"RaceType-{Guid.NewGuid():N}");
+
+        HttpRequestMessage Request()
+        {
+            var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/Users/me/user-settings");
+            var payload = JsonSerializer.Serialize(new
+            {
+                userSettingTypeId = settingTypeId,
+                value = "true"
+            });
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            return request;
+        }
+
+        // Fired together so both requests can pass the "does it already exist?" pre-check
+        // before either saves. IX_UserSettings_UserId_UserSettingTypeId then rejects the
+        // second write; before this was handled that surfaced as an unhandled 500.
+        var responses = await Task.WhenAll(
+            _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken),
+            _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.DoesNotContain(responses, r => r.StatusCode == HttpStatusCode.InternalServerError);
+
+        // Exactly one row exists regardless of which side won.
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var rows = await db.UserSettings
+            .Where(u => u.UserId == IntegrationTestSeeder.TestUserId
+                        && u.UserSettingTypeId == settingTypeId)
+            .CountAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, rows);
+    }
 }

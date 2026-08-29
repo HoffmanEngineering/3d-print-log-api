@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Models;
+﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Models;
 using PrintLogApi.Services;
 using Xunit;
 
@@ -110,5 +111,78 @@ public class DeviceTokenServiceTests : IClassFixture<CustomWebApplicationFactory
 
         Assert.False(removed);
         Assert.Single(db.DeviceTokens.Where(d => d.Token == token));
+    }
+
+
+    [Fact]
+    public async Task RegisterDevice_EvictsLeastRecentlySeenBeyondTheCap()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IDeviceTokenService>();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var options = scope.ServiceProvider
+            .GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintLogApi.Services.Push.PushOptions>>();
+        var cap = options.Value.MaxDevicesPerUser;
+
+        // Arrange rather than assume: a sibling test may already have registered rows for
+        // this user, and v3 does not guarantee which runs first.
+        await db.DeviceTokens
+            .Where(d => d.UserId == IntegrationTestSeeder.SecondaryUserId)
+            .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+
+        var tokens = new List<string>();
+        for (var i = 0; i < cap + 1; i++)
+        {
+            var token = $"cap-{i}-{Guid.NewGuid():N}";
+            tokens.Add(token);
+            await service.RegisterDevice(
+                IntegrationTestSeeder.SecondaryUserId, token, DevicePlatform.Android, "1.3.0");
+        }
+
+        var stored = await db.DeviceTokens
+            .Where(d => d.UserId == IntegrationTestSeeder.SecondaryUserId)
+            .Select(d => d.Token)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(cap, stored.Count);
+        // The newest registration always survives; the very first is the one displaced.
+        Assert.Contains(tokens[^1], stored);
+        Assert.DoesNotContain(tokens[0], stored);
+    }
+
+    [Fact]
+    public async Task GetTokensForUser_NeverExceedsTheCap()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IDeviceTokenService>();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var options = scope.ServiceProvider
+            .GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintLogApi.Services.Push.PushOptions>>();
+        var cap = options.Value.MaxDevicesPerUser;
+
+        await db.DeviceTokens
+            .Where(d => d.UserId == IntegrationTestSeeder.SecondaryUserId)
+            .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+
+        // Insert past the cap directly, bypassing the write path, to stand in for rows that
+        // predate the cap. The read must still bound what reaches the provider.
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < cap + 5; i++)
+        {
+            db.DeviceTokens.Add(new DeviceToken
+            {
+                UserId = IntegrationTestSeeder.SecondaryUserId,
+                Token = $"legacy-{i}-{Guid.NewGuid():N}",
+                Platform = DevicePlatform.Android,
+                CreatedDate = now,
+                LastSeenDate = now.AddMinutes(-i)
+            });
+        }
+
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var tokens = await service.GetTokensForUser(IntegrationTestSeeder.SecondaryUserId);
+
+        Assert.Equal(cap, tokens.Count);
     }
 }

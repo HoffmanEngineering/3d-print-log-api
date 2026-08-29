@@ -26,7 +26,15 @@ public class DevicesController(IDeviceTokenService deviceTokenService) : Control
             return Unauthorized();
         }
 
-        await deviceTokenService.RegisterDevice(userId.Value, dto.Token, dto.Platform, dto.AppVersion);
+        // [Required] has already rejected a missing token via ModelState, but that proof is
+        // invisible to flow analysis; the pattern moves it somewhere the compiler can see
+        // rather than suppressing the warning.
+        if (dto.Token is not { } token)
+        {
+            return BadRequest();
+        }
+
+        await deviceTokenService.RegisterDevice(userId.Value, token, dto.Platform, dto.AppVersion);
         return NoContent();
     }
 

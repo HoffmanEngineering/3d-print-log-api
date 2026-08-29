@@ -1,9 +1,14 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Push;
 
 namespace PrintLogApi.Services;
 
-public class DeviceTokenService(PrintLogContext context, ILogger<DeviceTokenService> logger)
+public class DeviceTokenService(
+    PrintLogContext context,
+    IOptions<PushOptions> pushOptions,
+    ILogger<DeviceTokenService> logger)
     : IDeviceTokenService
 {
     public async Task RegisterDevice(long userId, string token, DevicePlatform platform, string? appVersion)
@@ -29,6 +34,8 @@ public class DeviceTokenService(PrintLogContext context, ILogger<DeviceTokenServ
 
         if (existing is null)
         {
+            await EvictOldestBeyondCap(userId);
+
             context.DeviceTokens.Add(new DeviceToken
             {
                 UserId = userId,
@@ -72,9 +79,49 @@ public class DeviceTokenService(PrintLogContext context, ILogger<DeviceTokenServ
         return true;
     }
 
+    /// <summary>
+    /// Keeps a user's registrations under <see cref="PushOptions.MaxDevicesPerUser"/> by
+    /// dropping the least recently seen rows, so the newest install always registers.
+    /// </summary>
+    /// <remarks>
+    /// Rejecting the new device instead would mean a user who reinstalls repeatedly is locked
+    /// out of push by their own stale rows, which is the worse failure: the caller is a real
+    /// app launch, and the rows it displaces are installations that have not been seen since.
+    /// </remarks>
+    private async Task EvictOldestBeyondCap(long userId)
+    {
+        var cap = pushOptions.Value.MaxDevicesPerUser;
+        if (cap <= 0)
+        {
+            return;
+        }
+
+        var surplus = await context.DeviceTokens
+            .Where(d => d.UserId == userId)
+            .OrderByDescending(d => d.LastSeenDate)
+            .Skip(cap - 1)
+            .ToListAsync();
+
+        if (surplus.Count == 0)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Evicting {Count} device token(s) for user {UserId} over the {Cap}-device cap.",
+            surplus.Count, userId, cap);
+
+        context.DeviceTokens.RemoveRange(surplus);
+    }
+
+    // Capped for the same reason the registration path is: this list becomes one provider
+    // message each, and FirebaseAdmin documents SendEachAsync as taking at most 500. The cap
+    // is enforced on write, so this is a backstop for rows that predate it.
     public async Task<IReadOnlyList<string>> GetTokensForUser(long userId)
         => await context.DeviceTokens
             .Where(d => d.UserId == userId)
+            .OrderByDescending(d => d.LastSeenDate)
+            .Take(Math.Clamp(pushOptions.Value.MaxDevicesPerUser, 1, 500))
             .Select(d => d.Token)
             .ToListAsync();
 

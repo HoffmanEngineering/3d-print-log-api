@@ -45,6 +45,33 @@ public class DevicesControllerTests : IClassFixture<CustomWebApplicationFactory>
             () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    // 0 is default(DevicePlatform) and so indistinguishable from "not supplied"; 99 is simply
+    // undefined. [Required] alone accepts both on a non-nullable enum, which is why the DTO
+    // carries [EnumDataType].
+    [InlineData(0)]
+    [InlineData(99)]
+    public async Task RegisterDevice_RejectsUndefinedPlatform(int platform)
+    {
+        var request = AuthedRequest(HttpMethod.Post, "/api/Devices");
+        request.Content = JsonContent.Create(new { token = $"tok-{Guid.NewGuid():N}", platform });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RegisterDevice_RejectsMissingToken()
+    {
+        var request = AuthedRequest(HttpMethod.Post, "/api/Devices");
+        request.Content = JsonContent.Create(new { platform = (int)DevicePlatform.Android });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private HttpRequestMessage AuthedRequest(HttpMethod method, string url)
     {
         var request = new HttpRequestMessage(method, url);

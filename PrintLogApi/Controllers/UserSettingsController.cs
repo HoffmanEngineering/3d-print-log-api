@@ -126,7 +126,22 @@ public class UserSettingsController(
 
 
         context.UserSettings.Add(newSetting);
-        await context.SaveChangesAsync();
+
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Lost an insert race with a concurrent request for the same
+            // (UserId, UserSettingTypeId). Before IX_UserSettings_UserId_UserSettingTypeId
+            // both writes simply succeeded and left a duplicate; now the second violates the
+            // unique index, so without this it surfaces as an unhandled 500. Report it as the
+            // same conflict the pre-check above returns, so the outcome does not depend on
+            // which side of the race the caller landed on.
+            context.ChangeTracker.Clear();
+            return BadRequest("UserSetting for this SettingTypeId already exists.");
+        }
 
         // As with the update path: a newly-set price or rate changes every cached cost.
         cacheVersionService.InvalidateUserCache(userId.Value);
