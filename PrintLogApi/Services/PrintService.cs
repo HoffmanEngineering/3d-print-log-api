@@ -1769,32 +1769,47 @@ public sealed class PrintService(
             || (printerIdList != null && printerIdList.Any())
             || (filamentIdList != null && filamentIdList.Any());
 
-        // ── Phase 1: Build the filtered print query ───────────────────────────────
-        IQueryable<Print> filteredPrintQuery = context.Prints
+        // ── Phase 1: Build the filtered print queries ─────────────────────────────
+        // The non-text filters are shared by both branches; the text search is not, because a
+        // print with no project cannot match on a project's name. Build the shared part first.
+        IQueryable<Print> baseQuery = context.Prints
             .Where(p => p.CreatedById == userId);
 
-        if (!string.IsNullOrWhiteSpace(searchText))
-        {
-            var criterias = searchText.Split('"')
-                .Select((element, index) => index % 2 == 0
-                    ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                    : new string[] { element })
-                .SelectMany(element => element).ToList();
-            foreach (var text in criterias)
-                filteredPrintQuery = filteredPrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text) || p.Project!.Name!.Contains(text));
-        }
-
         if (filterByStatus.HasValue)
-            filteredPrintQuery = filteredPrintQuery.Where(p => p.Status == filterByStatus.Value);
+            baseQuery = baseQuery.Where(p => p.Status == filterByStatus.Value);
 
         if (printerIdList != null && printerIdList.Any())
-            filteredPrintQuery = filteredPrintQuery.Where(p => printerIdList.Contains(p.PrinterId));
+            baseQuery = baseQuery.Where(p => printerIdList.Contains(p.PrinterId));
 
         if (filamentIdList != null && filamentIdList.Any())
         {
-            filteredPrintQuery = filteredPrintQuery.Where(p =>
+            baseQuery = baseQuery.Where(p =>
                 p.FilamentUsage!.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
         }
+
+        // Split on any spaces and search separately, preserving quotes.
+        var criterias = string.IsNullOrWhiteSpace(searchText)
+            ? new List<string>()
+            : searchText.Split('"')
+                .Select((element, index) => index % 2 == 0
+                    ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                    : new string[] { element })
+                .SelectMany(element => element)
+                .ToList();
+
+        // Project-assigned prints: the project's name is on the row the user sees, so it is
+        // searchable and the join to Projects earns its place.
+        IQueryable<Print> filteredPrintQuery = baseQuery;
+        foreach (var text in criterias)
+            filteredPrintQuery = filteredPrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text) || p.Project!.Name!.Contains(text));
+
+        // Standalone prints: ProjectId IS NULL, so the LEFT JOIN the project-name term generates
+        // can only ever produce NULL and `Project.Name LIKE …` is never true. Carrying that term
+        // here made every standalone-branch query join Projects and evaluate a third LIKE — over
+        // a nvarchar(max) column — to reach a result it could not change.
+        IQueryable<Print> standalonePrintQuery = baseQuery.Where(p => p.ProjectId == null);
+        foreach (var text in criterias)
+            standalonePrintQuery = standalonePrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text));
 
         // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
         Dictionary<Guid, int> filteredGroupLookup;
@@ -1881,31 +1896,38 @@ public sealed class PrintService(
         }).ToList();
 
         // Standalone prints: same split to avoid correlated subquery per row.
-        var standalonePrintList = await filteredPrintQuery
-            .Where(p => p.ProjectId == null)
+        var standalonePrintList = await standalonePrintQuery
             .Select(p => new { p.Id, p.StartDate, p.CreatedDate, p.Title })
             .AsNoTracking()
             .ToListAsync();
 
-        var standaloneFilamentTotals = await context.PrintFilament
-            .Join(
-                filteredPrintQuery.Where(p => p.ProjectId == null),
-                pf => pf.PrintId, pr => pr.Id,
-                (pf, pr) => new { pr.Id, pf.AmountMg, pf.EstimatedAmountMg })
-            .GroupBy(x => x.Id)
-            .Select(g => new
-            {
-                PrintId = g.Key,
-                TotalFilamentWeightMg = (long?)g.Sum(x =>
-                    x.AmountMg > 0 ? (long?)x.AmountMg
-                    : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                    : (long?)0) ?? 0L
-            })
-            .AsNoTracking()
-            .ToListAsync();
+        // Joining PrintFilament back to the filtered query would re-run the text search — the
+        // most expensive predicate in the request, a scan of the user's prints with a LOB read
+        // per row for Notes — a second time to reach the same set of ids. The ids are already
+        // materialized above, and IX_PrintFilament_PrintId includes both amount columns, so
+        // seeking on them covers this query outright.
+        var standalonePrintIds = standalonePrintList.Select(p => p.Id).ToList();
 
-        var standaloneFilamentLookup = standaloneFilamentTotals
-            .ToDictionary(x => x.PrintId, x => x.TotalFilamentWeightMg);
+        var standaloneFilamentLookup = new Dictionary<long, long>();
+        if (standalonePrintIds.Count > 0)
+        {
+            var standaloneFilamentTotals = await context.PrintFilament
+                .Where(pf => standalonePrintIds.Contains(pf.PrintId))
+                .GroupBy(pf => pf.PrintId)
+                .Select(g => new
+                {
+                    PrintId = g.Key,
+                    TotalFilamentWeightMg = (long?)g.Sum(x =>
+                        x.AmountMg > 0 ? (long?)x.AmountMg
+                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
+                        : (long?)0) ?? 0L
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            standaloneFilamentLookup = standaloneFilamentTotals
+                .ToDictionary(x => x.PrintId, x => x.TotalFilamentWeightMg);
+        }
 
         var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
         {
