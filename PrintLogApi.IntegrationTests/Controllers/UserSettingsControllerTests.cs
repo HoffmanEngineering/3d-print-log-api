@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
 using Xunit;
@@ -577,4 +578,94 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
     }
 
     #endregion
+
+    #region Uniqueness Tests
+
+    [Fact]
+    public async Task DuplicateUserSettingForSameType_IsRejectedByDatabase()
+    {
+        // CreateUserSetting does check-then-insert with SingleOrDefaultAsync, so a duplicate
+        // (UserId, UserSettingTypeId) pair permanently breaks creation of that setting for the
+        // account. Push dispatch now reads this table too, so the database has to enforce it.
+        var settingTypeId = CreateUniqueSettingType();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+        // CreatedById/UpdatedById are required FKs inherited from TimestampEntity.
+        // Leaving them at zero trips the constraint before the index is ever exercised.
+        UserSetting Row(string value) => new()
+        {
+            UserId = IntegrationTestSeeder.TestUserId,
+            UserSettingTypeId = settingTypeId,
+            Value = value,
+            CreatedDate = DateTime.UtcNow,
+            UpdatedDate = DateTime.UtcNow,
+            CreatedById = IntegrationTestSeeder.TestUserId,
+            UpdatedById = IntegrationTestSeeder.TestUserId
+        };
+
+        db.UserSettings.Add(Row("1"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.UserSettings.Add(Row("2"));
+
+        await Assert.ThrowsAnyAsync<DbUpdateException>(
+            () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
+    }
+
+
+    [Theory]
+    [InlineData(15, "Push_PrintCompleted")]
+    [InlineData(16, "Push_PrintFailed")]
+    public async Task PushNotificationSettingTypes_AreSeeded(int id, string expectedName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+
+        var type = await db.UserSettingTypes.FindAsync([id], TestContext.Current.CancellationToken);
+
+        Assert.NotNull(type);
+        Assert.Equal(expectedName, type!.Name);
+    }
+
+    #endregion
+
+
+    [Fact]
+    public async Task CreateUserSetting_LosingAnInsertRace_ReturnsConflictNotServerError()
+    {
+        var settingTypeId = EnsureUserSettingTypeExists($"RaceType-{Guid.NewGuid():N}");
+
+        HttpRequestMessage Request()
+        {
+            var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/Users/me/user-settings");
+            var payload = JsonSerializer.Serialize(new
+            {
+                userSettingTypeId = settingTypeId,
+                value = "true"
+            });
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            return request;
+        }
+
+        // Fired together so both requests can pass the "does it already exist?" pre-check
+        // before either saves. IX_UserSettings_UserId_UserSettingTypeId then rejects the
+        // second write; before this was handled that surfaced as an unhandled 500.
+        var responses = await Task.WhenAll(
+            _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken),
+            _httpClient.SendAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.DoesNotContain(responses, r => r.StatusCode == HttpStatusCode.InternalServerError);
+
+        // Exactly one row exists regardless of which side won.
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var rows = await db.UserSettings
+            .Where(u => u.UserId == IntegrationTestSeeder.TestUserId
+                        && u.UserSettingTypeId == settingTypeId)
+            .CountAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, rows);
+    }
 }

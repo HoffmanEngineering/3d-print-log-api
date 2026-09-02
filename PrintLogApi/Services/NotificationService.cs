@@ -3,10 +3,14 @@ using AutoMapper.QueryableExtensions;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Notification;
+using PrintLogApi.Services.Push;
 
 namespace PrintLogApi.Services;
 
-public class NotificationService(PrintLogContext context, IMapper mapper) : INotificationService
+public class NotificationService(
+    PrintLogContext context,
+    IMapper mapper,
+    IPushDispatchService pushDispatchService) : INotificationService
 {
     public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null)
     {
@@ -109,6 +113,35 @@ public class NotificationService(PrintLogContext context, IMapper mapper) : INot
             .ExecuteDeleteAsync();
     }
 
+    /// <summary>
+    /// The single persistence path for created notifications. Every Create*Notification method
+    /// funnels here so cross-cutting concerns — currently push dispatch — attach in exactly one
+    /// place. A create method that saves directly will silently skip them.
+    /// </summary>
+    private async Task PersistNotifications(IReadOnlyList<Notification> notifications)
+    {
+        if (notifications.Count == 0)
+        {
+            return;
+        }
+
+        context.Notifications.AddRange(notifications);
+        await context.SaveChangesAsync();
+
+        foreach (var notification in notifications)
+        {
+            try
+            {
+                await pushDispatchService.DispatchForNotification(notification);
+            }
+            catch
+            {
+                // The dispatcher contains its own failures; this is belt-and-braces so a bug in
+                // a future dispatcher cannot fail a printer webhook or lose a saved notification.
+            }
+        }
+    }
+
     public async Task<Notification> CreateNotification(
         long userId,
         NotificationType type,
@@ -136,8 +169,7 @@ public class NotificationService(PrintLogContext context, IMapper mapper) : INot
             CreatedDate = DateTime.UtcNow
         };
 
-        context.Notifications.Add(notification);
-        await context.SaveChangesAsync();
+        await PersistNotifications([notification]);
 
         return notification;
     }
@@ -208,10 +240,7 @@ public class NotificationService(PrintLogContext context, IMapper mapper) : INot
             CreatedDate = now
         }).ToList();
 
-        if (notifications.Count == 0) return;
-
-        context.Notifications.AddRange(notifications);
-        await context.SaveChangesAsync();
+        await PersistNotifications(notifications);
     }
 
     public async Task<Notification> CreatePrintCompletedNotification(long userId, long printId, string? printTitle)

@@ -43,14 +43,22 @@ public class HealthCheckTests : IClassFixture<CustomWebApplicationFactory>
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
 
-        Assert.Equal("Healthy", root.GetProperty("status").GetString());
+        // Degraded overall, because push is unconfigured under test and its check is
+        // deliberately Degraded rather than Unhealthy — push is an optional transport, so a
+        // missing Firebase credential must not make the API look dead. Degraded still maps to
+        // 200, asserted above.
+        Assert.Equal("Degraded", root.GetProperty("status").GetString());
 
-        // Exactly one check, and it is the database one. Asserting only that a "database"
-        // entry exists would not notice an unrelated check leaking into the readiness set.
+        // Exactly these two checks. Asserting only that a "database" entry exists would not
+        // notice an unrelated check leaking into the readiness set.
         var checks = root.GetProperty("checks").EnumerateArray().ToList();
-        var databaseCheck = Assert.Single(checks);
-        Assert.Equal("database", databaseCheck.GetProperty("name").GetString());
+        Assert.Equal(2, checks.Count);
+
+        var databaseCheck = Assert.Single(checks, c => c.GetProperty("name").GetString() == "database");
         Assert.Equal("Healthy", databaseCheck.GetProperty("status").GetString());
+
+        var pushCheck = Assert.Single(checks, c => c.GetProperty("name").GetString() == "push");
+        Assert.Equal("Degraded", pushCheck.GetProperty("status").GetString());
     }
 
     /// <summary>

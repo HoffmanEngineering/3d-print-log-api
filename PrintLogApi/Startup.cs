@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,7 @@ using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Push;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -149,7 +151,45 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         });
 
-        ConfigureHealthChecks(services);
+        services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
+
+        var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
+        var pushConfigured = false;
+
+        if (pushOptions.Enabled && !pushOptions.HasValidOperationalValues())
+        {
+            // Degraded, never fatal — same contract as bad credentials below. Without this an
+            // out-of-range timeout or TTL reports healthy at startup and then drops every push
+            // at send time.
+            Console.Error.WriteLine("Push options are out of range; push disabled.");
+        }
+        else if (pushOptions.Enabled && !string.IsNullOrWhiteSpace(pushOptions.ServiceAccountJson))
+        {
+            // Parse the credential HERE rather than lazily inside the client. Otherwise malformed
+            // JSON deploys "healthy" and only surfaces as a swallowed exception on the first real
+            // print failure — the worst possible time to discover it.
+            try
+            {
+                GoogleCredential.FromJson(pushOptions.ServiceAccountJson);
+                pushConfigured = true;
+            }
+            catch (Exception ex)
+            {
+                // Degraded, never fatal. See NoOpFcmClient.
+                Console.Error.WriteLine($"Push credentials are invalid; push disabled. {ex.Message}");
+            }
+        }
+
+        if (pushConfigured)
+        {
+            services.AddSingleton<IFcmClient, FirebaseFcmClient>();
+        }
+        else
+        {
+            services.AddSingleton<IFcmClient, NoOpFcmClient>();
+        }
+
+        ConfigureHealthChecks(services, pushConfigured);
 
         ConfigureCaching(services);
 
@@ -177,6 +217,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         services.AddTransient<IAuth0Service, Auth0Service>();
         services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
         services.AddTransient<INotificationService, NotificationService>();
+        services.AddTransient<IDeviceTokenService, DeviceTokenService>();
+        services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();
         services.AddTransient<IProjectService, ProjectService>();
@@ -467,11 +509,18 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     /// checks, and is the endpoint a post-deploy smoke test should call if one is ever added
     /// to the deploy workflow.
     /// </summary>
-    private static void ConfigureHealthChecks(IServiceCollection services)
+    private static void ConfigureHealthChecks(IServiceCollection services, bool pushConfigured)
     {
         services.AddHealthChecks()
             .AddCheck(LiveCheckName, () => HealthCheckResult.Healthy("Process is serving requests."), tags: [LiveTag])
-            .AddDbContextCheck<PrintLogContext>(ReadyCheckName, tags: [ReadyTag]);
+            .AddDbContextCheck<PrintLogContext>(ReadyCheckName, tags: [ReadyTag])
+            // Tagged "ready" deliberately: an untagged check appears on no endpoint at all, and a
+            // deployment with bad Firebase credentials would look perfectly healthy while every
+            // push is silently dropped.
+            .AddCheck(PushCheckName, () => pushConfigured
+                    ? HealthCheckResult.Healthy("Push notifications configured.")
+                    : HealthCheckResult.Degraded("Push notifications are disabled or unconfigured."),
+                tags: [ReadyTag]);
     }
 
     /// <summary>
@@ -504,6 +553,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     private const string ReadyTag = "ready";
     private const string LiveCheckName = "self";
     private const string ReadyCheckName = "database";
+    private const string PushCheckName = "push";
 
     private void ConfigureMcpServer(IServiceCollection services)
     {
@@ -581,6 +631,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         var domain = $"https://{Configuration["Auth0:Domain"]}/";
         var bypassAuth = Environment.IsDevelopment() || Environment.IsEnvironment("E2ETesting");
 
+        // The scheme an interactive user (browser or mobile app) authenticates with, as opposed
+        // to the long-lived API keys ApiKeyMiddleware accepts. Normally the app's bearer scheme,
+        // or the dev bypass handler when auth is bypassed.
+        //
+        // Overridable by configuration because the integration test host replaces authentication
+        // wholesale with its own scheme; pinning "Bearer" there would 403 every authenticated
+        // test. This is deployment configuration, never request input, and no deployed
+        // environment sets it.
+        var interactiveScheme = Configuration["Auth:InteractiveScheme"]
+            ?? (bypassAuth ? "DevAuth" : JwtBearerDefaults.AuthenticationScheme);
+
         if (bypassAuth)
         {
             services.AddAuthentication(options =>
@@ -643,6 +704,21 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // These policies use custom requirements (not scope-based) and are needed in all environments
         services.AddAuthorization(options =>
         {
+            // ApiKeyMiddleware authenticates any /api request bearing a valid X-Api-Key header or
+            // api_key query parameter, in the "ApiUser" role. Those are long-lived credentials
+            // living in printer config files; they must not be able to register or delete the
+            // phones a user receives push notifications on.
+            //
+            // The scheme is pinned rather than only blacklisting the role, so a future
+            // authentication scheme does not silently gain access. The role check stays as
+            // defence in depth.
+            options.AddPolicy("InteractiveUserOnly", policy =>
+            {
+                policy.AuthenticationSchemes.Add(interactiveScheme);
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser"));
+            });
+
             options.AddPolicy("ViewPrint", policy =>
                 policy.Requirements.Add(new PublicOrCreatorRequirement()));
 

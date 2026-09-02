@@ -26,7 +26,9 @@ public class DatabaseDiagnosticsTests : IClassFixture<CustomWebApplicationFactor
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
 
         // Verify seeded data exists
-        Assert.Equal(1, db.Users.Count());
+        // Two: the primary test user plus the secondary account that ownership and
+        // device-token reassignment tests need.
+        Assert.Equal(2, db.Users.Count());
         Assert.Equal(2, db.Printers.Count());
         Assert.Equal(4, db.Filaments.Count());
         Assert.Equal(5, db.Prints.Count());

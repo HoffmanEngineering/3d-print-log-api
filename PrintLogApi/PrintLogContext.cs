@@ -56,6 +56,7 @@ public class PrintLogContext : DbContext
     public DbSet<UserApiKey> UserApiKeys { get; set; }
 
     public DbSet<UserSetting> UserSettings { get; set; }
+    public DbSet<DeviceToken> DeviceTokens { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -82,7 +83,9 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 9, Name = "Prints_LastSelectedResinMeasureType", Description = "The last selected resin measure type on the print." },
             new UserSettingType() { Id = 10, Name = "Prints_LastSelectedPowderMeasureType", Description = "The last selected powder measure type on the print." },
             new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." },
-            new UserSettingType() { Id = 14, Name = "Prints_PreferredFilamentDisplayUnit", Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume)." }
+            new UserSettingType() { Id = 14, Name = "Prints_PreferredFilamentDisplayUnit", Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume)." },
+            new UserSettingType() { Id = 15, Name = "Push_PrintCompleted", Description = "Send a push notification to the user's devices when a print completes." },
+            new UserSettingType() { Id = 16, Name = "Push_PrintFailed", Description = "Send a push notification to the user's devices when a print fails." }
             );
 
         var filamentCategory = new MaterialCategory()
@@ -385,6 +388,24 @@ public class PrintLogContext : DbContext
         );
 
         modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
+
+        // One preference row per user per setting type. CreateUserSetting reads with
+        // SingleOrDefaultAsync, so a duplicate pair makes that setting permanently uncreatable
+        // for the account — and push delivery now reads this table.
+        //
+        // Filtered because UserId is nullable and SQL Server treats NULLs as EQUAL in a unique
+        // index: without the filter, a second row with a null UserId and the same type would be
+        // rejected as a duplicate of the first.
+        // The token identifies the installation, so registration upserts on it rather than on the
+        // user: one physical device must never hold two rows. Not filtered — Token is non-nullable.
+        modelBuilder.Entity<DeviceToken>()
+            .HasIndex(dt => dt.Token)
+            .IsUnique();
+
+        modelBuilder.Entity<UserSetting>()
+            .HasIndex(us => new { us.UserId, us.UserSettingTypeId })
+            .IsUnique()
+            .HasFilter("[UserId] IS NOT NULL");
 
         modelBuilder.Entity<CuraSetting>()
             .Property(c => c._Settings)
