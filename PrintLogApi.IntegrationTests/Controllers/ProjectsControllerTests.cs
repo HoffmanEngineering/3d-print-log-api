@@ -3,8 +3,6 @@ using System.Net.Http.Headers;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 using PrintLogApi.Services;
-using Microsoft.Extensions.DependencyInjection;
-using PrintLogApi.IntegrationTests.Support;
 using Xunit;
 using static PrintLogApi.IntegrationTests.Support.ProjectDateSeedHelpers;
 

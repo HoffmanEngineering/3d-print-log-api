@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Project;
+﻿namespace PrintLogApi.Models.DTOs.Project;
 
 /// <summary>
 /// The project date fields shared by every read DTO, so a single typed AutoMapper

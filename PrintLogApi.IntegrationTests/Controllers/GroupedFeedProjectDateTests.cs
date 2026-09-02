@@ -1,5 +1,4 @@
-﻿using PrintLogApi.IntegrationTests.Support;
-using PrintLogApi.Models;
+﻿using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using Xunit;
 using static PrintLogApi.IntegrationTests.Support.ProjectDateSeedHelpers;

@@ -1,9 +1,7 @@
 ﻿using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
-using PrintLogApi.Mcp;
 using PrintLogApi.IntegrationTests.Support;
-using PrintLogApi.Models;
+using PrintLogApi.Mcp;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp;
@@ -250,12 +248,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         var name = $"conf-{Guid.NewGuid():N}";
         using var _ = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = name, ["startDate"] = "2026-02-01", ["idempotencyKey"] = key,
+            ["name"] = name,
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = key,
         });
 
         await AssertToolErrorAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = name, ["startDate"] = "2026-02-02", ["idempotencyKey"] = key,
+            ["name"] = name,
+            ["startDate"] = "2026-02-02",
+            ["idempotencyKey"] = key,
         });
     }
 
@@ -266,12 +268,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         var name = $"conf2-{Guid.NewGuid():N}";
         using var _ = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = name, ["finishDate"] = FutureDay(), ["idempotencyKey"] = key,
+            ["name"] = name,
+            ["finishDate"] = FutureDay(),
+            ["idempotencyKey"] = key,
         });
 
         await AssertToolErrorAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = name, ["finishDate"] = FutureDay(1), ["idempotencyKey"] = key,
+            ["name"] = name,
+            ["finishDate"] = FutureDay(1),
+            ["idempotencyKey"] = key,
         });
     }
 
@@ -282,7 +288,9 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
         var name = $"replay-{Guid.NewGuid():N}";
         var args = new Dictionary<string, object?>
         {
-            ["name"] = name, ["startDate"] = "2026-02-01", ["idempotencyKey"] = key,
+            ["name"] = name,
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = key,
         };
 
         using var first = await CallJsonAsync("create_project", args);
@@ -317,13 +325,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     {
         using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = $"upd-{Guid.NewGuid():N}", ["idempotencyKey"] = NewKey(),
+            ["name"] = $"upd-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
         });
         var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
 
         using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
         {
-            ["id"] = id, ["startDate"] = "2026-02-01", ["finishDate"] = "2026-03-01",
+            ["id"] = id,
+            ["startDate"] = "2026-02-01",
+            ["finishDate"] = "2026-03-01",
         });
 
         Assert.Equal("2026-02-01", updated.RootElement.GetProperty("startDate").GetString());
@@ -335,13 +346,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     {
         using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = $"clr-{Guid.NewGuid():N}", ["startDate"] = "2026-02-01", ["idempotencyKey"] = NewKey(),
+            ["name"] = $"clr-{Guid.NewGuid():N}",
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = NewKey(),
         });
         var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
 
         using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
         {
-            ["id"] = id, ["clearStartDate"] = true,
+            ["id"] = id,
+            ["clearStartDate"] = true,
         });
 
         // No prints, so it falls back to the project's creation date.
@@ -355,13 +369,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     {
         using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = $"clrf-{Guid.NewGuid():N}", ["finishDate"] = FutureDay(), ["idempotencyKey"] = NewKey(),
+            ["name"] = $"clrf-{Guid.NewGuid():N}",
+            ["finishDate"] = FutureDay(),
+            ["idempotencyKey"] = NewKey(),
         });
         var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
 
         using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
         {
-            ["id"] = id, ["clearFinishDate"] = true,
+            ["id"] = id,
+            ["clearFinishDate"] = true,
         });
 
         // An automatic finish date on a project with no dated prints has no value at all. The
@@ -377,13 +394,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     {
         using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = $"rej-{Guid.NewGuid():N}", ["idempotencyKey"] = NewKey(),
+            ["name"] = $"rej-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
         });
         var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
 
         await AssertToolErrorAsync("update_project", new Dictionary<string, object?>
         {
-            ["id"] = id, ["startDate"] = "2026-02-01", ["clearStartDate"] = true,
+            ["id"] = id,
+            ["startDate"] = "2026-02-01",
+            ["clearStartDate"] = true,
         });
     }
 
@@ -392,13 +412,16 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
     {
         using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
         {
-            ["name"] = $"inv-{Guid.NewGuid():N}", ["idempotencyKey"] = NewKey(),
+            ["name"] = $"inv-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
         });
         var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
 
         await AssertToolErrorAsync("update_project", new Dictionary<string, object?>
         {
-            ["id"] = id, ["startDate"] = "2026-05-01", ["finishDate"] = "2026-04-01",
+            ["id"] = id,
+            ["startDate"] = "2026-05-01",
+            ["finishDate"] = "2026-04-01",
         });
     }
 

@@ -1,5 +1,4 @@
-﻿using PrintLogApi.Services;
-using Xunit;
+﻿using Xunit;
 using static PrintLogApi.Services.ProjectDateResolver;
 
 namespace PrintLogApi.IntegrationTests.Services;
