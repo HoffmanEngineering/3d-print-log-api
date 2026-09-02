@@ -1,4 +1,6 @@
-﻿namespace PrintLogApi.Mcp;
+﻿using System.Collections.Frozen;
+
+namespace PrintLogApi.Mcp;
 
 /// <summary>
 /// Input-bound validation for the printer write surface, shared by create_printer and
@@ -24,13 +26,13 @@ public static class McpPrinterValidation
     /// wrapper is not an invariant, just a habit.
     /// </para>
     /// </summary>
-    public static readonly IReadOnlySet<string> ClearableFields = new HashSet<string>
+    public static readonly IReadOnlySet<string> ClearableFields = new[]
     {
         "description", "nozzleDiameterMm", "filamentDiameterMm", "beamDiameterMm",
         "bedWidthMm", "bedDepthMm", "bedHeightMm",
         "screenResolutionXPixels", "screenResolutionYPixels",
         "hasHeatedBed", "hasHeatedChamber", "wattageW",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     public static void RequireClearableFields(ISet<string> clear)
     {

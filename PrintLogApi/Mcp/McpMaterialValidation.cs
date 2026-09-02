@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Collections.Frozen;
+using System.Text.RegularExpressions;
 
 namespace PrintLogApi.Mcp;
 
@@ -29,7 +30,7 @@ public static class McpMaterialValidation
     /// wrapper is not an invariant, just a habit.
     /// </para>
     /// </summary>
-    public static readonly IReadOnlySet<string> ClearableFields = new HashSet<string>
+    public static readonly IReadOnlySet<string> ClearableFields = new[]
     {
         "brand", "colorName", "colorHex", "colors", "storageLocation", "notes",
         "purchaseLocation", "purchasePriceValue", "purchasePriceCurrency", "purchaseNotes",
@@ -37,7 +38,7 @@ public static class McpMaterialValidation
         "tempRangeStartC", "tempRangeEndC", "recommendedTempC", "recommendedBedTempC",
         "initialLayerTimeS", "layerTimeS", "meltingTemperatureC", "materialRefreshRatio",
         "colorPattern", "finishType", "effects",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     public static void RequireClearableFields(ISet<string> clear)
     {
