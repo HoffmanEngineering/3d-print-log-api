@@ -1821,7 +1821,7 @@ public sealed class PrintService(
         // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
         var projectList = await context.Projects
             .Where(p => p.CreatedById == userId)
-            .Select(p => new { p.Id, p.CreatedDate, p.Name })
+            .Select(p => new { p.Id, p.CreatedDate, p.Name, p.StartDateOverride })
             .AsNoTracking()
             .ToListAsync();
 
@@ -1846,11 +1846,36 @@ public sealed class PrintService(
             .Where(x => x.ProjectId.HasValue)
             .ToDictionary(x => x.ProjectId!.Value, x => x.TotalFilamentWeightMg);
 
+        // Start only: the feed carries no finish date, so there is no reason to load the
+        // duration columns or compute a finish here.
+        //
+        // The MIN is folded in memory rather than pushed into SQL. Print.StartDate is a
+        // DateTimeOffset?, and the SQLite provider the test suite runs on stores that as text
+        // INCLUDING the offset suffix and compares it lexicographically — so across rows with
+        // mixed offsets a SQL MIN can pick a different row on SQLite than on SQL Server.
+        // Two small columns per project-assigned print is the price of not having CI and
+        // production disagree about a sort key.
+        var projectStartRows = await context.Prints
+            .Where(p => p.CreatedById == userId && p.ProjectId != null && p.StartDate != null)
+            .Select(p => new { p.ProjectId, p.StartDate })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var projectStartLookup = projectStartRows
+            .Where(x => x.ProjectId.HasValue)
+            .GroupBy(x => x.ProjectId!.Value)
+            .ToDictionary(g => g.Key, g => g.Min(x => x.StartDate));
+
         var projectSortKeys = projectList.Select(p => new FeedSortItem
         {
             Type = FeedItemType.Project,
             ProjectId = p.Id,
-            SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
+            // Was the project's CreatedDate, which is why a project whose prints all ran in
+            // March sorted as though it happened the day the row was created.
+            SortDate = ProjectDateResolver.ResolveStartInstant(
+                p.StartDateOverride,
+                projectStartLookup.TryGetValue(p.Id, out var earliest) ? earliest : null,
+                p.CreatedDate),
             SortTitle = p.Name,
             TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var pw) ? pw : 0L
         }).ToList();
@@ -1899,20 +1924,41 @@ public sealed class PrintService(
         {
             merged = sortRequest.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.SortTitle)
-                : merged.OrderByDescending(x => x.SortTitle);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.SortTitle)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
         else if (sortRequest?.SortColumn == PrintSummarySortColumn.FilamentUsage)
         {
             merged = sortRequest.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.TotalFilamentWeightMg)
-                : merged.OrderByDescending(x => x.TotalFilamentWeightMg);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.TotalFilamentWeightMg)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
         else
         {
             bool asc = sortRequest?.SortDirection == SortDirection.Asc;
+            // Ties are now the COMMON case: a date-only override sorts every pinned project to
+            // the same UTC midnight. Without a deterministic tie-breaker equal keys can reorder
+            // between page requests, duplicating a row on one page and dropping it from the next.
             merged = asc
                 ? merged.OrderBy(x => x.SortDate)
-                : merged.OrderByDescending(x => x.SortDate);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.SortDate)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
 
         var mergedList = merged.ToList();
@@ -2145,6 +2191,10 @@ public sealed class PrintService(
                 {
                     Type = "project",
                     SortDate = key.SortDate,
+                    // The UTC civil date of the sort instant is exactly the resolved start
+                    // date: an override sorts at UTC midnight of that day, and the derived
+                    // cases already reduce to their UTC civil date in ProjectDateResolver.
+                    ProjectStartDate = DateOnly.FromDateTime(key.SortDate.UtcDateTime),
                     ProjectId = p.Id,
                     ProjectName = p.Name,
                     ProjectReference = p.Reference,

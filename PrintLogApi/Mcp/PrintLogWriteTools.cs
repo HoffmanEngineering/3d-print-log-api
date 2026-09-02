@@ -579,6 +579,8 @@ public class PrintLogWriteTools(
         [Description("Optional URL (max 1000 chars).")] string? url = null,
         [Description("Status, default InProgress.")] Project.ProjectStatus status = Project.ProjectStatus.InProgress,
         [Description("Visibility, default Private.")] Project.ProjectViewStatus viewStatus = Project.ProjectViewStatus.Private,
+        [Description("Optional manual start date as YYYY-MM-DD. Omit to derive it from the project's prints.")] DateOnly? startDate = null,
+        [Description("Optional manual finish date as YYYY-MM-DD. Omit to derive it from the project's prints.")] DateOnly? finishDate = null,
         [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
         CancellationToken ct = default)
     {
@@ -588,7 +590,8 @@ public class PrintLogWriteTools(
         }
         ValidateProjectFields(name, reference, description, url, status, viewStatus);
         return await projectService.CreateProjectForMcp(
-            CurrentUserId, name, reference, description, url, status, viewStatus, idempotencyKey, ct);
+            CurrentUserId, name, reference, description, url, status, viewStatus,
+            startDate, finishDate, idempotencyKey, ct);
     }
 
     // Destructive = true, matching the other update_* tools: passing a field overwrites whatever
@@ -596,7 +599,9 @@ public class PrintLogWriteTools(
     [McpServerTool(Title = "Update Project", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
      Description(
         "Edit one of your own projects. Only fields you pass are changed. viewStatus changes " +
-        "visibility; the result echoes the resulting visibility. Foreign projects are 'not found'.")]
+        "visibility; the result echoes the resulting visibility. startDate/finishDate pin the " +
+        "project's dates; clearStartDate/clearFinishDate go back to deriving them from the " +
+        "project's prints. Foreign projects are 'not found'.")]
     public async Task<ProjectWriteResult> UpdateProject(
         [Description("The project id.")] Guid id,
         [Description("Optional new name (max 100 chars).")] string? name = null,
@@ -605,10 +610,17 @@ public class PrintLogWriteTools(
         [Description("Optional new URL (max 1000 chars).")] string? url = null,
         [Description("Optional new status.")] Project.ProjectStatus? status = null,
         [Description("Optional new visibility.")] Project.ProjectViewStatus? viewStatus = null,
+        [Description("Optional manual start date as YYYY-MM-DD. Pass clearStartDate to go back to automatic.")] DateOnly? startDate = null,
+        [Description("Optional manual finish date as YYYY-MM-DD. Pass clearFinishDate to go back to automatic.")] DateOnly? finishDate = null,
+        [Description("Set true to clear a manual start date and derive it from prints again.")] bool clearStartDate = false,
+        [Description("Set true to clear a manual finish date and derive it from prints again.")] bool clearFinishDate = false,
         CancellationToken ct = default)
     {
         ValidateProjectFields(name, reference, description, url, status, viewStatus);
-        return await projectService.UpdateProjectForMcp(CurrentUserId, id, name, reference, description, url, status, viewStatus, ct);
+        ValidateProjectDateArguments(startDate, finishDate, clearStartDate, clearFinishDate);
+        return await projectService.UpdateProjectForMcp(
+            CurrentUserId, id, name, reference, description, url, status, viewStatus,
+            startDate, finishDate, clearStartDate, clearFinishDate, ct);
     }
 
     private static void ValidateProjectFields(
@@ -626,6 +638,25 @@ public class PrintLogWriteTools(
         if (viewStatus.HasValue)
         {
             McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
+        }
+    }
+
+    /// <summary>
+    /// This tool is patch-style: omitting a field leaves it alone. That makes "set to null" and
+    /// "leave alone" indistinguishable in a single parameter, so clearing needs its own explicit
+    /// channel — and passing both at once is a caller bug worth naming rather than resolving by
+    /// precedence, which would silently discard one of the two instructions.
+    /// </summary>
+    private static void ValidateProjectDateArguments(
+        DateOnly? startDate, DateOnly? finishDate, bool clearStartDate, bool clearFinishDate)
+    {
+        if (startDate.HasValue && clearStartDate)
+        {
+            throw McpToolException.InvalidArguments("Pass either startDate or clearStartDate, not both.");
+        }
+        if (finishDate.HasValue && clearFinishDate)
+        {
+            throw McpToolException.InvalidArguments("Pass either finishDate or clearFinishDate, not both.");
         }
     }
 

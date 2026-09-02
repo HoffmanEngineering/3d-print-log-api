@@ -37,6 +37,18 @@ public class Project : TimestampEntity
     [MaxLength(1000)]
     public string? Url { get; set; }
 
+    /// <summary>
+    /// Manual start date. Null means the date is derived from the project's prints.
+    /// A civil date, not an instant: project detail is anonymous for public projects,
+    /// and an instant would render as different calendar days for different viewers.
+    /// </summary>
+    public DateOnly? StartDateOverride { get; set; }
+
+    /// <summary>
+    /// Manual finish date. Null means the date is derived from the project's prints.
+    /// </summary>
+    public DateOnly? FinishDateOverride { get; set; }
+
     public ProjectStatus Status { get; set; }
 
     public ProjectViewStatus ViewStatus { get; set; }

@@ -110,4 +110,55 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
 
         Assert.Empty(unhinted);
     }
+
+    /// <summary>
+    /// A DateOnly parameter must advertise itself as a date-formatted string. If the SDK emitted
+    /// it as a bare object or a full date-time, an agent would send an ISO instant and the civil
+    /// date would acquire a time and an offset — the exact drift DateOnly exists to prevent.
+    /// </summary>
+    [Theory]
+    [InlineData("create_project", "startDate")]
+    [InlineData("create_project", "finishDate")]
+    [InlineData("update_project", "startDate")]
+    [InlineData("update_project", "finishDate")]
+    public async Task ProjectTools_DateParameters_AreAdvertisedAsDateStrings(string tool, string parameter)
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var property = tools.Single(t => t.Name == tool)
+            .ProtocolTool.InputSchema
+            .GetProperty("properties").GetProperty(parameter);
+
+        var json = property.ToString();
+        Assert.Contains("string", json);
+        Assert.Contains("date", json);
+        Assert.DoesNotContain("date-time", json);
+    }
+
+    /// <summary>
+    /// The clear flags are the only way to go back to an automatic date, so they must be
+    /// advertised, and they must be optional — a required flag would force every caller that
+    /// only wants to rename a project to state a date policy it has no opinion about.
+    /// </summary>
+    [Fact]
+    public async Task UpdateProject_ClearFlags_AreAdvertisedAndOptional()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var schema = tools.Single(t => t.Name == "update_project").ProtocolTool.InputSchema;
+        var properties = schema.GetProperty("properties");
+
+        Assert.True(properties.TryGetProperty("clearStartDate", out _));
+        Assert.True(properties.TryGetProperty("clearFinishDate", out _));
+
+        var required = schema.TryGetProperty("required", out var req)
+            ? req.EnumerateArray().Select(e => e.GetString()).ToArray()
+            : [];
+        Assert.DoesNotContain("clearStartDate", required);
+        Assert.DoesNotContain("clearFinishDate", required);
+        Assert.DoesNotContain("startDate", required);
+        Assert.DoesNotContain("finishDate", required);
+    }
 }

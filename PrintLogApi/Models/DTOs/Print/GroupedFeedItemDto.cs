@@ -17,6 +17,17 @@ public class GroupedFeedItemDto
 
     // --- Project fields (populated when Type == "project") ---
     public Guid? ProjectId { get; set; }
+
+    /// <summary>
+    /// The project's RESOLVED start date as a civil date. Populated for project rows only.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="SortDate"/> on purpose. SortDate is an instant used for
+    /// ordering; a manual override sorts at UTC midnight, so rendering SortDate in the
+    /// viewer's timezone shows a pinned 2026-01-01 as December 31 anywhere west of UTC — and
+    /// disagrees with the same project's detail page. Clients display THIS field.
+    /// </remarks>
+    public DateOnly? ProjectStartDate { get; set; }
     public string? ProjectName { get; set; }
     public string? ProjectReference { get; set; }
     public ProjectStatus? ProjectStatus { get; set; }

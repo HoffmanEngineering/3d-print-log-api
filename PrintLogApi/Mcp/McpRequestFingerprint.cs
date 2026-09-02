@@ -183,7 +183,8 @@ public static class McpRequestFingerprint
     /// </summary>
     public static string ComputeCreateProject(
         string? name, string? reference, string? description, string? url,
-        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus)
+        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus,
+        DateOnly? startDate, DateOnly? finishDate)
     {
         using var ms = new MemoryStream();
         using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
@@ -194,6 +195,19 @@ public static class McpRequestFingerprint
             WriteStr(w, url);
             w.Write((int)status);
             w.Write((int)viewStatus);
+
+            // Written ONLY when a date is actually supplied. Unconditionally appending two
+            // "absent" flags would still change the hashed bytes, so every idempotency record
+            // already stored against a date-less create would stop matching and a legitimate
+            // retry would come back as a conflict instead of a replay. Omitting the section
+            // entirely keeps a date-less create byte-identical to what it hashed before.
+            if (startDate.HasValue || finishDate.HasValue)
+            {
+                w.Write(startDate.HasValue);
+                if (startDate.HasValue) w.Write(startDate.Value.DayNumber);
+                w.Write(finishDate.HasValue);
+                if (finishDate.HasValue) w.Write(finishDate.Value.DayNumber);
+            }
         }
         return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
     }

@@ -21,7 +21,8 @@ public interface IProjectService
     /// </summary>
     Task<CreateProjectResult> CreateProjectForMcp(
         long userId, string name, string? reference, string? description, string? url,
-        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string? idempotencyKey,
+        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, string? idempotencyKey,
         CancellationToken ct);
 
     /// <summary>
@@ -30,7 +31,9 @@ public interface IProjectService
     /// </summary>
     Task<ProjectWriteResult> UpdateProjectForMcp(
         long userId, Guid id, string? name, string? reference, string? description, string? url,
-        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, CancellationToken ct);
+        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, bool clearStartDate, bool clearFinishDate,
+        CancellationToken ct);
 
     Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId, string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate");
     Task<Project?> GetProjectByIdAsync(Guid id);

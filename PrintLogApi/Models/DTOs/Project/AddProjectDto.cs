@@ -21,4 +21,16 @@ public class AddProjectDto
     public ProjectStatus Status { get; set; } = ProjectStatus.InProgress;
 
     public ProjectViewStatus ViewStatus { get; set; } = ProjectViewStatus.Private;
+
+    /// <summary>
+    /// Manual start date, or null to derive the start date from the project's prints.
+    /// This is a full replace: omitting it clears an existing override.
+    /// </summary>
+    public DateOnly? StartDateOverride { get; set; }
+
+    /// <summary>
+    /// Manual finish date, or null to derive the finish date from the project's prints.
+    /// This is a full replace: omitting it clears an existing override.
+    /// </summary>
+    public DateOnly? FinishDateOverride { get; set; }
 }
