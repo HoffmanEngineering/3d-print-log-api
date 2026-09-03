@@ -43,8 +43,9 @@ public static class PrintSearchPredicate
     /// Binary collation used for every free-text search comparison, in place of the column's own
     /// culture-aware SQL_Latin1_General_CP1_CI_AS.
     ///
-    /// Measured against production (351,515 rows, a user with 1,584 prints, term "wall"):
-    /// <b>CPU 33ms -> 10ms, elapsed 155ms -> 61ms, identical results</b>. The plan is unchanged —
+    /// Measured against production (351,515 rows, a user with 1,584 prints, term "wall") by two
+    /// independent methods that agree: <b>CPU 33.6ms -> 11.2ms, roughly 3x, with identical
+    /// results</b>. The plan is unchanged —
     /// same Index Seek on SummaryIndex, no Key Lookup, no Sort, and the SAME cardinality
     /// estimates, because a leading-wildcard LIKE was already estimated by a fixed guess and
     /// LOWER() therefore had no statistics left to defeat.
