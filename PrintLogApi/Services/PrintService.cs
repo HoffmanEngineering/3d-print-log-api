@@ -446,18 +446,9 @@ public sealed class PrintService(
                 .Where(p => p.CreatedById == currentUserId);
         }
 
-        if (!string.IsNullOrWhiteSpace(searchText))
+        foreach (var text in PrintSearchPredicate.SplitCriteria(searchText))
         {
-            // Split on any spaces and search separately, preserving quotes.
-            var criterias = searchText.Split('"')
-                 .Select((element, index) => index % 2 == 0  // If even index
-                                       ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)  // Split the item
-                                       : new string[] { element })  // Keep the entire item
-                 .SelectMany(element => element).ToList();
-            foreach (var text in criterias)
-            {
-                printQuery = printQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text));
-            }
+            printQuery = printQuery.Where(PrintSearchPredicate.TitleOrNotes(text));
         }
 
         // Half-open [fromDate, toDate) so adjacent windows never double-count a boundary
@@ -1787,21 +1778,13 @@ public sealed class PrintService(
                 p.FilamentUsage!.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
         }
 
-        // Split on any spaces and search separately, preserving quotes.
-        var criterias = string.IsNullOrWhiteSpace(searchText)
-            ? new List<string>()
-            : searchText.Split('"')
-                .Select((element, index) => index % 2 == 0
-                    ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                    : new string[] { element })
-                .SelectMany(element => element)
-                .ToList();
+        var criterias = PrintSearchPredicate.SplitCriteria(searchText);
 
         // Project-assigned prints: the project's name is on the row the user sees, so it is
         // searchable and the join to Projects earns its place.
         IQueryable<Print> filteredPrintQuery = baseQuery;
         foreach (var text in criterias)
-            filteredPrintQuery = filteredPrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text) || p.Project!.Name!.Contains(text));
+            filteredPrintQuery = filteredPrintQuery.Where(PrintSearchPredicate.TitleNotesOrProjectName(text));
 
         // Standalone prints: ProjectId IS NULL, so the LEFT JOIN the project-name term generates
         // can only ever produce NULL and `Project.Name LIKE …` is never true. Carrying that term
@@ -1809,7 +1792,7 @@ public sealed class PrintService(
         // a nvarchar(max) column — to reach a result it could not change.
         IQueryable<Print> standalonePrintQuery = baseQuery.Where(p => p.ProjectId == null);
         foreach (var text in criterias)
-            standalonePrintQuery = standalonePrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text));
+            standalonePrintQuery = standalonePrintQuery.Where(PrintSearchPredicate.TitleOrNotes(text));
 
         // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
         Dictionary<Guid, int> filteredGroupLookup;
