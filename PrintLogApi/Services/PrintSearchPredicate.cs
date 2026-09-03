@@ -40,11 +40,24 @@ namespace PrintLogApi.Services;
 public static class PrintSearchPredicate
 {
     /// <summary>
-    /// Binary collation used for every free-text search comparison. Culture-aware matching under
-    /// the column's own SQL_Latin1_General_CP1_CI_AS costs ~58ns/char against ~2.2ns/char here —
-    /// 16x in an isolated benchmark of the predicate. That benchmark used uniform synthetic rows
-    /// and hand-written SQL, so it bounds the comparison cost rather than predicting the
-    /// end-to-end win. See the spec for the semantics trade and the measurement's limits.
+    /// Binary collation used for every free-text search comparison, in place of the column's own
+    /// culture-aware SQL_Latin1_General_CP1_CI_AS.
+    ///
+    /// Measured against production (351,515 rows, a user with 1,584 prints, term "wall"):
+    /// <b>CPU 33ms -> 10ms, elapsed 155ms -> 61ms, identical results</b>. The plan is unchanged —
+    /// same Index Seek on SummaryIndex, no Key Lookup, no Sort, and the SAME cardinality
+    /// estimates, because a leading-wildcard LIKE was already estimated by a fixed guess and
+    /// LOWER() therefore had no statistics left to defeat.
+    ///
+    /// <b>An isolated benchmark of the bare predicate said 16x. Do not quote that number.</b> It
+    /// used uniform synthetic rows and hand-written SQL with no index; on real data the gain is
+    /// ~3x.
+    ///
+    /// <b>One metric gets worse.</b> LOB logical reads rose ~6x (166 -> 995 on the count query),
+    /// because LOWER() over nvarchar(max) shows up as CONVERT(nvarchar(max), lower(Notes)) and
+    /// materialises the whole value, where the old LIKE could stop at the first match. Physical
+    /// reads stayed 0, so it is buffer-pool traffic rather than I/O — but it is the reason to
+    /// watch avg_physical_io_reads rather than only CPU after a deploy.
     /// </summary>
     public const string BinaryCollation = "Latin1_General_BIN2";
 
