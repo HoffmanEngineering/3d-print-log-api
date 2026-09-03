@@ -10,8 +10,19 @@ namespace PrintLogApi.Services;
 /// Every comparison runs as <c>LOWER(col) COLLATE Latin1_General_BIN2 LIKE @t ESCAPE</c>. The
 /// column's own SQL_Latin1_General_CP1_CI_AS is culture-aware, which forces a linguistic rules
 /// engine at every candidate position of every row — measured at ~58ns/char against ~2.2ns/char
-/// for binary comparison. Substring semantics are unchanged; see the spec for the one measured
-/// behaviour difference (sharp-s vs ss).
+/// for binary comparison. Substring semantics are unchanged.
+///
+/// Matching is no longer culture-aware, and PrintSearchCollationCorpusTests measures exactly
+/// where that shows. Only two of those cases are reachable in production data, which was
+/// censused rather than assumed:
+///
+///   * <b>Sharp-s.</b> CI_AS expands ss to match Stra&#223;e; binary comparison does not.
+///   * <b>Turkish dotted capital I (U+0130), in both directions.</b> The column is lowered by
+///     SQL Server and the term by .NET, and their case tables disagree on this one character:
+///     SQL Server's LOWER folds it to "i" while ToLowerInvariant leaves it untouched (measured
+///     on .NET 10). So searching "i" now matches &#304;stanbul where it did not, and searching
+///     "&#304;" no longer does. Do not "fix" the second half with a culture-sensitive ToLower()
+///     &mdash; that would make every result depend on the server's locale.
 ///
 /// Three rules hold this together, and each is a trap that compiles and runs when broken:
 ///
