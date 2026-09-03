@@ -20,6 +20,7 @@ public class UserDeletionServiceTests
         var commandInterceptor = new CommandRecordingInterceptor();
         await using var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
+        SqliteSearchCollation.Register(connection);
 
         var options = new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlite(connection)

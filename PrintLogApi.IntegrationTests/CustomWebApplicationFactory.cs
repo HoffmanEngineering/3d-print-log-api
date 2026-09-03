@@ -25,6 +25,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         // Create and open the connection early - it must stay open for the entire test lifetime
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
+        SqliteSearchCollation.Register(_connection);
     }
 
     /// <summary>The address feedback notifications are sent to under test.</summary>
