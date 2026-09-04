@@ -54,23 +54,38 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
+      # Scripts from the migration *before the first unapplied one*, not from after the last
+      # applied one. Applied migrations are not necessarily a prefix of the id-ordered list: a PR
+      # that branches early can merge after a sibling, leaving a pending migration with a LOWER id
+      # than migrations already in the database (#106 merged after #107/#108 did exactly this).
+      # The old "last applied" query then picked an id past the pending one and produced an empty
+      # script -- so the production approval gate showed a reviewer nothing while the efbundle,
+      # which applies all pending migrations regardless of order, was about to add two columns.
+      # --idempotent guards each statement, so re-including already-applied migrations in the
+      # range is safe.
       - name: Generate migration SQL script
         run: |
           MIGRATIONS_JSON=$(dotnet tool run dotnet-ef migrations list --project PrintLogApi \
             --connection "$DB_CONNECTION_STRING_MIGRATIONS_READER" \
             --json --no-build --configuration Release 2>&1) || true
           echo "Raw migrations output: $MIGRATIONS_JSON"
-          LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
-            | sed -n '/^\[/,$p' \
-            | jq -r '[.[] | select(.applied == true)] | last | .id // empty' \
-            2>/dev/null || true)
-          echo "Last applied migration: $LAST_MIGRATION"
-          if [ -z "$LAST_MIGRATION" ]; then
-            echo "ERROR: Could not determine last applied migration" >&2
+          MIGRATIONS=$(echo "$MIGRATIONS_JSON" | sed -n '/^\[/,$p')
+          COUNT=$(echo "$MIGRATIONS" | jq -r 'length' 2>/dev/null || true)
+          if [ -z "$COUNT" ] || [ "$COUNT" = "0" ]; then
+            echo "ERROR: Could not read the migration list from the database" >&2
             exit 1
           fi
-          dotnet tool run dotnet-ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
-            --output migrations.sql --idempotent --no-build --configuration Release
+          # "0" is EF's marker for "before the first migration".
+          FROM=$(echo "$MIGRATIONS" | jq -r '
+            (map(.applied) | index(false)) as $i
+            | if $i == null then "none" elif $i == 0 then "0" else .[$i - 1].id end')
+          echo "Pending migrations start after: $FROM"
+          if [ "$FROM" = "none" ]; then
+            echo "-- No pending migrations." > migrations.sql
+          else
+            dotnet tool run dotnet-ef migrations script "$FROM" --project PrintLogApi \
+              --output migrations.sql --idempotent --no-build --configuration Release
+          fi
         env:
           DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
 
