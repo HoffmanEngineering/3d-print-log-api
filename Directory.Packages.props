@@ -49,8 +49,8 @@
        the two halves speak a versioned protocol revision to each other - so they must be bumped
        together. That coupling is exactly what central package management is for. -->
   <ItemGroup>
-    <PackageVersion Include="ModelContextProtocol" Version="2.0.0" />
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
   <!-- Test infrastructure. xUnit v3 on Microsoft.Testing.Platform (#70).
