@@ -51,6 +51,8 @@ public class PrintLogContext : DbContext
 
     public DbSet<FilamentImage> FilamentImages { get; set; } = null!;
 
+    public DbSet<PrinterImage> PrinterImages { get; set; } = null!;
+
     public DbSet<Feedback> Feedback { get; set; }
 
     public DbSet<UserApiKey> UserApiKeys { get; set; }
@@ -578,6 +580,42 @@ public class PrintLogContext : DbContext
                 .HasForeignKey(fi => fi.ThumbnailFileId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<PrinterImage>(entity =>
+        {
+            // Exactly one default per printer, enforced by the database rather than by
+            // convention: two concurrent "first" uploads would otherwise both win.
+            entity.HasIndex(pi => pi.PrinterId)
+                .HasFilter("[IsDefault] = 1")
+                .IsUnique()
+                .HasDatabaseName("IX_PrinterImages_PrinterId_IsDefault");
+
+            entity.HasIndex(pi => new { pi.PrinterId, pi.DisplayOrder });
+
+            entity.HasOne(pi => pi.Printer)
+                .WithMany()
+                .HasForeignKey(pi => pi.PrinterId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict, not Cascade: the service removes File rows explicitly so the
+            // blobs go with them. A cascade would delete the row and orphan the blob.
+            entity.HasOne(pi => pi.File)
+                .WithMany()
+                .HasForeignKey(pi => pi.FileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // The existing Printer covering index is led by Id, which does not serve the
+        // "every printer this user owns" shape that the image queries and the thumbnail
+        // map endpoint both use.
+        modelBuilder.Entity<Printer>()
+            .HasIndex(p => new { p.UserId, p.IsActive })
+            .HasDatabaseName("IX_Printers_UserId_IsActive");
 
         modelBuilder.Entity<ProjectImage>()
             .HasIndex(pi => pi.ProjectId)
