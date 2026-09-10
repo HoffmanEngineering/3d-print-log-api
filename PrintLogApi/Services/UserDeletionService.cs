@@ -283,6 +283,58 @@ public class UserDeletionService : IUserDeletionService
                 .Where(pm => pm.CreatedById == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete PrinterImages, their blobs, and their associated Files for user's printers.
+            // This MUST precede the Printers delete below: ExecuteDeleteAsync bypasses the change
+            // tracker and hits the PrinterImage -> File Restrict FKs directly.
+            var printerImageData = await _context.PrinterImages
+                .Where(pi => pi.Printer.UserId == userId)
+                .Select(pi => new
+                {
+                    pi.FileId,
+                    pi.ThumbnailFileId,
+                    Path = pi.File.Path,
+                    ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            if (printerImageData.Count > 0)
+            {
+                var printerBlobNames = printerImageData
+                    .SelectMany(pi => new[] { pi.Path, pi.ThumbnailPath })
+                    .Where(path => !string.IsNullOrEmpty(path))
+                    .Select(path => System.IO.Path.GetFileName(path)!);
+
+                foreach (var name in printerBlobNames)
+                {
+                    try
+                    {
+                        await _blobStorageService.DeleteBlobAsync(BlobContainers.PrinterImages, name);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete blob {BlobName} during user deletion; continuing", name);
+                    }
+                }
+
+                await _context.PrinterImages
+                    .Where(pi => pi.Printer.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                var printerImageFileIds = printerImageData
+                    .SelectMany(pi => new[] { pi.FileId, pi.ThumbnailFileId })
+                    .Where(id => id.HasValue)
+                    .Select(id => id!.Value)
+                    .ToList();
+
+                if (printerImageFileIds.Count > 0)
+                {
+                    await _context.Files
+                        .Where(f => printerImageFileIds.Contains(f.Id))
+                        .ExecuteDeleteAsync();
+                }
+            }
+
             // Delete Printers
             await _context.Printers
                 .Where(p => p.UserId == userId)

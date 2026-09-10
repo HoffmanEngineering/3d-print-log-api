@@ -271,9 +271,47 @@ public class PrinterService(
             context.PrinterMaintenance.RemoveRange(maintenanceEntries);
         }
 
+        // Images, their File rows and their blobs. Ordering is load-bearing: the
+        // PrinterImage -> File FKs are Restrict, so the image rows must go before the files,
+        // and both before the printer. Without this the delete would FAIL on the Restrict FK
+        // rather than orphan anything - broken either way.
+        var images = await context.PrinterImages
+            .Include(pi => pi.File)
+            .Include(pi => pi.ThumbnailFile)
+            .Where(pi => pi.PrinterId == printerId)
+            .ToListAsync();
+
+        var blobNames = images
+            .SelectMany(pi => new[] { pi.File?.Path, pi.ThumbnailFile?.Path })
+            .Where(path => !string.IsNullOrEmpty(path))
+            .Select(path => Path.GetFileName(path)!)
+            .ToList();
+
+        foreach (var image in images)
+        {
+            context.PrinterImages.Remove(image);
+            if (image.File is not null) context.Files.Remove(image.File);
+            if (image.ThumbnailFile is not null) context.Files.Remove(image.ThumbnailFile);
+        }
+
         context.Printers.Remove(printer);
 
         await context.SaveChangesAsync();
+
+        // Blobs LAST, so a failed save leaves an orphaned blob rather than a row pointing at
+        // destroyed bytes. Failures here are logged and swallowed for the same reason: the
+        // database is already consistent and the printer is gone.
+        foreach (var name in blobNames)
+        {
+            try
+            {
+                await blobStorage.DeleteBlobAsync(BlobContainers.PrinterImages, name);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete printer image blob {BlobName}; continuing", name);
+            }
+        }
 
         telemetry.TrackEvent("PrinterDelete");
 
