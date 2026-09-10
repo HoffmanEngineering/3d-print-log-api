@@ -89,6 +89,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             }
             services.AddSingleton<IBlobStorageService, InMemoryBlobStorageService>();
 
+            // The real processor, behind a switch that can drop the thumbnail. Defaults to
+            // pure passthrough, so every other test sees the production behavior.
+            var imageDescriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(IImageProcessingService));
+            if (imageDescriptor != null)
+            {
+                services.Remove(imageDescriptor);
+            }
+            services.AddSingleton<ImageProcessingService>();
+            services.AddSingleton<IImageProcessingService>(sp =>
+                new ControllableImageProcessingService(sp.GetRequiredService<ImageProcessingService>()));
+
             var auth0Descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IAuth0Service));
             if (auth0Descriptor != null)
             {

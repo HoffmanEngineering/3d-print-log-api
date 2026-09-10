@@ -14,6 +14,29 @@ public class InMemoryBlobStorageService : IBlobStorageService
     /// </summary>
     public Dictionary<string, byte[]> Blobs { get; private set; } = new();
 
+    /// <summary>Every blob path uploaded, in order, including ones later deleted.</summary>
+    public List<string> UploadedBlobNames { get; } = new();
+
+    /// <summary>Every blob path passed to <see cref="DeleteBlobAsync"/>, in order.</summary>
+    public List<string> DeletedBlobNames { get; } = new();
+
+    /// <summary>
+    /// The content type of the most recent inline signing request. Signing an original as
+    /// "image/webp" would set a response content type the bytes contradict, and only a
+    /// recording double can catch that - the URL itself does not carry it.
+    /// </summary>
+    public string? LastSignedContentType { get; private set; }
+
+    /// <summary>How many inline SAS URLs have been generated.</summary>
+    public int SignCallCount { get; private set; }
+
+    /// <summary>
+    /// Substituted into the next generated signature. Real bucketed signing deliberately
+    /// returns a byte-identical URL within a window, so URL equality cannot distinguish
+    /// "signed again" from "read from a cache"; varying this can.
+    /// </summary>
+    public string NextSignature { get; set; } = "fake-inline";
+
     /// <summary>
     /// Base URI for test blobs (can be customized for testing).
     /// </summary>
@@ -32,6 +55,8 @@ public class InMemoryBlobStorageService : IBlobStorageService
             await stream.CopyToAsync(memoryStream);
             Blobs[blobPath] = memoryStream.ToArray();
         }
+
+        UploadedBlobNames.Add(blobPath);
 
         // Construct the blob URI from the base URI and blob path
         var blobUri = new Uri(BaseUri, blobPath);
@@ -62,7 +87,11 @@ public class InMemoryBlobStorageService : IBlobStorageService
     public Task<Uri> GenerateSasInlineUrlAsync(
         string containerName, string blobName, string contentType,
         TimeSpan bucketSize, TimeSpan cacheControlMaxAge)
-        => Task.FromResult(new Uri(BaseUri, $"{containerName}/{blobName}?sig=fake-inline"));
+    {
+        LastSignedContentType = contentType;
+        SignCallCount++;
+        return Task.FromResult(new Uri(BaseUri, $"{containerName}/{blobName}?sig={NextSignature}"));
+    }
 
     /// <summary>
     /// Downloads a blob from in-memory storage. Returns null if it does not exist.
@@ -82,6 +111,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
     /// </summary>
     public Task DeleteBlobAsync(string containerName, string blobName)
     {
+        DeletedBlobNames.Add($"{containerName}/{blobName}");
         Blobs.Remove($"{containerName}/{blobName}");
         return Task.CompletedTask;
     }
@@ -92,6 +122,11 @@ public class InMemoryBlobStorageService : IBlobStorageService
     public void Clear()
     {
         Blobs.Clear();
+        UploadedBlobNames.Clear();
+        DeletedBlobNames.Clear();
+        SignCallCount = 0;
+        LastSignedContentType = null;
+        NextSignature = "fake-inline";
     }
 
     /// <summary>
