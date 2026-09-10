@@ -1493,8 +1493,8 @@ public sealed class PrintService(
             .SingleOrDefaultAsync();
 
         return subscription?.Status == SubscriptionStatus.Active
-            ? SubscriptionLimits.ProMaxImagesPerPrint
-            : SubscriptionLimits.FreeMaxImagesPerPrint;
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task SetDefaultImage(long printId, int newDefaultImageId)

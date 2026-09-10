@@ -1331,8 +1331,8 @@ public class FilamentService(
             .SingleOrDefaultAsync();
 
         return subscription?.Status == SubscriptionStatus.Active
-            ? SubscriptionLimits.ProMaxImagesPerFilament
-            : SubscriptionLimits.FreeMaxImagesPerFilament;
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task<Filament> AddFilament(AddFilamentDto filament, long userId)

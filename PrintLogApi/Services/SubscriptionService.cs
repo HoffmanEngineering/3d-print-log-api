@@ -59,7 +59,8 @@ public class SubscriptionService : ISubscriptionService
             dto = _mapper.Map<SubscriptionDto>(subscription);
         }
 
-        dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
+        dto.MaxImages = isPro ? SubscriptionLimits.ProMaxImages : SubscriptionLimits.FreeMaxImages;
+        dto.MaxImagesPerPrint = dto.MaxImages;
         dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
         dto.MaxFileStorageBytes = isPro ? SubscriptionLimits.ProMaxFileStorageBytes : SubscriptionLimits.FreeMaxFileStorageBytes;
         // Must count exactly what FilamentImageService.EnsureAccountStorageQuotaAsync counts.
