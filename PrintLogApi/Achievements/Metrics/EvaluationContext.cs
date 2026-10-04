@@ -28,6 +28,25 @@ public sealed class EvaluationContext
         _metrics = metrics.ToDictionary(m => m.Key, StringComparer.Ordinal);
     }
 
+    /// <summary>The <c>General_TimeZone</c> user setting type id.</summary>
+    public const int TimeZoneSettingTypeId = 20;
+
+    /// <summary>
+    /// Creates a context for <paramref name="userId"/>, resolving their saved time zone once. A
+    /// missing or unrecognized zone (an old client could have saved anything) means UTC, never an
+    /// error: a bad setting must not block grants or saves.
+    /// </summary>
+    public static async Task<EvaluationContext> CreateAsync(
+        PrintLogContext db, long userId, DateTime nowUtc, IEnumerable<IAchievementMetric> metrics, CancellationToken ct)
+    {
+        var zoneId = await db.UserSettings
+            .AsNoTracking()
+            .Where(s => s.UserId == userId && s.UserSettingTypeId == TimeZoneSettingTypeId)
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync(ct);
+        return new EvaluationContext(userId, db, Services.TimeZoneResolver.ResolveOrUtc(zoneId), nowUtc, metrics);
+    }
+
     public long UserId { get; }
 
     public PrintLogContext Db { get; }

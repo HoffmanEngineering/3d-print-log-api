@@ -7,7 +7,7 @@ public static class AchievementServiceCollectionExtensions
     /// <summary>Registers the achievement metrics, evaluator and save-time triggers.</summary>
     public static IServiceCollection AddAchievements(this IServiceCollection services)
     {
-        foreach (var metric in CountMetrics.All())
+        foreach (var metric in CountMetrics.All().Concat(DateMetrics.All()))
         {
             services.AddSingleton<IAchievementMetric>(metric);
         }
