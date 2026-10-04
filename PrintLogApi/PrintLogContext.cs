@@ -638,12 +638,25 @@ public class PrintLogContext : DbContext
             .HasForeignKey(a => a.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Serves the achievement metrics' single aggregate over a user's prints. This is the
-        // FK's convention index (IX_Prints_CreatedById) widened with INCLUDE columns, not a
+        // Covers the achievement metrics' one read of a user's prints (EvaluationContext's
+        // PrintRow projection): every column it selects is here, so the read never touches the
+        // clustered index. This is the FK's convention index widened with INCLUDE columns, not a
         // second index on the same key.
         modelBuilder.Entity<Print>()
             .HasIndex(p => p.CreatedById)
-            .IncludeProperties(p => new { p.Source, p.Slicer, p.Status, p.StartDate, p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds, p.ViewStatus });
+            .IncludeProperties(p => new
+            {
+                p.Source,
+                p.Slicer,
+                p.Status,
+                p.StartDate,
+                p.CreatedDate,
+                p.PrintTimeInSeconds,
+                p.EstimatedPrintTimeInSeconds,
+                p.FilamentUsageMg,
+                p.EstimatedFilamentUsageMg,
+                p.ViewStatus,
+            });
 
         modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 

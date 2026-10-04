@@ -16,6 +16,7 @@ public sealed class EvaluationContext
 {
     private readonly Dictionary<string, IAchievementMetric> _metrics;
     private readonly Dictionary<string, MetricValue> _measured = new(StringComparer.Ordinal);
+    private IReadOnlyList<PrintRow>? _rows;
     private PrintAggregate? _aggregate;
     private IReadOnlyList<PrintDateRow>? _dates;
 
@@ -60,15 +61,24 @@ public sealed class EvaluationContext
     /// <summary>Every metric measured so far in this pass, by key.</summary>
     public IReadOnlyDictionary<string, MetricValue> Measured => _measured;
 
-    public async Task<PrintAggregate> GetPrintAggregateAsync(CancellationToken ct) =>
-        _aggregate ??= await PrintAggregate.LoadAsync(Db, UserId, ct);
-
-    public async Task<IReadOnlyList<PrintDateRow>> GetPrintDatesAsync(CancellationToken ct) =>
-        _dates ??= await Db.Prints
+    /// <summary>
+    /// The user's prints, one narrow row each, read once and shared by the aggregate and every
+    /// date metric. Served by the covering index on <c>Prints (CreatedById)</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<PrintRow>> GetPrintRowsAsync(CancellationToken ct) =>
+        _rows ??= await Db.Prints
             .AsNoTracking()
             .Where(p => p.CreatedById == UserId)
-            .Select(p => new PrintDateRow(p.StartDate, p.CreatedDate, p.Status))
+            .Select(p => new PrintRow(
+                p.Id, p.StartDate, p.CreatedDate, p.Status, p.ViewStatus, p.Source, p.Slicer,
+                p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds, p.FilamentUsageMg, p.EstimatedFilamentUsageMg))
             .ToListAsync(ct);
+
+    public async Task<PrintAggregate> GetPrintAggregateAsync(CancellationToken ct) =>
+        _aggregate ??= await PrintAggregate.LoadAsync(Db, UserId, await GetPrintRowsAsync(ct), ct);
+
+    public async Task<IReadOnlyList<PrintDateRow>> GetPrintDatesAsync(CancellationToken ct) =>
+        _dates ??= (await GetPrintRowsAsync(ct)).Select(p => new PrintDateRow(p.StartDate, p.CreatedDate, p.Status)).ToList();
 
     /// <summary>Measures <paramref name="metricKey"/> once per pass.</summary>
     /// <exception cref="KeyNotFoundException">No metric is registered under that key.</exception>

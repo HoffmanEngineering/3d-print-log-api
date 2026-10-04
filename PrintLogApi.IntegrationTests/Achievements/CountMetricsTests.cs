@@ -243,7 +243,7 @@ public class CountMetricsTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task PrintAggregate_IsExactlyOneCommand()
+    public async Task PrintAggregate_AtMostThreeCommands_DatesReuseTheRows()
     {
         var (scope, seedDb, user) = await ArrangeAsync();
         using var _ = scope;
@@ -257,10 +257,13 @@ public class CountMetricsTests : IClassFixture<CustomWebApplicationFactory>
 
         var aggregate = await ctx.GetPrintAggregateAsync(Ct);
         await ctx.GetPrintAggregateAsync(Ct); // memoized
-
         Assert.Equal(1, aggregate.PrintCount);
         Assert.Equal(["cura"], aggregate.PluginSlicers);
-        Assert.Single(counter.Commands);
+        // Print rows, usage rows, photos.
+        Assert.Equal(3, counter.Commands.Count);
+
+        await ctx.GetPrintDatesAsync(Ct);
+        Assert.Equal(3, counter.Commands.Count);
     }
 
     [Fact]

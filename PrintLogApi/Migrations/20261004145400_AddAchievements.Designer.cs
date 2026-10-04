@@ -902,7 +902,7 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("CreatedById");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById"), new[] { "Source", "Slicer", "Status", "StartDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "ViewStatus" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById"), new[] { "Source", "Slicer", "Status", "StartDate", "CreatedDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "FilamentUsageMg", "EstimatedFilamentUsageMg", "ViewStatus" });
 
                     b.HasIndex("PrinterId");
 

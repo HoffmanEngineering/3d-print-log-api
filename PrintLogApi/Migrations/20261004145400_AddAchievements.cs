@@ -87,7 +87,7 @@ namespace PrintLogApi.Migrations
                 name: "IX_Prints_CreatedById",
                 table: "Prints",
                 column: "CreatedById")
-                .Annotation("SqlServer:Include", new[] { "Source", "Slicer", "Status", "StartDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "ViewStatus" });
+                .Annotation("SqlServer:Include", new[] { "Source", "Slicer", "Status", "StartDate", "CreatedDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "FilamentUsageMg", "EstimatedFilamentUsageMg", "ViewStatus" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_UserAchievements_Key_Tier",
