@@ -1,4 +1,5 @@
 ﻿using PrintLogApi.Achievements.Metrics;
+using PrintLogApi.Achievements.Triggers;
 
 namespace PrintLogApi.Achievements;
 
@@ -14,6 +15,13 @@ public static class AchievementServiceCollectionExtensions
 
         services.AddSingleton<ICatalogVersionProvider, CatalogVersionProvider>();
         services.AddScoped<IAchievementEvaluator, AchievementEvaluator>();
+
+        // Singletons: the interceptors are attached to every PrintLogContext, and the tracker's
+        // per-context state must be the same instance across all of them.
+        services.AddSingleton<AchievementTriggerTracker>();
+        services.AddSingleton<AchievementSaveChangesInterceptor>();
+        services.AddSingleton<AchievementTransactionInterceptor>();
+        services.AddSingleton<IAchievementPassRunner, AchievementPassRunner>();
 
         return services;
     }

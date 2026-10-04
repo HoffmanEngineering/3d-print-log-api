@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Achievements;
 using PrintLogApi.Achievements.Metrics;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 using Xunit;
@@ -53,6 +54,8 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
     {
         var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        // Seeding must not evaluate: these tests drive the evaluator themselves.
+        scope.ServiceProvider.GetRequiredService<AchievementTriggerTracker>().Suppress(db);
         var user = await AchievementTestData.CreateUserAsync(db);
         user.AchievementCatalogVersion = catalogVersion;
         await db.SaveChangesAsync(Ct);

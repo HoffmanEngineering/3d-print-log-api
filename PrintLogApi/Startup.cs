@@ -16,6 +16,7 @@ using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
 using PrintLogApi.Achievements;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
@@ -68,7 +69,7 @@ public class Startup
 
         ConfigureAuthentication(services);
 
-        services.AddDbContext<PrintLogContext>(opts =>
+        services.AddDbContext<PrintLogContext>((sp, opts) =>
         {
             opts.UseSqlServer(
                 Configuration["ConnectionString:PrintLogDb"],
@@ -79,6 +80,7 @@ public class Startup
                         maxRetryDelay: TimeSpan.FromSeconds(30),
                         errorNumbersToAdd: null);
                 });
+            opts.AddAchievementInterceptors(sp);
         });
 
         services.AddSwaggerGen(c =>
