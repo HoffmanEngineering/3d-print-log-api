@@ -50,6 +50,19 @@ public class AchievementsController(IAchievementQueryService achievements) : Con
     }
 
     /// <summary>
+    /// Get another maker's earned achievements for their public profile. Follows the profile's
+    /// visibility and the owner's "show on profile" setting; anything the viewer may not see comes
+    /// back empty rather than as an error, so a logged-out visitor is never bounced.
+    /// </summary>
+    /// <param name="id">The maker's user id.</param>
+    /// <response code="200">The earned achievements, or an empty result.</response>
+    [HttpGet("~/api/users/{id:long}/achievements")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<PublicAchievementsDto>> GetForUser(long id, CancellationToken ct) =>
+        Ok(await achievements.GetPublicAsync(User, id, ct));
+
+    /// <summary>
     /// Dismiss the hint card for one badge tier. It stays hidden until a different hint is chosen.
     /// </summary>
     /// <response code="204">Dismissed.</response>
