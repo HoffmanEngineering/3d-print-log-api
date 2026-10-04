@@ -12,6 +12,7 @@ namespace PrintLogApi.Achievements.Triggers;
 public sealed class AchievementTransactionInterceptor(
     AchievementTriggerTracker tracker,
     IAchievementPassRunner runner,
+    AchievementPassOptions options,
     ILogger<AchievementTransactionInterceptor> logger) : DbTransactionInterceptor
 {
     public override async Task TransactionCommittedAsync(
@@ -19,7 +20,7 @@ public sealed class AchievementTransactionInterceptor(
     {
         if (eventData.Context is { } ctx && !tracker.IsSuppressed(ctx))
         {
-            await AchievementPasses.RunAsync(runner, tracker.TakePending(ctx, eventData.TransactionId), logger);
+            await AchievementPasses.RunAsync(runner, tracker.TakePending(ctx, eventData.TransactionId), options, logger);
         }
     }
 

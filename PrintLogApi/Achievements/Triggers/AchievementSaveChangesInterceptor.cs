@@ -19,6 +19,7 @@ namespace PrintLogApi.Achievements.Triggers;
 public sealed class AchievementSaveChangesInterceptor(
     AchievementTriggerTracker tracker,
     IAchievementPassRunner runner,
+    AchievementPassOptions options,
     ILogger<AchievementSaveChangesInterceptor> logger) : SaveChangesInterceptor
 {
     public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -51,7 +52,7 @@ public sealed class AchievementSaveChangesInterceptor(
         tracker.PromoteTentative(ctx, transaction?.TransactionId);
         if (transaction is null)
         {
-            await AchievementPasses.RunAsync(runner, tracker.TakePending(ctx, null), logger);
+            await AchievementPasses.RunAsync(runner, tracker.TakePending(ctx, null), options, logger);
         }
 
         return result;
@@ -83,18 +84,20 @@ public sealed class AchievementSaveChangesInterceptor(
 /// <summary>Hands work to the runner without ever letting a failure reach the caller's save.</summary>
 internal static class AchievementPasses
 {
-    public static async Task RunAsync(IAchievementPassRunner runner, PendingWork work, ILogger logger)
+    public static async Task RunAsync(IAchievementPassRunner runner, PendingWork work, AchievementPassOptions options, ILogger logger)
     {
         if (work.IsEmpty)
         {
             return;
         }
 
+        // Not the request's token: a client that disconnects after its save committed still
+        // earned the badge. Bounded instead, so a stuck pass can't hold the request (or the
+        // connection an explicit transaction still owns) for long.
+        using var budget = new CancellationTokenSource(options.Budget);
         try
         {
-            // Not the request's token: a client that disconnects after its save committed still
-            // earned the badge.
-            await runner.RunAsync(work, CancellationToken.None);
+            await runner.RunAsync(work, budget.Token);
         }
         catch (Exception ex)
         {

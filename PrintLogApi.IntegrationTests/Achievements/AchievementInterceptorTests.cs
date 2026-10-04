@@ -19,10 +19,31 @@ public sealed class RecordingPassRunner : IAchievementPassRunner
 
     public Exception? ThrowOnRun { get; set; }
 
-    public Task RunAsync(PendingWork work, CancellationToken ct)
+    /// <summary>When set, a run waits until its token is canceled, like a pass stuck on the database.</summary>
+    public bool HangUntilCanceled { get; set; }
+
+    public bool SawCancellation { get; private set; }
+
+    public async Task RunAsync(PendingWork work, CancellationToken ct)
     {
         Runs.Enqueue(work);
-        return ThrowOnRun is { } ex ? Task.FromException(ex) : Task.CompletedTask;
+        if (ThrowOnRun is { } ex)
+        {
+            throw ex;
+        }
+
+        if (HangUntilCanceled)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                SawCancellation = true;
+                throw;
+            }
+        }
     }
 
     /// <summary>The flags every recorded pass carried for <paramref name="userId"/>, in order.</summary>
@@ -38,8 +59,14 @@ public sealed class RecordingRunnerFactory : CustomWebApplicationFactory
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        builder.ConfigureServices(s => s.AddSingleton<IAchievementPassRunner>(Recorder));
+        builder.ConfigureServices(s =>
+        {
+            s.AddSingleton<IAchievementPassRunner>(Recorder);
+            s.AddSingleton(new AchievementPassOptions { Budget = PassBudget });
+        });
     }
+
+    public static readonly TimeSpan PassBudget = TimeSpan.FromMilliseconds(500);
 }
 
 /// <summary>What the save hooks record, and when they hand it to the runner.</summary>
@@ -291,6 +318,28 @@ public class AchievementTriggerRecordingTests : IClassFixture<RecordingRunnerFac
 
         Assert.Equal(2, attempt);
         Assert.Equal([AchievementTrigger.PrintAdded], Recorder.For(user.Id));
+    }
+
+    [Fact]
+    public async Task StuckPass_IsCanceledAtTheBudget_AndTheSaveReturns()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        Recorder.HangUntilCanceled = true;
+        try
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            db.Projects.Add(new Project { Id = Guid.NewGuid(), Name = "Slow", CreatedById = user.Id, UpdatedById = user.Id });
+            await db.SaveChangesAsync(Ct);
+            stopwatch.Stop();
+
+            Assert.True(Recorder.SawCancellation);
+            Assert.InRange(stopwatch.Elapsed, RecordingRunnerFactory.PassBudget, TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            Recorder.HangUntilCanceled = false;
+        }
     }
 
     [Fact]

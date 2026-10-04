@@ -56,22 +56,28 @@ public sealed class AchievementRarityService(HybridCache cache, CachedComputatio
     /// </summary>
     public static async Task<RarityTable> ComputeAsync(PrintLogContext db, CancellationToken ct)
     {
-        var evaluated = await db.Users.CountAsync(u => u.AchievementCatalogVersion > 0, ct);
-        if (evaluated == 0)
-        {
-            return new RarityTable();
-        }
-
+        // One statement, so the holder counts and the evaluated-user count come from the same
+        // read: two separate queries could see a user finish catch-up in between and report
+        // over 100%. The clamp is only a guard on top of that.
         var holders = await db.UserAchievements
             .AsNoTracking()
             .Where(a => a.User.AchievementCatalogVersion > 0)
             .GroupBy(a => new { a.AchievementKey, a.Tier })
-            .Select(g => new { g.Key.AchievementKey, g.Key.Tier, Count = g.Count() })
+            .Select(g => new
+            {
+                g.Key.AchievementKey,
+                g.Key.Tier,
+                Count = g.Count(),
+                Evaluated = db.Users.Count(u => u.AchievementCatalogVersion > 0),
+            })
             .ToListAsync(ct);
 
         return new RarityTable
         {
-            Entries = holders.Select(h => new RarityEntry(h.AchievementKey, h.Tier, 100.0 * h.Count / evaluated)).ToList(),
+            Entries = holders
+                .Where(h => h.Evaluated > 0)
+                .Select(h => new RarityEntry(h.AchievementKey, h.Tier, Math.Min(100.0, 100.0 * h.Count / h.Evaluated)))
+                .ToList(),
         };
     }
 }

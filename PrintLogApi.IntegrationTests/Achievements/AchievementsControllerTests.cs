@@ -249,8 +249,14 @@ public class AchievementsControllerTests : IClassFixture<CustomWebApplicationFac
         await HoldAsync(db, evaluated, "rarity-probe");
         await HoldAsync(db, neverEvaluated, "rarity-probe");
 
-        var table = await AchievementRarityService.ComputeAsync(db, Ct);
+        var (countingDb, counter) = AchievementMetricTestKit.CountingContext(scope.ServiceProvider);
+        await using var ___ = countingDb;
+        var table = await AchievementRarityService.ComputeAsync(countingDb, Ct);
 
+        // One statement: holders and the evaluated-user count read in a single snapshot, so a
+        // user finishing catch-up between two reads can't push a tier past 100%.
+        Assert.Single(counter.Commands);
+        Assert.All(table.Entries, e => Assert.InRange(e.Percent, 0, 100));
         var denominator = await db.Users.CountAsync(u => u.AchievementCatalogVersion > 0, Ct);
         Assert.Equal(100.0 / denominator, table.PercentFor("rarity-probe", 1), 6);
         Assert.Equal(0, table.PercentFor("rarity-probe", 2));

@@ -38,7 +38,7 @@ public class AchievementQueryShapeTests : IClassFixture<CustomWebApplicationFact
         await using var db = new PrintLogContext(options);
         var evaluator = new AchievementEvaluator(db, sp.GetServices<IAchievementMetric>(),
             new NotificationService(db, sp.GetRequiredService<AutoMapper.IMapper>(), sp.GetRequiredService<PrintLogApi.Services.Push.IPushDispatchService>()),
-            new CatalogVersionProvider(), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
+            new CatalogVersionProvider(), new AchievementUserLocks(), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
 
         // The first pass grants (and so writes); the second measures the same history and only reads.
         var first = await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);

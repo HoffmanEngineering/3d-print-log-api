@@ -14,6 +14,7 @@ public static class AchievementServiceCollectionExtensions
         }
 
         services.AddSingleton<ICatalogVersionProvider, CatalogVersionProvider>();
+        services.AddSingleton<AchievementUserLocks>();
         services.AddScoped<IAchievementEvaluator, AchievementEvaluator>();
         services.AddScoped<IAchievementQueryService, AchievementQueryService>();
         services.AddSingleton<AchievementRarityService>();
@@ -21,6 +22,7 @@ public static class AchievementServiceCollectionExtensions
         // Singletons: the interceptors are attached to every PrintLogContext, and the tracker's
         // per-context state must be the same instance across all of them.
         services.AddSingleton<AchievementTriggerTracker>();
+        services.AddSingleton<AchievementPassOptions>();
         services.AddSingleton<AchievementSaveChangesInterceptor>();
         services.AddSingleton<AchievementTransactionInterceptor>();
         services.AddSingleton<IAchievementPassRunner, AchievementPassRunner>();

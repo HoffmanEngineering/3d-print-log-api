@@ -37,7 +37,7 @@ public class AchievementPerformanceTests : IClassFixture<CustomWebApplicationFac
     private static AchievementEvaluator Evaluator(IServiceProvider sp, PrintLogContext db) =>
         new(db, sp.GetServices<IAchievementMetric>(),
             new NotificationService(db, sp.GetRequiredService<AutoMapper.IMapper>(), sp.GetRequiredService<PrintLogApi.Services.Push.IPushDispatchService>()),
-            new CatalogVersionProvider(), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
+            new CatalogVersionProvider(), new AchievementUserLocks(), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
 
     /// <summary>Times the launch catch-up for the large user, after a warm-up pass on a small one.</summary>
     private static async Task<TimeSpan> TimeCatchUpAsync(IServiceProvider sp, Func<PrintLogContext> newContext)
@@ -98,6 +98,11 @@ public class AchievementPerformanceTests : IClassFixture<CustomWebApplicationFac
         var elapsed = await TimeCatchUpAsync(scope.ServiceProvider, () => new PrintLogContext(options));
 
         Assert.True(elapsed < TimeSpan.FromMilliseconds(150), $"Full catch-up pass took {elapsed.TotalMilliseconds:F0} ms");
+
+        // Rarity's single grouped statement must be valid T-SQL too; SQLite would accept more.
+        await using var rarityDb = new PrintLogContext(options);
+        var rarity = await AchievementRarityService.ComputeAsync(rarityDb, Ct);
+        Assert.Contains(rarity.Entries, e => e.Key == "prints-logged" && e.Tier == 6);
     }
 
     /// <summary>The real SQL Server strategy, also retrying on the test's marker exception.</summary>
@@ -119,8 +124,8 @@ public class AchievementPerformanceTests : IClassFixture<CustomWebApplicationFac
         var tracker = new AchievementTriggerTracker();
         var recorder = new RecordingPassRunner();
         var options = await SqlServerOptionsAsync(b => b.AddInterceptors(
-            new AchievementSaveChangesInterceptor(tracker, recorder, NullLogger<AchievementSaveChangesInterceptor>.Instance),
-            new AchievementTransactionInterceptor(tracker, recorder, NullLogger<AchievementTransactionInterceptor>.Instance)));
+            new AchievementSaveChangesInterceptor(tracker, recorder, new AchievementPassOptions(), NullLogger<AchievementSaveChangesInterceptor>.Instance),
+            new AchievementTransactionInterceptor(tracker, recorder, new AchievementPassOptions(), NullLogger<AchievementTransactionInterceptor>.Instance)));
 
         await using var db = new PrintLogContext(options);
         var user = await AchievementTestData.CreateUserAsync(db);

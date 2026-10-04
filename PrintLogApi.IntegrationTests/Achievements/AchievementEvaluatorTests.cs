@@ -36,7 +36,7 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
     }
 
     /// <summary>An evaluator over its own context on the shared connection, so tests can attach interceptors.</summary>
-    private static (AchievementEvaluator Evaluator, PrintLogContext Db) Build(IServiceProvider sp, int? version = null, params IInterceptor[] interceptors)
+    private static (AchievementEvaluator Evaluator, PrintLogContext Db) Build(IServiceProvider sp, int? version = null, AchievementUserLocks? locks = null, params IInterceptor[] interceptors)
     {
         var options = new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlite(sp.GetRequiredService<PrintLogContext>().Database.GetDbConnection())
@@ -46,7 +46,7 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
         var notifications = new NotificationService(db, sp.GetRequiredService<AutoMapper.IMapper>(),
             sp.GetRequiredService<PrintLogApi.Services.Push.IPushDispatchService>());
         var evaluator = new AchievementEvaluator(db, sp.GetServices<IAchievementMetric>(), notifications,
-            new FixedVersion(version ?? AchievementCatalog.Version), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
+            new FixedVersion(version ?? AchievementCatalog.Version), locks ?? new AchievementUserLocks(), TimeProvider.System, NullLogger<AchievementEvaluator>.Instance);
         return (evaluator, db);
     }
 
@@ -196,6 +196,24 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
     }
 
     [Fact]
+    public async Task LaunchCatchUp_MigrationGrantOnly_StillGetsSummary()
+    {
+        var (scope, db, user) = await ArrangeAsync(catalogVersion: 0);
+        using var _ = scope;
+        db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "plugged-in", Tier = 1, UnlockedAt = DateTime.UtcNow, Retroactive = true });
+        await db.SaveChangesAsync(Ct);
+        var (evaluator, evalDb) = Build(scope.ServiceProvider);
+        await using var __ = evalDb;
+
+        var result = await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+
+        Assert.Empty(result.Granted);
+        var summary = Assert.Single(await db.Notifications.AsNoTracking().Where(n => n.UserId == user.Id).ToListAsync(Ct));
+        Assert.Equal("""{"v":1,"summary":true,"count":1}""", summary.Metadata);
+        Assert.False(summary.IsRead);
+    }
+
+    [Fact]
     public async Task CatchUp_WithNothingToGrant_StillAdvancesVersion()
     {
         var (scope, db, user) = await ArrangeAsync(catalogVersion: 0);
@@ -245,12 +263,71 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
     }
 
     [Fact]
+    public async Task Conflict_WithConcurrentLaunchCatchUp_ReloadsUser_NoSecondSummary()
+    {
+        var (scope, db, user) = await ArrangeAsync(catalogVersion: 0);
+        using var _ = scope;
+        await AddUndatedPrintsAsync(db, user, 10);
+        var (evaluator, evalDb) = Build(scope.ServiceProvider);
+        await using var __ = evalDb;
+
+        // Another pass (its own locks, as on another request before serialization) completes the
+        // whole launch catch-up after this one has decided it is retroactive.
+        evaluator.BeforePersist = async () =>
+        {
+            evaluator.BeforePersist = null;
+            var (other, otherDb) = Build(scope.ServiceProvider);
+            await using var ___ = otherDb;
+            await other.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+        };
+
+        await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+
+        var notes = await db.Notifications.AsNoTracking().Where(n => n.UserId == user.Id).ToListAsync(Ct);
+        Assert.Single(notes, n => n.Metadata!.Contains("\"summary\":true"));
+        Assert.Single(notes, n => !n.IsRead);
+        Assert.All(await db.UserAchievements.AsNoTracking().Where(a => a.UserId == user.Id).ToListAsync(Ct), a => Assert.True(a.Retroactive));
+    }
+
+    [Fact]
+    public async Task PassesForOneUser_RunOneAtATime()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        await AddUndatedPrintsAsync(db, user, 1);
+        var locks = new AchievementUserLocks();
+        var (first, firstDb) = Build(scope.ServiceProvider, locks: locks);
+        var (second, secondDb) = Build(scope.ServiceProvider, locks: locks);
+        await using var __ = firstDb;
+        await using var ___ = secondDb;
+
+        var secondReachedPersist = false;
+        second.BeforePersist = () => { secondReachedPersist = true; return Task.CompletedTask; };
+        Task<EvaluationResult>? secondPass = null;
+        first.BeforePersist = async () =>
+        {
+            secondPass = second.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+            await Task.Delay(200, Ct);
+            // Still waiting for this pass's lock: it has not read anything yet.
+            Assert.False(secondPass.IsCompleted);
+            Assert.False(secondReachedPersist);
+        };
+
+        await first.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+        var secondResult = await secondPass!;
+
+        Assert.Empty(secondResult.Granted);
+        Assert.False(secondReachedPersist);
+        Assert.Equal(2, await db.UserAchievements.CountAsync(a => a.UserId == user.Id, Ct));
+    }
+
+    [Fact]
     public async Task NoGrants_NoSave()
     {
         var (scope, _, user) = await ArrangeAsync();
         using var __ = scope;
         var counter = new SaveCounter();
-        var (evaluator, evalDb) = Build(scope.ServiceProvider, null, counter);
+        var (evaluator, evalDb) = Build(scope.ServiceProvider, null, null, counter);
         await using var ___ = evalDb;
 
         var result = await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
