@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
+using PrintLogApi.Authentication;
 using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -534,7 +535,8 @@ public class PrintsController(
 
         try
         {
-            var newPrint = await printService.AddPrint(print, userId.Value);
+            var sourceCandidate = AuthMethodClaim.IsApiKey(User) ? PrintSource.ApiKey : PrintSource.Web;
+            var newPrint = await printService.AddPrint(print, userId.Value, sourceCandidate);
             telemetry.TrackEvent("PrintAdded");
 
             cacheVersionService.InvalidateUserCache(userId.Value);

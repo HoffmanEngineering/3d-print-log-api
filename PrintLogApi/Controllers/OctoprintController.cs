@@ -144,6 +144,7 @@ public class OctoprintController(
         var newPrint = new Print
         {
             Status = PrintStatus.Printing,
+            Source = PrintSource.OctoPrint,
             CreatedById = userId,
             UpdatedById = userId,
             Title = data?.Job?.File?.Name!.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",

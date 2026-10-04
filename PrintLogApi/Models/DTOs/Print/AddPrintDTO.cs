@@ -51,4 +51,11 @@ public class AddPrintDTO
     /// </summary>
     [MaxLength(100)]
     public string? NewProjectName { get; set; }
+
+    /// <summary>
+    /// The <c>CuraSetting</c> this print was prefilled from, when it came through the slicer
+    /// plugin. Only provenance: the slicer name and version are copied onto the print. An id that
+    /// is missing (purged) or owned by someone else is ignored, never rejected.
+    /// </summary>
+    public Guid? CuraSettingId { get; set; }
 }
