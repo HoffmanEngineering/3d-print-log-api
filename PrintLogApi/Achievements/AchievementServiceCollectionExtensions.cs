@@ -12,6 +12,9 @@ public static class AchievementServiceCollectionExtensions
             services.AddSingleton<IAchievementMetric>(metric);
         }
 
+        services.AddSingleton<ICatalogVersionProvider, CatalogVersionProvider>();
+        services.AddScoped<IAchievementEvaluator, AchievementEvaluator>();
+
         return services;
     }
 }
