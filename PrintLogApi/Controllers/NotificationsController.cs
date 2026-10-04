@@ -20,6 +20,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// </summary>
     /// <param name="pagingRequest">The paging request.</param>
     /// <param name="unreadOnly">If true, only return unread notifications.</param>
+    /// <param name="type">If set, only return notifications of this type.</param>
     /// <returns>A paged list of notifications.</returns>
     /// <response code="200">A paged list of notifications.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
@@ -28,7 +29,8 @@ public class NotificationsController(INotificationService notificationService) :
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<PagedList<NotificationSummaryDto>>> GetNotifications(
         [FromQuery] PagedRequest pagingRequest,
-        [FromQuery] bool? unreadOnly = null)
+        [FromQuery] bool? unreadOnly = null,
+        [FromQuery] NotificationType? type = null)
     {
         var userId = User.GetUserId();
         if (!userId.HasValue)
@@ -36,7 +38,7 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized();
         }
 
-        var notifications = await notificationService.GetNotificationsForUser(userId.Value, pagingRequest, unreadOnly);
+        var notifications = await notificationService.GetNotificationsForUser(userId.Value, pagingRequest, unreadOnly, type);
         return Ok(notifications);
     }
 
@@ -57,8 +59,8 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized();
         }
 
-        var count = await notificationService.GetUnreadCountForUser(userId.Value);
-        return Ok(new NotificationUnreadCountDto { UnreadCount = count });
+        var (total, achievements) = await notificationService.GetUnreadCountsForUser(userId.Value);
+        return Ok(new NotificationUnreadCountDto { UnreadCount = total, UnreadAchievementCount = achievements });
     }
 
     /// <summary>
