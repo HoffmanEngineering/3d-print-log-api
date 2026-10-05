@@ -277,6 +277,29 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(onboardingRow.Id)).Status);
     }
 
+    // A second dispatcher (slot swap, another instance) holds this user's other row in Sending.
+    // The cap only counts Sent rows, so without this the two would go out together.
+    [Fact]
+    public async Task FrequencyCap_DefersWhileAnotherRowForTheUserIsInFlight()
+    {
+        var recap = new TestCampaign("flight-recap");
+        var silent = new TestCampaign("flight-silent");
+        using var h = new Harness(_factory, recap, silent);
+        var user = await h.UserAsync();
+        var inFlight = EmailTestData.OutboxRow(user.Id, recap.Name, "in-flight", Now);
+        inFlight.Status = EmailOutboxStatus.Sending;
+        inFlight.ClaimedAt = Now.AddSeconds(-5);
+        h.Db.EmailOutbox.Add(inFlight);
+        await h.Db.SaveChangesAsync(h.Ct);
+        var row = await h.QueueAsync(user.Id, campaign: silent.Name);
+
+        await h.TickAsync();
+
+        var deferred = await h.ReloadAsync(row.Id);
+        Assert.Equal(EmailOutboxStatus.Pending, deferred.Status);
+        Assert.Equal(Now.AddMinutes(1), deferred.NextAttemptAt);
+    }
+
     [Fact]
     public async Task TwoDueRowsSameUser_OneSentOneDeferred()
     {

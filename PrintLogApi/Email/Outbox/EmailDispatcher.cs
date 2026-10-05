@@ -256,6 +256,17 @@ public sealed class EmailDispatcher(
             {
                 return Defer(row, last + settings.FrequencyCapWindow, "frequency-cap");
             }
+
+            // One dispatcher only claims one row per user per tick, but two can overlap (a slot
+            // swap, a second instance), and the other's row is Sending, not yet Sent. Look again
+            // once it has settled; the reaper bounds how long that can take.
+            var claimedCutoff = now - AbandonedAfter;
+            var inFlight = await db.EmailOutbox.AnyAsync(o => o.UserId == row.UserId && o.Id != row.Id
+                && o.Status == EmailOutboxStatus.Sending && counting.Contains(o.Campaign) && o.ClaimedAt >= claimedCutoff, ct);
+            if (inFlight)
+            {
+                return Defer(row, now + TimeSpan.FromMinutes(1), "frequency-cap");
+            }
         }
 
         var rendered = await campaign.RenderAsync(row, ct);
