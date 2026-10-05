@@ -1,3 +1,5 @@
+Your first prints, and what's next
+
 Hi Ada,
 
 Here's where you are so far:
@@ -11,6 +13,10 @@ Next: Add your first printer.
 Add your printer: https://www.3dprintlog.test/printers/new?utm_source=email
 
 --
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
 You're receiving this because of a test.
 Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
 Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB

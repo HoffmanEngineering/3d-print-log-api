@@ -1,44 +1,89 @@
-<EmailLayout Title="@MonthlyRecapTemplates.Subject(Model)" Preheader="@MonthlyRecapTemplates.Intro(Model)" Footer="Footer">
-    <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
-    <p style="margin:0 0 16px 0;">@MonthlyRecapTemplates.Intro(Model)</p>
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px 0;border:1px solid #e0e0e0;border-radius:6px;">
-        @foreach (var (value, label, change) in MonthlyRecapTemplates.Stats(Model))
-        {
-            <tr>
-                <td style="padding:10px 16px;border-bottom:1px solid #f0f0f0;">
-                    <span style="font-size:20px;font-weight:bold;color:#212121;">@value</span>
-                    <span style="color:#424242;">@label</span>
-                    @if (change is not null)
-                    {
-                        <div style="font-size:13px;color:#616161;">@change</div>
-                    }
-                </td>
-            </tr>
-        }
+@* The "report card": two hero tiles (prints, print time) with month-over-month change, a row of
+   light tiles for whatever else is present, the month's standouts, a shelf of badge art in rows
+   of three (explicit table rows: classic Outlook won't wrap inline-blocks), then the call to
+   action and the tip. Badge titles are text beside the image, so the shelf reads with images off. *@
+<EmailLayout Title="@MonthlyRecapTemplates.Subject(Model)" Kicker="Monthly recap" Headline="@MonthlyRecapTemplates.Headline(Model)" Preheader="@MonthlyRecapTemplates.Intro(Model)" Footer="Footer">
+    <p style="margin:0 0 4px 0;">@EmailFormat.Greeting(Model.Name)</p>
+    <p style="margin:0 0 20px 0;">@MonthlyRecapTemplates.Intro(Model)</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 12px 0;">
+        <tr>
+            @{ var hero = MonthlyRecapTemplates.HeroStats(Model); }
+            <EmailStatTile Hero="true" Width="49%" Value="@hero[0].Value" Label="@hero[0].Label" Change="@hero[0].ShortChange" Trend="@hero[0].Trend" />
+            <td width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+            <EmailStatTile Hero="true" Width="49%" Value="@hero[1].Value" Label="@hero[1].Label" Change="@hero[1].ShortChange" Trend="@hero[1].Trend" />
+        </tr>
     </table>
+    @if (MonthlyRecapTemplates.MinorStats(Model) is { Count: > 0 } minor)
+    {
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px 0;">
+            <tr>
+                @for (var i = 0; i < minor.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        <td width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+                    }
+
+                    <EmailStatTile Width="@TileWidth(minor.Count)" Value="@minor[i].Value" Label="@minor[i].Label" />
+                }
+            </tr>
+        </table>
+    }
     @if (MonthlyRecapTemplates.Highlights(Model) is { Count: > 0 } highlights)
     {
-        <p style="margin:0 0 16px 0;">
-            @foreach (var (label, value) in highlights)
+        <div class="em-link" style="margin:0 0 8px 0;font-size:12px;line-height:16px;letter-spacing:1px;text-transform:uppercase;font-weight:bold;color:#5c6bc0;">Month's standouts</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px 0;font-size:15px;line-height:20px;">
+            @for (var i = 0; i < highlights.Count; i++)
             {
-                <span style="color:#616161;">@label:</span> <strong>@value</strong><br />
+                var border = i == 0 ? "" : "border-top:1px solid #eeeeee;";
+                <tr>
+                    <td class="em-muted em-rule" style="padding:8px 12px 8px 0;@(border)color:#616161;">@highlights[i].Label</td>
+                    <td class="em-rule" align="right" style="padding:8px 0;@(border)font-weight:bold;">@highlights[i].Value</td>
+                </tr>
             }
-        </p>
+        </table>
     }
     @if (Model.Badges.Count > 0)
     {
-        <p style="margin:0 0 4px 0;font-weight:bold;">Badges earned in @Model.MonthName</p>
-        <ul style="margin:0 0 16px 0;padding-left:20px;">
-            @foreach (var badge in Model.Badges)
+        <div class="em-link" style="margin:0 0 8px 0;font-size:12px;line-height:16px;letter-spacing:1px;text-transform:uppercase;font-weight:bold;color:#5c6bc0;">Badges earned</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 8px 0;">
+            @foreach (var row in Model.Badges.Chunk(3))
             {
-                <li>@badge</li>
+                <tr>
+                    @foreach (var badge in row)
+                    {
+                        <td width="33%" align="center" valign="top" style="padding:0 4px 16px 4px;font-size:14px;line-height:18px;">
+                            <EmailImage Src="@badge.ImageUrl" Width="56" Height="63" Style="display:block;margin:0 auto 6px auto;" />
+                            <strong>@badge.Title</strong>
+                            @if (badge.TierName is not null)
+                            {
+                                <br>
+                                <span class="em-muted" style="font-size:12px;line-height:16px;color:#757575;">@badge.TierName</span>
+                            }
+                        </td>
+                    }
+                    @for (var pad = row.Length; pad < 3; pad++)
+                    {
+                        <td width="33%">&nbsp;</td>
+                    }
+                </tr>
             }
-        </ul>
+        </table>
+        @if (Model.MoreBadgeCount > 0)
+        {
+            <p style="margin:0 0 8px 0;font-size:14px;line-height:20px;"><a href="@Model.AchievementsUrl" class="em-link" style="color:#3f51b5;font-weight:bold;">@MonthlyRecapTemplates.MoreBadges(Model.MoreBadgeCount)</a></p>
+        }
     }
     <EmailButton Href="@Model.StatsUrl" Text="@MonthlyRecapTemplates.CtaLabel" />
     @if (Model.Tip is { } tip)
     {
-        <p style="margin:16px 0 0 0;font-size:14px;color:#424242;"><strong>Tip:</strong> @tip.Text <a href="@tip.Url" style="color:#3f51b5;">@tip.Label</a></p>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+            <tr>
+                <td class="em-callout" bgcolor="#fff8e1" style="padding:12px 16px;background-color:#fff8e1;border-left:4px solid #ffb300;border-radius:0 6px 6px 0;font-size:14px;line-height:20px;">
+                    <strong>Tip:</strong> @tip.Text <a href="@tip.Url" class="em-link" style="color:#3f51b5;font-weight:bold;">@tip.Label</a>
+                </td>
+            </tr>
+        </table>
     }
 </EmailLayout>
 
@@ -46,4 +91,12 @@
     [Parameter, EditorRequired] public MonthlyRecapModel Model { get; set; } = default!;
 
     [Parameter, EditorRequired] public EmailFooterModel Footer { get; set; } = default!;
+
+    // Tiles split the row evenly, leaving 2% for each gap between them.
+    private static string TileWidth(int count) => count switch
+    {
+        1 => "100%",
+        2 => "49%",
+        _ => "32%",
+    };
 }

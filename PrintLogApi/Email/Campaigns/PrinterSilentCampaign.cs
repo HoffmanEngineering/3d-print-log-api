@@ -148,7 +148,8 @@ public sealed class PrinterSilentCampaign(
                     Day(s.Last),
                     Link(docPath),
                     docLabel,
-                    Link($"/printers/{s.PrinterId}"));
+                    Link($"/printers/{s.PrinterId}"),
+                    (int)Math.Floor((row.SendAfter.UtcDateTime - s.Last).TotalDays));
             })
             .ToList();
 

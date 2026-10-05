@@ -1,6 +1,15 @@
-@* The shell every campaign email renders inside. Email clients strip <style> blocks and most
-   modern CSS, so everything is inline on a 600px table layout. Brand color is the UI's primary
-   (Material indigo 500). *@
+@* The shell every campaign email renders inside: a 600px table layout with inline styles, which
+   is all most clients honor. Brand color is the UI's primary (Material indigo 500).
+
+   The headline band carries the white wordmark (indigo baked into the PNG, so clients that invert
+   colors for dark mode can't hide it), a kicker and a headline. Both are live text, so the email
+   still says what it is with images blocked. The gradient is the printer mark's diagonal; Outlook
+   ignores it and shows the solid bgcolor.
+
+   The <style> block holds only dark-mode overrides for the clients that honor
+   prefers-color-scheme (Apple Mail, iOS Mail, Outlook for Mac). Clients that strip it keep the
+   light inline styles. Line heights are in px because classic Outlook mishandles unitless ones. *@
+@inject EmailAssets Assets
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,22 +18,43 @@
     <meta name="color-scheme" content="light dark">
     <meta name="supported-color-schemes" content="light dark">
     <title>@Title</title>
+    <style>
+        @("@")media (prefers-color-scheme: dark) {
+            .em-body { background-color:#121212 !important; }
+            .em-card { background-color:#1e1e1e !important; }
+            .em-text { color:#e0e0e0 !important; }
+            .em-muted { color:#bdbdbd !important; }
+            .em-rule { border-color:#333333 !important; }
+            .em-tile { background-color:#2a2e45 !important; }
+            .em-tile-value { color:#8c9eff !important; }
+            .em-hero { background-color:#3949ab !important; }
+            .em-callout { background-color:#33301f !important; }
+            .em-panel { border-color:#333333 !important; background-color:#1e1e1e !important; }
+            .em-link { color:#8c9eff !important; }
+            .em-btn { background-color:#8c9eff !important; }
+            .em-btn-link { color:#0d1240 !important; }
+        }
+    </style>
 </head>
-<body style="margin:0;padding:0;background-color:#f4f5f9;">
+<body class="em-body" style="margin:0;padding:0;background-color:#f4f5f9;">
     @* Inbox preview text; hidden in the body itself. *@
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">@Preheader</div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f9;">
+    <table role="presentation" class="em-body" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f5f9" style="background-color:#f4f5f9;">
         <tr>
             <td align="center" style="padding:24px 12px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;border-radius:8px;">
+                <table role="presentation" class="em-card" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border-radius:8px;">
                     <tr>
-                        <td style="padding:20px 32px;background-color:#3f51b5;border-radius:8px 8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:bold;color:#ffffff;">3D Print Log</td>
+                        <td bgcolor="#3f51b5" style="padding:20px 32px 28px 32px;background-color:#3f51b5;background-image:linear-gradient(135deg,#3f51b5 0%,#3f51b5 55%,#283593 55%,#283593 100%);border-radius:8px 8px 0 0;font-family:Arial,Helvetica,sans-serif;color:#ffffff;">
+                            <EmailImage Src="@Assets.Wordmark" Alt="3D Print Log" Width="180" Height="80" Style="display:block;margin:0 0 16px 0;font-family:Arial,Helvetica,sans-serif;font-size:20px;line-height:24px;font-weight:bold;color:#ffffff;" />
+                            <div style="font-size:12px;line-height:16px;letter-spacing:1px;text-transform:uppercase;color:#e8eaf6;">@Kicker</div>
+                            <div style="font-size:26px;line-height:32px;font-weight:bold;color:#ffffff;">@Headline</div>
+                        </td>
                     </tr>
                     <tr>
-                        <td style="padding:32px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;color:#212121;">@ChildContent</td>
+                        <td class="em-text" style="padding:32px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:24px;color:#212121;">@ChildContent</td>
                     </tr>
                     <tr>
-                        <td style="padding:24px 32px;border-top:1px solid #e0e0e0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#616161;">
+                        <td class="em-muted em-rule" style="padding:24px 32px;border-top:1px solid #e0e0e0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#616161;">
                             <EmailFooter Model="Footer" />
                         </td>
                     </tr>
@@ -39,6 +69,11 @@
     [Parameter, EditorRequired] public string Title { get; set; } = "";
 
     [Parameter, EditorRequired] public string Preheader { get; set; } = "";
+
+    /// <summary>The small uppercase line above the headline, e.g. "Monthly recap".</summary>
+    [Parameter, EditorRequired] public string Kicker { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Headline { get; set; } = "";
 
     [Parameter, EditorRequired] public EmailFooterModel Footer { get; set; } = default!;
 

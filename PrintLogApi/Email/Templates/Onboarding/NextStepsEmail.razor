@@ -1,15 +1,47 @@
-<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Preheader="@($"{EmailFormat.Count(Model.PrintCount, "print", "prints")} logged so far.")" Footer="Footer">
+@* Progress so far: three light tiles, then a meter with one cell per Getting started badge
+   (filled for each one held) and the next badge to earn. Steps are skipped by what a user has
+   already done, so the progress shown is badges, never "step N of 4". *@
+<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Kicker="Getting started" Headline="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Preheader="@($"{EmailFormat.Count(Model.PrintCount, "print", "prints")} logged so far.")" Footer="Footer">
     <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
     <p style="margin:0 0 16px 0;">Here's where you are so far:</p>
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px 0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0;">
         <tr>
-            <td style="padding:12px;background-color:#e8eaf6;border-radius:6px 0 0 6px;text-align:center;"><div style="font-size:22px;font-weight:bold;color:#283593;">@Model.PrintCount</div><div style="font-size:13px;color:#424242;">@(Model.PrintCount == 1 ? "print" : "prints")</div></td>
-            <td style="padding:12px;background-color:#e8eaf6;text-align:center;"><div style="font-size:22px;font-weight:bold;color:#283593;">@EmailFormat.Hours(Model.PrintHours)</div><div style="font-size:13px;color:#424242;">print time</div></td>
-            <td style="padding:12px;background-color:#e8eaf6;border-radius:0 6px 6px 0;text-align:center;"><div style="font-size:22px;font-weight:bold;color:#283593;">@EmailFormat.Weight(Model.FilamentGrams)</div><div style="font-size:13px;color:#424242;">filament</div></td>
+            <EmailStatTile Center="true" Width="32%" Value="@Model.PrintCount.ToString(System.Globalization.CultureInfo.InvariantCulture)" Label="@(Model.PrintCount == 1 ? "print" : "prints")" />
+            <td width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+            <EmailStatTile Center="true" Width="32%" Value="@EmailFormat.Hours(Model.PrintHours)" Label="print time" />
+            <td width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+            <EmailStatTile Center="true" Width="32%" Value="@EmailFormat.Weight(Model.FilamentGrams)" Label="filament" />
         </tr>
     </table>
-    <p style="margin:0 0 16px 0;">You hold <strong>@Model.GettingStartedHeld of @Model.GettingStartedTotal</strong> Getting started badges.</p>
-    <p style="margin:0;"><strong>Next:</strong> @Model.HintText</p>
+    <p style="margin:0 0 8px 0;font-size:15px;line-height:20px;"><strong>@Model.GettingStartedHeld of @Model.GettingStartedTotal</strong> Getting started badges</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0;">
+        <tr>
+            @for (var i = 0; i < Model.GettingStartedTotal; i++)
+            {
+                if (i > 0)
+                {
+                    <td width="6" style="width:6px;font-size:0;line-height:0;">&nbsp;</td>
+                }
+
+                if (i < Model.GettingStartedHeld)
+                {
+                    <td class="em-meter-on" bgcolor="#3f51b5" height="8" style="height:8px;background-color:#3f51b5;border-radius:4px;font-size:0;line-height:0;">&nbsp;</td>
+                }
+                else
+                {
+                    <td class="em-meter-off" bgcolor="#e0e0e0" height="8" style="height:8px;background-color:#e0e0e0;border-radius:4px;font-size:0;line-height:0;">&nbsp;</td>
+                }
+            }
+        </tr>
+    </table>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+            <td class="em-tile" bgcolor="#eef0fa" style="padding:12px 16px;background-color:#eef0fa;border-radius:8px;">
+                <div class="em-link" style="font-size:12px;line-height:16px;letter-spacing:1px;text-transform:uppercase;font-weight:bold;color:#5c6bc0;">Next badge</div>
+                <div style="margin:2px 0 0 0;font-size:16px;line-height:22px;font-weight:bold;">@Model.HintText</div>
+            </td>
+        </tr>
+    </table>
     <EmailButton Href="@Model.CtaUrl" Text="@Model.CtaLabel" />
 </EmailLayout>
 

@@ -1,3 +1,5 @@
+Log your first print in 30 seconds
+
 Hi Ada,
 
 You haven't logged a print yet. The quickest way: drop a G-code file on the new print page, and 3D Print Log reads the print time, filament and slicer settings for you.
@@ -7,6 +9,10 @@ Log a print: https://www.3dprintlog.test/prints/new/edit
 No file handy? You can type the details in on the same page.
 
 --
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
 You're receiving this because of a test.
 Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
 Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB

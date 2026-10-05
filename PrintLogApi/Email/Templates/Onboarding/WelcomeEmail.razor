@@ -1,4 +1,4 @@
-<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.Welcome)" Preheader="Track every print, printer and spool in one place." Footer="Footer">
+<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.Welcome)" Kicker="Getting started" Headline="@OnboardingTemplates.Subject(OnboardingTemplates.Welcome)" Preheader="Track every print, printer and spool in one place." Footer="Footer">
     <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
     <p style="margin:0 0 16px 0;">Thanks for signing up. 3D Print Log keeps a record of every print: what you printed, on which printer, with which spool, how long it took and how it turned out. Over time that record answers real questions, like which settings work and how much filament you have left.</p>
     <p style="margin:0;"><strong>Your next step:</strong> @Model.HintText</p>

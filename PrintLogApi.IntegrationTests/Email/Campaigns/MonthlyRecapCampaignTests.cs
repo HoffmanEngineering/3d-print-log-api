@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Achievements;
 using PrintLogApi.Email;
 using PrintLogApi.Email.Campaigns;
 using PrintLogApi.Email.Outbox;
@@ -37,6 +39,7 @@ public class MonthlyRecapCampaignTests : IClassFixture<CustomWebApplicationFacto
             sp.GetRequiredService<IEmailTemplateRenderer>(),
             new EmailFooterFactory(links, sp.GetRequiredService<IEmailTokenService>(), wrapped),
             links,
+            new EmailAssets(wrapped),
             wrapped);
     }
 
@@ -259,27 +262,191 @@ public class MonthlyRecapCampaignTests : IClassFixture<CustomWebApplicationFacto
     public async Task Golden()
     {
         var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
-        var model = new MonthlyRecapModel(
-            Name: "Ada",
-            MonthName: "November",
-            PreviousMonthName: "October",
-            PrintCount: 12,
-            SuccessRatePercent: 91.7,
-            PrintHours: 41.5,
-            FilamentGrams: 1234,
-            Cost: "$18.40",
-            PrintCountChangePercent: 50,
-            PrintHoursChangePercent: -12,
-            MostUsedPrinter: "Voron 2.4",
-            MostUsedMaterial: "Galaxy Black PETG",
-            LongestPrint: "Helmet (9h)",
-            Badges: ["Prolific Printer (Silver PLA)", "Marathon (Bronze PLA)"],
-            Tip: new RecapTip("Track your spools in Materials and see how much filament is left on each.", "https://www.3dprintlog.test/materials", "Open Materials"),
-            StatsUrl: "https://www.3dprintlog.test/analytics");
-
-        var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, model, CampaignTestData.Footer);
+        var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, GoldenModel(), CampaignTestData.Footer);
 
         GoldenFile.AssertMatches(html, "monthly-recap.approved.html");
         GoldenFile.AssertMatches(text, "monthly-recap.approved.txt");
     }
+
+    // Every catalog tier earned in one month (a new user, or a backfill run), a long printer
+    // name and the supporter ask: the case most likely to wrap badly or hit Gmail's clipping.
+    [Fact]
+    public async Task GoldenStress()
+    {
+        var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
+        var model = StressModel(_factory.Services.GetRequiredService<EmailAssets>());
+
+        var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, model, AskFooter);
+
+        Assert.Contains($"and {model.MoreBadgeCount} more", EmailLayoutRenderingTests.VisibleText(html));
+        GoldenFile.AssertMatches(html, "monthly-recap-stress.approved.html");
+        GoldenFile.AssertMatches(text, "monthly-recap-stress.approved.txt");
+    }
+
+    [Fact]
+    public async Task GoldenSparse()
+    {
+        var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
+        var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, SparseModel(), CampaignTestData.Footer);
+
+        Assert.DoesNotContain("Badges earned", html);
+        Assert.DoesNotContain("▲", EmailLayoutRenderingTests.VisibleText(html));
+        GoldenFile.AssertMatches(html, "monthly-recap-sparse.approved.html");
+        GoldenFile.AssertMatches(text, "monthly-recap-sparse.approved.txt");
+    }
+
+    [Fact]
+    public async Task Template_GainsAreGreenAndDeclinesNeutral()
+    {
+        var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
+        var (html, _) = await MonthlyRecapTemplates.RenderAsync(renderer, GoldenModel(), CampaignTestData.Footer);
+
+        Assert.Contains("color:#c5e1a5;\">&#x25B2; 50% vs October", html);
+        Assert.Contains("color:#c5cae9;\">&#x25BC; 12% vs October", html);
+    }
+
+    private async Task<long> UserWithBadgesAsync(params (string Key, int Tier)[] earned)
+    {
+        var (user, _) = await UserWithPrintsAsync(null, new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        await db.UserAchievements.Where(a => a.UserId == user.Id).ExecuteDeleteAsync(Ct);
+        var at = new DateTime(2026, 11, 3, 12, 0, 0, DateTimeKind.Utc);
+        for (var i = 0; i < earned.Length; i++)
+        {
+            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = earned[i].Key, Tier = earned[i].Tier, UnlockedAt = at.AddMinutes(i) });
+        }
+
+        await db.SaveChangesAsync(Ct);
+        return user.Id;
+    }
+
+    // Six tiers of one family in a month is one achievement worth showing, at its best tier.
+    [Fact]
+    public async Task Render_ShowsEachFamilyOnceAtItsHighestTierAndSkipsUnknownKeys()
+    {
+        var userId = await UserWithBadgesAsync(
+            [.. Enumerable.Range(1, 6).Select(t => ("prints-logged", t)), ("no-such-badge", 1), ("first-print", 1), ("mcp", 1)]);
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        Assert.Contains("badges/numeral-500-t6.png", email!.Html);
+        Assert.DoesNotContain("badges/numeral-10-t1.png", email.Html);
+        Assert.Contains("badges/layers-gs.png", email.Html);
+        Assert.Contains("badges/robot-in.png", email.Html);
+        Assert.Equal(3, Regex.Count(email.Html, "/assets/email/v1/badges/"));
+        Assert.DoesNotContain("more", EmailLayoutRenderingTests.VisibleText(email.Html).Split("Badges earned")[1].Split("See your full stats")[0]);
+        Assert.DoesNotContain("no-such-badge", email.Html);
+    }
+
+    // Tiered families lead, best tier first; one-time badges follow; the rest is "…and N more".
+    [Fact]
+    public async Task Render_CapsTheShelfAtSixLeadingWithTheHighestTiers()
+    {
+        var userId = await UserWithBadgesAsync(
+            ("first-printer", 1), ("first-material", 1), ("first-print", 1), ("mcp", 1),
+            ("print-hours", 2), ("prints-logged", 1), ("prints-logged", 2), ("prints-logged", 3), ("projects", 1), ("daily-streak", 1));
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        var html = email!.Html;
+        Assert.Equal(6, Regex.Count(html, "/assets/email/v1/badges/"));
+        Assert.True(html.IndexOf("numeral-50-t3.png", StringComparison.Ordinal) < html.IndexOf("clock-t2.png", StringComparison.Ordinal));
+        Assert.True(html.IndexOf("clock-t2.png", StringComparison.Ordinal) < html.IndexOf("printer-bedslinger-gs.png", StringComparison.Ordinal));
+        Assert.Contains("and 2 more", EmailLayoutRenderingTests.VisibleText(html));
+    }
+
+    // The app never names a tier for a one-time badge; its art is the category color, not a finish.
+    [Fact]
+    public async Task Render_OneTimeBadgesHaveNoTierCaption()
+    {
+        var userId = await UserWithBadgesAsync(("mcp", 1), ("print-hours", 2));
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        Assert.Contains("Robot Co-Pilot\n", email!.Text);
+        Assert.DoesNotContain("Robot Co-Pilot (", email.Text);
+        Assert.Contains("Machine Hours (Silver PLA)", email.Text);
+    }
+
+    [Fact]
+    public async Task Render_AsksFreeUsersAndThanksProMembers()
+    {
+        var (free, _) = await UserWithPrintsAsync(null, new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
+        var (pro, _) = await UserWithPrintsAsync(null, new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.Subscriptions.Add(new Subscription { UserId = pro.Id, CreatedById = pro.Id, UpdatedById = pro.Id, Status = SubscriptionStatus.Active, Plan = SubscriptionPlan.ProMonthly });
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var freeEmail = await RenderAsync(free.Id, "2026-11");
+        var proEmail = await RenderAsync(pro.Id, "2026-11");
+
+        Assert.Contains("going Pro", freeEmail!.Html);
+        Assert.Contains("Thanks for supporting 3D Print Log", proEmail!.Html);
+        Assert.DoesNotContain("going Pro", proEmail.Html);
+    }
+
+    internal static readonly EmailFooterModel AskFooter = CampaignTestData.Footer with
+    {
+        Supporter = SupporterLine.Ask,
+        SubscriptionUrl = "https://www.3dprintlog.test/subscription",
+    };
+
+    internal static MonthlyRecapModel GoldenModel() => new(
+        Name: "Ada",
+        MonthName: "November",
+        PreviousMonthName: "October",
+        PrintCount: 12,
+        SuccessRatePercent: 91.7,
+        PrintHours: 41.5,
+        FilamentGrams: 1234,
+        Cost: "$18.40",
+        PrintCountChangePercent: 50,
+        PrintHoursChangePercent: -12,
+        MostUsedPrinter: "Voron 2.4",
+        MostUsedMaterial: "Galaxy Black PETG",
+        LongestPrint: "Helmet (9h)",
+        Badges:
+        [
+            new RecapBadge("Prolific Printer", "Silver PLA", "https://www.3dprintlog.test/assets/email/v1/badges/numeral-25-t2.png"),
+            new RecapBadge("Marathon", "Bronze PLA", "https://www.3dprintlog.test/assets/email/v1/badges/timer-t1.png"),
+        ],
+        MoreBadgeCount: 0,
+        AchievementsUrl: "https://www.3dprintlog.test/achievements",
+        Tip: new RecapTip("Track your spools in Materials and see how much filament is left on each.", "https://www.3dprintlog.test/materials", "Open Materials"),
+        StatsUrl: "https://www.3dprintlog.test/analytics");
+
+    internal static MonthlyRecapModel StressModel(EmailAssets assets)
+    {
+        // Every family at its top tier, the way the campaign shows them: tiered first, then one-time.
+        var all = AchievementCatalog.Definitions
+            .OrderBy(d => d.Thresholds.Count == 1)
+            .ThenByDescending(d => d.Thresholds.Count)
+            .Select(d => new RecapBadge(
+                d.Title,
+                d.Thresholds.Count == 1 ? null : AchievementCatalog.TierNames[d.Thresholds.Count - 1],
+                assets.Badge(BadgeImage.FileName(d, d.Thresholds.Count))))
+            .ToList();
+        return GoldenModel() with
+        {
+            MostUsedPrinter = "Voron 2.4 350mm Stealthburner with Klicky Probe and Nevermore (the big one)",
+            Badges = all.Take(MonthlyRecapTemplates.MaxBadges).ToList(),
+            MoreBadgeCount = all.Count - MonthlyRecapTemplates.MaxBadges,
+        };
+    }
+
+    internal static MonthlyRecapModel SparseModel() => GoldenModel() with
+    {
+        SuccessRatePercent = null,
+        Cost = null,
+        PrintCountChangePercent = null,
+        PrintHoursChangePercent = null,
+        MostUsedMaterial = null,
+        LongestPrint = null,
+        Badges = [],
+        Tip = null,
+    };
 }
