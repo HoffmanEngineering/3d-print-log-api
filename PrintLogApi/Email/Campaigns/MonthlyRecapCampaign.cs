@@ -24,6 +24,7 @@ public sealed class MonthlyRecapCampaign(
     IEmailTemplateRenderer renderer,
     IEmailFooterFactory footers,
     EmailLinkBuilder links,
+    EmailAssets assets,
     IOptions<EmailOptions> options) : IEmailCampaign
 {
     public const string CampaignName = "monthly-recap";
@@ -175,10 +176,17 @@ public sealed class MonthlyRecapCampaign(
                 .OrderBy(a => a.UnlockedAt)
                 .Select(a => new { a.AchievementKey, a.Tier })
                 .ToListAsync(ct))
+            // A key no longer in the catalog has no title to show, and a raw key is worse than
+            // nothing, so it is skipped. Retired definitions stay in the catalog and still resolve.
             .Select(a => (Definition: AchievementCatalog.Find(a.AchievementKey), a.Tier))
-            .Where(a => a.Definition is not null && a.Tier >= 1 && a.Tier <= AchievementCatalog.TierNames.Count)
-            .Select(a => $"{a.Definition!.Title} ({AchievementCatalog.TierNames[a.Tier - 1]})")
+            .Where(a => a.Definition is not null && a.Tier >= 1
+                && a.Tier <= AchievementCatalog.TierNames.Count && a.Tier <= a.Definition.Thresholds.Count)
+            .Select(a => new RecapBadge(
+                a.Definition!.Title,
+                AchievementCatalog.TierNames[a.Tier - 1],
+                assets.Badge(BadgeImage.FileName(a.Definition, a.Tier))))
             .ToList();
+        var isPro = await db.Subscriptions.AnyAsync(s => s.UserId == row.UserId && s.Status == SubscriptionStatus.Active, ct);
 
         string Link(string path) => links.Web(path, CampaignName, row.PeriodKey);
         var highlights = current.Highlights;
@@ -199,11 +207,13 @@ public sealed class MonthlyRecapCampaign(
             MostUsedPrinter: Blank(highlights.MostUsedPrinter?.Label),
             MostUsedMaterial: Blank(highlights.MostUsedMaterial?.Label),
             LongestPrint: Longest(highlights.LongestPrint),
-            Badges: badges,
+            Badges: badges.Take(MonthlyRecapTemplates.MaxBadges).ToList(),
+            MoreBadgeCount: Math.Max(0, badges.Count - MonthlyRecapTemplates.MaxBadges),
+            AchievementsUrl: Link("/achievements"),
             Tip: await RecapTips.ForAsync(db, row.UserId, Link, ct),
             StatsUrl: Link("/analytics"));
 
-        var (footer, _) = footers.Create(row.UserId, PreferenceSettingTypeId, FooterReason);
+        var (footer, _) = footers.Create(row.UserId, PreferenceSettingTypeId, FooterReason, isPro ? SupporterLine.Thanks : SupporterLine.Ask);
         var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, model, footer);
         var exposure = new JsonObject { ["month"] = row.PeriodKey, ["printCount"] = printCount };
 

@@ -10,13 +10,18 @@ Here's how your November went.
 - 1.2 kg of filament
 - $18.40 in material and power
 
-Busiest printer: Voron 2.4
+Busiest printer: Voron 2.4 350mm Stealthburner with Klicky Probe and Nevermore (the big one)
 Most-used material: Galaxy Black PETG
 Longest print: Helmet (9h)
 
 Badges earned in November:
-- Prolific Printer (Silver PLA)
-- Marathon (Bronze PLA)
+- Bed Leveled (Bronze PLA)
+- Spooled Up (Bronze PLA)
+- First Layer (Bronze PLA)
+- Plugged In (Bronze PLA)
+- Say Cheese (Bronze PLA)
+- Maker Profile (Bronze PLA)
+…and 84 more: https://www.3dprintlog.test/achievements
 
 See your full stats: https://www.3dprintlog.test/analytics
 
@@ -27,6 +32,9 @@ Open Materials: https://www.3dprintlog.test/materials
 YouTube: https://www.youtube.com/@hoffmanengineering
 GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
 Blog: https://hoffman.engineering/
+
+3D Print Log is built by one person. If it's useful to you, going Pro keeps it growing.
+Go Pro: https://www.3dprintlog.test/subscription
 
 You're receiving this because of a test.
 Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
