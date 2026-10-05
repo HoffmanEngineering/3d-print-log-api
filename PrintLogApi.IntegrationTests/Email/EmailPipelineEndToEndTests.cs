@@ -40,7 +40,7 @@ public class EmailPipelineEndToEndTests : IClassFixture<CustomWebApplicationFact
         };
         foreach (var campaign in campaigns)
         {
-            options.Campaigns[campaign.Name] = new CampaignOptions { Enabled = true };
+            options.Campaigns[EmailOptions.CampaignKey(campaign.Name)] = new CampaignOptions { Enabled = true };
         }
 
         return options;

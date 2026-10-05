@@ -208,7 +208,7 @@ public class SesEventProcessorTests : IClassFixture<CustomWebApplicationFactory>
                 ApiBaseUrl = "https://api.3dprintlog.test",
                 MaxSendsPerSecond = 1000,
             };
-            options.Campaigns[campaign.Name] = new CampaignOptions { Enabled = true };
+            options.Campaigns[EmailOptions.CampaignKey(campaign.Name)] = new CampaignOptions { Enabled = true };
             var wrapped = Microsoft.Extensions.Options.Options.Create(options);
             var telemetry = new TelemetryClient(new TelemetryConfiguration());
             var clock = new SettableTimeProvider(DateTimeOffset.UtcNow);

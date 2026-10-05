@@ -127,7 +127,7 @@ public class MonthlyRecapCampaignTests : IClassFixture<CustomWebApplicationFacto
         var (user, _) = await UserWithPrintsAsync(null, new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
         var now = new DateTimeOffset(2026, 12, 1, 15, 0, 0, TimeSpan.Zero);
         var options = new EmailOptions { Enabled = true };
-        options.Campaigns["monthly-recap"] = new CampaignOptions { Enabled = true };
+        options.Campaigns[EmailOptions.CampaignKey("monthly-recap")] = new CampaignOptions { Enabled = true };
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();

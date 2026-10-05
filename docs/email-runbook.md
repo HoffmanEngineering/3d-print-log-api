@@ -66,7 +66,9 @@ signup date. It never overwrites one the API recorded.
 ## Configuration
 
 Everything lives in the `Email` section. On App Service, set it as application settings with
-double underscores, for example `Email__Enabled` or `Email__Campaigns__monthly-recap__Enabled`.
+double underscores, for example `Email__Enabled` or `Email__Campaigns__monthly_recap__Enabled`.
+Campaign keys use underscores where the campaign name has a hyphen: App Service on Linux
+rejects a setting name containing `-`, and the app refuses to start on a hyphenated key.
 Arrays take an index: `Email__AllowListUserIds__0`. Every key and its default is in
 `EmailOptions.cs`; the ones you will touch:
 
@@ -76,7 +78,7 @@ Arrays take an index: `Email__AllowListUserIds__0`. Every key and its default is
 | `Email__DryRun` | Render and record everything, send nothing. |
 | `Email__AllowListUserIds__N` | When any are set, only these users receive mail; everyone else waits. |
 | `Email__DailyCap` | Maximum sends per UTC day. Empty means unlimited. |
-| `Email__Campaigns__<name>__Enabled` | Per-campaign switch: `onboarding`, `printer-silent`, `monthly-recap`. |
+| `Email__Campaigns__<key>__Enabled` | Per-campaign switch: `onboarding`, `printer_silent`, `monthly_recap`. |
 | `Email__Onboarding__StartDate` | Only users who sign up on or after this instant get onboarding. |
 | `Email__Notice__Required` | Leave `true`: only users who have seen the in-app notice get engagement mail. |
 
