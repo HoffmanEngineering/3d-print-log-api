@@ -53,7 +53,7 @@
                     @foreach (var badge in row)
                     {
                         <td width="33%" align="center" valign="top" style="padding:0 4px 16px 4px;font-size:14px;line-height:18px;">
-                            <img src="@badge.ImageUrl" alt="" width="56" height="63" style="display:block;margin:0 auto 6px auto;border:0;width:56px;height:63px;">
+                            <EmailImage Src="@badge.ImageUrl" Width="56" Height="63" Style="display:block;margin:0 auto 6px auto;" />
                             <strong>@badge.Title</strong><br>
                             <span class="em-muted" style="font-size:12px;line-height:16px;color:#757575;">@badge.TierName</span>
                         </td>

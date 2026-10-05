@@ -330,19 +330,20 @@ public class PrinterSilentCampaignTests : IClassFixture<CustomWebApplicationFact
     public async Task Golden()
     {
         var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
-        var model = new PrinterSilentModel(
-            Name: "Ada",
-            Printers:
-            [
-                new SilentPrinterView("Voron 2.4", "LDO Voron 2.4", "Moonraker", "Oct 2", "https://www.3dprintlog.test/docs/klipper", "Klipper setup guide", "https://www.3dprintlog.test/printers/7", 18),
-                new SilentPrinterView("Bambu X1", null, "the slicer uploader", "Oct 5", "https://www.3dprintlog.test/docs/slic3r-uploader", "Slicer uploader guide", "https://www.3dprintlog.test/printers/9", 15),
-                new SilentPrinterView("Prusa MK4S in the garage, the one with the long enclosure name", "Prusa Research MK4S", "OctoPrint", "Oct 6", "https://www.3dprintlog.test/docs/octoprint-webhook", "OctoPrint setup guide", "https://www.3dprintlog.test/printers/11", 14),
-            ],
-            ApiKeyLastUsed: "Sep 28");
-
-        var (html, text) = await PrinterSilentTemplates.RenderAsync(renderer, model, CampaignTestData.Footer);
+        var (html, text) = await PrinterSilentTemplates.RenderAsync(renderer, GoldenModel(), CampaignTestData.Footer);
 
         GoldenFile.AssertMatches(html, "printer-silent.approved.html");
         GoldenFile.AssertMatches(text, "printer-silent.approved.txt");
     }
+
+    // Three printers, one with a long name, so wrapping and the card layout get exercised.
+    internal static PrinterSilentModel GoldenModel() => new(
+        Name: "Ada",
+        Printers:
+        [
+            new SilentPrinterView("Voron 2.4", "LDO Voron 2.4", "Moonraker", "Oct 2", "https://www.3dprintlog.test/docs/klipper", "Klipper setup guide", "https://www.3dprintlog.test/printers/7", 18),
+            new SilentPrinterView("Bambu X1", null, "the slicer uploader", "Oct 5", "https://www.3dprintlog.test/docs/slic3r-uploader", "Slicer uploader guide", "https://www.3dprintlog.test/printers/9", 15),
+            new SilentPrinterView("Prusa MK4S in the garage, the one with the long enclosure name", "Prusa Research MK4S", "OctoPrint", "Oct 6", "https://www.3dprintlog.test/docs/octoprint-webhook", "OctoPrint setup guide", "https://www.3dprintlog.test/printers/11", 14),
+        ],
+        ApiKeyLastUsed: "Sep 28");
 }

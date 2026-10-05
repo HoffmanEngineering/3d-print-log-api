@@ -118,15 +118,30 @@ enabled: the workers only run while the process is alive.
 
 ## Going live
 
-1. `Email__Enabled=true` with `Email__AllowListUserIds__0=<your user id>`. Look up your id with
+1. Confirm every image an email can reference is live on the UI. The images are permanent files
+   under `www.3dprintlog.com/assets/email/v1/`, generated in the UI repo (see its AGENTS.md,
+   "Email assets"), so this repo's CI never sees them:
+
+   ```bash
+   EMAIL_ASSET_SMOKE=1 dotnet test --project PrintLogApi.IntegrationTests -- --filter-class "*EmailAssetSmokeTests"
+   ```
+
+   Re-run it after adding an achievement family: the UI must regenerate and deploy its badge
+   images before a recap can show the new badge.
+2. `Email__Enabled=true` with `Email__AllowListUserIds__0=<your user id>`. Look up your id with
    `SELECT Id FROM Users WHERE Email = '<your address>'`.
-2. Check a real email in Gmail, Outlook and Apple Mail: layout, links, footer address.
-3. In Gmail, "Show original": SPF, DKIM and DMARC all `PASS`, and the DKIM signature's `h=`
+3. Check a real email in Gmail (web, iOS and Android), Apple Mail, Outlook for Mac, new Outlook
+   and classic Outlook for Windows, each in light mode, dark mode and with images blocked:
+   layout, links, footer address. Only a real send shows how Gmail and classic Outlook recolor
+   for dark mode. Seed accounts work; so does a free trial of Litmus or Email on Acid. To check
+   layout before a send, `EMAIL_PREVIEW=1` writes every template to `artifacts/email-preview/`
+   with images loaded from a local UI dev server.
+4. In Gmail, "Show original": SPF, DKIM and DMARC all `PASS`, and the DKIM signature's `h=`
    list includes `List-Unsubscribe` and `List-Unsubscribe-Post`. Without those two in `h=`,
    Gmail ignores one-click unsubscribe.
-4. Press Gmail's own "Unsubscribe" link next to the sender. The category should switch off in
+5. Press Gmail's own "Unsubscribe" link next to the sender. The category should switch off in
    Settings > Email.
-5. Remove the allow-list entries. Enable `onboarding` first (new signups only), then
+6. Remove the allow-list entries. Enable `onboarding` first (new signups only), then
    `printer-silent`, then `monthly-recap`.
 
 ### Monthly recap ramp
