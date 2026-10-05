@@ -10,8 +10,9 @@ The API never asks users for an email address. It copies the one Auth0 holds:
 - **Live sync.** The Auth0 post-login Action in [`docs/auth0/add-email-claims.js`](auth0/add-email-claims.js)
   adds `https://3dprintlog.com/email` and `https://3dprintlog.com/email_verified` to the API
   access token. On each authenticated request the claims transformer copies them onto
-  `Users.Email` / `Users.EmailVerified`, at most once a day per distinct value, and writes only
-  when something changed (`EmailUpdatedAt` records the last real change).
+  `Users.Email` / `Users.EmailVerified` when they differ from what it last wrote for that user,
+  and writes only when something changed (`EmailUpdatedAt` records the last real change). A
+  token issued before the one that last wrote (another device, say) never overwrites it.
 - **Backfill.** Users who have not signed in since the Action was deployed carry no address
   until they do. The offline backfill below fills them from an Auth0 export.
 
@@ -19,9 +20,11 @@ A token without the claim is treated as unknown and never blanks a stored addres
 
 ### Deploying the Auth0 Action (one time)
 
-1. Auth0 dashboard > Actions > Library > Create Action > Login / Post Login, Node 22.
+1. Auth0 dashboard > Actions > Library > Create Action > Build from scratch: Login / Post Login,
+   Node 22 (or newest).
 2. Paste `docs/auth0/add-email-claims.js`, Deploy.
-3. Actions > Flows > Login: drag the Action into the flow, Apply.
+3. Actions > Triggers > post-login (older dashboards: Flows > Login): drag the Action between
+   Start and Complete, Apply. Safe before this API ships: unknown claims are ignored.
 4. Sign in to the site, then call `GET /api/Users/me/email`: it should return your address.
 
 ## Backfilling email addresses
