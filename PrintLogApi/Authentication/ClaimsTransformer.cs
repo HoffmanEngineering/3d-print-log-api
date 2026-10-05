@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.ApplicationInsights;
@@ -81,11 +82,20 @@ public sealed class ClaimsTransformer(HybridCache cache, CachedComputation compu
         return principal;
     }
 
+    /// <summary>The (address, verified) pair last written for a user, and the issue time of the token it came from.</summary>
+    internal sealed record EmailSyncMark(string Fingerprint, long IssuedAt);
+
+    private static readonly HybridCacheEntryOptions ReadOnly = new()
+    {
+        Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite,
+    };
+
     /// <summary>
-    /// Keeps Users.Email in step with the address Auth0 puts in the token, at most once a day per
-    /// distinct (address, verified) pair. The pair is part of the cache key, so a changed address
-    /// syncs on the next request instead of up to 24 hours later, while an unchanged one costs a
-    /// cache hit and no database round trip.
+    /// Keeps Users.Email in step with the address Auth0 puts in the token. The cache remembers,
+    /// per user, the pair last written and the <c>iat</c> of the token that carried it, so an
+    /// unchanged pair costs a cache hit and no database round trip, a changed one syncs on the
+    /// next request, and an older token still in use on another device (or a change reverted
+    /// within the day) can never overwrite what a newer token wrote.
     /// </summary>
     private async Task SyncEmailAsync(ClaimsIdentity identity, string authUserId, long localUserId)
     {
@@ -96,27 +106,29 @@ public sealed class ClaimsTransformer(HybridCache cache, CachedComputation compu
         }
 
         var verified = bool.TryParse(identity.FindFirst(EmailClaims.EmailVerified)?.Value, out var v) && v;
+        var issuedAt = long.TryParse(identity.FindFirst("iat")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var iat) ? iat : 0;
 
-        // Hashed so the address never appears in a cache key, which can surface in logs.
+        // Hashed so the address never appears in the cache, which can surface in logs.
         var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{email}|{verified}")));
+        var key = $"email-sync:{authUserId}";
 
         try
         {
-            await cache.GetOrCreateAsync(
-                $"email-sync:{authUserId}:{fingerprint}",
-                (computation, localUserId, email, verified),
-                static (state, ct) => state.computation.RunAsync(async (services, token) =>
-                {
-                    await services.GetRequiredService<IUserEmailSyncService>()
-                        .SyncAsync(state.localUserId, state.email, state.verified, token);
-                    return true;
-                }, ct),
-                CacheOptions);
+            var last = await cache.GetOrCreateAsync<EmailSyncMark?>(key, static _ => ValueTask.FromResult<EmailSyncMark?>(null), ReadOnly);
+            if (last is not null && (last.Fingerprint == fingerprint || last.IssuedAt > issuedAt))
+            {
+                return;
+            }
+
+            await computation.RunAsync(async (services, token) =>
+                await services.GetRequiredService<IUserEmailSyncService>().SyncAsync(localUserId, email, verified, token),
+                CancellationToken.None);
+            await cache.SetAsync(key, new EmailSyncMark(fingerprint, issuedAt), CacheOptions);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Email is a side channel: a failed sync must never fail the request it rode in on.
-            // HybridCache does not cache a throwing factory, so the next request retries.
+            // Nothing is cached on failure, so the next request retries.
             telemetry.TrackEvent("EmailSync_Failed", new Dictionary<string, string> { ["Error"] = ex.GetType().Name });
             telemetry.TrackException(ex);
         }

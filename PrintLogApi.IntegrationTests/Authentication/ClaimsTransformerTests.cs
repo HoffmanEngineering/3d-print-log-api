@@ -36,6 +36,72 @@ public class ClaimsTransformerTests
         Assert.Equal("7", ((ClaimsIdentity)result.Identity!).FindFirst(ClaimTypes.NameIdentifier)?.Value);
     }
 
+    private sealed class RecordingEmailSync : IUserEmailSyncService
+    {
+        public List<string> Synced { get; } = [];
+
+        public Task<bool> SyncAsync(long userId, string? email, bool verified, CancellationToken ct)
+        {
+            Synced.Add(email!);
+            return Task.FromResult(true);
+        }
+    }
+
+    private static ClaimsPrincipal EmailPrincipal(string email, long issuedAt) => new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.Upn, "auth|email"),
+            new Claim(EmailClaims.Email, email),
+            new Claim(EmailClaims.EmailVerified, "true"),
+            new Claim("iat", issuedAt.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        ],
+        "TestScheme"));
+
+    private static (ClaimsTransformer Transformer, RecordingEmailSync Sync) CreateEmailTransformer()
+    {
+        var sync = new RecordingEmailSync();
+        var (cache, computation) = TestHybridCache.Create(s => s
+            .AddSingleton<IUserService>(new FakeUserService { ReturnUserId = 7L })
+            .AddSingleton<IUserEmailSyncService>(sync));
+        return (new ClaimsTransformer(cache, computation, Telemetry), sync);
+    }
+
+    [Fact]
+    public async Task TransformAsync_UnchangedEmail_SyncsOnce()
+    {
+        var (transformer, sync) = CreateEmailTransformer();
+
+        await transformer.TransformAsync(EmailPrincipal("a@example.com", 100));
+        await transformer.TransformAsync(EmailPrincipal("a@example.com", 100));
+
+        Assert.Equal(["a@example.com"], sync.Synced);
+    }
+
+    // A change reverted within the day used to be a cache hit for the original pair, leaving the
+    // database on the intermediate address.
+    [Fact]
+    public async Task TransformAsync_EmailChangedAndChangedBack_SyncsEachChange()
+    {
+        var (transformer, sync) = CreateEmailTransformer();
+
+        await transformer.TransformAsync(EmailPrincipal("a@example.com", 100));
+        await transformer.TransformAsync(EmailPrincipal("b@example.com", 200));
+        await transformer.TransformAsync(EmailPrincipal("a@example.com", 300));
+
+        Assert.Equal(["a@example.com", "b@example.com", "a@example.com"], sync.Synced);
+    }
+
+    // Another device still holding a token issued before the change must not undo it.
+    [Fact]
+    public async Task TransformAsync_OlderTokenAfterNewer_DoesNotOverwrite()
+    {
+        var (transformer, sync) = CreateEmailTransformer();
+
+        await transformer.TransformAsync(EmailPrincipal("new@example.com", 200));
+        await transformer.TransformAsync(EmailPrincipal("old@example.com", 100));
+
+        Assert.Equal(["new@example.com"], sync.Synced);
+    }
+
     private static ClaimsPrincipal CreatePrincipal(string authUserId)
     {
         var claims = new[] { new Claim(ClaimTypes.Upn, authUserId) };
