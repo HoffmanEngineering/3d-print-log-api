@@ -1,4 +1,6 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Controllers;
 using PrintLogApi.Exceptions;
@@ -43,7 +45,7 @@ public class ConnectedAgentsControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             new[] { new Claim(ClaimTypes.Upn, subject) }, "test"));
-        return new ConnectedAgentsController(service)
+        return new ConnectedAgentsController(service, new TelemetryClient(TelemetryConfiguration.CreateDefault()))
         {
             ControllerContext = new ControllerContext
             {

@@ -1,13 +1,17 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights.Channel;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.IntegrationTests.Mcp;
+using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests;
@@ -37,6 +41,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 
     /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
     public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
+
+    /// <summary>
+    /// Whether to re-enable telemetry for capture. Off, the host behaves exactly as Startup
+    /// configures it for this environment — which is what the test of that behaviour needs.
+    /// </summary>
+    protected virtual bool CaptureTelemetry => true;
+
+    /// <summary>Everything the app would have sent to Application Insights.</summary>
+    public RecordingTelemetryChannel Telemetry => (RecordingTelemetryChannel)Services.GetRequiredService<ITelemetryChannel>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -105,6 +118,22 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
                 services.Remove(emailDescriptor);
             }
             services.AddSingleton<IEmailSender, RecordingEmailSender>();
+
+            // Startup switches telemetry off in this environment so test runs stop reaching the
+            // production resource. Switch it back on here, pointed at an in-memory channel, so
+            // the events an endpoint emits can be asserted on. Adaptive sampling is disabled
+            // for the same reason: it would drop events non-deterministically under a burst.
+            services.RemoveAll<ITelemetryChannel>();
+            services.AddSingleton<ITelemetryChannel, RecordingTelemetryChannel>();
+            services.Configure<Microsoft.ApplicationInsights.AspNetCore.Extensions.ApplicationInsightsServiceOptions>(
+                o => o.EnableAdaptiveSampling = false);
+            if (CaptureTelemetry)
+            {
+                // Configure, not PostConfigure: the SDK supplies its own IOptions<TelemetryConfiguration>
+                // that runs the IConfigureOptions chain and nothing else, so a PostConfigure here
+                // is silently ignored. Registration order puts this after Startup's Configure.
+                services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = false);
+            }
 
             // Add test authentication scheme
             services.AddAuthentication(options =>

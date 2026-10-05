@@ -1,0 +1,2071 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "## 3D Print Log\nHealth is *is it working right now*; Usage is *how is it being used*. Tile tags compare with the previous period of the same length. Nothing here auto-refreshes \u2014 reload for fresh numbers, or open Live Metrics from the links row."
+      },
+      "name": "heading"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 172800000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                },
+                {
+                  "durationMs": 7776000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "version": "KqlParameterItem/1.0",
+            "name": "ApiResource",
+            "label": "API App Insights",
+            "type": 5,
+            "isRequired": true,
+            "isHiddenWhenLocked": true,
+            "query": "resources | where type =~ 'microsoft.insights/components' and id =~ '__API_RESOURCE_ID__' | project value = id, label = name, selected = true",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.insights/components": true
+              },
+              "additionalResourceOptions": []
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "version": "KqlParameterItem/1.0",
+            "name": "UiResource",
+            "label": "UI App Insights",
+            "type": 5,
+            "isRequired": true,
+            "isHiddenWhenLocked": true,
+            "query": "resources | where type =~ 'microsoft.insights/components' and id =~ '__UI_RESOURCE_ID__' | project value = id, label = name, selected = true",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.insights/components": true
+              },
+              "additionalResourceOptions": []
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "version": "KqlParameterItem/1.0",
+            "name": "ApiRole",
+            "label": "API role name",
+            "type": 1,
+            "isRequired": true,
+            "value": "3d-print-log-api-prod",
+            "isHiddenWhenLocked": true
+          }
+        ],
+        "style": "pills"
+      },
+      "name": "global-parameters"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "00000000-0000-0000-0000-000000000005",
+            "version": "KqlParameterItem/1.0",
+            "name": "selectedTab",
+            "label": "View",
+            "type": 2,
+            "isRequired": true,
+            "value": "health",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"health\", \"label\": \"Health\", \"selected\": true}, {\"value\": \"usage\", \"label\": \"Usage\"}]"
+          }
+        ],
+        "style": "pills"
+      },
+      "name": "view"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\navailabilityResults\n| where timestamp between (previousStart .. windowEnd)\n| extend current = timestamp >= windowStart\n| summarize ok = countif(success == '1'), n = count() by current, bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list_if(round(100.0 * ok / n, 1), current),\n            Value = round(100.0 * sumif(ok, current) / sumif(n, current), 2),\n            Previous = round(100.0 * sumif(ok, not(current)) / sumif(n, not(current)), 2)\n| extend Delta = round(Value - Previous, 2), Title = 'API uptime', Subtitle = 'availability tests, %'\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen",
+                    "min": 98,
+                    "max": 100
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-api-uptime",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\navailabilityResults\n| where timestamp between (previousStart .. windowEnd)\n| extend current = timestamp >= windowStart\n| summarize ok = countif(success == '1'), n = count() by current, bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list_if(round(100.0 * ok / n, 1), current),\n            Value = round(100.0 * sumif(ok, current) / sumif(n, current), 2),\n            Previous = round(100.0 * sumif(ok, not(current)) / sumif(n, not(current)), 2)\n| extend Delta = round(Value - Previous, 2), Title = 'UI uptime', Subtitle = 'availability tests, %'\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen",
+                    "min": 98,
+                    "max": 100
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-ui-uptime",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\nlet windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\napiRequests\n| where timestamp between (previousStart .. windowEnd)\n| extend current = timestamp >= windowStart\n| summarize n = count() by current, bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list_if(n, current),\n            Value = round(sumif(n, current) / ((windowEnd - windowStart) / 1m), 2),\n            Previous = round(sumif(n, not(current)) / ((windowEnd - windowStart) / 1m), 2)\n| extend Delta = round(Value - Previous, 2), Title = 'Requests / min', Subtitle = 'excluding preflight and polling'\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "blue"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-rpm",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\nlet windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\napiRequests\n| where timestamp between (previousStart .. windowEnd)\n| extend current = timestamp >= windowStart\n| summarize errors = countif(toint(resultCode) >= 500), n = count() by current, bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list_if(round(100.0 * errors / n, 2), current),\n            Value = round(100.0 * sumif(errors, current) / sumif(n, current), 2),\n            Previous = round(100.0 * sumif(errors, not(current)) / sumif(n, not(current)), 2)\n| extend Delta = round(Value - Previous, 2), Title = '5xx rate', Subtitle = '% of API requests'\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "greenRed",
+                    "min": 0,
+                    "max": 2
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-5xx",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\nlet windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\nlet inWindow = apiRequests\n| where name !has 'GetImage'\n| where timestamp between (previousStart .. windowEnd)\n| extend current = timestamp >= windowStart;\nlet trend = inWindow\n| where current\n| summarize p = percentile(duration, 95) by bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list(round(p));\nlet totals = inWindow\n| summarize p = percentile(duration, 95) by current\n| summarize Value = round(take_anyif(p, current)), Previous = round(take_anyif(p, not(current)));\ntrend\n| extend k = 1\n| join kind=inner (totals | extend k = 1) on k\n| project Title = 'API p95', Subtitle = 'ms, excluding image serving', Value = todouble(Value), Trend, Delta = Value - Previous\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "greenRed",
+                    "min": 500,
+                    "max": 3000
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-p95",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiDependencies = dependencies\n| where cloud_RoleName == '{ApiRole}'\n| where operation_Name != 'GET Notifications/GetUnreadCount'\n| extend Target = case(\n    type == 'SQL', 'SQL',\n    type has 'Storage' or type has 'blob', 'Blob storage',\n    target has 'auth0', 'Auth0',\n    'Other');\nlet windowStart = {TimeRange:start};\nlet windowEnd = {TimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {TimeRange:grain};\napiDependencies\n| where timestamp between (previousStart .. windowEnd)\n| where success == false\n| extend current = timestamp >= windowStart\n| summarize n = count() by current, bin(timestamp, grain)\n| order by timestamp asc\n| summarize Trend = make_list_if(n, current), Value = sumif(n, current), Previous = sumif(n, not(current))\n| extend Delta = Value - Previous, Title = 'Failed dependencies', Subtitle = 'SQL, blob, Auth0'\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "greenRed",
+                    "min": 0,
+                    "max": 20
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "full"
+              }
+            },
+            "name": "tile-deps",
+            "customWidth": "16"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\napiRequests\n| extend authMethod = tostring(customDimensions.authMethod)\n| extend authMethod = iff(isempty(authMethod), 'unstamped', authMethod)\n| summarize n = count() by bin(timestamp, {TimeRange:grain}), authMethod\n| extend ['req/min'] = round(n / ({TimeRange:grain} / 1m), 2)\n| project timestamp, authMethod, ['req/min']\n",
+              "size": 0,
+              "title": "Requests per minute by auth method",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "areachart",
+              "timeContextFromParameter": "TimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "jwt",
+                    "label": "jwt",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "apiKey",
+                    "label": "apiKey",
+                    "color": "turquoise"
+                  },
+                  {
+                    "seriesName": "mcp",
+                    "label": "mcp",
+                    "color": "purple"
+                  },
+                  {
+                    "seriesName": "anonymous",
+                    "label": "anonymous",
+                    "color": "gray"
+                  },
+                  {
+                    "seriesName": "unstamped",
+                    "label": "unstamped",
+                    "color": "lightBlue"
+                  }
+                ],
+                "ySettings": {
+                  "label": "requests / min"
+                }
+              }
+            },
+            "name": "requests-by-auth",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\napiRequests\n| where toint(resultCode) >= 400\n| extend class = iff(toint(resultCode) >= 500, '5xx', '4xx')\n| summarize Errors = count() by bin(timestamp, {TimeRange:grain}), class\n",
+              "size": 0,
+              "title": "Errors by status class",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "TimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "4xx",
+                    "label": "4xx",
+                    "color": "orange"
+                  },
+                  {
+                    "seriesName": "5xx",
+                    "label": "5xx",
+                    "color": "red"
+                  }
+                ],
+                "ySettings": {
+                  "label": "errors"
+                }
+              }
+            },
+            "name": "errors-by-class",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\n// GetImage streams blobs and runs at seconds, not milliseconds; on the same\n// axis it flattens every other route into the baseline. It gets its own row in the\n// routes grid instead.\napiRequests\n| where name !has 'GetImage'\n| summarize p50 = percentile(duration, 50), p95 = percentile(duration, 95), p99 = percentile(duration, 99)\n    by bin(timestamp, {TimeRange:grain})\n",
+              "size": 0,
+              "title": "API latency p50 / p95 / p99 (ms), excluding image serving",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "TimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "p50",
+                    "label": "p50",
+                    "color": "green"
+                  },
+                  {
+                    "seriesName": "p95",
+                    "label": "p95",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "p99",
+                    "label": "p99",
+                    "color": "purple"
+                  }
+                ],
+                "ySettings": {
+                  "label": "ms"
+                }
+              }
+            },
+            "name": "latency-percentiles",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\napiRequests\n| summarize Requests = count(), ['p95 ms'] = round(percentile(duration, 95)),\n            ['Fail %'] = round(100.0 * countif(success == false) / count(), 1)\n    by Route = name\n| where Requests >= 10\n| top 15 by ['p95 ms'] desc\n",
+              "size": 0,
+              "title": "Slowest routes (\u2265 10 requests)",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "TimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Requests",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "blue"
+                    }
+                  },
+                  {
+                    "columnMatch": "p95 ms",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "orange"
+                    }
+                  },
+                  {
+                    "columnMatch": "Fail %",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 10,
+                      "palette": "greenRed"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "slowest-routes",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiDependencies = dependencies\n| where cloud_RoleName == '{ApiRole}'\n| where operation_Name != 'GET Notifications/GetUnreadCount'\n| extend Target = case(\n    type == 'SQL', 'SQL',\n    type has 'Storage' or type has 'blob', 'Blob storage',\n    target has 'auth0', 'Auth0',\n    'Other');\napiDependencies\n| summarize ['p95 ms'] = round(percentile(duration, 95)) by bin(timestamp, {TimeRange:grain}), Target\n",
+              "size": 0,
+              "title": "Dependency p95 (ms) by target",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "TimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "SQL",
+                    "label": "SQL",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "Blob storage",
+                    "label": "Blob storage",
+                    "color": "orange"
+                  },
+                  {
+                    "seriesName": "Auth0",
+                    "label": "Auth0",
+                    "color": "purple"
+                  },
+                  {
+                    "seriesName": "Other",
+                    "label": "Other",
+                    "color": "gray"
+                  }
+                ],
+                "ySettings": {
+                  "label": "ms"
+                }
+              }
+            },
+            "name": "dependency-p95",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiDependencies = dependencies\n| where cloud_RoleName == '{ApiRole}'\n| where operation_Name != 'GET Notifications/GetUnreadCount'\n| extend Target = case(\n    type == 'SQL', 'SQL',\n    type has 'Storage' or type has 'blob', 'Blob storage',\n    target has 'auth0', 'Auth0',\n    'Other');\napiDependencies\n| where success == false\n| summarize Failures = count(), ['Last seen'] = max(timestamp), ['p95 ms'] = round(percentile(duration, 95))\n    by Target, Host = target, Result = resultCode\n| top 15 by Failures desc\n",
+              "size": 0,
+              "title": "Dependency failures",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "TimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Failures",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "Last seen",
+                    "formatter": 6,
+                    "dateFormat": {
+                      "formatName": "shortDateTimePattern"
+                    }
+                  },
+                  {
+                    "columnMatch": "p95 ms",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "orange"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "dependency-failures",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// BadImageFormatException is the runtime failing to format a stack trace, not an app\n// fault; the ad-slot and refresh-token errors are the browser's ad blocker and Auth0's\n// normal session expiry. All three are volume without information.\nunion (exceptions | extend App = 'API'), (app('{UiResource}').exceptions | extend App = 'UI')\n| where type !has 'BadImageFormatException'\n| where problemId !has 'adsbygoogle' and outerMessage !has 'refresh token'\n| summarize Count = count(), ['Last seen'] = max(timestamp) by App, Problem = problemId\n| top 20 by Count desc\n",
+              "size": 0,
+              "title": "Top exceptions, both apps (known noise filtered)",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "TimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Count",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "Last seen",
+                    "formatter": 6,
+                    "dateFormat": {
+                      "formatName": "shortDateTimePattern"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "top-exceptions",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "union (availabilityResults | extend App = 'API'), (app('{UiResource}').availabilityResults | extend App = 'UI')\n| summarize pct = round(100.0 * countif(success == '1') / count(), 2) by Test = strcat(App, ' \u00b7 ', name), location\n| evaluate pivot(location, max(pct), Test)\n",
+              "size": 0,
+              "title": "Availability by region (%)",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "TimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Test",
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "^(?!Test$).*",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 95,
+                      "max": 100,
+                      "palette": "redGreen"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "availability-heatmap",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "browserTimings\n| summarize p50 = percentile(totalDuration, 50), p95 = percentile(totalDuration, 95) by bin(timestamp, {TimeRange:grain})\n",
+              "size": 0,
+              "title": "Browser page load p50 / p95 (ms)",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "TimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "p50",
+                    "label": "p50",
+                    "color": "green"
+                  },
+                  {
+                    "seriesName": "p95",
+                    "label": "p95",
+                    "color": "blue"
+                  }
+                ],
+                "ySettings": {
+                  "label": "ms"
+                }
+              }
+            },
+            "name": "page-load",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Every other dependency the browser reports is an ad or analytics call blocked\n// client-side \u2014 100% failure by design, and not ours.\ndependencies\n| where target has 'api.3dprintlog.com' and name !has 'unread-count'\n| summarize Calls = count(), ['Fail %'] = round(100.0 * countif(success == false) / count(), 1),\n            ['p95 ms'] = round(percentile(duration, 95))\n    by Call = name\n| top 15 by Calls desc\n",
+              "size": 0,
+              "title": "API calls from the browser",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "TimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Calls",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "blue"
+                    }
+                  },
+                  {
+                    "columnMatch": "Fail %",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 10,
+                      "palette": "greenRed"
+                    }
+                  },
+                  {
+                    "columnMatch": "p95 ms",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "orange"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "browser-api-calls",
+            "customWidth": "50"
+          },
+          {
+            "type": 11,
+            "content": {
+              "version": "LinkItem/1.0",
+              "style": "list",
+              "links": [
+                {
+                  "id": "00000000-0000-0000-0000-000000000007",
+                  "cellValue": "{ApiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "Live Metrics",
+                  "subTarget": "quickPulse",
+                  "style": "link"
+                },
+                {
+                  "id": "00000000-0000-0000-0000-000000000008",
+                  "cellValue": "{ApiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "Failures",
+                  "subTarget": "failures",
+                  "style": "link"
+                },
+                {
+                  "id": "00000000-0000-0000-0000-000000000009",
+                  "cellValue": "{ApiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "Performance",
+                  "subTarget": "performance",
+                  "style": "link"
+                },
+                {
+                  "id": "00000000-0000-0000-0000-00000000000a",
+                  "cellValue": "{ApiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "Application Map",
+                  "subTarget": "applicationMap",
+                  "style": "link"
+                },
+                {
+                  "id": "00000000-0000-0000-0000-00000000000b",
+                  "cellValue": "{UiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "UI failures",
+                  "subTarget": "failures",
+                  "style": "link"
+                }
+              ]
+            },
+            "name": "health-links"
+          }
+        ]
+      },
+      "name": "health",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "health"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 9,
+            "content": {
+              "version": "KqlParameterItem/1.0",
+              "parameters": [
+                {
+                  "id": "00000000-0000-0000-0000-000000000006",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "UsageTimeRange",
+                  "label": "Usage time range",
+                  "type": 4,
+                  "isRequired": true,
+                  "value": {
+                    "durationMs": 2592000000
+                  },
+                  "typeSettings": {
+                    "selectableValues": [
+                      {
+                        "durationMs": 3600000
+                      },
+                      {
+                        "durationMs": 14400000
+                      },
+                      {
+                        "durationMs": 43200000
+                      },
+                      {
+                        "durationMs": 86400000
+                      },
+                      {
+                        "durationMs": 172800000
+                      },
+                      {
+                        "durationMs": 604800000
+                      },
+                      {
+                        "durationMs": 1209600000
+                      },
+                      {
+                        "durationMs": 2592000000
+                      },
+                      {
+                        "durationMs": 7776000000
+                      }
+                    ],
+                    "allowCustom": true
+                  }
+                }
+              ],
+              "style": "pills"
+            },
+            "name": "usage-parameters"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nlet windowStart = {UsageTimeRange:start};\nlet windowEnd = {UsageTimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {UsageTimeRange:grain};\nlet titles = datatable(Title: string, Order: int) [\n    'Signups', 1, 'Prints added', 2, 'Filaments added', 3, 'Photos uploaded', 4];\nlet counts = apiEvents\n| where timestamp between (previousStart .. windowEnd)\n| extend Title = case(\n    name == 'UserSignedUp', 'Signups',\n    name == 'PrintAdded', 'Prints added',\n    name == 'FilamentAdd', 'Filaments added',\n    name in ('PrintPictureAdded', 'FilamentPictureAdded', 'ProjectPictureAdded', 'UserProfilePictureUploaded', 'UserCoverPictureUploaded'), 'Photos uploaded',\n    '')\n| where isnotempty(Title)\n| extend current = timestamp >= windowStart\n| summarize n = count() by Title, current, bin(timestamp, 1d)\n| order by timestamp asc\n| summarize Trend = make_list_if(n, current), Value = sumif(n, current), Previous = sumif(n, not(current)) by Title;\n// A title with no events in either period still gets a tile, reading 0.\ntitles\n| join kind=leftouter counts on Title\n| project Title, Order, Trend, Value = todouble(coalesce(Value, 0)), Delta = todouble(coalesce(Value, 0) - coalesce(Previous, 0))\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "blue"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Delta",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": ">",
+                        "thresholdValue": "0",
+                        "representation": "green",
+                        "text": "+{0}{1}"
+                      },
+                      {
+                        "operator": "<",
+                        "thresholdValue": "0",
+                        "representation": "red",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "gray",
+                        "text": "\u00b10"
+                      }
+                    ],
+                    "showAsTag": true
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "showBorder": true,
+                "size": "auto",
+                "sortCriteriaField": "Order",
+                "sortOrderField": 1
+              }
+            },
+            "name": "usage-tiles",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nlet windowStart = {UsageTimeRange:start};\nlet windowEnd = {UsageTimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {UsageTimeRange:grain};\n// Counts users who did something, not users who merely polled: every write path\n// emits an event, and the initializer stamps the user on it. Reads 0 for any period\n// before the enrichment deploy.\nlet active = apiEvents | where isnotempty(user_AuthenticatedId);\nlet daily = active\n| where timestamp between (windowStart .. windowEnd)\n| summarize d = dcount(user_AuthenticatedId) by bin(timestamp, 1d)\n| order by timestamp asc\n| summarize Value = round(avg(d), 1), Trend = make_list(d)\n// avg() over no rows is NaN, which the tile would print verbatim.\n| extend Value = iff(isnan(Value), 0.0, Value)\n| extend Title = 'DAU', Subtitle = 'average per day', Order = 1;\nlet weekly = active\n| where timestamp > windowEnd - 7d\n| summarize Value = todouble(dcount(user_AuthenticatedId))\n| extend Title = 'WAU', Subtitle = 'last 7 days', Order = 2;\nlet monthly = active\n| where timestamp > windowEnd - 30d\n| summarize Value = todouble(dcount(user_AuthenticatedId))\n| extend Title = 'MAU', Subtitle = 'last 30 days', Order = 3;\nunion daily, weekly, monthly\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "blue"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "showBorder": true,
+                "size": "auto",
+                "sortCriteriaField": "Order",
+                "sortOrderField": 1
+              }
+            },
+            "name": "active-user-tiles",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| summarize ['Active users'] = dcountif(user_AuthenticatedId, isnotempty(user_AuthenticatedId)),\n            Signups = countif(name == 'UserSignedUp')\n    by bin(timestamp, 1d)\n",
+              "size": 0,
+              "title": "Active users and signups per day",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Active users",
+                    "label": "Active users",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "Signups",
+                    "label": "Signups",
+                    "color": "green"
+                  }
+                ],
+                "ySettings": {
+                  "label": "users"
+                }
+              }
+            },
+            "name": "active-users-per-day",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| extend authMethod = tostring(customDimensions.authMethod)\n| extend authMethod = iff(isempty(authMethod), 'unstamped', authMethod)\n| summarize Events = count() by bin(timestamp, 1d), authMethod\n",
+              "size": 0,
+              "title": "Writes per day by auth method",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "jwt",
+                    "label": "jwt",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "apiKey",
+                    "label": "apiKey",
+                    "color": "turquoise"
+                  },
+                  {
+                    "seriesName": "mcp",
+                    "label": "mcp",
+                    "color": "purple"
+                  },
+                  {
+                    "seriesName": "unstamped",
+                    "label": "unstamped",
+                    "color": "lightBlue"
+                  }
+                ],
+                "ySettings": {
+                  "label": "events"
+                }
+              }
+            },
+            "name": "activity-by-auth",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| extend Entity = case(\n    name == 'PrintAdded', 'Print',\n    name == 'FilamentAdd', 'Filament',\n    name in ('PrinterAdded', 'McpPrinterAdded'), 'Printer',\n    name == 'ProjectAdded', 'Project',\n    name == 'PrinterMaintenanceAdd', 'Maintenance',\n    name == 'CommentAdded', 'Comment',\n    '')\n| where isnotempty(Entity)\n| summarize Created = count() by bin(timestamp, 1d), Entity\n",
+              "size": 0,
+              "title": "Content created per day",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Print",
+                    "label": "Print",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "Filament",
+                    "label": "Filament",
+                    "color": "orange"
+                  },
+                  {
+                    "seriesName": "Printer",
+                    "label": "Printer",
+                    "color": "green"
+                  },
+                  {
+                    "seriesName": "Project",
+                    "label": "Project",
+                    "color": "purple"
+                  },
+                  {
+                    "seriesName": "Maintenance",
+                    "label": "Maintenance",
+                    "color": "brown"
+                  },
+                  {
+                    "seriesName": "Comment",
+                    "label": "Comment",
+                    "color": "gray"
+                  }
+                ],
+                "ySettings": {
+                  "label": "created"
+                }
+              }
+            },
+            "name": "content-created",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| where name in ('PrintEdit', 'PrintStatusEdit', 'PrintsBulkUpdated', 'FilamentEdit', 'PrinterEdit', 'McpPrinterEdit',\n                 'ProjectEdit', 'PrinterMaintenanceEdit', 'CommentEdit',\n                 'PrintDeleted', 'PrintsBulkDeleted', 'FilamentDelete', 'PrinterDelete', 'ProjectDelete',\n                 'PrinterMaintenanceDelete', 'CommentDelete')\n| summarize Changes = count() by bin(timestamp, 1d), name\n",
+              "size": 0,
+              "title": "Edits and deletes per day",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "ySettings": {
+                  "label": "changes"
+                }
+              }
+            },
+            "name": "content-changed",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nunion\n    (apiEvents | where name == 'CuraSettingsSaved' | extend Series = 'Cura settings saved'),\n    (apiEvents | where name == 'CuraSettingsFirstLoad' | extend Series = 'Cura first load'),\n    (app('{UiResource}').customEvents | where name == 'PrintSentFromCura' | extend Series = 'Print sent from Cura')\n| summarize Events = count() by bin(timestamp, 1d), Series\n",
+              "size": 0,
+              "title": "Cura plugin",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Cura settings saved",
+                    "label": "Cura settings saved",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "Cura first load",
+                    "label": "Cura first load",
+                    "color": "lightBlue"
+                  },
+                  {
+                    "seriesName": "Print sent from Cura",
+                    "label": "Print sent from Cura",
+                    "color": "orange"
+                  }
+                ],
+                "ySettings": {
+                  "label": "events"
+                }
+              }
+            },
+            "name": "cura",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| where name startswith 'Moonraker_Webhook_' or name startswith 'OctoPrint_Webhook_'\n| extend Outcome = case(\n    name endswith '_Error' or name endswith '_Unhandled', 'error',\n    name endswith '_Cancelled' or name endswith '_Failed', 'warn',\n    'ok')\n| summarize Webhooks = count() by bin(timestamp, 1d), Outcome\n",
+              "size": 0,
+              "title": "Printer webhooks by outcome",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "ok",
+                    "label": "ok",
+                    "color": "green"
+                  },
+                  {
+                    "seriesName": "warn",
+                    "label": "warn",
+                    "color": "orange"
+                  },
+                  {
+                    "seriesName": "error",
+                    "label": "error",
+                    "color": "red"
+                  }
+                ],
+                "ySettings": {
+                  "label": "webhooks"
+                }
+              }
+            },
+            "name": "webhooks",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| where name startswith 'Moonraker_Webhook_' or name startswith 'OctoPrint_Webhook_'\n| extend Source = iff(name startswith 'Moonraker', 'Moonraker', 'OctoPrint'), Event = substring(name, indexof(name, '_Webhook_') + 9)\n| summarize Count = count() by Source, Event\n| evaluate pivot(Event, sum(Count), Source)\n",
+              "size": 0,
+              "title": "Webhooks by source",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "UsageTimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Source",
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "^(?!Source$).*",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "blue"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "webhooks-by-source",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| where name == 'Mcp_ToolCalled'\n| summarize Calls = count() by Tool = tostring(customDimensions.tool), Outcome = tostring(customDimensions.outcome)\n| order by Calls desc\n",
+              "size": 0,
+              "title": "MCP tool calls by tool and outcome",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "categoricalbar",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "xAxis": "Tool",
+                "yAxis": [
+                  "Calls"
+                ],
+                "group": "Outcome",
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                }
+              }
+            },
+            "name": "mcp-tools",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nlet titles = datatable(Title: string, Order: int) [\n    'MCP tool calls', 1, 'Agents revoked', 2, 'API keys generated', 3, 'API keys deleted', 4,\n    'Files uploaded', 5, 'Uploaded MB', 6];\nlet counts = apiEvents\n| extend Title = case(\n    name == 'Mcp_ToolCalled', 'MCP tool calls',\n    name == 'ConnectedAgentRevoked', 'Agents revoked',\n    name == 'NewApiKeyGenerated', 'API keys generated',\n    name == 'ApiKeyDeleted', 'API keys deleted',\n    name == 'PrintFileUploaded', 'Files uploaded',\n    '')\n| where isnotempty(Title)\n| summarize Value = todouble(count()) by Title\n| union (apiEvents\n    | where name == 'PrintFileUploaded'\n    | summarize Value = round(sum(tolong(customDimensions.sizeBytes)) / 1048576.0, 1)\n    | extend Title = 'Uploaded MB');\ntitles\n| join kind=leftouter counts on Title\n| project Title, Order, Value = coalesce(Value, 0.0)\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "timeContextFromParameter": "UsageTimeRange",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "purple"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "showBorder": true,
+                "size": "auto",
+                "sortCriteriaField": "Order",
+                "sortOrderField": 1
+              }
+            },
+            "name": "integration-tiles",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\napiEvents\n| where name == 'PrintFileUploaded'\n| summarize Uploads = count() by bin(timestamp, 1d), Extension = tostring(customDimensions.extension)\n",
+              "size": 0,
+              "title": "Print file uploads by extension",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "barchart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "ySettings": {
+                  "label": "uploads"
+                }
+              }
+            },
+            "name": "uploads-by-extension",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "pageViews\n| summarize Sessions = dcount(session_Id), ['Page views'] = count() by bin(timestamp, 1d)\n",
+              "size": 0,
+              "title": "Sessions and page views per day",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "timechart",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Sessions",
+                    "label": "Sessions",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "Page views",
+                    "label": "Page views",
+                    "color": "lightBlue"
+                  }
+                ]
+              }
+            },
+            "name": "sessions",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "pageViews\n| summarize Views = count(), Sessions = dcount(session_Id) by Page = name\n| join kind=leftouter (browserTimings | summarize ['p95 load ms'] = round(percentile(totalDuration, 95)) by Page = name) on Page\n| project Page, Views, Sessions, ['p95 load ms']\n| top 15 by Views desc\n",
+              "size": 0,
+              "title": "Top pages",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "UsageTimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Views",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "blue"
+                    }
+                  },
+                  {
+                    "columnMatch": "Sessions",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "lightBlue"
+                    }
+                  },
+                  {
+                    "columnMatch": "p95 load ms",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "orange"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "top-pages",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let step = (started: string, completed: string, label: string) {\n    customEvents\n    | where name in (started, completed)\n    | summarize Started = countif(name == started), Completed = countif(name == completed)\n    | extend Feature = label\n};\nunion\n    step('PrintBulkActionBar_SetProjectStarted', 'PrintBulkActionBar_SetProjectCompleted', 'Bulk: set project'),\n    step('PrintBulkActionBar_SetStatusStarted', 'PrintBulkActionBar_SetStatusCompleted', 'Bulk: set status'),\n    step('PrintBulkActionBar_DeleteConfirmed', 'PrintBulkActionBar_DeleteCompleted', 'Bulk: delete'),\n    step('QrScanner_Opened', 'QrScanner_Success', 'QR scanner'),\n    step('ProjectDetail_EditStarted', 'ProjectDetail_Saved', 'Project edit')\n| extend ['Completion %'] = iff(Started > 0, round(100.0 * Completed / Started, 1), 0.0)\n| project Feature, Started, Completed, ['Completion %']\n",
+              "size": 0,
+              "title": "Feature funnels",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "UsageTimeRange",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Started",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "lightBlue"
+                    }
+                  },
+                  {
+                    "columnMatch": "Completed",
+                    "formatter": 3,
+                    "formatOptions": {
+                      "min": 0,
+                      "palette": "blue"
+                    }
+                  },
+                  {
+                    "columnMatch": "Completion %",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 100,
+                      "palette": "redGreen"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "funnels",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "customEvents\n| where name in ('PrintEmptyState_AddPrinter', 'PrintEmptyState_AddPrint', 'PrintEmptyState_ImportGcode',\n                 'Home_SignupClicked', 'Pricing_PageViewed', 'PrintGroupedView_ShareClicked')\n| summarize Clicks = count() by Action = name\n| order by Clicks desc\n",
+              "size": 0,
+              "title": "Calls to action",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "categoricalbar",
+              "timeContextFromParameter": "UsageTimeRange",
+              "chartSettings": {
+                "xAxis": "Action",
+                "yAxis": [
+                  "Clicks"
+                ],
+                "showLegend": false,
+                "showMetrics": false
+              }
+            },
+            "name": "cta-clicks",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Headline numbers only. The monthly review \u2014 zero-result searches, unhelpful pages,\n// scroll completion per page \u2014 is the 'Documentation Analytics' workbook, linked below.\nlet docViews = customEvents | where name == 'Docs_PageView' | summarize Value = todouble(count()) | extend Title = 'Docs page views', Order = 1;\nlet docReaders = customEvents | where name == 'Docs_PageView' | summarize Value = todouble(dcount(user_Id)) | extend Title = 'Docs readers', Order = 2;\nlet docSearches = customEvents | where name == 'Docs_Search' | summarize Value = todouble(count()) | extend Title = 'Docs searches', Order = 3;\nlet docCompletion = customEvents\n| where name in ('Docs_PageView', 'Docs_ScrollDepth')\n| summarize opened = countif(name == 'Docs_PageView'), finished = countif(name == 'Docs_ScrollDepth' and toint(customMeasurements.bucket) == 100)\n| project Title = 'Read to the end %', Value = iff(opened > 0, round(100.0 * finished / opened, 1), 0.0), Order = 4;\nunion docViews, docReaders, docSearches, docCompletion\n",
+              "size": 0,
+              "title": "Documentation",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{UiResource}"
+              ],
+              "visualization": "tiles",
+              "timeContextFromParameter": "UsageTimeRange",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "green"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "showBorder": true,
+                "size": "auto",
+                "sortCriteriaField": "Order",
+                "sortOrderField": 1
+              }
+            },
+            "name": "docs",
+            "customWidth": "50"
+          },
+          {
+            "type": 11,
+            "content": {
+              "version": "LinkItem/1.0",
+              "style": "list",
+              "links": [
+                {
+                  "id": "00000000-0000-0000-0000-00000000000c",
+                  "cellValue": "{UiResource}",
+                  "linkTarget": "Resource",
+                  "linkLabel": "Documentation Analytics workbook (Workbooks gallery)",
+                  "subTarget": "workbooks",
+                  "style": "link"
+                }
+              ]
+            },
+            "name": "docs-links"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nlet titles = datatable(Title: string, Order: int) [\n    'Checkouts started', 1, 'Subscriptions activated', 2, 'Subscriptions canceled', 3,\n    'Payments failed', 4, 'Feedback received', 5];\nlet counts = apiEvents\n| extend Title = case(\n    name == 'Subscription_CheckoutSessionCreated', 'Checkouts started',\n    name == 'Subscription_Activated', 'Subscriptions activated',\n    name in ('Subscription_Canceled', 'Subscription_CanceledImmediately'), 'Subscriptions canceled',\n    name == 'Subscription_PaymentFailed', 'Payments failed',\n    name == 'FeedbackAdded', 'Feedback received',\n    '')\n| where isnotempty(Title)\n| summarize Value = todouble(count()) by Title;\ntitles\n| join kind=leftouter counts on Title\n| project Title, Order, Value = coalesce(Value, 0.0)\n",
+              "size": 0,
+              "title": "",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}"
+              ],
+              "visualization": "tiles",
+              "timeContextFromParameter": "UsageTimeRange",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Title",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Subtitle",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "green"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Trend",
+                  "formatter": 9,
+                  "formatOptions": {
+                    "palette": "blue"
+                  }
+                },
+                "showBorder": true,
+                "size": "auto",
+                "sortCriteriaField": "Order",
+                "sortOrderField": 1
+              }
+            },
+            "name": "money-tiles",
+            "customWidth": "100"
+          }
+        ]
+      },
+      "name": "usage",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "usage"
+      }
+    }
+  ],
+  "fallbackResourceIds": [
+    "__API_RESOURCE_ID__"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

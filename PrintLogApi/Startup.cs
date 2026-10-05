@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -26,6 +27,7 @@ using PrintLogApi.Models.Stripe;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Push;
+using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -251,6 +253,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddApplicationInsightsTelemetry();
+        // Who and how, on every item; then drop the rows that only ever say "still polling".
+        // See each type's remarks for the numbers behind them.
+        services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
+        services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
+        if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
+        {
+            // Test runs were reaching the production resource: the per-environment appsettings
+            // set the key to "", which the SDK treats as unset, so the base file's key won.
+            // Switching telemetry off here is deterministic whatever the config layers say.
+            services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = true);
+        }
 
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
