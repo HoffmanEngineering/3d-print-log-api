@@ -62,6 +62,7 @@ public static class OnboardingTemplates
     public static string Text(OnboardingModel m, EmailFooterModel footer)
     {
         var b = new StringBuilder();
+        b.Append(Subject(m.Step)).Append("\n\n");
         b.Append(EmailFormat.Greeting(m.Name)).Append("\n\n");
 
         switch (m.Step)

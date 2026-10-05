@@ -193,6 +193,11 @@ public class PrinterSilentCampaignTests : IClassFixture<CustomWebApplicationFact
         Assert.Contains($"Last heard from via Moonraker on {(Now - TimeSpan.FromDays(15)).ToOffset(TimeSpan.FromHours(-6)):MMM d}", email.Text);
         Assert.Contains("/docs/klipper?utm_source=email", email.Text);
         Assert.Contains($"/printers/{printer.Id}?utm_source=email", email.Text);
+        Assert.Contains("Quiet 15 days", email.Text);
+        Assert.Contains("Quiet 15 days", email.Html);
+        Assert.Contains("#ffb300", email.Html);
+        Assert.DoesNotContain("going Pro", email.Html);
+        Assert.DoesNotContain("Thanks for supporting", email.Html);
         Assert.Equal(EmailSettingTypes.PrinterSilent, email.UnsubscribeCategory);
         var listed = Assert.Single(email.Exposure["printers"]!.AsArray());
         Assert.Equal(printer.Id, (long?)listed!["id"]);
@@ -329,8 +334,9 @@ public class PrinterSilentCampaignTests : IClassFixture<CustomWebApplicationFact
             Name: "Ada",
             Printers:
             [
-                new SilentPrinterView("Voron 2.4", "LDO Voron 2.4", "Moonraker", "Oct 2", "https://www.3dprintlog.test/docs/klipper", "Klipper setup guide", "https://www.3dprintlog.test/printers/7"),
-                new SilentPrinterView("Bambu X1", null, "the slicer uploader", "Oct 5", "https://www.3dprintlog.test/docs/slic3r-uploader", "Slicer uploader guide", "https://www.3dprintlog.test/printers/9"),
+                new SilentPrinterView("Voron 2.4", "LDO Voron 2.4", "Moonraker", "Oct 2", "https://www.3dprintlog.test/docs/klipper", "Klipper setup guide", "https://www.3dprintlog.test/printers/7", 18),
+                new SilentPrinterView("Bambu X1", null, "the slicer uploader", "Oct 5", "https://www.3dprintlog.test/docs/slic3r-uploader", "Slicer uploader guide", "https://www.3dprintlog.test/printers/9", 15),
+                new SilentPrinterView("Prusa MK4S in the garage, the one with the long enclosure name", "Prusa Research MK4S", "OctoPrint", "Oct 6", "https://www.3dprintlog.test/docs/octoprint-webhook", "OctoPrint setup guide", "https://www.3dprintlog.test/printers/11", 14),
             ],
             ApiKeyLastUsed: "Sep 28");
 

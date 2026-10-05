@@ -1,3 +1,5 @@
+Let your prints log themselves
+
 Hi Ada,
 
 Typing in every print gets old fast. Connect the tool you already use and new prints show up on their own:

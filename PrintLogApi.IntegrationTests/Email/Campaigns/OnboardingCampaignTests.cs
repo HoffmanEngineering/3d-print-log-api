@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Achievements;
 using PrintLogApi.Email;
 using PrintLogApi.Email.Campaigns;
@@ -288,25 +289,46 @@ public class OnboardingCampaignTests : IClassFixture<CustomWebApplicationFactory
     public async Task Golden(string step)
     {
         var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
-        var model = new OnboardingModel(
-            Step: step,
-            Name: "Ada",
-            CtaUrl: "https://www.3dprintlog.test/printers/new?utm_source=email",
-            CtaLabel: "Add your printer",
-            HintText: "Add your first printer.",
-            PrintCount: 4,
-            PrintHours: 12,
-            FilamentGrams: 1234,
-            GettingStartedHeld: 2,
-            GettingStartedTotal: 6,
-            OctoPrintUrl: "https://www.3dprintlog.test/docs/octoprint-webhook",
-            KlipperUrl: "https://www.3dprintlog.test/docs/klipper",
-            SlicerUrl: "https://www.3dprintlog.test/docs/slic3r-uploader",
-            FirstPrintUrl: "https://www.3dprintlog.test/prints/new/edit");
-
-        var (html, text) = await OnboardingTemplates.RenderAsync(renderer, model, CampaignTestData.Footer);
+        var (html, text) = await OnboardingTemplates.RenderAsync(renderer, GoldenModel(step), CampaignTestData.Footer);
 
         GoldenFile.AssertMatches(html, $"onboarding-{step}.approved.html");
         GoldenFile.AssertMatches(text, $"onboarding-{step}.approved.txt");
     }
+
+    [Fact]
+    public async Task NextSteps_ShowsABadgeMeterAndTheNextBadge()
+    {
+        var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
+        var (html, _) = await OnboardingTemplates.RenderAsync(renderer, GoldenModel(OnboardingTemplates.NextSteps), CampaignTestData.Footer);
+
+        Assert.Equal(2, Regex.Count(html, "class=\"em-meter-on\""));
+        Assert.Equal(4, Regex.Count(html, "class=\"em-meter-off\""));
+        Assert.Contains("Next badge", html);
+        Assert.Contains("Add your first printer.", html);
+    }
+
+    [Fact]
+    public async Task Connect_ShowsEachIntegrationAsACard()
+    {
+        var renderer = _factory.Services.GetRequiredService<IEmailTemplateRenderer>();
+        var (html, _) = await OnboardingTemplates.RenderAsync(renderer, GoldenModel(OnboardingTemplates.Connect), CampaignTestData.Footer);
+
+        Assert.Equal(3, Regex.Count(html, "class=\"em-panel\""));
+    }
+
+    internal static OnboardingModel GoldenModel(string step) => new(
+        Step: step,
+        Name: "Ada",
+        CtaUrl: "https://www.3dprintlog.test/printers/new?utm_source=email",
+        CtaLabel: "Add your printer",
+        HintText: "Add your first printer.",
+        PrintCount: 4,
+        PrintHours: 12,
+        FilamentGrams: 1234,
+        GettingStartedHeld: 2,
+        GettingStartedTotal: 6,
+        OctoPrintUrl: "https://www.3dprintlog.test/docs/octoprint-webhook",
+        KlipperUrl: "https://www.3dprintlog.test/docs/klipper",
+        SlicerUrl: "https://www.3dprintlog.test/docs/slic3r-uploader",
+        FirstPrintUrl: "https://www.3dprintlog.test/prints/new/edit");
 }
