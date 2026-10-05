@@ -70,6 +70,10 @@ public class PrintLogContext : DbContext
 
     public DbSet<UserAchievement> UserAchievements { get; set; }
 
+    public DbSet<EmailOutbox> EmailOutbox { get; set; } = null!;
+
+    public DbSet<EmailSuppression> EmailSuppressions { get; set; } = null!;
+
     public static int fnNaturalSort(string sortKey)
         => throw new NotSupportedException();
 
@@ -94,7 +98,12 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 18, Name = "Achievements_Celebrations", Description = "How new achievements are celebrated (on/quiet/off)." },
             new UserSettingType() { Id = 19, Name = "Achievements_DismissedHint", Description = "The achievement hint the user dismissed, as key:tier." },
             new UserSettingType() { Id = 20, Name = "General_TimeZone", Description = "The user's IANA time zone, used for daily and weekly streaks." },
-            new UserSettingType() { Id = 21, Name = "Push_Achievement", Description = "Send a push notification to the user's devices when they earn an achievement." }
+            new UserSettingType() { Id = 21, Name = "Push_Achievement", Description = "Send a push notification to the user's devices when they earn an achievement." },
+            new UserSettingType() { Id = 22, Name = "Email_All", Description = "Master switch for all non-required email (true/false; absent means on)." },
+            new UserSettingType() { Id = 23, Name = "Email_Onboarding", Description = "Send the onboarding email series (true/false; absent means on)." },
+            new UserSettingType() { Id = 24, Name = "Email_MonthlyRecap", Description = "Send the monthly recap email (true/false; absent means on)." },
+            new UserSettingType() { Id = 25, Name = "Email_PrinterSilent", Description = "Email when a connected printer stops reporting (true/false; absent means on)." },
+            new UserSettingType() { Id = 26, Name = "Email_NoticeSeenAt", Description = "When the user dismissed the in-app email notice (ISO 8601)." }
             );
 
         var filamentCategory = new MaterialCategory()
@@ -397,6 +406,25 @@ public class PrintLogContext : DbContext
         );
 
         modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
+
+        // Not unique: Auth0 permits the same address on more than one connection.
+        modelBuilder.Entity<User>().HasIndex(u => u.Email);
+        modelBuilder.Entity<User>().Property(u => u.Email).HasMaxLength(320);
+
+        // The unique key is the duplicate-send guard; see EmailOutbox.
+        modelBuilder.Entity<EmailOutbox>()
+            .HasIndex(o => new { o.UserId, o.Campaign, o.PeriodKey })
+            .IsUnique();
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.Status, o.NextAttemptAt });
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.UserId, o.SentAt });
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => o.ProviderMessageId);
+        modelBuilder.Entity<EmailOutbox>()
+            .HasOne(o => o.User)
+            .WithMany()
+            .HasForeignKey(o => o.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EmailSuppression>().HasIndex(s => s.EmailHash).IsUnique();
 
         // One preference row per user per setting type. CreateUserSetting reads with
         // SingleOrDefaultAsync, so a duplicate pair makes that setting permanently uncreatable
