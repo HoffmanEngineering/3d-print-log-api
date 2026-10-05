@@ -24,6 +24,7 @@ public static class EmailServiceCollectionExtensions
         services.AddSingleton<IEmailTokenService, EmailTokenService>();
         services.AddSingleton<IEmailTransport, SesEmailTransport>();
         services.AddSingleton<EmailLinkBuilder>();
+        services.AddSingleton<EmailAssets>();
         services.AddSingleton<IEmailFooterFactory, EmailFooterFactory>();
         services.AddSingleton<IEmailTemplateRenderer, EmailTemplateRenderer>();
 

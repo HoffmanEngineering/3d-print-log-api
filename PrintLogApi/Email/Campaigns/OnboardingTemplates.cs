@@ -98,13 +98,28 @@ public static class OnboardingTemplates
         return b.Append(TextFooter(footer)).ToString();
     }
 
-    internal static string TextFooter(EmailFooterModel footer) => $"""
+    /// <summary>The plain-text twin of <see cref="EmailFooter"/>: links, supporter line, then the legal lines.</summary>
+    internal static string TextFooter(EmailFooterModel footer)
+    {
+        var supporter = footer.Supporter switch
+        {
+            SupporterLine.Ask => $"{EmailFooter.AskLine}\nGo Pro: {footer.SubscriptionUrl}\n\n",
+            SupporterLine.Thanks => $"{EmailFooter.ThanksLine}\n\n",
+            _ => "",
+        };
 
-        --
-        {footer.ReasonLine}
-        Manage email preferences: {footer.ManageUrl}
-        Unsubscribe: {footer.UnsubscribeUrl}
-        {footer.PostalAddress}
+        return $"""
 
-        """.Replace("\r\n", "\n");
+            --
+            YouTube: {EmailFooter.YouTubeUrl}
+            GitHub: {EmailFooter.GitHubUrl}
+            Blog: {EmailFooter.BlogUrl}
+
+            {supporter}{footer.ReasonLine}
+            Manage email preferences: {footer.ManageUrl}
+            Unsubscribe: {footer.UnsubscribeUrl}
+            {footer.PostalAddress}
+
+            """.Replace("\r\n", "\n");
+    }
 }

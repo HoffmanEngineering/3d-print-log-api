@@ -1,4 +1,4 @@
-<EmailLayout Title="@PrinterSilentTemplates.Subject(Model)" Preheader="@Preheader" Footer="Footer">
+<EmailLayout Title="@PrinterSilentTemplates.Subject(Model)" Kicker="Printer check-in" Headline="@PrinterSilentTemplates.Subject(Model)" Preheader="@Preheader" Footer="Footer">
     <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
     <p style="margin:0 0 16px 0;">@PrinterSilentTemplates.Intro(Model)</p>
     @foreach (var p in Model.Printers)

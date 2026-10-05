@@ -1,4 +1,4 @@
-<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.FirstPrint)" Preheader="Drop in a G-code file and we'll fill in the details." Footer="Footer">
+<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.FirstPrint)" Kicker="Getting started" Headline="@OnboardingTemplates.Subject(OnboardingTemplates.FirstPrint)" Preheader="Drop in a G-code file and we'll fill in the details." Footer="Footer">
     <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
     <p style="margin:0;">You haven't logged a print yet. The quickest way: drop a G-code file on the new print page, and 3D Print Log reads the print time, filament and slicer settings for you.</p>
     <EmailButton Href="@Model.FirstPrintUrl" Text="Log a print" />

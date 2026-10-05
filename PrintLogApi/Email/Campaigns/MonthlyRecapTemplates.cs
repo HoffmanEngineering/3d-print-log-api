@@ -46,6 +46,9 @@ public static class MonthlyRecapTemplates
 
     public static string Intro(MonthlyRecapModel m) => $"Here's how your {m.MonthName} went.";
 
+    /// <summary>The headline band's title, e.g. "Your November in prints".</summary>
+    public static string Headline(MonthlyRecapModel m) => $"Your {m.MonthName} in prints";
+
     /// <summary>"up 50% vs October", "down 12% vs October" or "same as October".</summary>
     public static string Change(int percent, string previousMonth) => percent switch
     {

@@ -1,14 +1,47 @@
 @* Required on every campaign email: why they get it, a way out (CAN-SPAM, RFC 8058's visible
-   counterpart), and a postal address (CAN-SPAM). *@
+   counterpart), and a postal address (CAN-SPAM). Those stay last and plain.
+
+   Above them: the printer mark and three links. Each link is a decorative icon plus its name as
+   live text, because a blocked 24px image can't show readable alt text. Then the optional
+   supporter sentence (monthly recap only). *@
+@inject EmailAssets Assets
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px 0;">
+    <tr>
+        <td valign="middle" style="padding:0 12px 0 0;">
+            <img src="@Assets.PrinterMark" alt="" width="28" height="28" style="display:block;border:0;width:28px;height:28px;border-radius:6px;">
+        </td>
+        <td valign="middle" style="font-size:13px;line-height:24px;">
+            <a href="@YouTubeUrl" class="em-link" style="color:#3f51b5;text-decoration:none;"><img src="@Assets.SocialYouTube" alt="" width="24" height="24" style="border:0;width:24px;height:24px;vertical-align:middle;"> YouTube</a>
+            &nbsp;&middot;&nbsp;
+            <a href="@GitHubUrl" class="em-link" style="color:#3f51b5;text-decoration:none;"><img src="@Assets.SocialGitHub" alt="" width="24" height="24" style="border:0;width:24px;height:24px;vertical-align:middle;"> GitHub</a>
+            &nbsp;&middot;&nbsp;
+            <a href="@BlogUrl" class="em-link" style="color:#3f51b5;text-decoration:none;"><img src="@Assets.SocialBlog" alt="" width="24" height="24" style="border:0;width:24px;height:24px;vertical-align:middle;"> Blog</a>
+        </td>
+    </tr>
+</table>
+@if (Model.Supporter == SupporterLine.Ask)
+{
+    <p style="margin:0 0 12px 0;">3D Print Log is built by one person. If it's useful to you, <a href="@Model.SubscriptionUrl" class="em-link" style="color:#3f51b5;">going Pro</a> keeps it growing.</p>
+}
+else if (Model.Supporter == SupporterLine.Thanks)
+{
+    <p style="margin:0 0 12px 0;">@ThanksLine</p>
+}
 <p style="margin:0 0 8px 0;">@Model.ReasonLine</p>
 <p style="margin:0 0 8px 0;">
-    <a href="@Model.ManageUrl" style="color:#5c6bc0;">Manage email preferences</a>
+    <a href="@Model.ManageUrl" class="em-link" style="color:#5c6bc0;">Manage email preferences</a>
     &nbsp;&middot;&nbsp;
-    <a href="@Model.UnsubscribeUrl" style="color:#5c6bc0;">Unsubscribe</a>
+    <a href="@Model.UnsubscribeUrl" class="em-link" style="color:#5c6bc0;">Unsubscribe</a>
 </p>
 <p style="margin:0 0 8px 0;">@Model.PostalAddress</p>
-<p style="margin:0;"><a href="@Model.HomeUrl" style="color:#5c6bc0;">3dprintlog.com</a></p>
+<p style="margin:0;"><a href="@Model.HomeUrl" class="em-link" style="color:#5c6bc0;">3dprintlog.com</a></p>
 
 @code {
+    public const string YouTubeUrl = "https://www.youtube.com/@hoffmanengineering";
+    public const string GitHubUrl = "https://github.com/HoffmanEngineering/3d-print-log-ui";
+    public const string BlogUrl = "https://hoffman.engineering/";
+    public const string AskLine = "3D Print Log is built by one person. If it's useful to you, going Pro keeps it growing.";
+    public const string ThanksLine = "Thanks for supporting 3D Print Log as a Pro member.";
+
     [Parameter, EditorRequired] public EmailFooterModel Model { get; set; } = default!;
 }

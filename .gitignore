@@ -363,3 +363,6 @@ docs/superpowers/
 # MCP Registry publishing credentials (see docs/mcp-discoverability.md)
 key.pem
 mcp-registry-auth
+
+# Visual brainstorming companion mockups
+.superpowers/

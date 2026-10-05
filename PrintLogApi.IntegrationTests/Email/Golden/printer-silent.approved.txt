@@ -15,6 +15,10 @@ Not using this printer anymore? Mark it inactive: https://www.3dprintlog.test/pr
 Your newest API key was last used on Sep 28. If you replaced or deleted a key, update the one saved in your printer's config.
 
 --
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
 You're receiving this because of a test.
 Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
 Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB

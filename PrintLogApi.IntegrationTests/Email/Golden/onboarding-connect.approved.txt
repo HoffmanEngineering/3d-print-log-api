@@ -9,6 +9,10 @@ Typing in every print gets old fast. Connect the tool you already use and new pr
 Each one takes about five minutes.
 
 --
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
 You're receiving this because of a test.
 Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
 Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB

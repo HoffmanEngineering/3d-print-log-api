@@ -1,4 +1,4 @@
-<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Preheader="@($"{EmailFormat.Count(Model.PrintCount, "print", "prints")} logged so far.")" Footer="Footer">
+<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Kicker="Getting started" Headline="@OnboardingTemplates.Subject(OnboardingTemplates.NextSteps)" Preheader="@($"{EmailFormat.Count(Model.PrintCount, "print", "prints")} logged so far.")" Footer="Footer">
     <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
     <p style="margin:0 0 16px 0;">Here's where you are so far:</p>
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px 0;">
