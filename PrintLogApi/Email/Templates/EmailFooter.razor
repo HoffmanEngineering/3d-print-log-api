@@ -1,0 +1,14 @@
+@* Required on every campaign email: why they get it, a way out (CAN-SPAM, RFC 8058's visible
+   counterpart), and a postal address (CAN-SPAM). *@
+<p style="margin:0 0 8px 0;">@Model.ReasonLine</p>
+<p style="margin:0 0 8px 0;">
+    <a href="@Model.ManageUrl" style="color:#5c6bc0;">Manage email preferences</a>
+    &nbsp;&middot;&nbsp;
+    <a href="@Model.UnsubscribeUrl" style="color:#5c6bc0;">Unsubscribe</a>
+</p>
+<p style="margin:0 0 8px 0;">@Model.PostalAddress</p>
+<p style="margin:0;"><a href="@Model.HomeUrl" style="color:#5c6bc0;">3dprintlog.com</a></p>
+
+@code {
+    [Parameter, EditorRequired] public EmailFooterModel Model { get; set; } = default!;
+}

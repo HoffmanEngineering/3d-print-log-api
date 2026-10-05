@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using PrintLogApi.Email.Templates;
 using PrintLogApi.Email.Tokens;
 using PrintLogApi.Email.Transport;
 
@@ -19,6 +20,9 @@ public static class EmailServiceCollectionExtensions
         services.AddScoped<IUserEmailSyncService, UserEmailSyncService>();
         services.AddSingleton<IEmailTokenService, EmailTokenService>();
         services.AddSingleton<IEmailTransport, SesEmailTransport>();
+        services.AddSingleton<EmailLinkBuilder>();
+        services.AddSingleton<IEmailFooterFactory, EmailFooterFactory>();
+        services.AddSingleton<IEmailTemplateRenderer, EmailTemplateRenderer>();
 
         return services;
     }
