@@ -1,0 +1,35 @@
+<EmailLayout Title="@PrinterSilentTemplates.Subject(Model)" Preheader="@Preheader" Footer="Footer">
+    <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
+    <p style="margin:0 0 16px 0;">@PrinterSilentTemplates.Intro(Model)</p>
+    @foreach (var p in Model.Printers)
+    {
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px 0;border:1px solid #e0e0e0;border-radius:6px;">
+            <tr>
+                <td style="padding:16px;">
+                    <div style="font-size:17px;font-weight:bold;color:#212121;">@p.Name</div>
+                    @if (p.MakeModel is not null)
+                    {
+                        <div style="font-size:13px;color:#616161;">@p.MakeModel</div>
+                    }
+                    <div style="margin:8px 0;">Last heard from via @p.SourceLabel on <strong>@p.LastHeard</strong></div>
+                    <div style="margin:0 0 4px 0;"><a href="@p.TroubleshootUrl" style="color:#3f51b5;font-weight:bold;">@p.TroubleshootLabel</a></div>
+                    <div style="font-size:13px;color:#616161;">Not using this printer anymore? <a href="@p.PrinterUrl" style="color:#5c6bc0;">Mark it inactive</a></div>
+                </td>
+            </tr>
+        </table>
+    }
+    @if (Model.ApiKeyLastUsed is { } used)
+    {
+        <p style="margin:0;">@PrinterSilentTemplates.ApiKeyLine(used)</p>
+    }
+</EmailLayout>
+
+@code {
+    [Parameter, EditorRequired] public PrinterSilentModel Model { get; set; } = default!;
+
+    [Parameter, EditorRequired] public EmailFooterModel Footer { get; set; } = default!;
+
+    private string Preheader => Model.Printers.Count == 1
+        ? $"Last heard from on {Model.Printers[0].LastHeard}."
+        : "A few of your printers have gone quiet.";
+}
