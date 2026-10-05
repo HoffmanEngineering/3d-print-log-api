@@ -127,10 +127,17 @@ jobs:
           name: app
           path: ./publish
 
+      # Command Timeout raises SqlClient's 30s default for the bundle only; the app keeps it.
+      # v1.12.0's AddAchievements failed here when CREATE INDEX on Prints ran past 30s. The
+      # bundle takes no timeout option, and EF sets one on its commands only when the context is
+      # configured with it, so the connection-string keyword is what reaches each migration
+      # statement (checked: the bundle logs CommandTimeout='900' for every migration command).
+      # Keep it bounded: a migration that ALTERs a table holds its schema lock until commit, so
+      # this is also the longest the live app can be blocked on that table.
       - name: Run migrations
         run: |
           chmod +x ./migrations-bundle/efbundle
-          ./migrations-bundle/efbundle --connection "$DB_CONNECTION_STRING"
+          ./migrations-bundle/efbundle --connection "$DB_CONNECTION_STRING;Command Timeout=900"
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 

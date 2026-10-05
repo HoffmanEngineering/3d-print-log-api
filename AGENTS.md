@@ -537,6 +537,12 @@ and an `efbundle` to apply. The deploy job is gated on the `production` GitHub E
 waits for a required reviewer before running the bundle against the production database and
 deploying to App Service. Review the `migration-script` artifact before approving.
 
+The bundle runs with `Command Timeout=900` appended to the connection string, because SqlClient's
+30s default is what failed v1.12.0 (an index build on `Prints`). That is a per-statement ceiling,
+and for a migration that `ALTER`s a hot table it is also how long the live app can block on that
+table's schema lock — so a statement that needs more than that belongs in its own migration, not a
+higher number.
+
 To generate a migration script manually (e.g. for emergency patching):
 
 ```bash
