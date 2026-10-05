@@ -1,0 +1,14 @@
+Hi Ada,
+
+Thanks for signing up. 3D Print Log keeps a record of every print: what you printed, on which printer, with which spool, how long it took and how it turned out. Over time that record answers real questions, like which settings work and how much filament you have left.
+
+Your next step: Add your first printer.
+Add your printer: https://www.3dprintlog.test/printers/new?utm_source=email
+
+Questions or ideas? Just reply to this email.
+
+--
+You're receiving this because of a test.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB
+PO Box 0, Testville, USA

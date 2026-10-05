@@ -10,26 +10,30 @@ namespace PrintLogApi.IntegrationTests.Email.Golden;
 /// </summary>
 public static class GoldenFile
 {
-    public static void AssertMatches(string actual, string approvedFileName, [CallerFilePath] string callerPath = "")
+    public static void AssertMatches(string actual, string approvedFileName)
     {
         var normalized = actual.ReplaceLineEndings("\n");
         var outputCopy = Path.Combine(AppContext.BaseDirectory, "Email", "Golden", approvedFileName);
 
         if (Environment.GetEnvironmentVariable("UPDATE_GOLDEN") == "1")
         {
-            // The source tree, not the output folder, is what gets committed.
-            var sourceDir = Path.Combine(Path.GetDirectoryName(callerPath)!, "Golden");
-            if (!Directory.Exists(sourceDir))
+            // The source tree, not the output folder, is what gets committed: this file's folder.
+            // Fails only when something changed, so a test with several goldens fills them in
+            // over successive runs instead of stopping at the first one forever.
+            var source = Path.Combine(SourceFolder(), approvedFileName);
+            if (!File.Exists(source) || File.ReadAllText(source).ReplaceLineEndings("\n") != normalized)
             {
-                sourceDir = Path.GetDirectoryName(callerPath)!;
+                File.WriteAllText(source, normalized);
+                Assert.Fail($"UPDATE_GOLDEN=1: wrote {approvedFileName}. Review it, then re-run without the variable.");
             }
 
-            File.WriteAllText(Path.Combine(sourceDir, approvedFileName), normalized);
-            Assert.Fail($"UPDATE_GOLDEN=1: wrote {approvedFileName}. Review it, then re-run without the variable.");
+            return;
         }
 
         Assert.True(File.Exists(outputCopy), $"No approved file {approvedFileName}. Run with UPDATE_GOLDEN=1 to create it.");
         var approved = File.ReadAllText(outputCopy).ReplaceLineEndings("\n");
         Assert.Equal(approved, normalized);
     }
+
+    private static string SourceFolder([CallerFilePath] string thisFile = "") => Path.GetDirectoryName(thisFile)!;
 }
