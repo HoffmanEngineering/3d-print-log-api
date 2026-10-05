@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Offline operator commands run from a workstation against a production database (see
+       docs/email-runbook.md). The Web SDK, not the console one, so the implicit usings match the
+       other two projects (Directory.Build.props assumes they are identical) and the ASP.NET
+       framework reference that PrintLogApi needs comes along without a second declaration. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PrintLogApi\PrintLogApi.csproj" />
+  </ItemGroup>
+
+</Project>
