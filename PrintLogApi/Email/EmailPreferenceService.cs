@@ -20,6 +20,12 @@ public interface IEmailPreferenceService
     /// <summary>Upserts one preference. Safe against a concurrent first write for the same setting.</summary>
     Task SetAsync(long userId, int settingTypeId, bool enabled, CancellationToken ct);
 
+    /// <summary>
+    /// Upserts several preferences in one transaction, so a failure part-way leaves none of them
+    /// changed and a concurrent save never interleaves with this one.
+    /// </summary>
+    Task SetManyAsync(long userId, IReadOnlyDictionary<int, bool> values, CancellationToken ct);
+
     /// <summary>Master switch AND the campaign's own switch.</summary>
     Task<bool> IsAllowedAsync(long userId, int campaignSettingTypeId, CancellationToken ct);
 
@@ -90,6 +96,24 @@ public sealed class EmailPreferenceService(PrintLogContext db, TelemetryClient t
             db.ChangeTracker.Clear();
             await TryUpdateAsync(userId, settingTypeId, stored, ct);
         }
+    }
+
+    public async Task SetManyAsync(long userId, IReadOnlyDictionary<int, bool> values, CancellationToken ct)
+    {
+        // The SQL Server connection retries transient failures, and a retrying execution strategy
+        // refuses user-started transactions unless the whole unit runs inside it.
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            foreach (var (settingTypeId, enabled) in values)
+            {
+                await SetAsync(userId, settingTypeId, enabled, ct);
+            }
+
+            await transaction.CommitAsync(ct);
+        });
     }
 
     private async Task<bool> TryUpdateAsync(long userId, int settingTypeId, string stored, CancellationToken ct)

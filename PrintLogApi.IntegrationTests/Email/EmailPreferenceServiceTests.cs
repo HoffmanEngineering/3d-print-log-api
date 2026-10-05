@@ -100,6 +100,46 @@ public class EmailPreferenceServiceTests : IClassFixture<CustomWebApplicationFac
         Assert.Equal(seen, (await prefs.GetAsync(user.Id, ct)).NoticeSeenAt);
     }
 
+    // The manage page saves four switches at once; a failure part-way must not leave a mix.
+    [Fact]
+    public async Task SetMany_FailurePartWay_ChangesNothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await EmailTestData.CreateUserAsync(db);
+        var prefs = scope.ServiceProvider.GetRequiredService<IEmailPreferenceService>();
+        const int noSuchSettingType = 987654;
+
+        await Assert.ThrowsAnyAsync<DbUpdateException>(() => prefs.SetManyAsync(user.Id, new Dictionary<int, bool>
+        {
+            [EmailSettingTypes.All] = false,
+            [noSuchSettingType] = false,
+        }, ct));
+
+        using var check = _factory.Services.CreateScope();
+        Assert.True((await check.ServiceProvider.GetRequiredService<IEmailPreferenceService>().GetAsync(user.Id, ct)).All);
+    }
+
+    [Fact]
+    public async Task SetMany_WritesEveryValue()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var scope = _factory.Services.CreateScope();
+        var user = await EmailTestData.CreateUserAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
+        var prefs = scope.ServiceProvider.GetRequiredService<IEmailPreferenceService>();
+
+        await prefs.SetManyAsync(user.Id, new Dictionary<int, bool>
+        {
+            [EmailSettingTypes.All] = true,
+            [EmailSettingTypes.MonthlyRecap] = false,
+        }, ct);
+
+        var snapshot = await prefs.GetAsync(user.Id, ct);
+        Assert.True(snapshot.All);
+        Assert.False(snapshot.MonthlyRecap);
+    }
+
     [Fact]
     public async Task ConcurrentFirstWrites_LeaveOneRow()
     {

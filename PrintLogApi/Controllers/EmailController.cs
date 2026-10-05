@@ -29,8 +29,10 @@ public class EmailController(
 
     /// <summary>
     /// RFC 8058 one-click unsubscribe, POSTed by mail clients from the List-Unsubscribe header. The
-    /// body must be exactly List-Unsubscribe=One-Click, so link scanners that prefetch the URL
-    /// (GET, or POST with no body) never unsubscribe anyone.
+    /// form must carry List-Unsubscribe=One-Click (once), so link scanners that prefetch the URL
+    /// (GET, or POST with no body) never unsubscribe anyone. Other fields are tolerated: the RFC
+    /// requires that key, not that it be alone, and refusing a real unsubscribe costs more than
+    /// accepting a request that explicitly asked for one.
     /// </summary>
     [HttpPost("unsubscribe")]
     public async Task<IActionResult> OneClick([FromQuery] string? t, CancellationToken ct)
@@ -96,10 +98,13 @@ public class EmailController(
             return BadRequest();
         }
 
-        await preferences.SetAsync(payload.UserId, EmailSettingTypes.All, request.All, ct);
-        await preferences.SetAsync(payload.UserId, EmailSettingTypes.Onboarding, request.Onboarding, ct);
-        await preferences.SetAsync(payload.UserId, EmailSettingTypes.MonthlyRecap, request.MonthlyRecap, ct);
-        await preferences.SetAsync(payload.UserId, EmailSettingTypes.PrinterSilent, request.PrinterSilent, ct);
+        await preferences.SetManyAsync(payload.UserId, new Dictionary<int, bool>
+        {
+            [EmailSettingTypes.All] = request.All,
+            [EmailSettingTypes.Onboarding] = request.Onboarding,
+            [EmailSettingTypes.MonthlyRecap] = request.MonthlyRecap,
+            [EmailSettingTypes.PrinterSilent] = request.PrinterSilent,
+        }, ct);
         telemetry.TrackEvent("EmailPreferences_Updated", new Dictionary<string, string> { ["source"] = "token" });
 
         return (await LoadAsync(payload.UserId, ct))!;
