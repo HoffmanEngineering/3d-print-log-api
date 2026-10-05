@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using PrintLogApi.Email.Tokens;
+using PrintLogApi.Email.Transport;
 
 namespace PrintLogApi.Email;
 
@@ -17,6 +18,7 @@ public static class EmailServiceCollectionExtensions
         services.AddScoped<IEmailPreferenceService, EmailPreferenceService>();
         services.AddScoped<IUserEmailSyncService, UserEmailSyncService>();
         services.AddSingleton<IEmailTokenService, EmailTokenService>();
+        services.AddSingleton<IEmailTransport, SesEmailTransport>();
 
         return services;
     }
