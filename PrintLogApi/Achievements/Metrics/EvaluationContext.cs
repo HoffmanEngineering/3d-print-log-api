@@ -20,11 +20,13 @@ public sealed class EvaluationContext
     private PrintAggregate? _aggregate;
     private IReadOnlyList<PrintDateRow>? _dates;
 
-    public EvaluationContext(long userId, PrintLogContext db, TimeZoneInfo zone, DateTime nowUtc, IEnumerable<IAchievementMetric> metrics)
+    /// <param name="zone">The user's time zone, or null when none is saved or it is unrecognized.</param>
+    public EvaluationContext(long userId, PrintLogContext db, TimeZoneInfo? zone, DateTime nowUtc, IEnumerable<IAchievementMetric> metrics)
     {
         UserId = userId;
         Db = db;
-        Zone = zone;
+        Zone = zone ?? TimeZoneInfo.Utc;
+        ZoneKnown = zone is not null;
         NowUtc = nowUtc;
         _metrics = metrics.ToDictionary(m => m.Key, StringComparer.Ordinal);
     }
@@ -34,8 +36,9 @@ public sealed class EvaluationContext
 
     /// <summary>
     /// Creates a context for <paramref name="userId"/>, resolving their saved time zone once. A
-    /// missing or unrecognized zone (an old client could have saved anything) means UTC, never an
-    /// error: a bad setting must not block grants or saves.
+    /// missing or unrecognized zone (an old client could have saved anything) is never an error:
+    /// a bad setting must not block grants or saves. It leaves <see cref="ZoneKnown"/> false, so
+    /// the date metrics wait for a real zone instead of guessing UTC.
     /// </summary>
     public static async Task<EvaluationContext> CreateAsync(
         PrintLogContext db, long userId, DateTime nowUtc, IEnumerable<IAchievementMetric> metrics, CancellationToken ct)
@@ -45,7 +48,8 @@ public sealed class EvaluationContext
             .Where(s => s.UserId == userId && s.UserSettingTypeId == TimeZoneSettingTypeId)
             .Select(s => s.Value)
             .FirstOrDefaultAsync(ct);
-        return new EvaluationContext(userId, db, Services.TimeZoneResolver.ResolveOrUtc(zoneId), nowUtc, metrics);
+        var zone = Services.TimeZoneResolver.TryResolve(zoneId, out var resolved) ? resolved : null;
+        return new EvaluationContext(userId, db, zone, nowUtc, metrics);
     }
 
     public long UserId { get; }
@@ -54,6 +58,15 @@ public sealed class EvaluationContext
 
     /// <summary>The user's time zone for date metrics; UTC when unset or unresolvable.</summary>
     public TimeZoneInfo Zone { get; }
+
+    /// <summary>
+    /// Whether <see cref="Zone"/> is the user's own saved zone rather than the UTC stand-in. The
+    /// date metrics read zero without one: a date badge granted in the wrong zone stays wrong,
+    /// since grants are never revoked (UTC midnight to 4 AM is the evening in the Americas).
+    /// The web app saves the browser's zone each session, and that save raises
+    /// <see cref="AchievementTrigger.TimeZoneChanged"/>, which grants whatever was waiting.
+    /// </summary>
+    public bool ZoneKnown { get; }
 
     /// <summary>The pass's single clock reading. Metrics never read the clock themselves.</summary>
     public DateTime NowUtc { get; }

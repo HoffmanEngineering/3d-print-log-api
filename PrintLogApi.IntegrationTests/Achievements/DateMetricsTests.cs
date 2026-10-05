@@ -149,8 +149,12 @@ public class DateMetricsTests : IClassFixture<CustomWebApplicationFactory>
         await db.SaveChangesAsync(Ct);
     }
 
+    // A date badge granted in the wrong zone is wrong for good (grants are never revoked): UTC
+    // midnight to 4 AM is the evening in the Americas, so a UTC fallback would hand out Night
+    // Owl for evening prints. Until a zone is known, every date metric reads zero; saving one
+    // raises TimeZoneChanged, which re-evaluates them.
     [Fact]
-    public async Task Streak_InvalidTimeZone_FallsBackToUtc()
+    public async Task DateMetrics_InvalidTimeZone_AreWithheld()
     {
         var (scope, db, user) = await ArrangeAsync();
         using var _ = scope;
@@ -161,20 +165,34 @@ public class DateMetricsTests : IClassFixture<CustomWebApplicationFactory>
         var ctx = await EvaluationContext.CreateAsync(db, user.Id, Day(2).UtcDateTime,
             scope.ServiceProvider.GetServices<IAchievementMetric>(), Ct);
 
-        Assert.Equal(TimeZoneInfo.Utc, ctx.Zone);
-        Assert.Equal(new MetricValue(2, 2), await ctx.MeasureAsync("streak.daily", Ct));
+        Assert.False(ctx.ZoneKnown);
+        Assert.Equal(new MetricValue(0, 0), await ctx.MeasureAsync("streak.daily", Ct));
     }
 
-    [Fact]
-    public async Task Streak_MissingTimeZone_UsesUtc()
+    [Theory]
+    [InlineData("streak.daily")]
+    [InlineData("streak.weekly")]
+    [InlineData("day.maxPrints")]
+    [InlineData("day.comeback")]
+    [InlineData("day.nightOwl")]
+    [InlineData("day.newYear")]
+    public async Task DateMetrics_MissingTimeZone_AreWithheld(string key)
     {
         var (scope, db, user) = await ArrangeAsync();
         using var _ = scope;
+        // Qualifies for every date metric in UTC: a 2 AM start on January 1st, three prints that
+        // day, the next two days, and a return after a 40-day gap.
+        var newYear = new DateTimeOffset(2026, 1, 1, 2, 0, 0, TimeSpan.Zero);
+        foreach (var start in new[] { newYear, newYear.AddHours(1), newYear.AddHours(2), newYear.AddDays(1), newYear.AddDays(2), newYear.AddDays(42) })
+        {
+            await AddStartedAsync(db, user, start);
+        }
 
-        var ctx = await EvaluationContext.CreateAsync(db, user.Id, Day(0).UtcDateTime,
+        var ctx = await EvaluationContext.CreateAsync(db, user.Id, newYear.AddDays(42).UtcDateTime,
             scope.ServiceProvider.GetServices<IAchievementMetric>(), Ct);
 
-        Assert.Equal(TimeZoneInfo.Utc, ctx.Zone);
+        Assert.False(ctx.ZoneKnown);
+        Assert.Equal(new MetricValue(0, 0), await ctx.MeasureAsync(key, Ct));
     }
 
     [Fact]
@@ -187,6 +205,7 @@ public class DateMetricsTests : IClassFixture<CustomWebApplicationFactory>
         var ctx = await EvaluationContext.CreateAsync(db, user.Id, Day(0).UtcDateTime,
             scope.ServiceProvider.GetServices<IAchievementMetric>(), Ct);
 
+        Assert.True(ctx.ZoneKnown);
         Assert.Equal(NewYork.BaseUtcOffset, ctx.Zone.BaseUtcOffset);
     }
 

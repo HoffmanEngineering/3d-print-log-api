@@ -348,4 +348,35 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
         Assert.Empty(result.Granted);
         Assert.Empty(result.Held);
     }
+
+    [Fact]
+    public async Task DateBadges_WaitForATimeZone()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        // Three prints started at 2 AM UTC, each logged five minutes later: Night Owl and Full
+        // Plate in UTC. An integration-only user may never open the app to save a zone.
+        var start = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-1).AddHours(2), TimeSpan.Zero);
+        for (var i = 0; i < 3; i++)
+        {
+            var print = await AchievementTestData.AddPrintAsync(db, user, p => p.StartDate = start.AddMinutes(i));
+            await AchievementTestData.SetCreatedDateAsync(db, print.Id, start.AddMinutes(i + 5).UtcDateTime);
+        }
+        var (evaluator, evalDb) = Build(scope.ServiceProvider);
+        await using var __ = evalDb;
+
+        await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
+        var withoutZone = await HeldAsync(db, user.Id);
+
+        db.UserSettings.Add(new UserSetting { UserId = user.Id, UserSettingTypeId = 20, Value = "Etc/UTC", CreatedById = user.Id, UpdatedById = user.Id });
+        await db.SaveChangesAsync(Ct);
+        await evaluator.EvaluateAsync(user.Id, AchievementTrigger.TimeZoneChanged, EvaluationMode.Triggered, Ct);
+        var withZone = await HeldAsync(db, user.Id);
+
+        Assert.DoesNotContain(("night-owl", 1), withoutZone);
+        Assert.DoesNotContain(("busy-day", 1), withoutZone);
+        Assert.Contains(("first-print", 1), withoutZone);
+        Assert.Contains(("night-owl", 1), withZone);
+        Assert.Contains(("busy-day", 1), withZone);
+    }
 }

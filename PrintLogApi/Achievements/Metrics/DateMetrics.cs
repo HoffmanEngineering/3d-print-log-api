@@ -67,6 +67,13 @@ public static class DateMetrics
     private static DelegateMetric Local(string key, Func<IReadOnlyList<LocalStart>, DateOnly, MetricValue> compute) =>
         new(key, async (ctx, ct) =>
         {
+            // Without the user's own zone a local date or hour is a guess, and a guessed grant
+            // can never be taken back. Wait for the zone (see EvaluationContext.ZoneKnown).
+            if (!ctx.ZoneKnown)
+            {
+                return new MetricValue(0, 0);
+            }
+
             var rows = await ctx.GetPrintDatesAsync(ct);
             var starts = rows
                 .Where(QualifyingPrints.Qualifies)
