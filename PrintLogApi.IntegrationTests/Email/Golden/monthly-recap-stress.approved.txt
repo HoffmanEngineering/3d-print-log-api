@@ -15,13 +15,13 @@ Most-used material: Galaxy Black PETG
 Longest print: Helmet (9h)
 
 Badges earned in November:
-- Bed Leveled (Bronze PLA)
-- Spooled Up (Bronze PLA)
-- First Layer (Bronze PLA)
-- Plugged In (Bronze PLA)
-- Say Cheese (Bronze PLA)
-- Maker Profile (Bronze PLA)
-…and 84 more: https://www.3dprintlog.test/achievements
+- Prolific Printer (Glow-in-the-Dark)
+- Machine Hours (Glow-in-the-Dark)
+- Plastic Fantastic (Glow-in-the-Dark)
+- Spool Collector (Carbon Fiber)
+- On a Roll (Carbon Fiber)
+- Every Week (Carbon Fiber)
+…and 28 more: https://www.3dprintlog.test/achievements
 
 See your full stats: https://www.3dprintlog.test/analytics
 

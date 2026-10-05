@@ -8,8 +8,9 @@ namespace PrintLogApi.Email.Campaigns;
 /// <summary>One "did you know" line at the bottom of a recap, pointing at a feature the user hasn't tried.</summary>
 public sealed record RecapTip(string Text, string Url, string Label);
 
-/// <summary>A badge tier earned during the month, with its image (see <see cref="BadgeImage"/>).</summary>
-public sealed record RecapBadge(string Title, string TierName, string ImageUrl);
+/// <summary>A badge earned during the month, at its best tier, with its image (see <see cref="BadgeImage"/>).</summary>
+/// <param name="TierName">"Silver PLA"; null for a one-time badge, which has no tiers.</param>
+public sealed record RecapBadge(string Title, string? TierName, string ImageUrl);
 
 /// <summary>
 /// One headline number. <paramref name="Change"/> is the sentence the text part uses ("up 50% vs
@@ -161,7 +162,13 @@ public static class MonthlyRecapTemplates
             b.Append("\nBadges earned in ").Append(m.MonthName).Append(":\n");
             foreach (var badge in m.Badges)
             {
-                b.Append("- ").Append(badge.Title).Append(" (").Append(badge.TierName).Append(")\n");
+                b.Append("- ").Append(badge.Title);
+                if (badge.TierName is not null)
+                {
+                    b.Append(" (").Append(badge.TierName).Append(')');
+                }
+
+                b.Append('\n');
             }
 
             if (m.MoreBadgeCount > 0)

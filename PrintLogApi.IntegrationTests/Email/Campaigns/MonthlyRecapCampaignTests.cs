@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Achievements;
 using PrintLogApi.Email;
 using PrintLogApi.Email.Campaigns;
@@ -304,33 +305,68 @@ public class MonthlyRecapCampaignTests : IClassFixture<CustomWebApplicationFacto
         Assert.Contains("color:#c5cae9;\">&#x25BC; 12% vs October", html);
     }
 
-    [Fact]
-    public async Task Render_CapsBadgesAtSixAndSkipsUnknownKeys()
+    private async Task<long> UserWithBadgesAsync(params (string Key, int Tier)[] earned)
     {
         var (user, _) = await UserWithPrintsAsync(null, new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
-        using (var scope = _factory.Services.CreateScope())
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        await db.UserAchievements.Where(a => a.UserId == user.Id).ExecuteDeleteAsync(Ct);
+        var at = new DateTime(2026, 11, 3, 12, 0, 0, DateTimeKind.Utc);
+        for (var i = 0; i < earned.Length; i++)
         {
-            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            await db.UserAchievements.Where(a => a.UserId == user.Id).ExecuteDeleteAsync(Ct);
-            var at = new DateTime(2026, 11, 3, 12, 0, 0, DateTimeKind.Utc);
-            foreach (var tier in Enumerable.Range(1, 6))
-            {
-                db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "prints-logged", Tier = tier, UnlockedAt = at.AddMinutes(tier) });
-            }
-
-            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "no-such-badge", Tier = 1, UnlockedAt = at.AddMinutes(7) });
-            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "first-print", Tier = 1, UnlockedAt = at.AddMinutes(8) });
-            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "mcp", Tier = 1, UnlockedAt = at.AddMinutes(9) });
-            await db.SaveChangesAsync(Ct);
+            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = earned[i].Key, Tier = earned[i].Tier, UnlockedAt = at.AddMinutes(i) });
         }
 
-        var email = await RenderAsync(user.Id, "2026-11");
+        await db.SaveChangesAsync(Ct);
+        return user.Id;
+    }
 
-        Assert.Contains("badges/numeral-10-t1.png", email!.Html);
-        Assert.Contains("badges/numeral-500-t6.png", email.Html);
-        Assert.DoesNotContain("badges/robot-in.png", email.Html);
-        Assert.Contains("and 2 more", EmailLayoutRenderingTests.VisibleText(email.Html));
+    // Six tiers of one family in a month is one achievement worth showing, at its best tier.
+    [Fact]
+    public async Task Render_ShowsEachFamilyOnceAtItsHighestTierAndSkipsUnknownKeys()
+    {
+        var userId = await UserWithBadgesAsync(
+            [.. Enumerable.Range(1, 6).Select(t => ("prints-logged", t)), ("no-such-badge", 1), ("first-print", 1), ("mcp", 1)]);
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        Assert.Contains("badges/numeral-500-t6.png", email!.Html);
+        Assert.DoesNotContain("badges/numeral-10-t1.png", email.Html);
+        Assert.Contains("badges/layers-gs.png", email.Html);
+        Assert.Contains("badges/robot-in.png", email.Html);
+        Assert.Equal(3, Regex.Count(email.Html, "/assets/email/v1/badges/"));
+        Assert.DoesNotContain("more", EmailLayoutRenderingTests.VisibleText(email.Html).Split("Badges earned")[1].Split("See your full stats")[0]);
         Assert.DoesNotContain("no-such-badge", email.Html);
+    }
+
+    // Tiered families lead, best tier first; one-time badges follow; the rest is "…and N more".
+    [Fact]
+    public async Task Render_CapsTheShelfAtSixLeadingWithTheHighestTiers()
+    {
+        var userId = await UserWithBadgesAsync(
+            ("first-printer", 1), ("first-material", 1), ("first-print", 1), ("mcp", 1),
+            ("print-hours", 2), ("prints-logged", 1), ("prints-logged", 2), ("prints-logged", 3), ("projects", 1), ("daily-streak", 1));
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        var html = email!.Html;
+        Assert.Equal(6, Regex.Count(html, "/assets/email/v1/badges/"));
+        Assert.True(html.IndexOf("numeral-50-t3.png", StringComparison.Ordinal) < html.IndexOf("clock-t2.png", StringComparison.Ordinal));
+        Assert.True(html.IndexOf("clock-t2.png", StringComparison.Ordinal) < html.IndexOf("printer-bedslinger-gs.png", StringComparison.Ordinal));
+        Assert.Contains("and 2 more", EmailLayoutRenderingTests.VisibleText(html));
+    }
+
+    // The app never names a tier for a one-time badge; its art is the category color, not a finish.
+    [Fact]
+    public async Task Render_OneTimeBadgesHaveNoTierCaption()
+    {
+        var userId = await UserWithBadgesAsync(("mcp", 1), ("print-hours", 2));
+
+        var email = await RenderAsync(userId, "2026-11");
+
+        Assert.Contains("Robot Co-Pilot\n", email!.Text);
+        Assert.DoesNotContain("Robot Co-Pilot (", email.Text);
+        Assert.Contains("Machine Hours (Silver PLA)", email.Text);
     }
 
     [Fact]
@@ -385,9 +421,14 @@ public class MonthlyRecapCampaignTests : IClassFixture<CustomWebApplicationFacto
 
     internal static MonthlyRecapModel StressModel(EmailAssets assets)
     {
+        // Every family at its top tier, the way the campaign shows them: tiered first, then one-time.
         var all = AchievementCatalog.Definitions
-            .SelectMany(d => Enumerable.Range(1, d.Thresholds.Count).Select(tier => (Def: d, Tier: tier)))
-            .Select(x => new RecapBadge(x.Def.Title, AchievementCatalog.TierNames[x.Tier - 1], assets.Badge(BadgeImage.FileName(x.Def, x.Tier))))
+            .OrderBy(d => d.Thresholds.Count == 1)
+            .ThenByDescending(d => d.Thresholds.Count)
+            .Select(d => new RecapBadge(
+                d.Title,
+                d.Thresholds.Count == 1 ? null : AchievementCatalog.TierNames[d.Thresholds.Count - 1],
+                assets.Badge(BadgeImage.FileName(d, d.Thresholds.Count))))
             .ToList();
         return GoldenModel() with
         {

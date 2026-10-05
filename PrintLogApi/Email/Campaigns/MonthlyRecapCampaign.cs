@@ -173,17 +173,26 @@ public sealed class MonthlyRecapCampaign(
         var endUtc = monthEndUtc.UtcDateTime;
         var badges = (await db.UserAchievements.AsNoTracking()
                 .Where(a => a.UserId == row.UserId && a.UnlockedAt >= startUtc && a.UnlockedAt < endUtc)
-                .OrderBy(a => a.UnlockedAt)
-                .Select(a => new { a.AchievementKey, a.Tier })
+                .Select(a => new { a.AchievementKey, a.Tier, a.UnlockedAt })
                 .ToListAsync(ct))
             // A key no longer in the catalog has no title to show, and a raw key is worse than
             // nothing, so it is skipped. Retired definitions stay in the catalog and still resolve.
-            .Select(a => (Definition: AchievementCatalog.Find(a.AchievementKey), a.Tier))
+            .Select(a => (Definition: AchievementCatalog.Find(a.AchievementKey), a.Tier, a.UnlockedAt))
             .Where(a => a.Definition is not null && a.Tier >= 1
                 && a.Tier <= AchievementCatalog.TierNames.Count && a.Tier <= a.Definition.Thresholds.Count)
+            // Each achievement once, at the best tier reached this month: six tiers of one family
+            // is one achievement worth showing. Tiered families lead, highest tier first, then
+            // one-time badges; earlier unlocks first within each, then key, so ties are stable.
+            .GroupBy(a => a.Definition!.Key)
+            .Select(g => g.MaxBy(a => a.Tier))
+            .OrderBy(a => a.Definition!.Thresholds.Count == 1)
+            .ThenByDescending(a => a.Tier)
+            .ThenBy(a => a.UnlockedAt)
+            .ThenBy(a => a.Definition!.Key, StringComparer.Ordinal)
             .Select(a => new RecapBadge(
                 a.Definition!.Title,
-                AchievementCatalog.TierNames[a.Tier - 1],
+                // The app names no tier for a one-time badge; its art is the category color.
+                a.Definition.Thresholds.Count == 1 ? null : AchievementCatalog.TierNames[a.Tier - 1],
                 assets.Badge(BadgeImage.FileName(a.Definition, a.Tier))))
             .ToList();
         var isPro = await db.Subscriptions.AnyAsync(s => s.UserId == row.UserId && s.Status == SubscriptionStatus.Active, ct);

@@ -54,8 +54,12 @@
                     {
                         <td width="33%" align="center" valign="top" style="padding:0 4px 16px 4px;font-size:14px;line-height:18px;">
                             <EmailImage Src="@badge.ImageUrl" Width="56" Height="63" Style="display:block;margin:0 auto 6px auto;" />
-                            <strong>@badge.Title</strong><br>
-                            <span class="em-muted" style="font-size:12px;line-height:16px;color:#757575;">@badge.TierName</span>
+                            <strong>@badge.Title</strong>
+                            @if (badge.TierName is not null)
+                            {
+                                <br>
+                                <span class="em-muted" style="font-size:12px;line-height:16px;color:#757575;">@badge.TierName</span>
+                            }
                         </td>
                     }
                     @for (var pad = row.Length; pad < 3; pad++)
