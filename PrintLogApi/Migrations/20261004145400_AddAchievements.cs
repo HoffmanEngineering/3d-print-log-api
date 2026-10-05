@@ -100,17 +100,27 @@ namespace PrintLogApi.Migrations
                 columns: new[] { "UserId", "AchievementKey", "Tier" },
                 unique: true);
 
-            // Launch backfill: a claimed CuraSetting proves the user ran the slicer plugin, so
-            // they get "Plugged In" retroactively. This is the only read of CuraSetting history;
-            // afterwards that table can be trimmed freely. CuraSetting.UserId has no FK and
-            // deleted users' settings remain, so the INNER JOIN drops orphaned ids that would
-            // otherwise fail the FK insert. NOT EXISTS keeps a re-run a no-op.
+            // Launch backfill: "Plugged In" retroactively for users who logged a print from the
+            // slicer before prints recorded their source. A claimed CuraSetting alone is not
+            // enough: claiming happens when a signed-in user opens the link the slicer launches,
+            // and in production more than half of the users who did that never logged a print.
+            // So the claim must be followed by a print logged the same or the next UTC day,
+            // which ties the print to that handoff. Measured on production (2026-10-04): 12,265
+            // users claimed a setting, 5,621 of them ever logged a print, 5,574 within a day.
+            // This is the only read of CuraSetting history; afterwards that table can be trimmed
+            // freely. CuraSetting.UserId has no FK and deleted users' settings remain, so the
+            // INNER JOIN drops orphaned ids that would otherwise fail the FK insert. The EXISTS
+            // seeks IX_Prints_CreatedById, created above. NOT EXISTS keeps a re-run a no-op.
             migrationBuilder.Sql(@"
 INSERT INTO UserAchievements (UserId, AchievementKey, Tier, UnlockedAt, Retroactive)
 SELECT DISTINCT cs.UserId, 'plugged-in', 1, SYSUTCDATETIME(), 1
 FROM CuraSettings cs
 INNER JOIN Users u ON u.Id = cs.UserId
 WHERE cs.UserId IS NOT NULL
+  AND EXISTS (SELECT 1 FROM Prints p
+              WHERE p.CreatedById = cs.UserId
+                AND p.CreatedDate >= CAST(CAST(SWITCHOFFSET(cs.CreatedDate, '+00:00') AS date) AS datetime2)
+                AND p.CreatedDate <  DATEADD(day, 2, CAST(CAST(SWITCHOFFSET(cs.CreatedDate, '+00:00') AS date) AS datetime2)))
   AND NOT EXISTS (SELECT 1 FROM UserAchievements ua
                   WHERE ua.UserId = cs.UserId AND ua.AchievementKey = 'plugged-in' AND ua.Tier = 1);");
         }
