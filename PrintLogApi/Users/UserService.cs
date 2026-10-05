@@ -6,7 +6,7 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.Users;
 
-public class UserService(PrintLogContext context, TelemetryClient telemetry) : IUserService
+public class UserService(PrintLogContext context, TelemetryClient telemetry, TimeProvider timeProvider) : IUserService
 {
     public User? GetLocalUserByAuthUserId(string authUserId)
     {
@@ -67,7 +67,8 @@ public class UserService(PrintLogContext context, TelemetryClient telemetry) : I
         var newUser = new User
         {
             OAuthUserId = authUserId,
-            ViewStatus = User.ProfileViewStatus.Public
+            ViewStatus = User.ProfileViewStatus.Public,
+            CreatedDate = timeProvider.GetUtcNow(),
         };
 
         context.Users.Add(newUser);

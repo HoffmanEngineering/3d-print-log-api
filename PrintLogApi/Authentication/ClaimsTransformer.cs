@@ -1,12 +1,16 @@
 ﻿using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Caching;
+using PrintLogApi.Email;
 using PrintLogApi.Users;
 
 namespace PrintLogApi.Authentication;
 
-public sealed class ClaimsTransformer(HybridCache cache, CachedComputation computation) : IClaimsTransformation
+public sealed class ClaimsTransformer(HybridCache cache, CachedComputation computation, TelemetryClient telemetry) : IClaimsTransformation
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -72,6 +76,49 @@ public sealed class ClaimsTransformer(HybridCache cache, CachedComputation compu
 
         existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()));
 
+        await SyncEmailAsync(existingClaimsIdentity, authUserId, localUserId);
+
         return principal;
+    }
+
+    /// <summary>
+    /// Keeps Users.Email in step with the address Auth0 puts in the token, at most once a day per
+    /// distinct (address, verified) pair. The pair is part of the cache key, so a changed address
+    /// syncs on the next request instead of up to 24 hours later, while an unchanged one costs a
+    /// cache hit and no database round trip.
+    /// </summary>
+    private async Task SyncEmailAsync(ClaimsIdentity identity, string authUserId, long localUserId)
+    {
+        var email = identity.FindFirst(EmailClaims.Email)?.Value;
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        var verified = bool.TryParse(identity.FindFirst(EmailClaims.EmailVerified)?.Value, out var v) && v;
+
+        // Hashed so the address never appears in a cache key, which can surface in logs.
+        var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{email}|{verified}")));
+
+        try
+        {
+            await cache.GetOrCreateAsync(
+                $"email-sync:{authUserId}:{fingerprint}",
+                (computation, localUserId, email, verified),
+                static (state, ct) => state.computation.RunAsync(async (services, token) =>
+                {
+                    await services.GetRequiredService<IUserEmailSyncService>()
+                        .SyncAsync(state.localUserId, state.email, state.verified, token);
+                    return true;
+                }, ct),
+                CacheOptions);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Email is a side channel: a failed sync must never fail the request it rode in on.
+            // HybridCache does not cache a throwing factory, so the next request retries.
+            telemetry.TrackEvent("EmailSync_Failed", new Dictionary<string, string> { ["Error"] = ex.GetType().Name });
+            telemetry.TrackException(ex);
+        }
     }
 }

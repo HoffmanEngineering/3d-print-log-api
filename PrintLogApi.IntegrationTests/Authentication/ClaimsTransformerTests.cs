@@ -1,5 +1,8 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using PrintLogApi.Authentication;
+using PrintLogApi.Email;
 using PrintLogApi.Models;
 using PrintLogApi.Users;
 using Xunit;
@@ -8,6 +11,31 @@ namespace PrintLogApi.IntegrationTests.Authentication;
 
 public class ClaimsTransformerTests
 {
+    private static readonly TelemetryClient Telemetry = new(new TelemetryConfiguration());
+
+    private sealed class ThrowingEmailSync : IUserEmailSyncService
+    {
+        public Task<bool> SyncAsync(long userId, string? email, bool verified, CancellationToken ct)
+            => throw new InvalidOperationException("database unavailable");
+    }
+
+    // The email sync rides along on every authenticated request; its failure must never turn
+    // into a failed sign-in.
+    [Fact]
+    public async Task TransformAsync_EmailSyncThrows_StillResolvesUser()
+    {
+        var userService = new FakeUserService { ReturnUserId = 7L };
+        var (cache, computation) = TestHybridCache.Create(s => s
+            .AddSingleton<IUserService>(userService)
+            .AddSingleton<IUserEmailSyncService>(new ThrowingEmailSync()));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Upn, "auth|sync-fails"), new Claim(EmailClaims.Email, "a@example.com")], "TestScheme"));
+
+        var result = await new ClaimsTransformer(cache, computation, Telemetry).TransformAsync(principal);
+
+        Assert.Equal("7", ((ClaimsIdentity)result.Identity!).FindFirst(ClaimTypes.NameIdentifier)?.Value);
+    }
+
     private static ClaimsPrincipal CreatePrincipal(string authUserId)
     {
         var claims = new[] { new Claim(ClaimTypes.Upn, authUserId) };
@@ -23,7 +51,7 @@ public class ClaimsTransformerTests
     private static ClaimsTransformer CreateTransformer(FakeUserService userService)
     {
         var (cache, computation) = TestHybridCache.Create(s => s.AddSingleton<IUserService>(userService));
-        return new ClaimsTransformer(cache, computation);
+        return new ClaimsTransformer(cache, computation, Telemetry);
     }
 
     [Fact]
@@ -101,7 +129,7 @@ public class ClaimsTransformerTests
         // A fresh transformer per caller, matching the transient registration: nothing is
         // serialized by sharing an instance.
         var results = await Task.WhenAll(principals.Select(p =>
-            Task.Run(() => new ClaimsTransformer(cache, computation).TransformAsync(p))));
+            Task.Run(() => new ClaimsTransformer(cache, computation, Telemetry).TransformAsync(p))));
 
         Assert.Equal(1, userService.GetLocalUserIdCallCount);
         Assert.Equal(1, userService.CreateUserCallCount);

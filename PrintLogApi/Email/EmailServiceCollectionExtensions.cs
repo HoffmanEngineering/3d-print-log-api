@@ -14,6 +14,7 @@ public static class EmailServiceCollectionExtensions
 
         services.AddSingleton<IEmailAddressHasher, EmailAddressHasher>();
         services.AddScoped<IEmailPreferenceService, EmailPreferenceService>();
+        services.AddScoped<IUserEmailSyncService, UserEmailSyncService>();
 
         return services;
     }

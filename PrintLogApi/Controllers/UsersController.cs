@@ -5,6 +5,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Email;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
@@ -78,6 +79,27 @@ public class UsersController(
             .SingleAsync();
 
         return user;
+    }
+
+    /// <summary>
+    /// The address email is sent to, as last synced from the sign-in provider. Interactive
+    /// sessions only: an API key must not be a way to read the account address.
+    /// </summary>
+    [HttpGet("me/email")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<ActionResult<AccountEmailDto>> GetAccountEmail(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new AccountEmailDto(u.Email, u.EmailVerified))
+            .AsNoTracking()
+            .SingleAsync(ct);
     }
 
     /// <summary>

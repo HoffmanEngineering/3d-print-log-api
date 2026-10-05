@@ -2,6 +2,7 @@
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
+using PrintLogApi.Email;
 using PrintLogApi.Users;
 
 namespace PrintLogApi.IntegrationTests;
@@ -14,6 +15,10 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
 {
     public const string AuthenticationScheme = "TestScheme";
     public const string TestUserIdHeader = "X-Test-User-Id";
+
+    /// <summary>Optional: adds the Auth0 email claims the real access token carries (verified unless <see cref="TestEmailVerifiedHeader"/> says "false").</summary>
+    public const string TestEmailHeader = "X-Test-Email";
+    public const string TestEmailVerifiedHeader = "X-Test-Email-Verified";
 
     public TestAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -44,13 +49,20 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
 
         // Create claims for the test user
         // Include both Upn (OAuth ID) and NameIdentifier (internal ID)
-        var claims = new[]
+        var claims = new List<Claim>
         {
             new Claim(ClaimTypes.Upn, oauthUserId),
             new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()),
             new Claim(ClaimTypes.Name, "Test User"),
             new Claim("sub", oauthUserId),
         };
+
+        if (Request.Headers.TryGetValue(TestEmailHeader, out var email))
+        {
+            claims.Add(new Claim(EmailClaims.Email, email.ToString()));
+            var verified = Request.Headers.TryGetValue(TestEmailVerifiedHeader, out var v) ? v.ToString() : "true";
+            claims.Add(new Claim(EmailClaims.EmailVerified, verified, ClaimValueTypes.Boolean));
+        }
 
         var identity = new ClaimsIdentity(claims, AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
