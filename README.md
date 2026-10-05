@@ -41,7 +41,9 @@ The frontend lives at [HoffmanEngineering/3d-print-log-ui](https://github.com/Ho
 
 ## Infrastructure
 
-The production environment runs on Azure (App Service, SQL Server, Blob Storage). Infrastructure is manually managed — there is no Terraform or IaC setup.
+The production environment runs on Azure (App Service, SQL Server, Blob Storage). That part is manually managed. Email is the exception: Amazon SES, its DNS and the event webhook topic are defined in Terraform in [HoffmanEngineering/3d-print-log-infra](https://github.com/HoffmanEngineering/3d-print-log-infra).
+
+Email is configured through the `Email` section (`PrintLogApi/Email/EmailOptions.cs` lists every key and default; the example appsettings files show the shape). It is off by default: nothing is sent until `Email:Enabled` is true. [`docs/email-runbook.md`](docs/email-runbook.md) covers dry runs, going live, key rotation and the single-instance requirement, and [`docs/email-metrics.md`](docs/email-metrics.md) the holdout measurements.
 
 If your contribution requires infrastructure changes (new environment variables, Azure resource configuration, etc.), call this out explicitly in your PR description so the maintainer can coordinate the changes before the code ships.
 

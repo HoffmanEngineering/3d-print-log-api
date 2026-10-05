@@ -50,6 +50,8 @@
     <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
     <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->
+    <None Update="Email\Golden\**\*.approved.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

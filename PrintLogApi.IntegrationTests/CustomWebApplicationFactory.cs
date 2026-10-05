@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using PrintLogApi.Achievements.Triggers;
+using PrintLogApi.Email.Outbox;
 using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Services;
@@ -131,6 +132,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             }
             services.AddSingleton<IEmailSender, RecordingEmailSender>();
 
+            // The email workers would tick on their own timers mid-test. Tests drive
+            // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead.
+            foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
+                && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService))).ToList())
+            {
+                services.Remove(worker);
+            }
+
             // Startup switches telemetry off in this environment so test runs stop reaching the
             // production resource. Switch it back on here, pointed at an in-memory channel, so
             // the events an endpoint emits can be asserted on. Adaptive sampling is disabled
@@ -230,14 +239,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         {
             using (var scope = host.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                db.Database.EnsureCreated();
-                IntegrationTestSeeder.Seed(db);
+                PrepareDatabase(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
             }
             _seeded = true;
         }
 
         return host;
+    }
+
+    /// <summary>Creates and seeds the schema once, when the host first starts. A host on another provider overrides it.</summary>
+    protected virtual void PrepareDatabase(PrintLogContext db)
+    {
+        db.Database.EnsureCreated();
+        IntegrationTestSeeder.Seed(db);
     }
 
     protected override void Dispose(bool disposing)

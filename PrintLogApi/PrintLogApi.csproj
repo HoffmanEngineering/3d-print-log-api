@@ -42,6 +42,8 @@
 
   <ItemGroup>
     <PackageReference Include="AutoMapper" />
+    <PackageReference Include="AWSSDK.SimpleEmailV2" />
+    <PackageReference Include="AWSSDK.SimpleNotificationService" />
     <PackageReference Include="Azure.Storage.Blobs" />
     <PackageReference Include="CsvHelper" />
     <PackageReference Include="FirebaseAdmin" />

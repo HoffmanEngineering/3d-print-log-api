@@ -1,0 +1,16 @@
+<EmailLayout Title="@OnboardingTemplates.Subject(OnboardingTemplates.Connect)" Preheader="Connect OctoPrint, Klipper or your slicer and skip the typing." Footer="Footer">
+    <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
+    <p style="margin:0 0 16px 0;">Typing in every print gets old fast. Connect the tool you already use and new prints show up on their own:</p>
+    <ul style="margin:0 0 16px 0;padding-left:20px;">
+        <li style="margin:0 0 8px 0;"><a href="@Model.OctoPrintUrl" style="color:#3f51b5;font-weight:bold;">OctoPrint</a>: install the webhook plugin.</li>
+        <li style="margin:0 0 8px 0;"><a href="@Model.KlipperUrl" style="color:#3f51b5;font-weight:bold;">Klipper (Moonraker)</a>: add one block to your config.</li>
+        <li style="margin:0;"><a href="@Model.SlicerUrl" style="color:#3f51b5;font-weight:bold;">Your slicer</a>: upload straight from PrusaSlicer, OrcaSlicer or SuperSlicer.</li>
+    </ul>
+    <p style="margin:0;">Each one takes about five minutes.</p>
+</EmailLayout>
+
+@code {
+    [Parameter, EditorRequired] public OnboardingModel Model { get; set; } = default!;
+
+    [Parameter, EditorRequired] public EmailFooterModel Footer { get; set; } = default!;
+}

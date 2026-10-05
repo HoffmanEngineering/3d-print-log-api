@@ -107,6 +107,66 @@ public class UserDeletionServiceTests
         Assert.True(notificationDeleteIndex < printDeleteIndex, "Notifications referencing prints must be deleted before prints.");
     }
 
+    [Fact]
+    public async Task DeleteAllDataForUser_DeletesEmailOutboxExplicitly_AndKeepsSuppressions()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(commandInterceptor)
+            .Options;
+
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|email-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        var now = DateTimeOffset.UtcNow;
+        context.EmailOutbox.Add(new EmailOutbox
+        {
+            UserId = user.Id,
+            Campaign = "monthly-recap",
+            PeriodKey = "2026-11",
+            Status = EmailOutboxStatus.Sent,
+            SendAfter = now,
+            NextAttemptAt = now,
+            ExpiresAt = now.AddDays(5),
+            CreatedAt = now,
+        });
+        context.EmailSuppressions.Add(new EmailSuppression { EmailHash = "hash-of-deleted-user", Reason = EmailSuppressionReason.Complaint, CreatedAt = now });
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        // The FK cascades too; the explicit delete keeps this method the one list of what a user owns.
+        Assert.Contains(commandInterceptor.Commands, command => IsDeleteFrom(command, "EmailOutbox"));
+        Assert.Equal(0, await context.EmailOutbox.CountAsync(ct));
+
+        // Suppressions are keyed by address hash, not user, and must outlive the account.
+        Assert.Equal(1, await context.EmailSuppressions.CountAsync(ct));
+    }
+
+    private static UserDeletionService CreateService(PrintLogContext context) => new(
+        context,
+        NullLogger<UserDeletionService>.Instance,
+        new TelemetryClient(TelemetryConfiguration.CreateDefault()),
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["PendingUserDeactivationTimeInMinutes"] = "1440" })
+            .Build(),
+        new TestAuth0Service(),
+        new InMemoryBlobStorageService());
+
     private static bool IsDeleteFrom(string command, string tableName)
     {
         return command.Contains("DELETE FROM", StringComparison.OrdinalIgnoreCase)

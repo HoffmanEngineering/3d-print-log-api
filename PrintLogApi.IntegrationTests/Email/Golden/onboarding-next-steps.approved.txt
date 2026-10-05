@@ -1,0 +1,17 @@
+Hi Ada,
+
+Here's where you are so far:
+
+- 4 prints logged
+- 12h of print time
+- 1.2 kg of filament
+- 2 of 6 Getting started badges
+
+Next: Add your first printer.
+Add your printer: https://www.3dprintlog.test/printers/new?utm_source=email
+
+--
+You're receiving this because of a test.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB
+PO Box 0, Testville, USA
