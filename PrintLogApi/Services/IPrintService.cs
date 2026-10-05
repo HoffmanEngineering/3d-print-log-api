@@ -7,7 +7,12 @@ namespace PrintLogApi.Services;
 
 public interface IPrintService
 {
-    Task<Print> AddPrint(AddPrintDTO print, long userId);
+    /// <summary>
+    /// Adds a print. <paramref name="sourceCandidate"/> is how the caller reached the API (web or
+    /// API key); a valid <see cref="AddPrintDTO.CuraSettingId"/> owned by the user overrides it
+    /// with <see cref="PrintSource.SlicerPlugin"/>.
+    /// </summary>
+    Task<Print> AddPrint(AddPrintDTO print, long userId, PrintSource sourceCandidate = PrintSource.Web);
 
     /// <summary>
     /// Creates a print and its PrintFilament usage rows for the MCP write surface, in one

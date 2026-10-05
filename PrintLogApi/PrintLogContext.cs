@@ -68,6 +68,8 @@ public class PrintLogContext : DbContext
 
     public DbSet<McpIdempotencyRecord> McpIdempotencyRecords { get; set; }
 
+    public DbSet<UserAchievement> UserAchievements { get; set; }
+
     public static int fnNaturalSort(string sortKey)
         => throw new NotSupportedException();
 
@@ -87,7 +89,12 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." },
             new UserSettingType() { Id = 14, Name = "Prints_PreferredFilamentDisplayUnit", Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume)." },
             new UserSettingType() { Id = 15, Name = "Push_PrintCompleted", Description = "Send a push notification to the user's devices when a print completes." },
-            new UserSettingType() { Id = 16, Name = "Push_PrintFailed", Description = "Send a push notification to the user's devices when a print fails." }
+            new UserSettingType() { Id = 16, Name = "Push_PrintFailed", Description = "Send a push notification to the user's devices when a print fails." },
+            new UserSettingType() { Id = 17, Name = "Achievements_ShowOnProfile", Description = "Show the user's achievements on their public profile (true/false)." },
+            new UserSettingType() { Id = 18, Name = "Achievements_Celebrations", Description = "How new achievements are celebrated (on/quiet/off)." },
+            new UserSettingType() { Id = 19, Name = "Achievements_DismissedHint", Description = "The achievement hint the user dismissed, as key:tier." },
+            new UserSettingType() { Id = 20, Name = "General_TimeZone", Description = "The user's IANA time zone, used for daily and weekly streaks." },
+            new UserSettingType() { Id = 21, Name = "Push_Achievement", Description = "Send a push notification to the user's devices when they earn an achievement." }
             );
 
         var filamentCategory = new MaterialCategory()
@@ -650,6 +657,44 @@ public class PrintLogContext : DbContext
             .HasIndex(r => new { r.UserId, r.ToolName, r.IdempotencyKey })
             .IsUnique()
             .HasDatabaseName("IX_McpIdempotencyRecords_User_Tool_Key");
+
+        // Achievements: one row per tier earned. The unique index is what makes concurrent
+        // evaluation passes safe; the evaluator retries once on a conflict. No FK to the
+        // triggering print: next to the User cascade it would be a second cascade path (1785).
+        modelBuilder.Entity<UserAchievement>()
+            .HasIndex(a => new { a.UserId, a.AchievementKey, a.Tier })
+            .IsUnique()
+            .HasDatabaseName("IX_UserAchievements_User_Key_Tier");
+
+        modelBuilder.Entity<UserAchievement>()
+            .HasIndex(a => new { a.AchievementKey, a.Tier })
+            .HasDatabaseName("IX_UserAchievements_Key_Tier");
+
+        modelBuilder.Entity<UserAchievement>()
+            .HasOne(a => a.User)
+            .WithMany()
+            .HasForeignKey(a => a.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Covers the achievement metrics' one read of a user's prints (EvaluationContext's
+        // PrintRow projection): every column it selects is here, so the read never touches the
+        // clustered index. This is the FK's convention index widened with INCLUDE columns, not a
+        // second index on the same key.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => p.CreatedById)
+            .IncludeProperties(p => new
+            {
+                p.Source,
+                p.Slicer,
+                p.Status,
+                p.StartDate,
+                p.CreatedDate,
+                p.PrintTimeInSeconds,
+                p.EstimatedPrintTimeInSeconds,
+                p.FilamentUsageMg,
+                p.EstimatedFilamentUsageMg,
+                p.ViewStatus,
+            });
 
         modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 

@@ -88,4 +88,18 @@ public class Print : TimestampEntity
 
     public Guid? ProjectId { get; set; }
     public Project? Project { get; set; }
+
+    /// <summary>How the print reached the API. Server-set; see <see cref="PrintSource"/>.</summary>
+    public PrintSource Source { get; set; }
+
+    /// <summary>
+    /// The normalized slicer key (<c>SlicerNames</c>) for prints logged through the slicer
+    /// plugin or uploader, otherwise null.
+    /// </summary>
+    [MaxLength(32)]
+    public string? Slicer { get; set; }
+
+    /// <summary>The slicer version as the plugin reported it.</summary>
+    [MaxLength(50)]
+    public string? SlicerVersion { get; set; }
 }

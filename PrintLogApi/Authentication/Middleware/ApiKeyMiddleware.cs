@@ -76,6 +76,7 @@ public class ApiKeyMiddleware
 
         var identity = new GenericIdentity("API");
         identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId.ToString()));
+        identity.AddClaim(new Claim(AuthMethodClaim.Type, AuthMethodClaim.ApiKey));
         context.User = new GenericPrincipal(identity, new[] { "ApiUser" });
 
         await userApiKeyService.UpdateApiKeyLastUsed(key);

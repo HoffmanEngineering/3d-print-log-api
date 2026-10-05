@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
+using PrintLogApi.Authentication;
 using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -534,7 +535,8 @@ public class PrintsController(
 
         try
         {
-            var newPrint = await printService.AddPrint(print, userId.Value);
+            var sourceCandidate = AuthMethodClaim.IsApiKey(User) ? PrintSource.ApiKey : PrintSource.Web;
+            var newPrint = await printService.AddPrint(print, userId.Value, sourceCandidate);
             telemetry.TrackEvent("PrintAdded");
 
             cacheVersionService.InvalidateUserCache(userId.Value);
@@ -1167,6 +1169,12 @@ public class PrintsController(
         try
         {
             var result = await fileAttachmentService.ConfirmUploadAsync(id, userId.Value, request);
+            telemetry.TrackEvent("PrintFileUploaded", new Dictionary<string, string>
+            {
+                // Lower-cased so ".GCODE" and ".gcode" chart as one series.
+                ["extension"] = Path.GetExtension(request.FileName ?? string.Empty).ToLowerInvariant(),
+                ["sizeBytes"] = request.SizeBytes.ToString(CultureInfo.InvariantCulture),
+            });
             return Ok(result);
         }
         catch (NotFoundException) { return NotFound(); }

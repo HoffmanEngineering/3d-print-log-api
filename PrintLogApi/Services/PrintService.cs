@@ -5,6 +5,7 @@ using CsvHelper;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Achievements;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
@@ -678,8 +679,9 @@ public sealed class PrintService(
     /// </summary>
     /// <param name="print">The Print to add</param>
     /// <param name="userId">The user adding the print</param>
+    /// <param name="sourceCandidate">How the caller reached the API; see <see cref="IPrintService.AddPrint"/>.</param>
     /// <returns></returns>
-    public async Task<Print> AddPrint(AddPrintDTO print, long userId)
+    public async Task<Print> AddPrint(AddPrintDTO print, long userId, PrintSource sourceCandidate = PrintSource.Web)
     {
         var newPrint = mapper.Map<Print>(print);
 
@@ -733,6 +735,8 @@ public sealed class PrintService(
         newPrint.CreatedById = userId;
         newPrint.UpdatedById = userId;
 
+        await ApplyProvenance(newPrint, print.CuraSettingId, userId, sourceCandidate);
+
         // Resolve project assignment
         if (print.ProjectId.HasValue)
         {
@@ -759,6 +763,36 @@ public sealed class PrintService(
         await context.SaveChangesAsync();
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(newPrint.Id))!;
+    }
+
+    /// <summary>
+    /// Sets <see cref="Print.Source"/>, <see cref="Print.Slicer"/> and <see cref="Print.SlicerVersion"/>.
+    /// A Cura setting the user owns marks the print as a slicer-plugin upload and wins over the
+    /// caller's candidate. Any other id (purged by retention, or another account's) is ignored
+    /// so the print still saves.
+    /// </summary>
+    private async Task ApplyProvenance(Print newPrint, Guid? curaSettingId, long userId, PrintSource sourceCandidate)
+    {
+        newPrint.Source = sourceCandidate;
+
+        if (curaSettingId is not { } settingId)
+        {
+            return;
+        }
+
+        var setting = await context.CuraSettings
+            .Where(s => s.Id == settingId && s.UserId == userId)
+            .Select(s => new { s.Slicer, s.CuraVersion })
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
+        if (setting is null)
+        {
+            return;
+        }
+
+        newPrint.Source = PrintSource.SlicerPlugin;
+        newPrint.Slicer = SlicerNames.Normalize(setting.Slicer);
+        newPrint.SlicerVersion = setting.CuraVersion is { Length: > 50 } v ? v[..50] : setting.CuraVersion;
     }
 
     public async Task<CreatePrintResult> CreatePrintForMcp(
@@ -829,6 +863,7 @@ public sealed class PrintService(
             CreatedById = userId,
             UpdatedById = userId,
             FilamentUsage = materials.Select(ToPrintFilament).ToList(),
+            Source = PrintSource.Mcp,
         };
 
         await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);

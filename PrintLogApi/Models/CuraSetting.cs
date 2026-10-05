@@ -39,4 +39,11 @@ public class CuraSetting
     /// </summary>
     public long? UserId { get; set; }
 
+    /// <summary>
+    /// The slicer name the Slic3r uploader posts (its parser's <c>SlicerName</c>). Null means the
+    /// Cura plugin, which does not send the field. Copied onto the print when one is created.
+    /// </summary>
+    [StringLength(50)]
+    public string? Slicer { get; set; }
+
 }

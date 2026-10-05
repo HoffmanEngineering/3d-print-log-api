@@ -94,6 +94,8 @@ public class CuraController(PrintLogContext context, TelemetryClient telemetry) 
         {
             CuraVersion = settings.CuraVersion,
             PluginVersion = settings.PluginVersion,
+            // Stored raw. SlicerNames.Normalize runs when a print is created from this setting.
+            Slicer = settings.Slicer,
             Settings = settings.Settings,
             CreatedDate = DateTimeOffset.Now
         };

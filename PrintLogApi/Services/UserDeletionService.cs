@@ -417,6 +417,12 @@ public class UserDeletionService : IUserDeletionService
                 .Where(f => f.CreatedById == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete achievements. The FK cascades too; deleting explicitly keeps this method the
+            // one place that lists everything a user owns.
+            await _context.UserAchievements
+                .Where(a => a.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete User Settings
             await _context.UserSettings
                 .Where(us => us.UserId == userId)

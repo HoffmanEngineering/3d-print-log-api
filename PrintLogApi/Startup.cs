@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +16,8 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
+using PrintLogApi.Achievements;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
@@ -24,6 +27,7 @@ using PrintLogApi.Models.Stripe;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Push;
+using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
@@ -67,7 +71,7 @@ public class Startup
 
         ConfigureAuthentication(services);
 
-        services.AddDbContext<PrintLogContext>(opts =>
+        services.AddDbContext<PrintLogContext>((sp, opts) =>
         {
             opts.UseSqlServer(
                 Configuration["ConnectionString:PrintLogDb"],
@@ -78,6 +82,7 @@ public class Startup
                         maxRetryDelay: TimeSpan.FromSeconds(30),
                         errorNumbersToAdd: null);
                 });
+            opts.AddAchievementInterceptors(sp);
         });
 
         services.AddSwaggerGen(c =>
@@ -235,6 +240,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // with a SettableTimeProvider (see PinnedClockDataFactory) rather than adding a second
         // one, so this stays the single source of "now" for the whole app.
         services.AddSingleton(TimeProvider.System);
+        services.AddAchievements();
         services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
         services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
         services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();
@@ -249,6 +255,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddApplicationInsightsTelemetry();
+        // Who and how, on every item; then drop the rows that only ever say "still polling".
+        // See each type's remarks for the numbers behind them.
+        services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
+        services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
+        if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
+        {
+            // Test runs were reaching the production resource: the per-environment appsettings
+            // set the key to "", which the SDK treats as unset, so the base file's key won.
+            // Switching telemetry off here is deterministic whatever the config layers say.
+            services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = true);
+        }
 
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();

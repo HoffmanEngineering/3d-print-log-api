@@ -72,6 +72,10 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("Slicer")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<long?>("UserId")
                         .HasColumnType("bigint");
 
@@ -857,6 +861,17 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Slicer")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("StartDate")
                         .HasColumnType("datetimeoffset");
 
@@ -881,6 +896,10 @@ namespace PrintLogApi.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById"), new[] { "Source", "Slicer", "Status", "StartDate", "CreatedDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "FilamentUsageMg", "EstimatedFilamentUsageMg", "ViewStatus" });
 
                     b.HasIndex("PrinterId");
 
@@ -1702,6 +1721,9 @@ namespace PrintLogApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<int>("AchievementCatalogVersion")
+                        .HasColumnType("int");
+
                     b.Property<string>("Bio")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -1732,6 +1754,43 @@ namespace PrintLogApi.Migrations
                         .HasFilter("[OAuthUserId] IS NOT NULL");
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.UserAchievement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AchievementKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("Retroactive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Tier")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UnlockedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AchievementKey", "Tier")
+                        .HasDatabaseName("IX_UserAchievements_Key_Tier");
+
+                    b.HasIndex("UserId", "AchievementKey", "Tier")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserAchievements_User_Key_Tier");
+
+                    b.ToTable("UserAchievements");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.UserApiKey", b =>
@@ -1935,6 +1994,36 @@ namespace PrintLogApi.Migrations
                             Id = 16,
                             Description = "Send a push notification to the user's devices when a print fails.",
                             Name = "Push_PrintFailed"
+                        },
+                        new
+                        {
+                            Id = 17,
+                            Description = "Show the user's achievements on their public profile (true/false).",
+                            Name = "Achievements_ShowOnProfile"
+                        },
+                        new
+                        {
+                            Id = 18,
+                            Description = "How new achievements are celebrated (on/quiet/off).",
+                            Name = "Achievements_Celebrations"
+                        },
+                        new
+                        {
+                            Id = 19,
+                            Description = "The achievement hint the user dismissed, as key:tier.",
+                            Name = "Achievements_DismissedHint"
+                        },
+                        new
+                        {
+                            Id = 20,
+                            Description = "The user's IANA time zone, used for daily and weekly streaks.",
+                            Name = "General_TimeZone"
+                        },
+                        new
+                        {
+                            Id = 21,
+                            Description = "Send a push notification to the user's devices when they earn an achievement.",
+                            Name = "Push_Achievement"
                         });
                 });
 
@@ -2486,6 +2575,17 @@ namespace PrintLogApi.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("UpdatedBy");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.UserAchievement", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

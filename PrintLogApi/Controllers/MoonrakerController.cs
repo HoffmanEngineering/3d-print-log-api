@@ -124,6 +124,7 @@ public class MoonrakerController(
         var newPrint = new Print
         {
             Status = PrintStatus.Printing,
+            Source = PrintSource.Moonraker,
             CreatedById = userId,
             UpdatedById = userId,
             Title = title[..Math.Min(title.Length, 100)] ?? "",

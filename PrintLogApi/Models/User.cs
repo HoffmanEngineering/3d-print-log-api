@@ -60,4 +60,10 @@ public class User
     public ProfileViewStatus ViewStatus { get; set; }
 
     public ICollection<Printer>? printers { get; set; }
+
+    /// <summary>
+    /// The achievement catalog version this user was last fully evaluated against. 0 means never,
+    /// so the first pass is the launch catch-up.
+    /// </summary>
+    public int AchievementCatalogVersion { get; set; }
 }
