@@ -42,4 +42,10 @@ public class PrinterDetailDto
     public bool? HasHeatedChamber { get; set; }
 
     public double? WattageW { get; set; }
+
+    /// <summary>
+    /// Photos of this printer, ordered by display order. Hydrated explicitly after
+    /// materialization and never projected: SAS signing cannot run inside ProjectTo.
+    /// </summary>
+    public IList<PrinterImageDto>? Images { get; set; }
 }

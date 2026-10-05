@@ -18,19 +18,22 @@ public class SubscriptionService : ISubscriptionService
     private readonly TelemetryClient _telemetry;
     private readonly StripeOptions _stripeOptions;
     private readonly INotificationService _notificationService;
+    private readonly IMediaStorageQuotaService _quota;
 
     public SubscriptionService(
         PrintLogContext context,
         IMapper mapper,
         TelemetryClient telemetry,
         IOptions<StripeOptions> stripeOptions,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IMediaStorageQuotaService quota)
     {
         _context = context;
         _mapper = mapper;
         _telemetry = telemetry;
         _stripeOptions = stripeOptions.Value;
         _notificationService = notificationService;
+        _quota = quota;
     }
 
     public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -59,21 +62,13 @@ public class SubscriptionService : ISubscriptionService
             dto = _mapper.Map<SubscriptionDto>(subscription);
         }
 
-        dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
+        dto.MaxImages = isPro ? SubscriptionLimits.ProMaxImages : SubscriptionLimits.FreeMaxImages;
+        dto.MaxImagesPerPrint = dto.MaxImages;
         dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
         dto.MaxFileStorageBytes = isPro ? SubscriptionLimits.ProMaxFileStorageBytes : SubscriptionLimits.FreeMaxFileStorageBytes;
-        // Must count exactly what FilamentImageService.EnsureAccountStorageQuotaAsync counts.
-        // Reporting only attachments here while enforcement also counts filament images shows
-        // the user less usage than the number they are actually rejected against.
-        var attachmentBytes = await _context.PrintAttachments
-            .Where(pa => pa.CreatedById == userId)
-            .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
-
-        var filamentImageBytes = await _context.FilamentImages
-            .Where(fi => fi.CreatedById == userId)
-            .SumAsync(fi => (long?)fi.File.Size + (fi.ThumbnailFile != null ? fi.ThumbnailFile.Size : 0L)) ?? 0L;
-
-        dto.UsedFileStorageBytes = attachmentBytes + filamentImageBytes;
+        // Reported usage and enforced usage read the same calculator. Reporting a smaller
+        // figure than enforcement uses shows the user headroom they do not have.
+        dto.UsedFileStorageBytes = await _quota.GetUsedBytesAsync(userId);
 
         return dto;
     }

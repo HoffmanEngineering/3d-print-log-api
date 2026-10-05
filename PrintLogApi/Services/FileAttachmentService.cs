@@ -8,6 +8,7 @@ namespace PrintLogApi.Services;
 
 public class FileAttachmentService(
     PrintLogContext context,
+    IMediaStorageQuotaService quota,
     IBlobStorageService blobStorageService) : IFileAttachmentService
 {
     private const string AttachmentContainer = "printattachments";
@@ -186,10 +187,10 @@ public class FileAttachmentService(
         if (fileCount >= SubscriptionLimits.ProMaxFilesPerPrint)
             throw new BadRequestException($"Maximum of {SubscriptionLimits.ProMaxFilesPerPrint} files per print allowed.");
 
-        // Per-user storage quota
-        var usedBytes = await context.PrintAttachments
-            .Where(pa => pa.CreatedById == userId)
-            .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
+        // Per-user storage quota. The per-print FILE COUNT ceiling above is
+        // attachment-specific and stays here; the byte figure comes from the shared
+        // calculator so it matches what the user is shown and what images are held to.
+        var usedBytes = await quota.GetUsedBytesAsync(userId);
 
         if (usedBytes + newFileSizeBytes > SubscriptionLimits.ProMaxFileStorageBytes)
             throw new BadRequestException("Storage quota exceeded. Delete files to free up space.");

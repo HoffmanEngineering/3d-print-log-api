@@ -3,12 +3,15 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Services;
 
 public class PrinterService(
     PrintLogContext context,
     TelemetryClient telemetry,
+    IBlobStorageService blobStorage,
+    ILogger<PrinterService> logger,
     ICacheVersionService cacheVersionService) : IPrinterService
 {
     /// <summary>
@@ -16,6 +19,144 @@ public class PrinterService(
     /// and MCP create paths cannot drift onto different defaults.
     /// </summary>
     public const string DefaultPrinterCategoryNickname = "FFF";
+
+    // Bucketed expiry: repeated signing within a window returns a byte-identical URL, which
+    // is what lets the browser image cache hit at all. Max-age is strictly less than the
+    // bucket so a cached response cannot outlive the signature that fetched it.
+    private static readonly TimeSpan SasBucket = TimeSpan.FromHours(6);
+    private static readonly TimeSpan SasCacheMaxAge = TimeSpan.FromHours(5);
+
+    /// <summary>
+    /// The per-tier image cap. There is no IsProAsync helper anywhere in this codebase; the
+    /// established test is this direct query, and wrapping it in a new service method would
+    /// only create a second definition of "is Pro."
+    /// </summary>
+    public async Task<int> GetMaxImagesPerPrinter(long userId)
+    {
+        var subscription = await context.Subscriptions
+            .Where(s => s.UserId == userId)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
+
+        return subscription?.Status == SubscriptionStatus.Active
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
+    }
+
+    /// <summary>
+    /// Signs the full image set for one printer detail response. Explicit and
+    /// post-materialization, never a projection: SAS signing cannot run inside ProjectTo.
+    /// </summary>
+    public async Task HydrateDetailImageUrlsAsync(
+        PrinterDetailDto detail, CancellationToken ct = default)
+    {
+        if (detail.Id is not { } printerId) return;
+
+        var images = await context.PrinterImages
+            .AsNoTracking()
+            .Where(pi => pi.PrinterId == printerId)
+            // (DisplayOrder, Id): two concurrent uploads may share a DisplayOrder, so
+            // ordering on it alone is not deterministic.
+            .OrderBy(pi => pi.DisplayOrder).ThenBy(pi => pi.Id)
+            .Select(pi => new
+            {
+                pi.Id,
+                pi.IsDefault,
+                pi.DisplayOrder,
+                pi.ContentType,
+                OriginalPath = pi.File.Path,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null
+            })
+            .ToListAsync(ct);
+
+        // The filtered unique index enforces AT MOST one default, never at least one. A
+        // delete interleaved with an add can leave a non-empty set with none; heal it on
+        // read rather than serializing those transactions.
+        var defaultId = images.FirstOrDefault(i => i.IsDefault)?.Id ?? images.FirstOrDefault()?.Id;
+
+        var hydrated = new List<PrinterImageDto>(images.Count);
+        foreach (var image in images)
+        {
+            var dto = new PrinterImageDto
+            {
+                Id = image.Id,
+                IsDefault = image.Id == defaultId,
+                DisplayOrder = image.DisplayOrder
+            };
+
+            dto.Url = await SignImageOrNullAsync(image.OriginalPath, image.ContentType, printerId, ct);
+
+            // The thumbnail is WebP; the original is whatever the decode produced. Signing an
+            // original as "image/webp" would set a response content type the bytes contradict.
+            dto.ThumbnailUrl = image.ThumbnailPath is null
+                ? dto.Url
+                : await SignImageOrNullAsync(image.ThumbnailPath, "image/webp", printerId, ct);
+
+            hydrated.Add(dto);
+        }
+
+        detail.Images = hydrated;
+    }
+
+    /// <summary>
+    /// Signs one just-uploaded image into its response DTO. The upload response would
+    /// otherwise carry no usable URL.
+    /// </summary>
+    public async Task<PrinterImageDto> HydrateImageDtoAsync(
+        PrinterImage image, CancellationToken ct = default)
+    {
+        // The File rows were just written by PrinterImageService inside this same scope, so
+        // read them back rather than assuming the navigations were loaded.
+        var paths = await context.PrinterImages
+            .AsNoTracking()
+            .Where(pi => pi.Id == image.Id)
+            .Select(pi => new
+            {
+                OriginalPath = pi.File.Path,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var dto = new PrinterImageDto
+        {
+            Id = image.Id,
+            IsDefault = image.IsDefault,
+            DisplayOrder = image.DisplayOrder
+        };
+
+        if (paths is null) return dto;
+
+        dto.Url = await SignImageOrNullAsync(paths.OriginalPath, image.ContentType, image.PrinterId, ct);
+        dto.ThumbnailUrl = paths.ThumbnailPath is null
+            ? dto.Url
+            : await SignImageOrNullAsync(paths.ThumbnailPath, "image/webp", image.PrinterId, ct);
+
+        return dto;
+    }
+
+    /// <summary>
+    /// Signs one blob path, or returns null if signing fails. Public because the printer
+    /// summary endpoint signs AFTER its HybridCache read, outside this service.
+    /// </summary>
+    public async Task<string?> SignImageOrNullAsync(
+        string? path, string contentType, long printerId, CancellationToken ct = default)
+    {
+        if (path is null) return null;
+
+        try
+        {
+            return (await blobStorage.GenerateSasInlineUrlAsync(
+                BlobContainers.PrinterImages, Path.GetFileName(path),
+                contentType, SasBucket, SasCacheMaxAge)).ToString();
+        }
+        catch (Exception ex)
+        {
+            // Each URL is signed independently so one unsignable blob costs one image,
+            // not the whole response.
+            logger.LogWarning(ex, "Failed to sign printer image URL for {PrinterId}", printerId);
+            return null;
+        }
+    }
 
     public async Task<Printer?> getPrinterById(long printerId)
     {
@@ -130,9 +271,47 @@ public class PrinterService(
             context.PrinterMaintenance.RemoveRange(maintenanceEntries);
         }
 
+        // Images, their File rows and their blobs. Ordering is load-bearing: the
+        // PrinterImage -> File FKs are Restrict, so the image rows must go before the files,
+        // and both before the printer. Without this the delete would FAIL on the Restrict FK
+        // rather than orphan anything - broken either way.
+        var images = await context.PrinterImages
+            .Include(pi => pi.File)
+            .Include(pi => pi.ThumbnailFile)
+            .Where(pi => pi.PrinterId == printerId)
+            .ToListAsync();
+
+        var blobNames = images
+            .SelectMany(pi => new[] { pi.File?.Path, pi.ThumbnailFile?.Path })
+            .Where(path => !string.IsNullOrEmpty(path))
+            .Select(path => Path.GetFileName(path)!)
+            .ToList();
+
+        foreach (var image in images)
+        {
+            context.PrinterImages.Remove(image);
+            if (image.File is not null) context.Files.Remove(image.File);
+            if (image.ThumbnailFile is not null) context.Files.Remove(image.ThumbnailFile);
+        }
+
         context.Printers.Remove(printer);
 
         await context.SaveChangesAsync();
+
+        // Blobs LAST, so a failed save leaves an orphaned blob rather than a row pointing at
+        // destroyed bytes. Failures here are logged and swallowed for the same reason: the
+        // database is already consistent and the printer is gone.
+        foreach (var name in blobNames)
+        {
+            try
+            {
+                await blobStorage.DeleteBlobAsync(BlobContainers.PrinterImages, name);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete printer image blob {BlobName}; continuing", name);
+            }
+        }
 
         telemetry.TrackEvent("PrinterDelete");
 

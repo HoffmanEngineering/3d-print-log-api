@@ -23,4 +23,11 @@ public class PrinterSummarySimpleDto
     public PrinterCategoryDto? Category { get; set; }
 
     public ICollection<PrinterFilamentForSummaryDto>? LoadedFilaments { get; set; }
+
+    /// <summary>
+    /// Signed thumbnail URL for this printer's default photo. Populated per-request, AFTER
+    /// the cache read - a signed URL cached for the entry's lifetime would outlive its
+    /// signature.
+    /// </summary>
+    public string? DefaultImageThumbnailUrl { get; set; }
 }

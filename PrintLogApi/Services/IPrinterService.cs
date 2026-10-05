@@ -1,11 +1,29 @@
 ﻿using PrintLogApi.Mcp;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Services;
 
 public interface IPrinterService
 {
     Task DeletePrinter(long printerId);
+
+    /// <summary>Images allowed on one printer, by subscription tier.</summary>
+    Task<int> GetMaxImagesPerPrinter(long userId);
+
+    /// <summary>Signs every image on a printer into its detail DTO.</summary>
+    Task HydrateDetailImageUrlsAsync(PrinterDetailDto detail, CancellationToken ct = default);
+
+    /// <summary>Signs one just-uploaded image into its response DTO.</summary>
+    Task<PrinterImageDto> HydrateImageDtoAsync(PrinterImage image, CancellationToken ct = default);
+
+    /// <summary>
+    /// Signs one printer-image blob path, or returns null if signing fails. The printer
+    /// summary endpoint calls this AFTER its HybridCache read: a signed URL must never be
+    /// cached, because it would outlive its signature.
+    /// </summary>
+    Task<string?> SignImageOrNullAsync(
+        string? path, string contentType, long printerId, CancellationToken ct = default);
     Task<Printer?> getPrinterById(long printerId);
     Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds);
 

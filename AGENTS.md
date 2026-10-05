@@ -205,6 +205,33 @@ them from the deploy workflow (see Deployment) — never rely on startup migrati
 New migrations must be **backwards compatible** (additive only): the old app version is still
 running against the database while migrations execute.
 
+### Migrations are never executed by the test suite
+
+Integration tests build their schema with `EnsureCreated()` on SQLite, so a migration can be
+completely broken and the whole suite still passes. Two SQL Server rules EF's conventions will
+happily violate:
+
+- **Multiple cascade paths (error 1785).** An entity deriving from `TimestampEntity` gets Cascade
+  FKs to `Users` on `CreatedById`/`UpdatedById` by convention. If that table *also* cascades from
+  an owner that itself cascades from `Users`, SQL Server refuses to create the constraint. Hand-edit
+  the generated migration to `ReferentialAction.NoAction` for the two audit FKs, leave the model's
+  Cascade alone, and say why in a comment — `AddProjects`, `AddFilamentImage` and `AddPrinterImage`
+  all had to. Account deletion removes those rows explicitly in `UserDeletionService`, so nothing
+  depends on the cascade.
+- **Correlated aggregates (error 8124).** Inside a correlated `Sum`, reach related columns through
+  the row's own navigation, never off the outer entity. Guard with a translation test in the style
+  of `FilamentSqlServerTranslationTests`.
+
+**Verify a new migration against real SQL Server — it takes two minutes.** `docker-compose.yml`
+already runs SQL Server 2022 on host port 1434:
+
+```bash
+dotnet ef database update --project PrintLogApi --connection "Server=localhost,1434;Database=PrintLogDb_MigrationCheck;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True"
+```
+
+Drop the scratch database afterwards. On Git Bash, `docker exec` needs `MSYS_NO_PATHCONV=1` or the
+container path is mangled into a Windows path.
+
 ## Nullable Reference Types
 
 The migration (#46) is **done and closed**. Both projects are on `<Nullable>enable</Nullable>` with

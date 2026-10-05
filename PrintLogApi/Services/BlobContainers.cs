@@ -9,4 +9,5 @@ public static class BlobContainers
     public const string PrintImages = "printimages";
     public const string ProjectImages = "projectimages";
     public const string FilamentImages = "filamentimages";
+    public const string PrinterImages = "printerimages";
 }

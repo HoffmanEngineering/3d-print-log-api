@@ -197,7 +197,7 @@ public class FilamentImageServiceTests(CustomWebApplicationFactory factory)
         using var scope = _factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IFilamentImageService>();
         var (filamentId, _, userId) = await SeedFilamentWithImagesAsync(
-            scope, SubscriptionLimits.FreeMaxImagesPerFilament, TestContext.Current.CancellationToken);
+            scope, SubscriptionLimits.FreeMaxImages, TestContext.Current.CancellationToken);
 
         using var png = MakePng(50, 50);
         await Assert.ThrowsAsync<ArgumentException>(() =>
