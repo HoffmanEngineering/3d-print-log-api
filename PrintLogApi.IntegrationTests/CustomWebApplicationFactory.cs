@@ -135,7 +135,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             // The email workers would tick on their own timers mid-test. Tests drive
             // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead.
             foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
-                && d.ImplementationType == typeof(CampaignEvaluatorService)).ToList())
+                && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService))).ToList())
             {
                 services.Remove(worker);
             }

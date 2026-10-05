@@ -27,6 +27,8 @@ public static class EmailServiceCollectionExtensions
 
         services.AddScoped<CampaignEvaluator>();
         services.AddHostedService<CampaignEvaluatorService>();
+        services.AddScoped<EmailDispatcher>();
+        services.AddHostedService<EmailDispatcherService>();
 
         return services;
     }
