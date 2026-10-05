@@ -1,11 +1,12 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using Microsoft.ApplicationInsights;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.Users;
 
-public class UserService(PrintLogContext context) : IUserService
+public class UserService(PrintLogContext context, TelemetryClient telemetry) : IUserService
 {
     public User? GetLocalUserByAuthUserId(string authUserId)
     {
@@ -74,6 +75,9 @@ public class UserService(PrintLogContext context) : IUserService
         try
         {
             await context.SaveChangesAsync();
+            // Only on the insert that won. The constraint-violation branch below returns a
+            // user a concurrent request already created — and already counted.
+            telemetry.TrackEvent("UserSignedUp");
         }
         catch (DbUpdateException dbUpdateEx)
         {

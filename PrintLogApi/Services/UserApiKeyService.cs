@@ -69,6 +69,8 @@ public class UserApiKeyService(
         cache.Remove(LastUsedThrottleKey(existingKey.HashedKey));
 
         await notificationService.CreateApiKeyDeletedNotification(userId, existingKey.Description);
+
+        telemetry.TrackEvent("ApiKeyDeleted");
     }
 
     public async Task<NewUserApiKeyDto> GenerateNewApiKey(long userId, string? description)

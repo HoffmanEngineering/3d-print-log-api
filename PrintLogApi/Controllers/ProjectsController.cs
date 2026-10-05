@@ -73,6 +73,7 @@ public class ProjectsController(
         {
             var project = await projectService.CreateProjectAsync(dto, userId.Value);
             cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectAdded");
 
             return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
                 mapper.Map<ProjectDetailDto>(project));
@@ -105,6 +106,7 @@ public class ProjectsController(
         {
             var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
             cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectEdit");
 
             return Ok(mapper.Map<ProjectDetailDto>(updated));
         }
@@ -138,6 +140,10 @@ public class ProjectsController(
         {
             await projectService.DeleteProjectAsync(id, deletePrints, userId.Value);
             cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectDelete", new Dictionary<string, string>
+            {
+                ["deletePrints"] = deletePrints ? "true" : "false",
+            });
             return Ok();
         }
         catch (DoesNotExistException)

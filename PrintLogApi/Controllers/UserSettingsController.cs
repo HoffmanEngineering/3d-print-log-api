@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,8 @@ namespace PrintLogApi.Controllers;
 public class UserSettingsController(
     PrintLogContext context,
     IMapper mapper,
-    Services.ICacheVersionService cacheVersionService) : ControllerBase
+    Services.ICacheVersionService cacheVersionService,
+    TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
     /// Returns the list of the current user's UserSettings.
@@ -91,6 +93,7 @@ public class UserSettingsController(
         // wrong. Without this the user edits their kWh rate and the cost tile keeps the
         // old figure for up to the cache TTL.
         cacheVersionService.InvalidateUserCache(userId.Value);
+        TrackSettingChanged(existingSetting);
 
         return mapper.Map<UserSettingDto>(existingSetting);
     }
@@ -145,8 +148,21 @@ public class UserSettingsController(
 
         // As with the update path: a newly-set price or rate changes every cached cost.
         cacheVersionService.InvalidateUserCache(userId.Value);
+        TrackSettingChanged(newSetting);
 
         return mapper.Map<UserSettingDto>(newSetting);
+    }
+
+    /// <summary>
+    /// One event for create and update alike: the dashboard question is "which settings do
+    /// people touch", and a first-time set and a later change answer it the same way.
+    /// </summary>
+    private void TrackSettingChanged(UserSetting setting)
+    {
+        telemetry.TrackEvent("UserSettingsChanged", new Dictionary<string, string>
+        {
+            ["settingTypeId"] = setting.UserSettingTypeId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        });
     }
 
     private bool UserSettingExists(long id)
