@@ -48,7 +48,7 @@ public sealed class SesEventProcessor(
                     await BounceAsync(root["bounce"] as JsonObject, ct);
                     break;
                 case "Complaint":
-                    await ComplaintAsync(root["complaint"] as JsonObject, messageId, ct);
+                    await ComplaintAsync(root["complaint"] as JsonObject, mail, messageId, ct);
                     break;
                 case "Delivery":
                     await DeliveryAsync(root["delivery"] as JsonObject, mail, messageId, ct);
@@ -83,18 +83,27 @@ public sealed class SesEventProcessor(
         }
     }
 
-    private async Task ComplaintAsync(JsonObject? complaint, string? messageId, CancellationToken ct)
+    private async Task ComplaintAsync(JsonObject? complaint, JsonObject? mail, string? messageId, CancellationToken ct)
     {
         telemetry.TrackEvent("Email_Complained");
         EmailMetrics.Complained.Inc();
         var detail = (string?)complaint?["feedbackId"];
 
+        // The message id is only on the row once the dispatcher has saved it after the send; the
+        // outbox_id tag finds the row even when that save never happened.
         var row = messageId is null
             ? null
             : await db.EmailOutbox.AsNoTracking()
                 .Where(o => o.ProviderMessageId == messageId)
                 .Select(o => new { o.UserId, o.SentTo })
                 .FirstOrDefaultAsync(ct);
+        if (row is null && OutboxId(mail) is { } outboxId)
+        {
+            row = await db.EmailOutbox.AsNoTracking()
+                .Where(o => o.Id == outboxId)
+                .Select(o => new { o.UserId, o.SentTo })
+                .FirstOrDefaultAsync(ct);
+        }
 
         var addresses = Addresses(complaint?["complainedRecipients"]).ToList();
         foreach (var address in addresses)
@@ -102,11 +111,18 @@ public sealed class SesEventProcessor(
             await suppressions.SuppressAsync(address, isHash: false, EmailSuppressionReason.Complaint, detail, ct);
         }
 
-        // Some feedback loops redact the recipient. The message id still leads to the outbox
-        // row, which recorded a hash of the address it went to.
-        if (addresses.Count == 0 && row?.SentTo is { } sentTo)
+        // Some feedback loops redact the recipient. The outbox row recorded a hash of the address
+        // it went to, and SES's own copy of the destination is in the event either way.
+        if (addresses.Count == 0)
         {
-            await suppressions.SuppressAsync(sentTo, isHash: true, EmailSuppressionReason.Complaint, detail, ct);
+            if (row?.SentTo is { } sentTo)
+            {
+                await suppressions.SuppressAsync(sentTo, isHash: true, EmailSuppressionReason.Complaint, detail, ct);
+            }
+            else if (First(mail?["destination"]) is { } destination)
+            {
+                await suppressions.SuppressAsync(destination, isHash: false, EmailSuppressionReason.Complaint, detail, ct);
+            }
         }
 
         // A complaint is an objection to all of it, not to one campaign.
@@ -136,15 +152,19 @@ public sealed class SesEventProcessor(
     {
         telemetry.TrackEvent("Email_Delivered");
 
-        // An ambiguous failure (timeout, abandoned claim) may in fact have gone out. The outbox_id
-        // tag lets SES's own record settle it.
-        if (!long.TryParse(First(mail?["tags"]?["outbox_id"]), NumberStyles.None, CultureInfo.InvariantCulture, out var outboxId))
+        // An ambiguous failure (timeout, abandoned claim) may in fact have gone out, and a row
+        // still Sending is one whose post-send save has not landed (or never will, if it failed,
+        // and the reaper would later call it ambiguous). The outbox_id tag lets SES's own record
+        // settle both.
+        if (OutboxId(mail) is not { } outboxId)
         {
             return;
         }
 
         var row = await db.EmailOutbox.SingleOrDefaultAsync(o => o.Id == outboxId, ct);
-        if (row is not { Status: EmailOutboxStatus.Failed } || row.LastError?.StartsWith("ambiguous:", StringComparison.Ordinal) != true)
+        var ambiguous = row is { Status: EmailOutboxStatus.Failed }
+            && row.LastError?.StartsWith("ambiguous:", StringComparison.Ordinal) == true;
+        if (row is null || !(ambiguous || row.Status == EmailOutboxStatus.Sending))
         {
             return;
         }
@@ -177,6 +197,9 @@ public sealed class SesEventProcessor(
             row.LastError = $"rejected: {(string?)reject?["reason"]}";
         }
     }
+
+    private static long? OutboxId(JsonObject? mail)
+        => long.TryParse(First(mail?["tags"]?["outbox_id"]), NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null;
 
     /// <summary>The first string in a JSON array, or null when it is missing or empty (SES sends both).</summary>
     private static string? First(JsonNode? node) => node is JsonArray { Count: > 0 } array ? (string?)array[0] : null;

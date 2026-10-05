@@ -242,6 +242,47 @@ public class SesEventProcessorTests : IClassFixture<CustomWebApplicationFactory>
         Assert.NotNull(reconciled.SentAt);
     }
 
+    // The dispatcher's post-send save has not landed (or failed): SES's Delivery settles the row
+    // now, instead of the reaper later calling it ambiguous.
+    [Fact]
+    public async Task Delivery_SettlesRowStillSending()
+    {
+        var user = await UserAsync();
+        var row = EmailTestData.OutboxRow(user.Id, "monthly-recap", $"p-{Guid.NewGuid():N}");
+        row.Status = EmailOutboxStatus.Sending;
+        row.ClaimedAt = DateTimeOffset.UtcNow;
+        await SaveRowAsync(row);
+
+        await ProcessAsync(SesEvent("Delivery", "msg-early", new JsonObject { ["timestamp"] = "2026-11-02T15:00:05.000Z" },
+            outboxId: row.Id, destination: [user.Email!]));
+
+        var settled = await ReloadAsync(row.Id);
+        Assert.Equal(EmailOutboxStatus.Sent, settled.Status);
+        Assert.Equal("msg-early", settled.ProviderMessageId);
+        Assert.Equal(Hasher.Hash(user.Email!), settled.SentTo);
+    }
+
+    // A redacted complaint for a message whose row never recorded the provider message id still
+    // reaches the user and the address, through the outbox_id tag and SES's destination.
+    [Fact]
+    public async Task RedactedComplaint_BeforeSendWasSaved_ResolvesThroughOutboxTag()
+    {
+        var user = await UserAsync();
+        var row = EmailTestData.OutboxRow(user.Id, "monthly-recap", $"p-{Guid.NewGuid():N}");
+        row.Status = EmailOutboxStatus.Sending;
+        row.ClaimedAt = DateTimeOffset.UtcNow;
+        await SaveRowAsync(row);
+
+        await ProcessAsync(SesEvent("Complaint", $"msg-{Guid.NewGuid():N}", new JsonObject
+        {
+            ["feedbackId"] = "fb-3",
+            ["complainedRecipients"] = new JsonArray(),
+        }, outboxId: row.Id, destination: [user.Email!]));
+
+        Assert.True(await SuppressedAsync(user.Email!));
+        Assert.False((await PrefsAsync(user.Id)).All);
+    }
+
     // A row that failed for a known reason did not send; a stray Delivery must not rewrite it.
     [Fact]
     public async Task Delivery_LeavesNonAmbiguousFailureAlone()
