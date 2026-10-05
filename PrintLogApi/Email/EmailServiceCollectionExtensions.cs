@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using PrintLogApi.Email.Campaigns;
 using PrintLogApi.Email.Events;
 using PrintLogApi.Email.Outbox;
 using PrintLogApi.Email.Templates;
@@ -25,6 +26,11 @@ public static class EmailServiceCollectionExtensions
         services.AddSingleton<EmailLinkBuilder>();
         services.AddSingleton<IEmailFooterFactory, EmailFooterFactory>();
         services.AddSingleton<IEmailTemplateRenderer, EmailTemplateRenderer>();
+
+        // Campaigns are scoped: each holds the request's PrintLogContext.
+        services.AddScoped<IEmailCampaign, OnboardingCampaign>();
+        services.AddScoped<IEmailCampaign, MonthlyRecapCampaign>();
+        services.AddScoped<IEmailCampaign, PrinterSilentCampaign>();
 
         services.AddScoped<CampaignEvaluator>();
         services.AddHostedService<CampaignEvaluatorService>();

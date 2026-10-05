@@ -239,14 +239,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         {
             using (var scope = host.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                db.Database.EnsureCreated();
-                IntegrationTestSeeder.Seed(db);
+                PrepareDatabase(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
             }
             _seeded = true;
         }
 
         return host;
+    }
+
+    /// <summary>Creates and seeds the schema once, when the host first starts. A host on another provider overrides it.</summary>
+    protected virtual void PrepareDatabase(PrintLogContext db)
+    {
+        db.Database.EnsureCreated();
+        IntegrationTestSeeder.Seed(db);
     }
 
     protected override void Dispose(bool disposing)

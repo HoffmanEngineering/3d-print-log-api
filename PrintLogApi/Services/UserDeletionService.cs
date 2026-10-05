@@ -423,6 +423,12 @@ public class UserDeletionService : IUserDeletionService
                 .Where(a => a.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete queued and sent email. The FK cascades too. Suppressions are keyed by address
+            // hash, not user, and stay: a complaint must keep blocking the address after deletion.
+            await _context.EmailOutbox
+                .Where(o => o.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete User Settings
             await _context.UserSettings
                 .Where(us => us.UserId == userId)
