@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Printer;
+﻿namespace PrintLogApi.Models.DTOs.Printer;
 
 public class PrinterImageDto
 {

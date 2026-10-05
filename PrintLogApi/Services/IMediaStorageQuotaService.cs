@@ -1,4 +1,4 @@
-namespace PrintLogApi.Services;
+﻿namespace PrintLogApi.Services;
 
 /// <summary>
 /// The single definition of "storage used." Enforcement and reported usage both read it, so

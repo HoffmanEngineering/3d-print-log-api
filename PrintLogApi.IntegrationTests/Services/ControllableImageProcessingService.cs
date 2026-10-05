@@ -1,4 +1,4 @@
-using PrintLogApi.Services;
+﻿using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests;
 

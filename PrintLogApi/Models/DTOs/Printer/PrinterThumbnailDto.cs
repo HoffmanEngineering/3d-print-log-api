@@ -1,4 +1,4 @@
-namespace PrintLogApi.Models.DTOs.Printer;
+﻿namespace PrintLogApi.Models.DTOs.Printer;
 
 /// <summary>
 /// One entry in the caller's printer-thumbnail map.
