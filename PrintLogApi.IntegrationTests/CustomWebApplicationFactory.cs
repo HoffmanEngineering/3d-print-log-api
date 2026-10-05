@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using PrintLogApi.Achievements.Triggers;
+using PrintLogApi.Email.Outbox;
 using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Services;
@@ -130,6 +131,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
                 services.Remove(emailDescriptor);
             }
             services.AddSingleton<IEmailSender, RecordingEmailSender>();
+
+            // The email workers would tick on their own timers mid-test. Tests drive
+            // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead.
+            foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
+                && d.ImplementationType == typeof(CampaignEvaluatorService)).ToList())
+            {
+                services.Remove(worker);
+            }
 
             // Startup switches telemetry off in this environment so test runs stop reaching the
             // production resource. Switch it back on here, pointed at an in-memory channel, so

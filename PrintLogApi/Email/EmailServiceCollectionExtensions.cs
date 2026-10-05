@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using PrintLogApi.Email.Outbox;
 using PrintLogApi.Email.Templates;
 using PrintLogApi.Email.Tokens;
 using PrintLogApi.Email.Transport;
@@ -23,6 +24,9 @@ public static class EmailServiceCollectionExtensions
         services.AddSingleton<EmailLinkBuilder>();
         services.AddSingleton<IEmailFooterFactory, EmailFooterFactory>();
         services.AddSingleton<IEmailTemplateRenderer, EmailTemplateRenderer>();
+
+        services.AddScoped<CampaignEvaluator>();
+        services.AddHostedService<CampaignEvaluatorService>();
 
         return services;
     }
