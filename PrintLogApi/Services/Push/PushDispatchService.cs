@@ -19,12 +19,20 @@ public class PushDispatchService(
     {
         [NotificationType.PrintCompleted] = 15,
         [NotificationType.PrintFailed] = 16,
+        [NotificationType.Achievement] = 21,
     };
 
     public async Task DispatchForNotification(Notification notification, CancellationToken ct = default)
     {
         try
         {
+            // A notification created already read (a retroactive achievement grant) is history,
+            // not news. Pushing it would buzz a phone for something the user never needs to see.
+            if (notification.IsRead)
+            {
+                return;
+            }
+
             if (!PushEligibleTypes.TryGetValue(notification.Type, out var settingTypeId))
             {
                 return;

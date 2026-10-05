@@ -205,6 +205,28 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
+    public async Task MoonrakerWebhook_RecordsMoonraker()
+    {
+        var filename = UniqueFileName("records_source_test");
+        var messageDto = new PrintEventMessageDto
+        {
+            EventName = "started",
+            Filename = filename,
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            FilamentUsed = 0,
+            PrintDuration = 0,
+            TotalDuration = 0
+        };
+
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var print = FindPrintByFileNameInDb(filename)!;
+        Assert.Equal(PrintSource.Moonraker, print.Source);
+        Assert.Null(print.Slicer);
+    }
+
+    [Fact]
     public async Task Webhook_Started_CreatesNewPrint()
     {
         // Arrange

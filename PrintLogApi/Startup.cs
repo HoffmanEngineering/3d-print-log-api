@@ -15,6 +15,8 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
+using PrintLogApi.Achievements;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
@@ -67,7 +69,7 @@ public class Startup
 
         ConfigureAuthentication(services);
 
-        services.AddDbContext<PrintLogContext>(opts =>
+        services.AddDbContext<PrintLogContext>((sp, opts) =>
         {
             opts.UseSqlServer(
                 Configuration["ConnectionString:PrintLogDb"],
@@ -78,6 +80,7 @@ public class Startup
                         maxRetryDelay: TimeSpan.FromSeconds(30),
                         errorNumbersToAdd: null);
                 });
+            opts.AddAchievementInterceptors(sp);
         });
 
         services.AddSwaggerGen(c =>
@@ -233,6 +236,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // with a SettableTimeProvider (see PinnedClockDataFactory) rather than adding a second
         // one, so this stays the single source of "now" for the whole app.
         services.AddSingleton(TimeProvider.System);
+        services.AddAchievements();
         services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
         services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
         services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();

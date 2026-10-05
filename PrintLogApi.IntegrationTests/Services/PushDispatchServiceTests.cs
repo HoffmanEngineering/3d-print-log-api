@@ -103,6 +103,77 @@ public class PushDispatchServiceTests : IClassFixture<CustomWebApplicationFactor
         Assert.Empty(fcm.Sent);
     }
 
+    /// <summary>An isolated user with one registered device, so device counts are exact.</summary>
+    private static async Task<long> UserWithDeviceAsync(PrintLogContext db, IDeviceTokenService tokens)
+    {
+        var user = await Achievements.AchievementTestData.CreateUserAsync(db);
+        await tokens.RegisterDevice(user.Id, $"tok-{Guid.NewGuid():N}", DevicePlatform.Android, null);
+        return user.Id;
+    }
+
+    private static Notification AchievementFor(long userId, bool isRead = false)
+    {
+        var n = NotificationOfType(NotificationType.Achievement);
+        n.UserId = userId;
+        n.PrintId = null;
+        n.Title = "Achievement unlocked: First Layer";
+        n.IsRead = isRead;
+        return n;
+    }
+
+    [Fact]
+    public async Task DispatchesForAchievement_WhenPushAchievementEnabled()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+
+        await service.DispatchForNotification(AchievementFor(userId), TestContext.Current.CancellationToken);
+
+        Assert.Single(fcm.Sent);
+        Assert.Equal("Achievement unlocked: First Layer", fcm.Sent[0].Title);
+    }
+
+    [Fact]
+    public async Task SkipsAchievement_WhenDisabled()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            UserSettingTypeId = 21, // Push_Achievement
+            Value = "false",
+            CreatedById = userId,
+            UpdatedById = userId
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await service.DispatchForNotification(AchievementFor(userId), TestContext.Current.CancellationToken);
+
+        Assert.Empty(fcm.Sent);
+    }
+
+    [Theory]
+    [InlineData(NotificationType.Achievement)]
+    [InlineData(NotificationType.PrintFailed)]
+    public async Task SkipsAlreadyReadNotifications(NotificationType type)
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+        var notification = AchievementFor(userId, isRead: true);
+        notification.Type = type;
+
+        await service.DispatchForNotification(notification, TestContext.Current.CancellationToken);
+
+        Assert.Empty(fcm.Sent);
+    }
+
     [Fact]
     public async Task RespectsDisabledPreference()
     {

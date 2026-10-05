@@ -28,4 +28,10 @@ public class NotificationSummaryDto
     public string? PrintTitle { get; set; }
 
     public UserSummaryDto? TriggeredByUser { get; set; }
+
+    /// <summary>
+    /// The parsed metadata of an <see cref="NotificationType.Achievement"/> notification. Null for
+    /// every other type, and for metadata this server version cannot read.
+    /// </summary>
+    public AchievementNotificationDto? Achievement { get; set; }
 }

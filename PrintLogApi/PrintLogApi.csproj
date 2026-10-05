@@ -70,6 +70,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test seams only: AchievementEvaluator.BeforePersist reproduces a concurrent-grant race. -->
+    <InternalsVisibleTo Include="PrintLogApi.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <WCFMetadata Include="Connected Services" />
   </ItemGroup>
 

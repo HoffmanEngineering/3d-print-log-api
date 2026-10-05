@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.Services;
 
@@ -77,6 +78,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             services.AddDbContext<PrintLogContext>((sp, options) =>
             {
                 options.UseSqlite(_connection);
+                // Same hooks as Startup; without them no test would exercise achievement triggers.
+                options.AddAchievementInterceptors(sp);
                 options.ConfigureWarnings(warnings =>
                     warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
             });

@@ -12,7 +12,7 @@ public class NotificationService(
     IMapper mapper,
     IPushDispatchService pushDispatchService) : INotificationService
 {
-    public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null)
+    public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null, NotificationType? type = null)
     {
         var query = context.Notifications
             .Where(n => n.UserId == userId);
@@ -20,6 +20,11 @@ public class NotificationService(
         if (unreadOnly == true)
         {
             query = query.Where(n => !n.IsRead);
+        }
+
+        if (type is { } onlyType)
+        {
+            query = query.Where(n => n.Type == onlyType);
         }
 
         var orderedQuery = query
@@ -53,6 +58,19 @@ public class NotificationService(
         return await context.Notifications
             .Where(n => n.UserId == userId && !n.IsRead)
             .CountAsync();
+    }
+
+    public async Task<(int Total, int Achievements)> GetUnreadCountsForUser(long userId)
+    {
+        // A conditional count in one GROUP BY: no subquery inside the aggregate, so this is as
+        // valid on SQL Server as on the SQLite test database.
+        var counts = await context.Notifications
+            .Where(n => n.UserId == userId && !n.IsRead)
+            .GroupBy(n => n.UserId)
+            .Select(g => new { Total = g.Count(), Achievements = g.Count(n => n.Type == NotificationType.Achievement) })
+            .FirstOrDefaultAsync();
+
+        return counts is null ? (0, 0) : (counts.Total, counts.Achievements);
     }
 
     public async Task<bool> MarkAsRead(Guid notificationId, long userId)
@@ -118,7 +136,7 @@ public class NotificationService(
     /// funnels here so cross-cutting concerns — currently push dispatch — attach in exactly one
     /// place. A create method that saves directly will silently skip them.
     /// </summary>
-    private async Task PersistNotifications(IReadOnlyList<Notification> notifications)
+    private async Task PersistNotifications(IReadOnlyList<Notification> notifications, CancellationToken ct = default)
     {
         if (notifications.Count == 0)
         {
@@ -126,7 +144,7 @@ public class NotificationService(
         }
 
         context.Notifications.AddRange(notifications);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(ct);
 
         foreach (var notification in notifications)
         {
@@ -141,6 +159,10 @@ public class NotificationService(
             }
         }
     }
+
+    /// <inheritdoc/>
+    public Task PersistAchievementNotifications(IReadOnlyList<Notification> notifications, CancellationToken ct = default) =>
+        PersistNotifications(notifications, ct);
 
     public async Task<Notification> CreateNotification(
         long userId,
