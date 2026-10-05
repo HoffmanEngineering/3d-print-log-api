@@ -23,7 +23,7 @@ public class CampaignEvaluatorTests : IClassFixture<CustomWebApplicationFactory>
         var options = new EmailOptions { Enabled = enabled, DryRun = dryRun };
         foreach (var name in enabledCampaigns)
         {
-            options.Campaigns[name] = new CampaignOptions { Enabled = true };
+            options.Campaigns[EmailOptions.CampaignKey(name)] = new CampaignOptions { Enabled = true };
         }
         return options;
     }

@@ -81,7 +81,7 @@ public class EmailPipelineSqlServerTests : IClassFixture<EmailPipelineSqlServerT
         };
         foreach (var campaign in campaigns)
         {
-            settings.Campaigns[campaign.Name] = new CampaignOptions { Enabled = true };
+            settings.Campaigns[EmailOptions.CampaignKey(campaign.Name)] = new CampaignOptions { Enabled = true };
         }
 
         var options = MsOptions.Create(settings);

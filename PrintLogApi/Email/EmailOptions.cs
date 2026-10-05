@@ -65,9 +65,17 @@ public sealed class EmailOptions
 
     public RateLimitOptions RateLimits { get; set; } = new();
 
-    public Dictionary<string, CampaignOptions> Campaigns { get; set; } = new(StringComparer.Ordinal);
+    /// <summary>Keyed by <see cref="CampaignKey"/>, not by the campaign name itself.</summary>
+    public Dictionary<string, CampaignOptions> Campaigns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool IsCampaignEnabled(string name) => Campaigns.TryGetValue(name, out var campaign) && campaign.Enabled;
+    public bool IsCampaignEnabled(string name) => Campaigns.TryGetValue(CampaignKey(name), out var campaign) && campaign.Enabled;
+
+    /// <summary>
+    /// The configuration key for a campaign: its name with underscores for hyphens, so
+    /// <c>monthly-recap</c> is switched by <c>Email__Campaigns__monthly_recap__Enabled</c>.
+    /// App Service on Linux rejects an app setting whose name contains a hyphen.
+    /// </summary>
+    public static string CampaignKey(string name) => name.Replace('-', '_');
 
     /// <summary>True when the pipeline does real work: sending, or rendering in dry run.</summary>
     public bool IsActive => Enabled || DryRun;
@@ -131,6 +139,11 @@ public sealed class EmailOptionsValidator : IValidateOptions<EmailOptions>
         if (options.LocalSendHour is < 0 or > 23) failures.Add($"{nameof(EmailOptions.LocalSendHour)} must be 0-23.");
         if (options.HoldoutPercent is < 0 or > 100) failures.Add($"{nameof(EmailOptions.HoldoutPercent)} must be 0-100.");
         if (options.DailyCap is < 0) failures.Add($"{nameof(EmailOptions.DailyCap)} must be null or non-negative.");
+
+        foreach (var key in options.Campaigns.Keys.Where(k => k.Contains('-')))
+        {
+            failures.Add($"Campaigns:{key} is never read. Use Campaigns:{EmailOptions.CampaignKey(key)}: hyphens can't be set as App Service settings.");
+        }
 
         if (options.IsActive)
         {

@@ -51,7 +51,7 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
             };
             foreach (var c in Campaigns)
             {
-                Options.Campaigns[c.Name] = new CampaignOptions { Enabled = true };
+                Options.Campaigns[EmailOptions.CampaignKey(c.Name)] = new CampaignOptions { Enabled = true };
             }
             Hasher = new EmailAddressHasher(Microsoft.Extensions.Options.Options.Create(Options));
         }
@@ -126,7 +126,7 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
     public async Task DisabledCampaign_Skips()
     {
         using var h = new Harness(_factory);
-        h.Options.Campaigns[h.Campaign.Name].Enabled = false;
+        h.Options.Campaigns[EmailOptions.CampaignKey(h.Campaign.Name)].Enabled = false;
         var row = await h.QueueAsync((await h.UserAsync()).Id);
 
         await h.TickAsync();

@@ -1,4 +1,5 @@
-﻿using PrintLogApi.Email;
+﻿using Microsoft.Extensions.Configuration;
+using PrintLogApi.Email;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Email;
@@ -119,8 +120,34 @@ public class EmailOptionsValidatorTests
     public void IsCampaignEnabled_DefaultsFalse()
     {
         var o = new EmailOptions();
-        o.Campaigns["monthly-recap"] = new CampaignOptions { Enabled = true };
+        o.Campaigns[EmailOptions.CampaignKey("monthly-recap")] = new CampaignOptions { Enabled = true };
         Assert.True(o.IsCampaignEnabled("monthly-recap"));
         Assert.False(o.IsCampaignEnabled("onboarding"));
+    }
+
+    [Fact]
+    public void CampaignSwitch_BindsFromAnAppServiceSettingName()
+    {
+        // App Service on Linux rejects a setting name with a hyphen, so this is the only way
+        // production can switch on a hyphenated campaign. The appsettings.json default sits
+        // underneath it, as it does in the real host.
+        var config = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: false)
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Email:Campaigns:monthly_recap:Enabled"] = "true" })
+            .Build();
+
+        var o = config.GetSection(EmailOptions.SectionName).Get<EmailOptions>()!;
+
+        Assert.True(o.IsCampaignEnabled("monthly-recap"));
+        Assert.False(o.IsCampaignEnabled("printer-silent"));
+        Assert.Null(Failure(o));
+    }
+
+    [Fact]
+    public void HyphenatedCampaignKey_Fails()
+    {
+        var o = Valid();
+        o.Campaigns["monthly-recap"] = new CampaignOptions { Enabled = true };
+        Assert.Contains("Campaigns:monthly_recap", Failure(o));
     }
 }
