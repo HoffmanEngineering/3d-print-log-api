@@ -21,6 +21,7 @@ using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
+using PrintLogApi.Email;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
@@ -269,6 +270,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
+        services.AddEmail(Configuration);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
             options.Host = Configuration["ExternalProviders:Smtp:Host"];

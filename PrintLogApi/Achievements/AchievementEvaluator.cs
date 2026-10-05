@@ -1,7 +1,6 @@
-﻿using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Achievements.Metrics;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 
@@ -76,7 +75,7 @@ public sealed class AchievementEvaluator(
         {
             await PersistAsync(user, missing, held, retroactive, catchUp ? targetVersion : null, nowUtc, ct);
         }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        catch (DbUpdateException ex) when (UniqueConstraintViolation.IsUniqueViolation(ex))
         {
             // A concurrent pass (another instance, or one that bypassed the lock) committed at
             // least one of these tiers first, and the database rejected the whole batch. Start
@@ -96,7 +95,7 @@ public sealed class AchievementEvaluator(
             {
                 await PersistAsync(user, missing, held, retroactive, catchUp ? targetVersion : null, nowUtc, ct);
             }
-            catch (DbUpdateException retryEx) when (IsUniqueViolation(retryEx))
+            catch (DbUpdateException retryEx) when (UniqueConstraintViolation.IsUniqueViolation(retryEx))
             {
                 DetachAdded();
                 logger.LogWarning(retryEx, "Achievement grants for user {UserId} conflicted twice; leaving them to reconciliation", userId);
@@ -189,12 +188,4 @@ public sealed class AchievementEvaluator(
             entry.State = EntityState.Detached;
         }
     }
-
-    private static bool IsUniqueViolation(DbUpdateException ex) => ex.InnerException switch
-    {
-        SqlException sql => sql.Number is 2601 or 2627,
-        // SQLITE_CONSTRAINT_UNIQUE; the test database's equivalent.
-        SqliteException sqlite => sqlite.SqliteExtendedErrorCode == 2067,
-        _ => false,
-    };
 }
