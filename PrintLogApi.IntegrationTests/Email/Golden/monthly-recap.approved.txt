@@ -1,0 +1,28 @@
+Hi Ada,
+
+Here's how your November went.
+
+- 12 prints (up 50% vs October)
+- 42h of print time (down 12% vs October)
+- 92% successful
+- 1.2 kg of filament
+- $18.40 in material and power
+
+Busiest printer: Voron 2.4
+Most-used material: Galaxy Black PETG
+Longest print: Helmet (9h)
+
+Badges earned in November:
+- Prolific Printer (Silver PLA)
+- Marathon (Bronze PLA)
+
+See your full stats: https://www.3dprintlog.test/analytics
+
+Tip: Track your spools in Materials and see how much filament is left on each.
+Open Materials: https://www.3dprintlog.test/materials
+
+--
+You're receiving this because of a test.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB
+PO Box 0, Testville, USA
