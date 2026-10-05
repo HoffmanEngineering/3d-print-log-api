@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using PrintLogApi.Email.Events;
 using PrintLogApi.Email.Outbox;
 using PrintLogApi.Email.Templates;
 using PrintLogApi.Email.Tokens;
@@ -29,6 +30,11 @@ public static class EmailServiceCollectionExtensions
         services.AddHostedService<CampaignEvaluatorService>();
         services.AddScoped<EmailDispatcher>();
         services.AddHostedService<EmailDispatcherService>();
+
+        services.AddScoped<IEmailSuppressionService, EmailSuppressionService>();
+        services.AddScoped<SesEventProcessor>();
+        services.AddSingleton<ISnsMessageVerifier, SnsMessageVerifier>();
+        services.AddHttpClient(EmailEventsConstants.SnsHttpClient, c => c.Timeout = TimeSpan.FromSeconds(10));
 
         return services;
     }
