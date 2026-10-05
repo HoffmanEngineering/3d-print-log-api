@@ -123,6 +123,14 @@ public class McpPrinterValidationTests
         McpPrinterValidation.RequireClearableFields(new HashSet<string>(McpPrinterValidation.ClearableFields));
     }
 
+    [Fact]
+    public void RequireClearableFields_RejectsCaseMismatchedField()
+    {
+        var ex = Assert.Throws<McpToolException>(
+            () => McpPrinterValidation.RequireClearableFields(new HashSet<string> { "Description" }));
+        Assert.Equal("invalid_arguments", ex.Code);
+    }
+
     // Identity and the category are not clearable: a printer with no make, or no category, is
     // not a state MCP will create.
     [Theory]

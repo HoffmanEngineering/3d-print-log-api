@@ -55,6 +55,13 @@ public class McpWriteValidationTests
                 () => McpWriteValidation.RequireAllowedClearFields(new[] { "bogus" }, ClearAllowed)).Code);
 
     [Fact]
+    public void ClearFields_RejectsCaseMismatchedPrintField() =>
+        Assert.Equal("invalid_arguments",
+            Assert.Throws<McpToolException>(
+                () => McpWriteValidation.RequireAllowedClearFields(
+                    new[] { "FileName" }, PrintLogWriteTools.ClearablePrintFields)).Code);
+
+    [Fact]
     public void ClearFields_NormalizesDedupes()
     {
         var r = McpWriteValidation.RequireAllowedClearFields(new[] { " fileName ", "url", "url" }, ClearAllowed);

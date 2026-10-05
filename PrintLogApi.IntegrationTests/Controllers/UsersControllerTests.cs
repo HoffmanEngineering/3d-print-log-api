@@ -487,6 +487,22 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task PostProfileImage_WithUppercaseContentType_ReturnsSuccess()
+    {
+        var imageContent = CreateTestImageContent();
+        imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("IMAGE/JPEG");
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Users/me/profile-image");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var formContent = new MultipartFormDataContent();
+        formContent.Add(imageContent, "image", "uppercase-content-type.jpg");
+        request.Content = formContent;
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task PostProfileImage_Authenticated_ReturnsUrlDto()
     {
         // Arrange

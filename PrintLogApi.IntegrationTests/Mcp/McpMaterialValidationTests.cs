@@ -112,6 +112,14 @@ public class McpMaterialValidationTests
     }
 
     [Fact]
+    public void RequireClearableFields_RejectsCaseMismatchedField()
+    {
+        var ex = Assert.Throws<McpToolException>(() => McpMaterialValidation.RequireClearableFields(
+            new HashSet<string> { "Brand" }));
+        Assert.Equal("invalid_arguments", ex.Code);
+    }
+
+    [Fact]
     public void RequireClearableFields_AcceptsClearableNames()
     {
         McpMaterialValidation.RequireClearableFields(new HashSet<string> { "notes", "brand", "colors" });

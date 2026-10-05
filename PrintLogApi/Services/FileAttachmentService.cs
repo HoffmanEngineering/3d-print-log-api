@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Collections.Frozen;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
@@ -12,7 +13,10 @@ public class FileAttachmentService(
 {
     private const string AttachmentContainer = "printattachments";
     private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200MB
-    private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj" };
+    private static readonly FrozenSet<string> AllowedExtensions = new[]
+    {
+        ".gcode", ".stl", ".3mf", ".obj",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public async Task<GetUploadUrlResponse> GetUploadUrlAsync(long printId, long userId, GetUploadUrlRequest request)
     {
@@ -202,9 +206,9 @@ public class FileAttachmentService(
     private static void AssertAllowedExtension(string? fileName)
     {
         var ext = GetExtension(fileName).ToLowerInvariant();
-        if (!Array.Exists(AllowedExtensions, e => e == ext))
+        if (!AllowedExtensions.Contains(ext))
             throw new BadRequestException(
-                $"File type '{ext}' is not supported. Allowed: {string.Join(", ", AllowedExtensions)}");
+                $"File type '{ext}' is not supported. Allowed: .gcode, .stl, .3mf, .obj");
     }
 
     private static string GetExtension(string? fileName)
