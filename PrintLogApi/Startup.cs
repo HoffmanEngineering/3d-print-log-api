@@ -259,6 +259,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // Who and how, on every item; then drop the rows that only ever say "still polling".
         // See each type's remarks for the numbers behind them.
         services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
+        services.AddSingleton<ITelemetryInitializer, EmailTokenRedactionInitializer>();
         services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
         if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
         {
@@ -300,6 +301,12 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 }
                 return System.Threading.Tasks.ValueTask.CompletedTask;
             };
+            // Email endpoints (spec §6.8): a per-token budget, a webhook budget, and a ceiling
+            // across all /api/email callers. All read Email:RateLimits; 0 disables, as in tests.
+            options.AddPolicy<string, EmailRateLimiting.TokenPolicyImpl>(EmailRateLimiting.TokenPolicy);
+            options.AddPolicy<string, EmailRateLimiting.EventsPolicyImpl>(EmailRateLimiting.EventsPolicy);
+            options.GlobalLimiter = EmailRateLimiting.CreateGlobalLimiter(Configuration);
+
             options.AddPolicy("mcp", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: httpContext.User.GetUserId()?.ToString() ?? "anon",
@@ -886,7 +893,17 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         app.UseEndpoints(endpoints =>
         {
-            endpoints.MapControllers().RequireRateLimiting("api");
+            // The "api" policy for every controller that does not name its own. A convention
+            // runs after the controller's attributes, and the limiter reads the LAST
+            // [EnableRateLimiting] it finds, so applying "api" unconditionally would silently
+            // replace an endpoint's own policy (EmailController's per-token budget).
+            endpoints.MapControllers().Add(endpoint =>
+            {
+                if (!endpoint.Metadata.OfType<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>().Any())
+                {
+                    endpoint.Metadata.Add(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("api"));
+                }
+            });
 
             // Liveness: the path to configure under App Service > Monitoring > Health check.
             // Plain text, no dependencies — see ConfigureHealthChecks for why it stays shallow.
