@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
-using PrintLogApi.Email;
+﻿using PrintLogApi.Email;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Email;
