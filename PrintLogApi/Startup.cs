@@ -21,6 +21,7 @@ using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
 using PrintLogApi.Extensions;
+using PrintLogApi.Middleware;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
 using PrintLogApi.OpenApi;
@@ -63,6 +64,10 @@ public class Startup
         services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Startup).Assembly));
 
         services.AddCors();
+
+        // RFC 7807 bodies for responses that have none (#127). See ProblemDetailsStatusCodePages
+        // for what this does and, as importantly, what it leaves alone.
+        services.AddProblemDetails();
 
         ConfigureResponseCompression(services);
 
@@ -791,7 +796,17 @@ public class Startup
             builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
         });
 
+        // Both wrap routing, authentication and ApiKeyMiddleware, because that is where the
+        // body-less 404/405/401 responses come from (#127). Inside response compression, so the
+        // problem bodies are compressed like any other JSON, and inside CORS, so they carry the
+        // CORS headers a browser needs to read them. Neither touches /mcp.
+        app.UseProblemDetailsStatusCodePages();
+        app.UseRestResourceMetadataChallenge();
 
+        // RFC 9728 metadata for the REST audience, which every REST 401 points at. Before
+        // UseAuthentication, or the MCP SDK's handler answers this path with the MCP document;
+        // see RestProtectedResource for that and for why REST needs a document of its own.
+        app.UseRestProtectedResourceMetadata();
 
         app.UseRouting();
 
