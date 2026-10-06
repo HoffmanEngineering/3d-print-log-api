@@ -32,6 +32,7 @@ public partial class AgentSkillTests : IClassFixture<McpDataWebApplicationFactor
     {
         McpToolException.NotFound(), McpToolException.InvalidArguments("x"),
         McpToolException.Forbidden(), McpToolException.Conflict("x"),
+        McpToolException.Unavailable("x"),
     }.Select(e => e.Code).ToHashSet();
 
     private readonly McpDataWebApplicationFactory _factory;

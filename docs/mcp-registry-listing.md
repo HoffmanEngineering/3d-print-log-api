@@ -16,7 +16,7 @@ copy). This file is the part that has to be done exactly.
 | Registry metadata | `server.json` (repo root) | `ServerJsonTests` validates it against the vendored schema, offline |
 | Registry schema | `PrintLogApi.IntegrationTests/Mcp/Registry/server.schema.2025-12-11.json` | `DeclaredSchema_IsTheVendoredSchema` fails if `$schema` moves without it |
 | Publish job | `publish-mcp-registry` in `.github/workflows/deploy.yml` | Off unless `vars.MCP_REGISTRY_PUBLISH == 'true'` |
-| Tool annotations | `PrintLogReadTools` / `PrintLogWriteTools` | `ToolSchemaTests.EveryTool_*` |
+| Tool annotations | `PrintLogReadTools` / `PrintLogWriteTools` / `PrintLogDocsTools` | `ToolSchemaTests.EveryTool_*` |
 | ChatGPT domain check | `GET /.well-known/openai-apps-challenge` | `OpenAiAppsChallengeTests`; 404 until configured |
 
 **The server name is `com.3dprintlog/printlog`.** #128 proposed `com.3dprintlog/mcp`; the existing
@@ -25,9 +25,16 @@ name was kept because the UI's server card (`/.well-known/mcp/server-card.json`,
 permanent once used. `printlog` names the product, which reads better in a client's server list than
 a second "mcp".
 
-**The description is the 91-character one the UI card uses.** The registry caps `description` at
+**The description is the 97-character one the UI card uses.** The registry caps `description` at
 100 characters, and the original 230-character text would have been rejected at publish time.
 The longer copy belongs in the directory listings, which allow 2,000 (Claude) and 4,000 (ChatGPT).
+Listing version 1.1.0 changed it to mention the docs tools (#129).
+
+**The anonymous docs server, `https://api.3dprintlog.com/mcp/docs`, is not a second registry
+entry.** It serves a subset of this server's tools (the docs ones, which `/mcp` also has), so a
+client that installs this listing already gets the docs. A `remotes` entry would be wrong: clients
+treat every remote as the same server, and one that picked `/mcp/docs` would never see the data
+tools. The UI's server card advertises it as a second endpoint instead.
 
 ## Versioning
 

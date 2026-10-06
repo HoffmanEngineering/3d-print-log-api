@@ -252,6 +252,28 @@ public class Startup
                         QueueLimit = 0,
                     }));
 
+            // The anonymous docs endpoint has no user to partition on. Per socket peer, with the
+            // same caveat as the anonymous "api" budget below: behind a front end that terminates
+            // the connection, callers share one bucket, so the default stays generous.
+            options.AddPolicy(Mcp.Docs.McpDocsEndpoint.RateLimitPolicy, httpContext =>
+            {
+                var limit = Configuration.GetValue("Mcp:DocsRateLimitPerMinute", 120);
+                if (limit <= 0)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("mcp-docs-unlimited");
+                }
+
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"mcp-docs:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
             // Per-caller rate limiting for the REST controllers. Two separate budgets, because
             // the two populations behave nothing alike:
             //
@@ -522,11 +544,37 @@ public class Startup
     {
         services.AddSingleton<Mcp.IMcpToolTelemetry, Mcp.McpToolTelemetry>();
 
+        // The public docs (#129): fetched from the site's Markdown twins and served on /mcp and,
+        // anonymously, on /mcp/docs. See McpDocsEndpoint for why that is a second endpoint.
+        services.Configure<Mcp.Docs.DocsOptions>(Configuration.GetSection(Mcp.Docs.DocsOptions.SectionName));
+        services.AddSingleton<Mcp.Docs.IDocsCatalog, Mcp.Docs.DocsCatalog>();
+        services.AddHttpClient(Mcp.Docs.DocsCatalog.HttpClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Accept.ParseAdd("text/markdown");
+                client.DefaultRequestHeaders.Accept.ParseAdd("text/plain;q=0.9");
+            })
+            // No redirects: the configured origin is the only host ever fetched, and a redirect
+            // is the one way a response could move a request somewhere else.
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
+
         services.AddMcpServer()
-            .WithHttpTransport(options => options.Stateless = true)
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = true;
+                options.ConfigureSessionOptions = Mcp.Docs.McpDocsEndpoint.ConfigureSessionOptions;
+            })
             .AddAuthorizationFilters()
             .WithTools<Mcp.PrintLogReadTools>()
             .WithTools<Mcp.PrintLogWriteTools>()
+            .WithTools<Mcp.Docs.PrintLogDocsTools>()
+            .WithListResourcesHandler(Mcp.Docs.McpDocsEndpoint.ListResources)
+            .WithListResourceTemplatesHandler(Mcp.Docs.McpDocsEndpoint.ListResourceTemplates)
+            .WithReadResourceHandler(Mcp.Docs.McpDocsEndpoint.ReadResource)
             .WithRequestFilters(requestFilters =>
             {
                 // Single choke point for tool errors AND telemetry: map our typed codes to safe
@@ -859,6 +907,12 @@ public class Startup
             // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
             // scope gate is applied per tool class (McpRead / McpWrite).
             endpoints.MapMcp("/mcp").RequireAuthorization("Mcp").RequireRateLimiting("mcp");
+
+            // The public docs, anonymously (#129). Same server registration, narrowed to the docs
+            // tools per request by McpDocsEndpoint.ConfigureSessionOptions; /mcp above is untouched.
+            endpoints.MapMcp(Mcp.Docs.McpDocsEndpoint.Path)
+                .AllowAnonymous()
+                .RequireRateLimiting(Mcp.Docs.McpDocsEndpoint.RateLimitPolicy);
 
             // OpenAI's domain-verification token for the ChatGPT plugin directory; 404 unless
             // configured. See OpenAiAppsChallenge and docs/mcp-registry-listing.md.

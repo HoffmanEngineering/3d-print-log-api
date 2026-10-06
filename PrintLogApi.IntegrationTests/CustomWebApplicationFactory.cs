@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Email.Outbox;
 using PrintLogApi.IntegrationTests.Mcp;
+using PrintLogApi.IntegrationTests.Mcp.Docs;
 using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Services;
 
@@ -39,6 +40,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 
     /// <summary>The recording email sender, for asserting on notifications the app sent.</summary>
     public RecordingEmailSender EmailSender => (RecordingEmailSender)Services.GetRequiredService<IEmailSender>();
+
+    /// <summary>
+    /// The docs site the MCP docs surface reads from. Every host gets it, so no test can reach
+    /// www.3dprintlog.com; unconfigured paths 404 like the real site.
+    /// </summary>
+    public DocsSiteStub DocsSite { get; } = new();
 
     /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
     public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
@@ -155,6 +162,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
                 // is silently ignored. Registration order puts this after Startup's Configure.
                 services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = false);
             }
+
+            // The docs surface fetches the site's Markdown twins. Point it at the stub instead.
+            services.AddHttpClient(PrintLogApi.Mcp.Docs.DocsCatalog.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => DocsSite.CreateHandler());
 
             // Add test authentication scheme
             services.AddAuthentication(options =>
