@@ -1,5 +1,4 @@
 ﻿using System.IO.Compression;
-using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
@@ -14,7 +13,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
 using PrintLogApi.Achievements;
 using PrintLogApi.Achievements.Triggers;
@@ -25,6 +23,7 @@ using PrintLogApi.Email;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.OpenApi;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Push;
@@ -32,7 +31,6 @@ using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using Prometheus;
-using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace PrintLogApi;
 
@@ -86,76 +84,7 @@ public class Startup
             opts.AddAchievementInterceptors(sp);
         });
 
-        services.AddSwaggerGen(c =>
-        {
-            c.SwaggerDoc("v1", new OpenApiInfo
-            {
-                Title = "3D Print Log Api",
-                Version = "v1",
-                Description = @"HTTP API powering <https://3dprintlog.com>, allowing users to manage their prints, printers, and filaments.
-
-For additional documentation, please visit <https://www.3dprintlog.com/docs/getting-started>. Please contact us at <hello@3dprintlog.com> with any questions or comments.
-
-Authentication can be done using a personal API Key. After creating an account on the 3D Print Log website, create an API key using the following:
-- Navigate to the [Personal Api Keys](https://www.3dprintlog.com/api-keys) page by clicking on your User Profile Picture at the top-left, and selecting ""Personal Api Keys"".
-- Click Create new API Key.
-- Enter a new description(such a ""API Access Key"").
-- Click Submit to generate a new key.
-- Copy the new 32 - character key.
-   - Note: The API Key cannot be retrieved after you leave the page, so copy it to a secure location, otherwise you will have to generate a new key
-
-The API key can be used either by adding a **X-Api-Key header** with the key, or by including a **api_key query param** to each request.
-",
-                Contact = new OpenApiContact
-                {
-                    Email = "hello@3dprintlog.com",
-                    Name = "Christopher Hoffman",
-                    Url = new Uri("https://www.hoffman.engineering")
-                }
-            });
-
-            c.CustomOperationIds(apiDesc =>
-            {
-                return apiDesc.TryGetMethodInfo(out MethodInfo methodInfo) ? methodInfo.Name : null;
-            });
-
-            c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
-            {
-                Type = SecuritySchemeType.OAuth2,
-                Flows = new OpenApiOAuthFlows
-                {
-                    Implicit = new OpenApiOAuthFlow
-                    {
-                        AuthorizationUrl = new Uri($"https://{Configuration["Auth0:Domain"]}/authorize"),
-
-                        Scopes = new Dictionary<string, string>
-                        {
-                            {"api1", "Demo API - full access"}
-                        }
-                    }
-                },
-                In = ParameterLocation.Header,
-                Scheme = "bearer",
-                BearerFormat = "JWT"
-            });
-
-            c.AddSecurityDefinition("apikey", new OpenApiSecurityScheme
-            {
-                Type = SecuritySchemeType.ApiKey,
-
-                In = ParameterLocation.Header,
-                Name = "X-Api-Key"
-            });
-
-            c.OperationFilter<AuthorizeCheckOperationFilter>();
-
-            var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-            c.IncludeXmlComments(xmlPath, true);
-
-            c.CustomSchemaIds(type => type.ToString());
-
-        });
+        services.AddPrintLogOpenApi(Configuration);
 
         services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
 
@@ -876,17 +805,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         JsonWebTokenHandler.DefaultMapInboundClaims = true;
         JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
-        // Enable middleware to serve generated Swagger as a JSON endpoint.
-        app.UseSwagger();
-
-        // Enable middleware to serve swagger-ui (HTML, JS, CSS, etc.),
-        // specifying the Swagger JSON endpoint.
-        app.UseSwaggerUI(c =>
-        {
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
-            c.OAuthClientId(Configuration["Auth0:SwaggerClientId"]);
-            c.OAuthAdditionalQueryStringParams(new Dictionary<string, string>() { { "audience", "https://dev.3dprintlog.com/api" } });
-        });
+        app.UsePrintLogOpenApi(Configuration);
 
         app.UseMetricServer();
         app.UseHttpMetrics();
@@ -926,56 +845,5 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             endpoints.MapMcp("/mcp").RequireAuthorization("Mcp").RequireRateLimiting("mcp");
         });
 
-    }
-}
-
-public class AuthorizeCheckOperationFilter : IOperationFilter
-{
-    public void Apply(OpenApiOperation operation, OperationFilterContext context)
-    {
-        var hasAuthorize =
-          // DeclaringType is never null for a controller action method.
-          context.MethodInfo.DeclaringType!.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
-          || context.MethodInfo.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any();
-
-        if (hasAuthorize)
-        {
-            if (!operation.Responses.Any(kvp => kvp.Key == "401"))
-            {
-                operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
-            }
-
-            if (!operation.Responses.Any(kvp => kvp.Key == "403"))
-            {
-                operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
-            }
-
-
-            operation.Security = new List<OpenApiSecurityRequirement>
-        {
-            new OpenApiSecurityRequirement
-            {
-                [
-                    new OpenApiSecurityScheme {Reference = new OpenApiReference
-                    {
-                        Type = ReferenceType.SecurityScheme,
-                        Id = "oauth2"}
-                    }
-                ] = new[] {"api1"}
-            },
-            new OpenApiSecurityRequirement
-            {
-                [
-                    new OpenApiSecurityScheme {
-                        Reference = new OpenApiReference
-                    {
-                        Type = ReferenceType.SecurityScheme,
-                        Id = "apikey"}
-                    }
-                ] = new[] {"api1"}
-            }
-        };
-
-        }
     }
 }

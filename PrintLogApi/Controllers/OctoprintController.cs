@@ -29,10 +29,16 @@ public class OctoprintController(
     private const string printImageContainerName = BlobContainers.PrintImages;
 
     /// <summary>
-    /// Webhook endpoint for the Octoprint Webhooks plugin. Takes in webhook data and uses that to create or 
-    /// update prints based on the statuses sent by Octoprint. See https://www.3dprintlog.com/docs/octoprint-webhookOctoprint 
-    /// Webhook Docs for more information.
+    /// Receive a print event from the OctoPrint Webhooks plugin.
     /// </summary>
+    /// <remarks>
+    /// Called by the OctoPrint-Webhooks plugin, not by hand. Set it up as described at
+    /// https://www.3dprintlog.com/docs/octoprint-webhook, authenticating with a personal API key.
+    ///
+    /// The body is form data. `deviceIdentifier` must be the id of one of the caller's printers. A
+    /// `Print Started` event creates a print in the Printing status. `Print Done` marks it Success,
+    /// and `Print Failed` or `Error` mark it Failed.
+    /// </remarks>
     /// <param name="data">The wehbook data sent by Octoprint.</param>
     /// <response code="200">Returned if the webhook was handled successfully.</response>
     /// <response code="400">Returned if required data is missing in the webhook (like the DeviceIdentifier, etc).</response>

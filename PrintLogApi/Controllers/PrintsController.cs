@@ -47,10 +47,16 @@ public class PrintsController(
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
     /// <summary>
-    ///     Get a paged list of Print Summary information for a user. 
-    ///     If no userId is provided, then all prints for the currently authenticated user will be queried.
-    ///     Otherwise, if a userId is provided, then only the user's public prints will be returned.
+    /// List prints, paged, with optional search, filters and sorting.
     /// </summary>
+    /// <remarks>
+    /// Without `userId`, lists the authenticated user's own prints. With `userId`, lists that user's
+    /// public prints, and needs no credentials. Results are paged with `pageNumber` (from 1) and
+    /// `pageSize` (default 10).
+    ///
+    /// Statuses are integers: `1` Pending, `2` Printing, `3` Success, `4` Cancelled, `5` Failed,
+    /// `6` PartialSuccess. `fromDate` and `toDate` must be supplied together.
+    /// </remarks>
     /// <param name="pagingRequest">The paging request.</param>
     /// <param name="searchText">Optionally search for text in a print's title or notes.</param>
     /// <param name="filterByPrinterIds">Optionally filter by specific printer ids.</param>
@@ -213,8 +219,12 @@ public class PrintsController(
     }
 
     /// <summary>
-    ///     Get a print's detailed information by print id.
+    /// Get a print's full detail by id.
     /// </summary>
+    /// <remarks>
+    /// Public and unlisted prints can be read without credentials; a private print only by its creator.
+    /// Durations are in seconds and filament amounts in milligrams.
+    /// </remarks>
     /// <param name="id">The id of a print to query</param>
     /// <returns></returns>
     /// <response code="200">Returns the Print's Detailed information.</response>
@@ -305,9 +315,12 @@ public class PrintsController(
 
 
     /// <summary>
-    ///     Update a print with new detailed information. All data is overridden with the details provided, no partial-patching is done. Last-request wins.
-    ///     Normally GetPrintById is used to retrieve the current version, then fields are modified before PUT to this endpoint.
+    /// Replace a print's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole print rather than patching it: read the print with `GET /api/Prints/{id}`,
+    /// change the fields you need, and send the whole object back. The last request wins.
+    /// </remarks>
     /// <param name="id">The ID of the print to update.</param>
     /// <param name="printDTO">The new print detail information.</param>
     /// <response code="200">The newly-updated Print Detail information.</response>
@@ -369,6 +382,10 @@ public class PrintsController(
     /// <summary>
     ///   Update a print with a new PrintStatus.
     /// </summary>
+    /// <remarks>
+    /// Changes only the status, leaving every other field as it is. Statuses: `1` Pending,
+    /// `2` Printing, `3` Success, `4` Cancelled, `5` Failed, `6` PartialSuccess.
+    /// </remarks>
     /// <param name="id">The ID of the print to update.</param>
     /// <param name="newStatus">The new Print Status.</param>
     /// <response code="200">The updated Print Detail information.</response>
@@ -518,6 +535,12 @@ public class PrintsController(
     /// <summary>
     ///    Create a new Print.
     /// </summary>
+    /// <remarks>
+    /// `title` is required, and `printerId` is the id of one of the caller's printers. Durations are
+    /// in seconds and filament amounts in milligrams. `status` is an integer (`1` Pending,
+    /// `2` Printing, `3` Success, `4` Cancelled, `5` Failed, `6` PartialSuccess), and `viewStatus`
+    /// is `1` Public, `2` Unlisted or `3` Private.
+    /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
     /// <response code="400">Returned if the new Print is not valid. Inspect Problem Details object for message as to what failed validation.</response>

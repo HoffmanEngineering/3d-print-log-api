@@ -83,5 +83,20 @@ jobs:
       - name: Verify EF model matches migrations
         run: dotnet tool run dotnet-ef migrations has-pending-model-changes --project PrintLogApi --no-build --configuration Release
 
+      # OPENAPI_DOCUMENT_OUTPUT makes OpenApiDocumentTests write the generated document, so the
+      # lint below reads exactly what the app serves rather than a copy that could drift.
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+        env:
+          OPENAPI_DOCUMENT_OUTPUT: ${{ runner.temp }}/openapi.json
+
+      # Agents build function-calling tools from this document, and production once served an
+      # invalid one (duplicate operationIds, illegal component names; #126). Fails on errors only;
+      # warnings are reported. A missing file fails too, so a renamed test cannot skip this.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Lint OpenAPI document
+        run: npx --yes @redocly/cli@2.58.2 lint "${{ runner.temp }}/openapi.json"

@@ -30,10 +30,16 @@ public class MoonrakerController(
     ICacheVersionService cacheVersionService) : ControllerBase
 {
     /// <summary>
-    /// Webhook endpoint for the Moonraker. Takes in webhook data and uses that to create or 
-    /// update prints based on the statuses sent by Moonraker. See https://www.3dprintlog.com/docs/klipper Moonraker 
-    /// Webhook Docs for more information.
+    /// Receive a print event from Moonraker (Klipper).
     /// </summary>
+    /// <remarks>
+    /// Called by Moonraker's notifier on a Klipper printer, not by hand. Set it up as described at
+    /// https://www.3dprintlog.com/docs/klipper, authenticating with a personal API key.
+    ///
+    /// The body is Moonraker's JSON notification, whose `message` field carries the print event.
+    /// `started` creates a print in the Printing status. `complete` marks that print Success, and
+    /// `cancelled` or `error` mark it Failed.
+    /// </remarks>
     /// <see cref="PrintEventDto"/>
     /// <see cref="PrintEventMessageDto"/>
     /// <param>The body of the Post Request contains <see cref="PrintEventDto"/></param>
