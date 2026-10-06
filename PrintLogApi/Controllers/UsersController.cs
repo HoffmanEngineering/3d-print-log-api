@@ -43,7 +43,7 @@ public class UsersController(
     /// <returns></returns>
     [HttpGet("{id}/summary")]
     [AllowAnonymous]
-    public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
+    public async Task<ActionResult<UserSummaryDto>> GetUserSummary(long id)
     {
         var user = await context.Users
             .Where(u => u.Id == id)

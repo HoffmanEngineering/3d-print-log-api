@@ -34,8 +34,12 @@ public class FilamentsController(
     private const int MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
-    /// Gets a Paged Result of filament summaries for the current user.
+    /// List the current user's filaments, paged.
     /// </summary>
+    /// <remarks>
+    /// These are the user's filament spools, which the web app calls *materials*. Use a filament's
+    /// `id` in a print's `filamentUsage` to record what the print consumed. Weights are in milligrams.
+    /// </remarks>
     /// <param name="pagingRequest">The paging request information.</param>
     /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
     /// <param name="searchText">Search filament's name/description/brand for text.</param>
@@ -122,8 +126,12 @@ public class FilamentsController(
     }
 
     /// <summary>
-    /// Update an existing filament with new information.
+    /// Replace a filament's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole filament rather than patching it: read it with `GET /api/Filaments/{id}`,
+    /// change the fields you need, and send the whole object back.
+    /// </remarks>
     /// <param name="id">The GUID of the filament to update.</param>
     /// <param name="filamentDto">The updated filament details.</param>
     /// <returns>The updated filament.</returns>
@@ -179,6 +187,10 @@ public class FilamentsController(
     /// <summary>
     ///     Create a new Filament for the current user.
     /// </summary>
+    /// <remarks>
+    /// `source` says how the starting amount was measured: `1` Weight, `2` Length or `3` Volume. The
+    /// other two are derived from it where the density and diameter allow. Weights are in milligrams.
+    /// </remarks>
     /// <param name="filamentDto">The dto containing all of the details for the filament to create.</param>
     /// <returns>The filament detail DTO that was created.</returns>
     /// <response code="201">The filament detail DTO that was created.</response>

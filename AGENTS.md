@@ -443,6 +443,27 @@ Two non-obvious facts, both verified rather than assumed:
   on the context is not what enables that; it only keeps `Default.Options` from being PascalCase
   for anyone serializing through the context directly.
 
+## OpenAPI document
+
+`/swagger/v1/swagger.json` is generated in `OpenApi/OpenApiSetup.cs` (#126). Agents turn it into
+function-calling tools, so it has to be valid OpenAPI. CI lints it with Redocly: `OpenApiDocumentTests`
+writes the document to `$OPENAPI_DOCUMENT_OUTPUT`, and the next step lints that file.
+
+- **Operation ids are `{Controller}_{Action}`.** Bare method names collided across controllers
+  (`GetMaterials` on five of them). Two actions with the same name in one controller still collide,
+  and the test names them.
+- **`servers` comes from `OpenApi:ServerUrl`.** `appsettings.json` holds the production URL. The local
+  environments blank it, which falls back to the request's origin. Without that blank, Swagger UI's
+  "Try it out" sends local requests to production. A local `appsettings.Development.json` copied
+  from an old example needs the blank added.
+- **The `oauth2` scheme lists no data scopes, on purpose.** REST tokens (audience
+  `Auth0:ApiIdentifier`) are checked for audience only. `read:printdata`/`write:printdata` exist
+  only on the MCP audience. Listing them here would describe a check the API does not make. Add
+  them when REST starts enforcing them.
+- **Security requirements come from each endpoint's own authorization metadata.** `[AllowAnonymous]`
+  adds an empty requirement, and `InteractiveUserOnly` drops the API-key schemes. Don't hand-edit
+  them per operation.
+
 ## Integration Testing
 
 `WebApplicationFactory` over an in-memory SQLite database. See

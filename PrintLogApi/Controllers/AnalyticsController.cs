@@ -87,6 +87,19 @@ public class AnalyticsController(
             cancellationToken: HttpContext.RequestAborted);
     }
 
+    /// <summary>
+    /// Get headline totals (print count, success rate, filament, print time and cost) and prints by status over time.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">The overview figures for the filtered window.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("overview")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -96,6 +109,19 @@ public class AnalyticsController(
         Cached("overview", filter, (sp, userId, f, token) =>
             sp.GetRequiredService<IAnalyticsService>().GetOverview(userId, f, token));
 
+    /// <summary>
+    /// Get print activity over time: print count, print time, material and cost per period, a calendar of print days, streaks, and when prints start.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">The activity series and calendar for the filtered window.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("activity")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -105,6 +131,19 @@ public class AnalyticsController(
         Cached("activity", filter, (sp, userId, f, token) =>
             sp.GetRequiredService<IActivityAnalyticsService>().GetActivity(userId, f, token));
 
+    /// <summary>
+    /// Get per-printer usage, success rate and maintenance for the filtered window, including idle printers.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">One row per printer, with a usage series and maintenance events.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("printers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -114,6 +153,19 @@ public class AnalyticsController(
         Cached("printers", filter, (sp, userId, f, token) =>
             sp.GetRequiredService<IPrinterAnalyticsService>().GetPrinters(userId, f, token));
 
+    /// <summary>
+    /// Get material consumption by material type, brand and color, the most-used spools, how long each spool will last, and waste.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">Material usage for the filtered window.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("materials")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -123,6 +175,19 @@ public class AnalyticsController(
         Cached("materials", filter, (sp, userId, f, token) =>
             sp.GetRequiredService<IMaterialAnalyticsService>().GetMaterials(userId, f, token));
 
+    /// <summary>
+    /// Get print spending split into filament, electricity and maintenance, grouped by material type and brand, with the cost of failed prints.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">Cost totals, groups and series for the filtered window.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("costs")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -132,6 +197,19 @@ public class AnalyticsController(
         Cached("costs", filter, (sp, userId, f, token) =>
             sp.GetRequiredService<ICostAnalyticsService>().GetCosts(userId, f, token));
 
+    /// <summary>
+    /// Compare slicer time and material estimates with what prints actually used, by printer, by material and over time.
+    /// </summary>
+    /// <remarks>
+    /// Covers the authenticated user's own prints only. Every analytics endpoint takes the same
+    /// filter: a half-open <c>fromDate</c>/<c>toDate</c> range (omit both for all time), an IANA
+    /// <c>timeZone</c> for bucketing (default UTC), optional <c>printerIds</c>,
+    /// <c>filamentIds</c>, <c>projectIds</c> and <c>statuses</c>, a <c>granularity</c>
+    /// (Auto, Day, Week or Month) and <c>comparePrevious</c> to add the preceding window of the
+    /// same length. Ids the caller does not own match nothing.
+    /// </remarks>
+    /// <response code="200">Estimate accuracy overall, by printer and over time.</response>
+    /// <response code="400">The filter is invalid, for example a one-sided or reversed date range.</response>
     [HttpGet("accuracy")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

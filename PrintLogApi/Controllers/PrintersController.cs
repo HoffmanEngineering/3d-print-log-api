@@ -36,8 +36,12 @@ public class PrintersController(
     private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
 
     /// <summary>
-    /// Get an array of paged Printer Summaries for current user.
+    /// List the current user's printers.
     /// </summary>
+    /// <remarks>
+    /// Inactive printers are left out unless `includeInactive=true`. Use a printer's `id` as the
+    /// `printerId` when creating a print.
+    /// </remarks>
     /// <param name="pagingRequest">Paging information</param>
     /// <param name="searchText">Filter printers by name, make, and model.</param>
     /// <param name="includeInactive">By default, only returns active printers. Set this to true to return both active and inactive printers.</param>
@@ -198,8 +202,11 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Update a printer. Overwrites all properties of the printer.
+    /// Replace a printer's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole printer rather than patching it: send every field, not only the changed ones.
+    /// </remarks>
     /// <param name="id">The ID of the printer to update.</param>
     /// <param name="printer">The updated printer details.</param>
     /// <returns></returns>
