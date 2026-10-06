@@ -2,13 +2,13 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.3dprintlog/printlog",
   "title": "3D Print Log",
-  "description": "Log and query your 3D prints, printers, filament inventory, and projects on 3dprintlog.com.",
+  "description": "Log and query 3D prints, printers, filament, and projects on 3dprintlog.com, and search its docs.",
   "websiteUrl": "https://www.3dprintlog.com/docs/mcp",
   "repository": {
     "url": "https://github.com/HoffmanEngineering/3d-print-log-api",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "remotes": [
     {
       "type": "streamable-http",

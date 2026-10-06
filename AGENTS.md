@@ -404,6 +404,33 @@ No hard-delete tools. Every write invalidates `ICacheVersionService` after commi
 See the `adding-an-mcp-tool` skill before adding or changing a tool — it carries the checklist, the
 domain rules, and the known gaps.
 
+### Docs over MCP (#129)
+
+The public user docs are served as three tools (`search_docs`, `list_docs`, `get_doc`) and as
+`docs://<slug>` resources, on `/mcp` **and** anonymously on `/mcp/docs`. Code: `Mcp/Docs/`.
+
+- **`/mcp/docs` is a second endpoint, not anonymous access on `/mcp`.** A client starts OAuth only
+  when its first request gets a 401. Letting an unauthenticated `initialize` through on `/mcp` would
+  leave a new client connected, unauthenticated and seeing only the docs, with nothing prompting it to
+  sign in. `McpDocsEndpointTests` pins `/mcp`'s 401 byte for byte.
+- **One server registration, narrowed per request.** `McpDocsEndpoint.ConfigureSessionOptions`
+  replaces the tool collection with the `[PublicDocsTools]` classes when the path is `/mcp/docs`.
+  The SDK hands that callback a fresh options instance on every stateless request, so it cannot
+  leak into `/mcp`; a test proves `/mcp` keeps its tools after a docs call. The data tools keep their
+  `[Authorize]` policies as the second layer. **Never put a user-scoped service in a
+  `[PublicDocsTools]` class.**
+- **The content is fetched, never copied.** `DocsCatalog` reads `/docs/llms.txt` and each
+  `/docs/<slug>.md` twin from `Docs:BaseUrl` (the UI generates them in `scripts/docs-twins.mjs`).
+  Each fetch is rebuilt from that origin and a slug that passed the slug rule, never from the
+  index's link text; redirects are off and bodies are size-capped. A failed or partial load is kept
+  for `Docs:FailureCacheMinutes`, a complete one for `Docs:CacheMinutes`, in a field rather than
+  `IMemoryCache` (reasoning at the class).
+- **A missing site degrades, it does not fail.** Empty resource list, `unavailable` from the tools,
+  host starts normally. Every test host routes the `Docs` HTTP client to `DocsSiteStub`, which
+  404s anything unseeded, so no test reaches the network.
+- Rate-limited per client address (`Mcp:DocsRateLimitPerMinute`), since there is no user to
+  partition on.
+
 ### Registry listing (`server.json`)
 
 `server.json` at the repo root is the official MCP Registry entry, published by the

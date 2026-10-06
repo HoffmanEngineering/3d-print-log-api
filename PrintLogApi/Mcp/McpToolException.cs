@@ -25,4 +25,11 @@ public sealed class McpToolException : Exception
 
     public static McpToolException Conflict(string message) =>
         new("conflict", message);
+
+    /// <summary>
+    /// A dependency outside this API (the docs site) could not be read. Retrying later can
+    /// succeed, unlike every other code here.
+    /// </summary>
+    public static McpToolException Unavailable(string message) =>
+        new("unavailable", message);
 }

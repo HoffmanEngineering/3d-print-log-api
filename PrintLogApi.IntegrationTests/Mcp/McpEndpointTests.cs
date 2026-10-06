@@ -78,20 +78,24 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         // A read-only token sees ONLY the read surface: the SDK's authorization filter hides the
         // write tools (which require write:printdata) from tools/list. See McpWriteSurfaceTests
-        // for the write-token view.
+        // for the write-token view. The three docs tools (#129) are public and appear for every
+        // token; McpDocsEndpointTests covers the anonymous /mcp/docs view.
         Assert.Equal(
             new[]
             {
                 "find_material",
+                "get_doc",
                 "get_material",
                 "get_material_inventory",
                 "get_print",
                 "get_print_summary",
                 "get_printer",
                 "get_printer_stats",
+                "list_docs",
                 "list_printers",
                 "list_projects",
                 "ping",
+                "search_docs",
                 "search_prints",
             },
             tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());

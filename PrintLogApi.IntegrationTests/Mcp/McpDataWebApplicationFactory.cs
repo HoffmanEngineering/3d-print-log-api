@@ -42,6 +42,27 @@ public class McpDataWebApplicationFactory : CustomWebApplicationFactory
         return await McpClient.CreateAsync(transport);
     }
 
+    /// <summary>
+    /// An MCP client on <paramref name="path"/> with no token, or with <paramref name="bearer"/>.
+    /// For the anonymous docs endpoint, and for proving what an unauthenticated client gets.
+    /// </summary>
+    public async Task<McpClient> ConnectToAsync(string path, string? bearer = null)
+    {
+        var httpClient = CreateClient();
+        if (bearer is not null)
+        {
+            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        }
+        var transport = new HttpClientTransport(
+            new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(httpClient.BaseAddress!, path),
+                TransportMode = HttpTransportMode.StreamableHttp,
+            },
+            httpClient);
+        return await McpClient.CreateAsync(transport);
+    }
+
     /// <summary>Returns true if the tool call surfaced an error (via IsError result or McpException).</summary>
     public static async Task<bool> IsToolError(McpClient client, string tool, Dictionary<string, object?> arguments)
     {
