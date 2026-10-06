@@ -464,6 +464,21 @@ writes the document to `$OPENAPI_DOCUMENT_OUTPUT`, and the next step lints that 
   adds an empty requirement, and `InteractiveUserOnly` drops the API-key schemes. Don't hand-edit
   them per operation.
 
+## Error responses without a body (#127)
+
+`ProblemDetailsStatusCodePages` gives every body-less 4xx/5xx an `application/problem+json` body
+(`type`, `title`, `status`, `detail`, `traceId`, nothing more), whatever the `Accept` header says.
+It only fills an empty response, so existing bodies are untouched; changing those is #73, because
+the slicer plugins parse them. Every REST 401 also gets
+`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/api"`.
+**`/mcp` is excluded from both**: its 401 header drives MCP OAuth discovery.
+
+- **REST has its own metadata document, on purpose.** The root `/.well-known/oauth-protected-resource`
+  describes the MCP audience, and the REST bearer scheme rejects MCP-audience tokens.
+- **It is served by middleware before `UseAuthentication`, not by `MapGet`.** The MCP SDK's
+  metadata handler runs inside `UseAuthentication` and answers every path under
+  `/.well-known/oauth-protected-resource` with the MCP document, so an endpoint there never runs.
+
 ## Integration Testing
 
 `WebApplicationFactory` over an in-memory SQLite database. See
