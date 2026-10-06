@@ -32,6 +32,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="NJsonSchema" />
     <PackageReference Include="xunit.v3" />
     <!-- MTP's code-coverage extension, the replacement for the coverlet.collector datacollector.
          Deliberately without PrivateAssets=all: it registers the coverage command-line options on
@@ -52,6 +53,9 @@
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->
     <None Update="Email\Golden\**\*.approved.*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The MCP Registry listing and the schema it must satisfy; see ServerJsonTests. -->
+    <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Registry\server.json" />
+    <None Update="Mcp\Registry\server.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

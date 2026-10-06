@@ -28,8 +28,11 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
    everywhere: Print/Filament/Project use `CreatedById`, **Printer uses `UserId`**. A foreign or
    missing id must surface a uniform `not_found` — never an existence oracle.
 3. **Register** any NEW service in `Startup.ConfigureServices` and inject it into the tool class.
-4. **Tool method** — `[McpServerTool, Description("…")]`. Get the user with
-   `McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User)` — **never** a tool argument.
+4. **Tool method** — `[McpServerTool(Title = "…", ReadOnly = …, Destructive = …, Idempotent = …, OpenWorld = false), Description("…")]`.
+   All four hints are explicit booleans on every tool, reads included (`ReadOnly = true,
+   Destructive = false, Idempotent = true`): OpenAI's directory review rejects an omitted hint
+   even where the MCP spec allows it. `ToolSchemaTests` fails on a missing or contradictory one.
+   Get the user with `McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User)` — **never** a tool argument.
    Throw `McpToolException.NotFound/InvalidArguments/Forbidden/Conflict`.
 5. **Tests** — `IClassFixture<McpDataWebApplicationFactory>`. Cover creator-only isolation, each
    filter/validation rule, and invalid input → error.

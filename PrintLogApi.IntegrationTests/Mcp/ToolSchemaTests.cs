@@ -112,6 +112,59 @@ public class ToolSchemaTests : IClassFixture<McpDataWebApplicationFactory>
     }
 
     /// <summary>
+    /// OpenAI's plugin review is stricter than Anthropic's: readOnlyHint, destructiveHint and
+    /// openWorldHint must each be an explicit boolean on every tool, read tools included
+    /// (https://developers.openai.com/apps-sdk/app-submission-guidelines). The MCP spec lets a
+    /// read-only tool omit destructiveHint and idempotentHint, and the SDK then omits them from
+    /// tools/list, so a read tool written the "spec-minimal" way passes the test above and still
+    /// fails that review. idempotentHint is pinned too, so no hint is ever left to a client's
+    /// default.
+    /// </summary>
+    [Fact]
+    public async Task EveryTool_StatesEveryBehaviorHintExplicitly()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var incomplete = tools
+            .Where(t => t.ProtocolTool.Annotations is not { } a
+                        || a.ReadOnlyHint is null
+                        || a.DestructiveHint is null
+                        || a.IdempotentHint is null
+                        || a.OpenWorldHint is null)
+            .Select(t => t.Name)
+            .ToArray();
+
+        Assert.Empty(incomplete);
+    }
+
+    /// <summary>
+    /// The hints have to agree with each other, not just be present. A tool that claims to be
+    /// read-only but also destructive gets the stricter of the two treatments in one client and
+    /// the looser in another; a read is trivially safe to repeat. Every tool here is confined to
+    /// the caller's own account, so none of them is open-world.
+    /// </summary>
+    [Fact]
+    public async Task EveryTool_HintsAreConsistent()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var contradictory = tools
+            .Where(t => t.ProtocolTool.Annotations is { ReadOnlyHint: true } a
+                        && (a.DestructiveHint != false || a.IdempotentHint != true))
+            .Select(t => t.Name)
+            .ToArray();
+        var openWorld = tools
+            .Where(t => t.ProtocolTool.Annotations?.OpenWorldHint != false)
+            .Select(t => t.Name)
+            .ToArray();
+
+        Assert.Empty(contradictory);
+        Assert.Empty(openWorld);
+    }
+
+    /// <summary>
     /// A DateOnly parameter must advertise itself as a date-formatted string. If the SDK emitted
     /// it as a bare object or a full date-time, an agent would send an ISO instant and the civil
     /// date would acquire a time and an offset — the exact drift DateOnly exists to prevent.

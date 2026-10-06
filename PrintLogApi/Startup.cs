@@ -21,6 +21,7 @@ using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
 using PrintLogApi.Extensions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Middleware;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
@@ -858,6 +859,10 @@ public class Startup
             // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
             // scope gate is applied per tool class (McpRead / McpWrite).
             endpoints.MapMcp("/mcp").RequireAuthorization("Mcp").RequireRateLimiting("mcp");
+
+            // OpenAI's domain-verification token for the ChatGPT plugin directory; 404 unless
+            // configured. See OpenAiAppsChallenge and docs/mcp-registry-listing.md.
+            endpoints.MapOpenAiAppsChallenge();
         });
 
     }

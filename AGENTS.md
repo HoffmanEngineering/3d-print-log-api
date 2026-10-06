@@ -404,6 +404,21 @@ No hard-delete tools. Every write invalidates `ICacheVersionService` after commi
 See the `adding-an-mcp-tool` skill before adding or changing a tool — it carries the checklist, the
 domain rules, and the known gaps.
 
+### Registry listing (`server.json`)
+
+`server.json` at the repo root is the official MCP Registry entry, published by the
+`publish-mcp-registry` job in `deploy.yml` (off until `vars.MCP_REGISTRY_PUBLISH` is `'true'`).
+Runbook and owner steps: `docs/mcp-registry-listing.md`.
+
+- **Its `version` is the listing's, not the API's.** Registry versions are immutable and the
+  registry holds no tool list, so bump it only in a PR that changes `server.json`, and mirror
+  name/description/version in the UI's `scripts/discovery-lib.mjs`. The job fails a release whose
+  `server.json` changed without a bump rather than silently skipping it.
+- **`description` is capped at 100 characters** by the registry schema. `ServerJsonTests` validates
+  the file against the vendored schema offline; a new `$schema` means vendoring the new file.
+- **Every tool states all four behavior hints explicitly**, read tools included, or the ChatGPT
+  directory rejects the server (`ToolSchemaTests`).
+
 ## JSON serialization
 
 `PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume
