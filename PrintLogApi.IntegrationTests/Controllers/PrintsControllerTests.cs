@@ -7,6 +7,7 @@ using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
@@ -1226,6 +1227,62 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.NotNull(ids);
         Assert.True(ids.Count > 0, "Should have at least one public print");
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_ListsPublicPrintsWithTheirLastSave_OrderedById()
+    {
+        var before = DateTimeOffset.UtcNow.AddSeconds(-5);
+        var created = await CreatePrintAsync("Sitemap Lastmod Print");
+
+        var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
+
+        var entry = Assert.Single(entries, e => e.Id == created.Id);
+        Assert.NotNull(entry.LastModified);
+        Assert.Equal(TimeSpan.Zero, entry.LastModified.Value.Offset);
+        Assert.InRange(entry.LastModified.Value, before, DateTimeOffset.UtcNow.AddSeconds(5));
+        Assert.Equal(entries.Select(e => e.Id).Order(), entries.Select(e => e.Id));
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_ListsExactlyThePublicPrintIds()
+    {
+        var privatePrint = await CreatePrintAsync("Sitemap Private Print");
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.Prints
+                .Where(p => p.Id == privatePrint.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.ViewStatus, PrintViewStatus.Private), TestContext.Current.CancellationToken);
+        }
+
+        var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
+        var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public", cancellationToken: TestContext.Current.CancellationToken))!;
+
+        Assert.DoesNotContain(entries, e => e.Id == privatePrint.Id);
+        Assert.Equal(ids.Order(), entries.Select(e => e.Id).Order());
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_IsAnonymousAndSerializesCamelCase()
+    {
+        var response = await _httpClient.GetAsync("/api/Prints/public/sitemap", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("\"lastModified\":", body);
+        Assert.Contains("\"id\":", body);
+    }
+
+    [Fact]
+    public void SitemapEntry_FromUpdatedDate_DropsAnUnsetTimestamp_AndMarksARealOneUtc()
+    {
+        Assert.Null(SitemapEntryDto.FromUpdatedDate(1, DateTime.MinValue).LastModified);
+
+        var saved = new DateTime(2026, 9, 14, 8, 30, 0, DateTimeKind.Unspecified);
+        var entry = SitemapEntryDto.FromUpdatedDate(2, saved);
+
+        Assert.Equal(new DateTimeOffset(2026, 9, 14, 8, 30, 0, TimeSpan.Zero), entry.LastModified);
     }
 
     #endregion
