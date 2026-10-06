@@ -24,11 +24,11 @@ public class PrintLogReadTools(
     private long CurrentUserId =>
         McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User);
 
-    [McpServerTool(Title = "Ping", ReadOnly = true, OpenWorld = false),
+    [McpServerTool(Title = "Ping", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
      Description("Health check. Echoes the input.")]
     public string Ping([Description("Any string")] string message) => $"pong: {message}";
 
-    [McpServerTool(Title = "Search Prints", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Search Prints", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Search your own 3D prints. Use 'query' to find a print by name — it is a " +
         "case-insensitive substring match over the print title AND its project name, so 'bench' " +
         "finds 'Dual Color 3D Benchy'. Other optional filters: status, printer id, material id, " +
@@ -65,7 +65,7 @@ public class PrintLogReadTools(
             normalizedFrom, normalizedTo, query, ct);
     }
 
-    [McpServerTool(Title = "Get Print", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Get Print", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Get the details of one of your own prints by id, including a per-material breakdown of " +
         "what it used. Only the print's creator can read it; any other id (including public " +
         "prints owned by someone else) returns not found. Weights are grams, durations are " +
@@ -86,7 +86,7 @@ public class PrintLogReadTools(
         return result ?? throw McpToolException.NotFound("Print not found.");
     }
 
-    [McpServerTool(Title = "Get Material Inventory", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Get Material Inventory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "List your own filament/material inventory with remaining weight in grams, including " +
         "where each spool is stored. Material and color filters match on whole words, so 'PLA' " +
         "also finds 'PLA (Polylactic Acid)', 'PLA+' and 'Silk PLA', and 'blue' also finds " +
@@ -108,7 +108,7 @@ public class PrintLogReadTools(
             userId, validPage, validPageSize, material, color, includeInactive, ct);
     }
 
-    [McpServerTool(Name = "get_material", Title = "Get Material", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Name = "get_material", Title = "Get Material", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Get one of your own materials in full: category, density, diameter, colors, temperatures, " +
         "cure times, purchase details, notes, and capacity. Weights are grams, lengths mm, volumes " +
         "ml, temperatures °C, cure times seconds. 'sourceUnit' names the measurement the capacity " +
@@ -123,7 +123,7 @@ public class PrintLogReadTools(
         return await filamentService.GetOwnMaterialDetailForMcp(CurrentUserId, materialId, ct);
     }
 
-    [McpServerTool(Title = "Find Material", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Find Material", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Find your own filament spools matching a material and/or color, grouped by their exact " +
         "material and color. Filters match whole words, so 'PLA' also finds 'PLA+' and 'Silk PLA'. " +
         "Optionally pass requiredGrams to see which groups can supply it. " +
@@ -150,7 +150,7 @@ public class PrintLogReadTools(
         return filamentService.FindMaterialForMcp(CurrentUserId, material, color, requiredGrams, ct);
     }
 
-    [McpServerTool(Title = "Get Printer Stats", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Get Printer Stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Get per-printer statistics for your own prints: print counts, success/failure counts, " +
         "success rate percent, and total print time in seconds. Omit 'from' and 'to' for all-time " +
         "statistics; an explicit range is inclusive UTC and at most 366 days, and excludes prints " +
@@ -176,7 +176,7 @@ public class PrintLogReadTools(
             CurrentUserId, validFrom, validTo, printerId, validPage, validPageSize, ct);
     }
 
-    [McpServerTool(Title = "Get Print Summary", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Get Print Summary", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Summarize your own prints. Omit 'from' and 'to' for all-time totals, which INCLUDE " +
         "prints that have no start date (reported separately under 'undated', so that all-time " +
         "equals the sum of any exhaustive set of date ranges plus 'undated'). An explicit range " +
@@ -199,7 +199,7 @@ public class PrintLogReadTools(
         return statisticsService.GetPrintSummaryForMcp(CurrentUserId, validFrom, validTo, status, ct);
     }
 
-    [McpServerTool(Title = "List Printers", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "List Printers", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "List your own 3D printers: id, name, make, model, nozzle diameter, and whether the " +
         "printer is active. Use this to resolve a printer you refer to by name into the id that " +
         "search_prints and get_printer_stats take. Paginated (default 25, max 100).")]
@@ -214,7 +214,7 @@ public class PrintLogReadTools(
         return printerService.ListPrintersForMcp(CurrentUserId, validPage, validPageSize, ct);
     }
 
-    [McpServerTool(Title = "Get Printer", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "Get Printer", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Get the full details of one of your own printers by id: description, nozzle diameter, " +
         "bed dimensions, heated bed/chamber, wattage, and the filament spools CURRENTLY loaded " +
         "on it (spools that have been unloaded are not included). Only the printer's owner can " +
@@ -226,7 +226,7 @@ public class PrintLogReadTools(
         return printerService.GetPrinterForMcp(CurrentUserId, id, ct);
     }
 
-    [McpServerTool(Title = "List Projects", ReadOnly = true, OpenWorld = false), Description(
+    [McpServerTool(Title = "List Projects", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "List your own projects: id, name, reference, status, and visibility. Use this to resolve " +
         "a project name into the id that create_print and update_print take. Search matches name or " +
         "reference. Paginated (default 25, max 100), most-recently-updated first.")]

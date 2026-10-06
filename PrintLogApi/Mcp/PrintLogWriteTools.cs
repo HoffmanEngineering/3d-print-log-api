@@ -73,7 +73,7 @@ public class PrintLogWriteTools(
         McpWriteValidation.RequireMaxLength(row.Notes, 1000, "materials.notes");
     }
 
-    [McpServerTool(Name = "whoami", Title = "Who Am I", ReadOnly = true, OpenWorld = false),
+    [McpServerTool(Name = "whoami", Title = "Who Am I", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
      Description("Confirms write access is granted. Returns your internal user id.")]
     public long WhoAmI() => CurrentUserId;
 
