@@ -56,6 +56,14 @@
     <!-- The MCP Registry listing and the schema it must satisfy; see ServerJsonTests. -->
     <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Registry\server.json" />
     <None Update="Mcp\Registry\server.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The agent skill and the plugin manifests that bundle it; see AgentSkillTests and
+         PluginManifestTests. server.json is copied alongside so the endpoints can be compared. -->
+    <None Include="..\skills\**\*" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\skills\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\plugin.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\plugin.json" />
+    <None Include="..\mcp.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\mcp.json" />
+    <None Include="..\.claude-plugin\marketplace.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\marketplace.json" />
+    <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\server.json" />
+    <None Update="Mcp\Plugin\*.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

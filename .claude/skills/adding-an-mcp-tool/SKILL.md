@@ -1,6 +1,8 @@
 ---
 name: adding-an-mcp-tool
 description: Use when adding a read or write tool to the MCP server (PrintLogApi/Mcp/PrintLogReadTools or PrintLogWriteTools, exposed at /mcp), when choosing whether a write tool's idempotency key is required, or when an MCP tool leaks another user's data, reports wrong filament usage, advertises the wrong required fields, duplicates an entity on retry, or its integration test hangs.
+metadata:
+  internal: true
 ---
 
 # Adding an MCP Tool
@@ -36,6 +38,9 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
    Throw `McpToolException.NotFound/InvalidArguments/Forbidden/Conflict`.
 5. **Tests** — `IClassFixture<McpDataWebApplicationFactory>`. Cover creator-only isolation, each
    filter/validation rule, and invalid input → error.
+6. **Public skill** — if the tool changes how an agent should work (a new workflow, a renamed
+   parameter, a new guardrail), update `skills/3d-print-log/SKILL.md`. `AgentSkillTests` fails on
+   any tool or argument the skill names that no longer exists. See AGENTS.md for the UI mirror.
 
 ## Extra steps for a WRITE tool
 

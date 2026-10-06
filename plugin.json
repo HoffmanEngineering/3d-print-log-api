@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "3d-print-log",
+  "description": "Log and query your 3D prints, printers, filament inventory, and projects on 3dprintlog.com: the 3D Print Log MCP server plus a skill for using it well.",
+  "author": {
+    "name": "Hoffman Engineering",
+    "url": "https://www.3dprintlog.com"
+  },
+  "homepage": "https://www.3dprintlog.com/docs/mcp",
+  "repository": "https://github.com/HoffmanEngineering/3d-print-log-api",
+  "keywords": ["3d-printing", "filament", "print-log", "mcp"]
+}
