@@ -34,7 +34,7 @@ public static class OpenApiSetup
 
     private const string Description = @"HTTP API powering <https://www.3dprintlog.com>, allowing users to manage their prints, printers, and filaments.
 
-For additional documentation, please visit <https://www.3dprintlog.com/docs/getting-started>. Please contact us at <hello@3dprintlog.com> with any questions or comments.
+Authentication, scopes, errors, rate limits and which endpoints are stable are documented at <https://www.3dprintlog.com/docs/api>, and summarized for agents at <https://www.3dprintlog.com/auth.md>. For the rest of the product, see <https://www.3dprintlog.com/docs/getting-started>. Please contact us at <hello@3dprintlog.com> with any questions or comments.
 
 ## Authentication
 
@@ -58,7 +58,7 @@ The authorization code flow with PKCE, against the authorization server in the `
 
 ### AI agents
 
-Agents should prefer the MCP server at <https://api.3dprintlog.com/mcp>, which is built for tool calling and advertises its own OAuth metadata (RFC 9728).
+Agents should prefer the MCP server at <https://api.3dprintlog.com/mcp>, which is built for tool calling and advertises its own OAuth metadata (RFC 9728). See <https://www.3dprintlog.com/docs/mcp>.
 ";
 
     public static IServiceCollection AddPrintLogOpenApi(this IServiceCollection services, IConfiguration configuration)
