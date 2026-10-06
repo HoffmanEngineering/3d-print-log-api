@@ -118,6 +118,19 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
+    public async Task Description_LinksTheApiAndAuthenticationDocs()
+    {
+        // The documentation the ProblemDetails bodies and the REST protected-resource metadata
+        // point to (#127), and the agent-facing auth.md (UI #209). An agent that starts from this
+        // document should reach the same pages.
+        var document = await LoadDocument();
+
+        var description = document.GetProperty("info").GetProperty("description").GetString();
+        Assert.Contains("https://www.3dprintlog.com/docs/api", description);
+        Assert.Contains("https://www.3dprintlog.com/auth.md", description);
+    }
+
+    [Fact]
     public async Task Servers_NameTheProductionApiBaseUrl()
     {
         // IntegrationTesting inherits OpenApi:ServerUrl from appsettings.json, which is the
