@@ -12,6 +12,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using static PrintLogApi.Models.Print;
 using static PrintLogApi.Services.MeasurementUtilities;
@@ -578,6 +579,20 @@ public sealed class PrintService(
     public async Task<List<long>> GetPublicPrintIds()
     {
         return await context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
+    }
+
+    public async Task<List<SitemapEntryDto>> GetPublicPrintSitemapEntries(CancellationToken cancellationToken = default)
+    {
+        // Projected to two scalar columns, then shaped in memory: DateTime.SpecifyKind has no
+        // SQL translation, and the projection keeps the query a single scan over Prints.
+        var rows = await context.Prints
+            .AsNoTracking()
+            .Where(p => p.ViewStatus == PrintViewStatus.Public)
+            .OrderBy(p => p.Id)
+            .Select(p => new { p.Id, p.UpdatedDate })
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(r => SitemapEntryDto.FromUpdatedDate(r.Id, r.UpdatedDate)).ToList();
     }
 
     public async Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate)

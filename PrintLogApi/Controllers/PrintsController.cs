@@ -17,6 +17,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
@@ -1126,6 +1127,25 @@ public class PrintsController(
     {
         telemetry.TrackEvent("PublicPrintsQueried");
         return await printService.GetPublicPrintIds();
+    }
+
+    /// <summary>
+    /// Returns every public print's id with its last-modified time, for the sitemap's lastmod.
+    /// </summary>
+    /// <remarks>
+    /// A sibling of <c>GET public</c> rather than a change to it, so a sitemap generator that still
+    /// expects a bare id array keeps working. <c>lastModified</c> is the print's own last save
+    /// (UTC) and is null when no trustworthy timestamp exists.
+    /// </remarks>
+    /// <response code="200">The public prints, ordered by id.</response>
+    [AllowAnonymous]
+    [HttpGet("public/sitemap")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+    public async Task<ActionResult<IEnumerable<SitemapEntryDto>>> GetPublicPrintSitemapEntries(CancellationToken cancellationToken)
+    {
+        telemetry.TrackEvent("PublicPrintSitemapQueried");
+        return await printService.GetPublicPrintSitemapEntries(cancellationToken);
     }
 
     /// <summary>

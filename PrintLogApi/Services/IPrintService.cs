@@ -1,6 +1,7 @@
 ﻿using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 
 namespace PrintLogApi.Services;
@@ -73,6 +74,11 @@ public interface IPrintService
     Task<Print?> GetPrintById(long id);
     Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
     Task<List<long>> GetPublicPrintIds();
+    /// <summary>
+    /// Every public print with its last-modified time, ordered by id, for the UI's sitemap
+    /// generator. One indexed scan projected to two columns; no navigation is loaded.
+    /// </summary>
+    Task<List<SitemapEntryDto>> GetPublicPrintSitemapEntries(CancellationToken cancellationToken = default);
     /// <summary>
     /// The statuses and projectIds collections replace the former scalar filters; the caller
     /// folds any legacy scalar parameters into them so there is a single code path here.
