@@ -173,6 +173,61 @@ public class DocsCatalogTests
         Assert.NotNull((await catalog.GetCorpusAsync(Ct)).Find("klipper"));
     }
 
+    /// <summary>
+    /// The docs change rarely, so a reload that fails after a good load keeps serving the copy
+    /// already held, and retries after the short failure TTL instead of the full one.
+    /// </summary>
+    [Fact]
+    public async Task AFailedReload_KeepsServingTheEarlierCopy_AndRetriesSoon()
+    {
+        _site.SeedSite();
+        var catalog = Catalog();
+        await catalog.GetCorpusAsync(Ct);
+
+        _site.Set("/docs/llms.txt", "down", "text/plain", HttpStatusCode.ServiceUnavailable);
+        _clock.SetUtcNow(Start.AddMinutes(_options.CacheMinutes + 1));
+        var stale = await catalog.GetCorpusAsync(Ct);
+
+        Assert.True(stale.Available);
+        Assert.NotNull(stale.Find("klipper"));
+        Assert.Equal(2, _site.CountRequests("/docs/llms.txt"));
+
+        _site.SeedSite();
+        _clock.SetUtcNow(Start.AddMinutes(_options.CacheMinutes + 1 + _options.FailureCacheMinutes + 1));
+        await catalog.GetCorpusAsync(Ct);
+        Assert.Equal(3, _site.CountRequests("/docs/llms.txt"));
+    }
+
+    [Fact]
+    public async Task APartialReload_KeepsTheEarlierCompleteCopy()
+    {
+        _site.SeedSite();
+        var catalog = Catalog();
+        await catalog.GetCorpusAsync(Ct);
+
+        _site.Remove("/docs/klipper.md");
+        _clock.SetUtcNow(Start.AddMinutes(_options.CacheMinutes + 1));
+
+        Assert.NotNull((await catalog.GetCorpusAsync(Ct)).Find("klipper"));
+    }
+
+    /// <summary>A partial copy is still better than none when the next reload fails outright.</summary>
+    [Fact]
+    public async Task AFailedReload_AfterAPartialLoad_KeepsThePartialCopy()
+    {
+        _site.SeedSite();
+        _site.Remove("/docs/klipper.md");
+        var catalog = Catalog();
+        await catalog.GetCorpusAsync(Ct);
+
+        _site.Remove("/docs/llms.txt");
+        _clock.SetUtcNow(Start.AddMinutes(_options.FailureCacheMinutes + 1));
+        var corpus = await catalog.GetCorpusAsync(Ct);
+
+        Assert.True(corpus.Available);
+        Assert.NotNull(corpus.Find("pro-subscription"));
+    }
+
     [Fact]
     public async Task ConcurrentCallers_ShareOneLoad()
     {

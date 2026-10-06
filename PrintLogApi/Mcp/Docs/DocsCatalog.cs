@@ -27,7 +27,8 @@ public sealed class DocsCorpus
 public interface IDocsCatalog
 {
     /// <summary>
-    /// The docs corpus. Never throws for a fetch failure: an unreachable or missing index yields
+    /// The docs corpus. Never throws for a fetch failure: a failed reload keeps serving the copy
+    /// loaded earlier, an unreachable or missing index with no earlier copy yields
     /// <see cref="DocsCorpus.Unavailable"/>, and a page that fails to load is left out.
     /// </summary>
     Task<DocsCorpus> GetCorpusAsync(CancellationToken cancellationToken);
@@ -60,7 +61,8 @@ public sealed class DocsCatalog(
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Snapshot? _current;
 
-    private sealed record Snapshot(DocsCorpus Corpus, DateTimeOffset ExpiresAt);
+    /// <param name="Complete">Whether <paramref name="Corpus"/> came from a load that read every page.</param>
+    private sealed record Snapshot(DocsCorpus Corpus, bool Complete, DateTimeOffset ExpiresAt);
 
     public async Task<DocsCorpus> GetCorpusAsync(CancellationToken cancellationToken)
     {
@@ -82,8 +84,21 @@ public sealed class DocsCatalog(
             var settings = options.Value;
             var (corpus, complete) = await LoadAsync(settings);
             var ttl = TimeSpan.FromMinutes(complete ? settings.CacheMinutes : settings.FailureCacheMinutes);
-            _current = new Snapshot(corpus, timeProvider.GetUtcNow() + ttl);
-            return corpus;
+            var next = new Snapshot(corpus, complete, timeProvider.GetUtcNow() + ttl);
+
+            // A failed or partial reload keeps the copy already held when that copy is better:
+            // any copy beats none, and a complete one beats a partial one. The docs change
+            // rarely, so an older copy is far better than going dark until the site recovers.
+            // The retry still comes after the short failure TTL.
+            if (!complete && current is { Corpus.Available: true }
+                && (!corpus.Available || current.Complete))
+            {
+                logger.LogWarning("Reloading the docs failed; serving the copy loaded earlier.");
+                next = current with { ExpiresAt = next.ExpiresAt };
+            }
+
+            _current = next;
+            return next.Corpus;
         }
         finally
         {
