@@ -302,6 +302,7 @@ public class McpDocsEndpointTests : IClassFixture<McpDocsWebApplicationFactory>
     [InlineData("initialize")]
     [InlineData("tools/list")]
     [InlineData("resources/list")]
+    [InlineData("resources/read")]
     [InlineData("tools/call")]
     public async Task UnauthenticatedPostToMcp_IsStillTheSame401(string method)
     {

@@ -80,4 +80,11 @@
     <WCFMetadata Include="Connected Services" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- MCP Apps views (api#130), served from the assembly by McpAppResources. The logical name
+         is pinned so a folder rename cannot silently change the manifest name it loads. -->
+    <Content Remove="Mcp\Apps\*.html" />
+    <EmbeddedResource Include="Mcp\Apps\*.html" LogicalName="PrintLogApi.Mcp.Apps.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
