@@ -170,3 +170,95 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+
+  # Publishes server.json to the official MCP Registry (#128; runbook in
+  # docs/mcp-registry-listing.md). Off until the owner sets the repository variable
+  # MCP_REGISTRY_PUBLISH to 'true', so merging this job changes nothing on its own.
+  #
+  # After deploy, for the same reason as publish-release: the listing must never describe a
+  # server that is not live yet.
+  #
+  # Auth is DNS, not GitHub OIDC. `login github-oidc` only grants io.github.<owner>/*; the
+  # com.3dprintlog namespace is proved by an Ed25519 key whose public half is a TXT record on the
+  # 3dprintlog.com apex. That key can publish (and overwrite) anything under com.3dprintlog/*, so
+  # it is an environment secret on 'mcp-registry', which the runbook restricts to v* tags and puts
+  # behind a required reviewer. No id-token permission: nothing here uses OIDC.
+  #
+  # Registry versions are immutable, and server.json's version tracks the listing, not the API
+  # release. So most releases find their version already published and skip; a release fails only
+  # when server.json changed without a version bump, which would otherwise be silently dropped.
+  publish-mcp-registry:
+    needs: deploy
+    if: vars.MCP_REGISTRY_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: mcp-registry
+    permissions:
+      contents: read
+
+    env:
+      REGISTRY_URL: https://registry.modelcontextprotocol.io
+      # Pinned with its checksum from the release's registry_<version>_checksums.txt. To upgrade,
+      # change both from https://github.com/modelcontextprotocol/registry/releases.
+      MCP_PUBLISHER_VERSION: 1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Decide whether this version needs publishing
+        id: check
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          URL="$REGISTRY_URL/v0.1/servers/${NAME//\//%2F}/versions/$VERSION"
+          STATUS=$(curl -sS -o published.json -w '%{http_code}' "$URL")
+          case "$STATUS" in
+            404)
+              echo "$NAME $VERSION is not in the registry yet; publishing."
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            200)
+              if diff <(jq -S '.server' published.json) <(jq -S '.' server.json); then
+                echo "$NAME $VERSION is already published and unchanged; nothing to do."
+                echo "publish=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::server.json differs from the published $NAME $VERSION. Registry versions are immutable: bump 'version' in server.json (and MCP_SERVER_VERSION in the UI's scripts/discovery-lib.mjs)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unexpected HTTP $STATUS from $URL"
+              exit 1
+              ;;
+          esac
+
+      - name: Install mcp-publisher
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          ARCHIVE="mcp-publisher_linux_amd64.tar.gz"
+          curl -fsSL -o "$ARCHIVE" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/${ARCHIVE}"
+          echo "${MCP_PUBLISHER_SHA256}  ${ARCHIVE}" | sha256sum --check --strict
+          tar xzf "$ARCHIVE" mcp-publisher
+
+      - name: Publish to the MCP Registry
+        if: steps.check.outputs.publish == 'true'
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MCP_REGISTRY_PRIVATE_KEY" ]; then
+            echo "::error::MCP_REGISTRY_PRIVATE_KEY is not set on the mcp-registry environment."
+            exit 1
+          fi
+          ./mcp-publisher login dns --domain 3dprintlog.com --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+          ./mcp-publisher publish
+          ./mcp-publisher logout
+
+      - name: Verify the listing
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          curl -fsS "$REGISTRY_URL/v0.1/servers/${NAME//\//%2F}/versions/$VERSION" | jq -e --arg v "$VERSION" '.server.version == $v'
