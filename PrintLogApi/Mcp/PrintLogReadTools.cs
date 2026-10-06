@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
+using PrintLogApi.Mcp.Apps;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
 
@@ -86,6 +87,10 @@ public class PrintLogReadTools(
         return result ?? throw McpToolException.NotFound("Print not found.");
     }
 
+    // MCP Apps (api#130): hosts that render apps show this result in the inventory view; every
+    // other client gets the unchanged text result. The view is presentation only and calls no tool.
+    [McpMeta("ui", JsonValue = McpAppResources.InventoryToolUiMeta)]
+    [McpMeta("openai/outputTemplate", McpAppResources.InventoryUri)]
     [McpServerTool(Title = "Get Material Inventory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "List your own filament/material inventory with remaining weight in grams, including " +
         "where each spool is stored. Material and color filters match on whole words, so 'PLA' " +

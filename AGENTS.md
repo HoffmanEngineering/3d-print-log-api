@@ -431,6 +431,26 @@ The public user docs are served as three tools (`search_docs`, `list_docs`, `get
 - Rate-limited per client address (`Mcp:DocsRateLimitPerMinute`), since there is no user to
   partition on.
 
+### MCP Apps views (#130)
+
+`get_material_inventory` links to a `ui://` view (`Mcp/Apps/`), built against MCP Apps (SEP-1865)
+spec `2026-01-26`. A host that renders apps shows the result as a table; every other client gets
+the unchanged text result. Tool `_meta` carries `ui.resourceUri` plus ChatGPT's
+`openai/outputTemplate` alias, via `[McpMeta]`.
+
+- **A view is presentation only.** It renders the tool result the host posts to it and never calls
+  a tool, so no view can start a write. `McpAppResourcesTests` fails on `tools/call` in the HTML.
+  Confirm-before-write was declined in #130 for that reason, not deferred for effort.
+- **Self-contained HTML, embedded in the assembly.** No external URL of any kind, values written
+  with `textContent` only, and an empty CSP allowlist in `_meta.ui.csp` on both the listing and the
+  read. The tests fail on a URL, a `src`/`href`, `innerHTML`, or a network API in the file.
+- **Not on `/mcp/docs`.** `McpAppResources` wraps the docs resource handlers (the SDK takes one
+  list and one read handler for both endpoints) and drops `ui://` on the docs path, failing closed
+  when it cannot see the path.
+- The tool result has no `structuredContent`; the view parses the JSON text block, preferring
+  `structuredContent` if a tool ever adds it. Renaming a field of `MaterialInventoryItem` breaks
+  the view silently, which is what the field-name assertion in the tests is for.
+
 ### Registry listing (`server.json`)
 
 `server.json` at the repo root is the official MCP Registry entry, published by the

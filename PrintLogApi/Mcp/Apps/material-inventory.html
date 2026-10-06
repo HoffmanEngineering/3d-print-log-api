@@ -1,0 +1,407 @@
+<!doctype html>
+<!--
+  MCP App view for get_material_inventory (api#130). Built against MCP Apps (SEP-1865), spec
+  version 2026-01-26 (modelcontextprotocol/ext-apps, specification/2026-01-26/apps.mdx). The
+  link to it lives in McpAppResources.cs, because a test fails on any URL in this file.
+
+  Self-contained on purpose: no external scripts, styles, fonts or images, and no network access.
+  The resource metadata declares an empty CSP allowlist (McpAppResources), and the meta tag below
+  repeats it, so the view can only render what the host hands it over postMessage.
+
+  The view never calls a tool. It only renders the get_material_inventory result the host sends in
+  ui/notifications/tool-result. Every value from that result is written with textContent, never as
+  markup.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Material inventory</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --color-background-primary: light-dark(#ffffff, #1f1f1f);
+        --color-background-secondary: light-dark(#f5f5f4, #2a2a2a);
+        --color-text-primary: light-dark(#1c1917, #f5f5f4);
+        --color-text-secondary: light-dark(#57534e, #c4c4c4);
+        --color-text-warning: light-dark(#9a3412, #fdba74);
+        --color-border-primary: light-dark(#d6d3d1, #444444);
+        --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --font-text-sm-size: 0.875rem;
+        --font-text-md-size: 1rem;
+        --font-weight-semibold: 600;
+        --border-radius-sm: 4px;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        background: var(--color-background-primary);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--font-text-md-size);
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 1.05rem;
+        font-weight: var(--font-weight-semibold);
+      }
+      .meta {
+        margin: 0 0 10px;
+        color: var(--color-text-secondary);
+        font-size: var(--font-text-sm-size);
+      }
+      .scroll {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-text-sm-size);
+      }
+      caption {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      th,
+      td {
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--color-border-primary);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--color-background-secondary);
+        font-weight: var(--font-weight-semibold);
+        white-space: nowrap;
+      }
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .secondary {
+        color: var(--color-text-secondary);
+      }
+      .tag {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 6px;
+        border: 1px solid var(--color-border-primary);
+        border-radius: var(--border-radius-sm);
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+      }
+      .warning {
+        color: var(--color-text-warning);
+        font-weight: var(--font-weight-semibold);
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Material inventory</h1>
+    <p id="status" class="meta" role="status" aria-live="polite">Waiting for inventory…</p>
+    <div class="scroll" id="table-wrap" hidden>
+      <table>
+        <caption>
+          Remaining material per spool, in grams
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Material</th>
+            <th scope="col">Color</th>
+            <th scope="col" class="num">Remaining</th>
+            <th scope="col">Location</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <script>
+      (function () {
+        "use strict";
+
+        var PROTOCOL_VERSION = "2026-01-26";
+        var statusEl = document.getElementById("status");
+        var wrapEl = document.getElementById("table-wrap");
+        var rowsEl = document.getElementById("rows");
+        var locale;
+        var filters = "";
+        var nextId = 1;
+        var pending = {};
+        var lastHeight = -1;
+
+        // ---- JSON-RPC over postMessage (SEP-1865 "Transport Layer") ---------------------------
+
+        function post(message) {
+          // The host's origin is not knowable from inside its sandbox, so the target is "*".
+          // Nothing sent here is secret: protocol handshakes and this view's size.
+          window.parent.postMessage(message, "*");
+        }
+
+        function request(method, params) {
+          var id = nextId++;
+          post({ jsonrpc: "2.0", id: id, method: method, params: params });
+          return new Promise(function (resolve, reject) {
+            pending[id] = { resolve: resolve, reject: reject };
+          });
+        }
+
+        function notify(method, params) {
+          post({ jsonrpc: "2.0", method: method, params: params });
+        }
+
+        function respond(id, result) {
+          post({ jsonrpc: "2.0", id: id, result: result });
+        }
+
+        window.addEventListener("message", function (event) {
+          // Only the embedding host speaks this protocol.
+          if (event.source !== window.parent) return;
+          var msg = event.data;
+          if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0") return;
+
+          if (msg.method === undefined && msg.id !== undefined && pending[msg.id]) {
+            var waiter = pending[msg.id];
+            delete pending[msg.id];
+            if (msg.error) waiter.reject(msg.error);
+            else waiter.resolve(msg.result);
+            return;
+          }
+
+          switch (msg.method) {
+            case "ui/notifications/tool-input":
+              describeFilters(msg.params && msg.params.arguments);
+              break;
+            case "ui/notifications/tool-result":
+              renderResult(msg.params);
+              break;
+            case "ui/notifications/tool-cancelled":
+              showStatus("The inventory request was cancelled.");
+              break;
+            case "ui/notifications/host-context-changed":
+              applyHostContext(msg.params);
+              break;
+            case "ui/resource-teardown":
+            case "ping":
+              if (msg.id !== undefined) respond(msg.id, {});
+              break;
+          }
+        });
+
+        // ---- Host context: theme, style variables, locale -------------------------------------
+
+        function applyHostContext(context) {
+          if (!context || typeof context !== "object") return;
+          var root = document.documentElement;
+          if (context.theme === "light" || context.theme === "dark") {
+            root.setAttribute("data-theme", context.theme);
+          }
+          var vars = context.styles && context.styles.variables;
+          if (vars && typeof vars === "object") {
+            Object.keys(vars).forEach(function (key) {
+              var value = vars[key];
+              if (key.slice(0, 2) === "--" && typeof value === "string") {
+                root.style.setProperty(key, value);
+              }
+            });
+          }
+          if (typeof context.locale === "string") {
+            locale = context.locale;
+          }
+          reportSize();
+        }
+
+        // ---- Rendering -----------------------------------------------------------------------
+
+        function showStatus(text) {
+          statusEl.textContent = text;
+          reportSize();
+        }
+
+        function str(value) {
+          return typeof value === "string" && value.trim() !== "" ? value : null;
+        }
+
+        function num(value) {
+          return typeof value === "number" && isFinite(value) ? value : null;
+        }
+
+        function formatGrams(grams) {
+          var formatted;
+          try {
+            formatted = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(grams);
+          } catch (e) {
+            formatted = String(Math.round(grams * 10) / 10);
+          }
+          return formatted + " g";
+        }
+
+        function describeFilters(args) {
+          if (!args || typeof args !== "object") return;
+          var parts = [];
+          if (str(args.material)) parts.push("material “" + args.material + "”");
+          if (str(args.color)) parts.push("color “" + args.color + "”");
+          if (args.includeInactive === true) parts.push("including inactive spools");
+          filters = parts.length ? " Filtered by " + parts.join(", ") + "." : "";
+        }
+
+        // The tool's result is the same CallToolResult every client gets: a page of
+        // MaterialInventoryItem as JSON text. structuredContent is preferred if the server ever
+        // starts sending it, and the text block is the fallback that works today.
+        function extractPage(result) {
+          if (!result || typeof result !== "object") return null;
+          var sc = result.structuredContent;
+          if (sc && typeof sc === "object" && Array.isArray(sc.items)) return sc;
+          var blocks = Array.isArray(result.content) ? result.content : [];
+          for (var i = 0; i < blocks.length; i++) {
+            var block = blocks[i];
+            if (block && block.type === "text" && typeof block.text === "string") {
+              try {
+                var parsed = JSON.parse(block.text);
+                if (parsed && Array.isArray(parsed.items)) return parsed;
+              } catch (e) {
+                return null;
+              }
+            }
+          }
+          return null;
+        }
+
+        function cell(row, text, className) {
+          var td = document.createElement("td");
+          td.textContent = text;
+          if (className) td.className = className;
+          row.appendChild(td);
+          return td;
+        }
+
+        function renderResult(result) {
+          if (result && result.isError === true) {
+            wrapEl.hidden = true;
+            showStatus("The inventory could not be loaded.");
+            return;
+          }
+
+          var page = extractPage(result);
+          if (!page) {
+            wrapEl.hidden = true;
+            showStatus("The inventory result was not in a format this view understands.");
+            return;
+          }
+
+          rowsEl.textContent = "";
+          var items = page.items;
+          items.forEach(function (item) {
+            if (!item || typeof item !== "object") return;
+            var tr = document.createElement("tr");
+
+            var nameCell = cell(tr, str(item.name) || "Unnamed");
+            var brand = str(item.brand);
+            if (brand) {
+              var brandEl = document.createElement("div");
+              brandEl.className = "secondary";
+              brandEl.textContent = brand;
+              nameCell.appendChild(brandEl);
+            }
+            if (item.isActive === false) {
+              var tag = document.createElement("span");
+              tag.className = "tag";
+              tag.textContent = "Inactive";
+              nameCell.appendChild(tag);
+            }
+
+            var material = str(item.material) || "—";
+            var diameter = num(item.diameterMm);
+            cell(tr, diameter !== null ? material + " · " + diameter + " mm" : material);
+            cell(tr, str(item.color) || "—");
+
+            var grams = num(item.remainingGrams);
+            var remaining = cell(tr, grams === null ? "—" : formatGrams(grams), "num");
+            if (grams !== null && grams < 0) {
+              // Over-logged: more use recorded than the spool held. Said in words, not only color.
+              remaining.className = "num warning";
+              remaining.textContent = formatGrams(grams) + " (over-logged)";
+            }
+
+            cell(tr, str(item.storageLocation) || "—", "secondary");
+            rowsEl.appendChild(tr);
+          });
+
+          var total = num(page.totalCount);
+          var pageNo = num(page.page);
+          var pages = num(page.totalPages);
+          var summary;
+          if (rowsEl.childElementCount === 0) {
+            summary = "No materials matched.";
+          } else {
+            summary =
+              "Showing " +
+              rowsEl.childElementCount +
+              (total !== null ? " of " + total : "") +
+              (total === 1 ? " spool" : " spools") +
+              (pageNo !== null && pages !== null && pages > 1
+                ? ", page " + pageNo + " of " + pages
+                : "") +
+              ".";
+          }
+          showStatus(summary + filters);
+          wrapEl.hidden = rowsEl.childElementCount === 0;
+          reportSize();
+        }
+
+        // ---- Size reporting and handshake -----------------------------------------------------
+
+        // Called after every render as well as by the observer, so a host without
+        // ResizeObserver support in the sandbox still learns the content height.
+        function reportSize() {
+          var height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+          if (height === lastHeight) return;
+          lastHeight = height;
+          notify("ui/notifications/size-changed", {
+            width: Math.ceil(document.documentElement.scrollWidth),
+            height: height,
+          });
+        }
+        if (typeof ResizeObserver === "function") {
+          new ResizeObserver(reportSize).observe(document.documentElement);
+        }
+
+        request("ui/initialize", {
+          appInfo: { name: "3D Print Log material inventory", version: "1.0.0" },
+          appCapabilities: { availableDisplayModes: ["inline"] },
+          protocolVersion: PROTOCOL_VERSION,
+        }).then(
+          function (result) {
+            applyHostContext(result && result.hostContext);
+            notify("ui/notifications/initialized", {});
+            reportSize();
+          },
+          function () {
+            showStatus("This view needs a host that supports MCP Apps.");
+          },
+        );
+      })();
+    </script>
+  </body>
+</html>

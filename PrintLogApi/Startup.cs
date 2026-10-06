@@ -572,9 +572,11 @@ public class Startup
             .WithTools<Mcp.PrintLogReadTools>()
             .WithTools<Mcp.PrintLogWriteTools>()
             .WithTools<Mcp.Docs.PrintLogDocsTools>()
-            .WithListResourcesHandler(Mcp.Docs.McpDocsEndpoint.ListResources)
+            // docs:// pages (#129) and the ui:// MCP Apps views (#130) share these handlers.
+            // McpAppResources wraps the docs ones and keeps the views off /mcp/docs.
+            .WithListResourcesHandler(Mcp.Apps.McpAppResources.ListResources)
             .WithListResourceTemplatesHandler(Mcp.Docs.McpDocsEndpoint.ListResourceTemplates)
-            .WithReadResourceHandler(Mcp.Docs.McpDocsEndpoint.ReadResource)
+            .WithReadResourceHandler(Mcp.Apps.McpAppResources.ReadResource)
             .WithRequestFilters(requestFilters =>
             {
                 // Single choke point for tool errors AND telemetry: map our typed codes to safe
