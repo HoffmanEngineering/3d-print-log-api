@@ -419,6 +419,29 @@ Runbook and owner steps: `docs/mcp-registry-listing.md`.
 - **Every tool states all four behavior hints explicitly**, read tools included, or the ChatGPT
   directory rejects the server (`ToolSchemaTests`).
 
+### Agent skill and plugin (`skills/`, `plugin.json`, `mcp.json`, `.claude-plugin/`)
+
+`skills/3d-print-log/SKILL.md` is the public skill that teaches an agent to use the MCP tools
+(UI #215). The repo root doubles as a plugin that bundles it with the server, in two formats:
+`plugin.json` + `mcp.json` (Agent Plugins 1.0.0) and `.claude-plugin/marketplace.json` (Claude Code,
+which carries the public OAuth client ID that Agent Plugins has no field for). `npx skills add
+HoffmanEngineering/3d-print-log-api` installs the skill; `claude plugin marketplace add` with the
+same repo installs the plugin.
+
+- **Renaming or removing a tool or parameter means editing `SKILL.md` in the same PR.**
+  `AgentSkillTests` reads the skill against the live `tools/list` and fails on any tool, call
+  argument or usage-row field that no longer exists. It also fails when a tool name suggests a
+  delete or a filament load, because the skill promises neither exists.
+- **The UI serves a byte-identical copy** at `/.well-known/agent-skills/3d-print-log/SKILL.md`,
+  with its SHA-256 in `/.well-known/agent-skills/index.json`. After this file changes on `main`,
+  run `npm run discovery:sync-skill` in the UI repo and commit the result. Until then the site
+  serves the previous version, which is stale but still self-consistent.
+- **No `version` in `plugin.json` or the marketplace entry, on purpose.** Both formats pin an
+  installed plugin to its declared version until it changes, so a forgotten bump would freeze
+  users on an old skill. Without one, Claude Code tracks the commit.
+- `.claude/skills/` holds contributor skills. They carry `metadata.internal: true` so the skills
+  CLI does not offer them to people installing the public one.
+
 ## JSON serialization
 
 `PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume

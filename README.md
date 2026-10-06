@@ -53,6 +53,23 @@ Usage questions are best asked in [**3D Print Log Discussions**](https://github.
 
 Bug reports and feature requests still belong in this repository's issues.
 
+## Use It With an AI Agent
+
+The API hosts an [MCP server](https://www.3dprintlog.com/docs/mcp) at `https://api.3dprintlog.com/mcp`,
+and this repo publishes an agent skill that teaches an agent to use it well:
+[`skills/3d-print-log`](skills/3d-print-log/SKILL.md).
+
+```bash
+# The skill, for any agent the skills CLI supports
+npx skills add HoffmanEngineering/3d-print-log-api
+
+# The skill and the MCP server together, as a Claude Code plugin
+claude plugin marketplace add HoffmanEngineering/3d-print-log-api
+claude plugin install 3d-print-log@3d-print-log
+```
+
+The repo root is also an [Agent Plugins](https://agent-plugins.org) package (`plugin.json` and `mcp.json`).
+
 ## Support Development
 
 If you find 3D Print Log useful, consider supporting its development:
