@@ -100,3 +100,60 @@ jobs:
 
       - name: Lint OpenAPI document
         run: npx --yes @redocly/cli@2.58.2 lint "${{ runner.temp }}/openapi.json"
+
+  # Known-vulnerable NuGet packages, top-level and transitive (#61). Restore already prints these as
+  # NU1901-NU1904, but as a handful of lines among dozens of build warnings, which is how four
+  # advisories (one High) sat unnoticed.
+  #
+  # Fails on High and Critical only. Low and Moderate become warning annotations on the run. The
+  # advisory database changes independently of any PR, so a hard failure on every new advisory would
+  # turn unrelated PRs red overnight; High/Critical is the bar worth that interruption. Dependabot
+  # (.github/dependabot.yml) is what proposes the fixing bump, and this job is what makes a serious
+  # finding impossible to scroll past. The fix for a transitive package with no patched parent is a
+  # pin in Directory.Packages.props, which already has a section for them.
+  #
+  # A separate job so a finding never skips the build and test steps above, and so they never hide
+  # it.
+  vulnerable-packages:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Check for vulnerable packages
+        run: |
+          report="${{ runner.temp }}/vulnerable.json"
+          dotnet list package --vulnerable --include-transitive --format json > "$report"
+
+          findings=$(jq -r '
+            .projects[] | (.path | split("/") | last | rtrimstr(".csproj")) as $project
+            | .frameworks[]? | (.topLevelPackages[]?, .transitivePackages[]?) as $pkg
+            | $pkg.vulnerabilities[]
+            | [.severity, $pkg.id, $pkg.resolvedVersion, $project, .advisoryurl] | @tsv' "$report")
+
+          if [ -z "$findings" ]; then
+            echo "No vulnerable packages."
+            exit 0
+          fi
+
+          blocking=0
+          while IFS=$'\t' read -r severity id version project url; do
+            case "$severity" in
+              High|Critical) level=error; blocking=$((blocking + 1)) ;;
+              *) level=warning ;;
+            esac
+            echo "::$level title=$severity advisory in $id $version::$id $version in $project ($url)"
+          done <<< "$findings"
+
+          if [ "$blocking" -gt 0 ]; then
+            echo "$blocking High/Critical finding(s). Bump the package, or pin the transitive one in Directory.Packages.props."
+            exit 1
+          fi

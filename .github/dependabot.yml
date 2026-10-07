@@ -59,6 +59,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.Extensions.*"
         update-types: ["version-update:semver-major"]
+      # Transitive security pins (#61). These exist only to lift a package the scaffolding tooling
+      # pulls in past an advisory, held on the 6.x line that tooling was built against. A 7.x bump
+      # here is not a fix anyone asked for.
+      - dependency-name: "NuGet.Packaging"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "NuGet.Protocol"
+        update-types: ["version-update:semver-major"]
 
   # Catches pinned action versions going stale, including any security advisory against an action
   # that runs with repository secrets -- deploy.yml passes production database credentials to steps
