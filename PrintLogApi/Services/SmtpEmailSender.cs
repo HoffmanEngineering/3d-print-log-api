@@ -19,11 +19,18 @@ public partial class SmtpEmailSender : IEmailSender
 
     public async Task SendEmailAsync(string email, string subject, string message)
     {
+        // MailKit 4.17 annotated these parameters non-nullable. A missing value already failed
+        // (MailKit threw ArgumentNullException on it), so this only moves the failure ahead of the
+        // connection and names the setting. FeedbackService records it like any failed send.
+        var host = _options.Host ?? throw MissingSetting("Host");
+        var username = _options.Username ?? throw MissingSetting("Username");
+        var password = _options.Password ?? throw MissingSetting("Password");
+
         var mimeMessage = BuildMessage(_options, email, subject, message);
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(_options.Host, _options.Port, SecureSocketOptions.StartTls);
-        await client.AuthenticateAsync(_options.Username, _options.Password);
+        await client.ConnectAsync(host, _options.Port, SecureSocketOptions.StartTls);
+        await client.AuthenticateAsync(username, password);
         await client.SendAsync(mimeMessage);
         await client.DisconnectAsync(true);
     }
@@ -47,6 +54,9 @@ public partial class SmtpEmailSender : IEmailSender
 
         return mimeMessage;
     }
+
+    private static InvalidOperationException MissingSetting(string name) =>
+        new($"ExternalProviders:Smtp:{name} is not configured.");
 
     [GeneratedRegex("<[^>]+>")]
     private static partial Regex Tags();

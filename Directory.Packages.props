@@ -10,6 +10,12 @@
 
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!-- Lets a PackageVersion below raise a package that only arrives transitively, without a
+         PackageReference in any project (#61). Without it, a version listed here for a transitive
+         package is silently ignored. It only ever raises a version: a transitive dependency that
+         asks for something newer than the pin fails restore (NU1109) instead of being downgraded. -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <!-- Microsoft.* framework packages. These track the target framework and should move together
@@ -36,7 +42,7 @@
     <PackageVersion Include="FirebaseAdmin" Version="3.3.0" />
     <PackageVersion Include="Humanizer" Version="2.14.1" />
     <PackageVersion Include="JsonModelBinder" Version="2.1.1" />
-    <PackageVersion Include="MailKit" Version="4.15.1" />
+    <PackageVersion Include="MailKit" Version="4.18.1" />
     <PackageVersion Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.22.0" />
     <PackageVersion Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.21.0" />
     <PackageVersion Include="prometheus-net" Version="8.2.1" />
@@ -53,6 +59,19 @@
   <ItemGroup>
     <PackageVersion Include="ModelContextProtocol" Version="2.0.0" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />
+  </ItemGroup>
+
+  <!-- Transitive security pins. Nothing references these directly; each entry exists only to lift a
+       transitive package past an advisory, so delete it once the parent ships the fixed version.
+
+       NuGet.Packaging / NuGet.Protocol: GHSA-g4vj-cjjj-v7hg (Low), fixed in 6.12.5. Pulled in at
+       6.12.1 by Microsoft.VisualStudio.Web.CodeGeneration.Design (via
+       Microsoft.DotNet.Scaffolding.Shared -> NuGet.ProjectModel), and 10.0.2 is the newest stable
+       release of that package, so there is no parent to bump. Held on the 6.12 line the scaffolding
+       packages were built against; the rest of the NuGet.* client set follows from these two. -->
+  <ItemGroup>
+    <PackageVersion Include="NuGet.Packaging" Version="6.12.5" />
+    <PackageVersion Include="NuGet.Protocol" Version="6.12.5" />
   </ItemGroup>
 
   <!-- Test infrastructure. xUnit v3 on Microsoft.Testing.Platform (#70).
