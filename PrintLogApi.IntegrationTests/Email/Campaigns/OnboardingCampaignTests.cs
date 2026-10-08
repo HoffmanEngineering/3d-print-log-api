@@ -272,6 +272,50 @@ public class OnboardingCampaignTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
+    public async Task Welcome_StillNamesAHintDismissedInTheApp()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await UserAsync(db, Created);
+        // Hold the first badge, so the hint is one that neither fallback could produce by accident.
+        db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = "first-printer", Tier = 1, UnlockedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync(Ct);
+        var achievements = scope.ServiceProvider.GetRequiredService<IAchievementQueryService>();
+        var hint = (await achievements.GetMineAsync(user.Id, honorDismissedHint: true, Ct)).NextHint;
+        Assert.NotNull(hint);
+        Assert.NotEqual("first-printer", hint.Key);
+        await achievements.DismissHintAsync(user.Id, hint.Key, hint.Tier, Ct);
+
+        var email = await Campaign(scope).RenderAsync(Row(user.Id, "welcome"), Ct);
+
+        // Dismissing the card means "not here", not "never": the email still names the real next badge.
+        Assert.NotNull(email);
+        Assert.Contains($"https://www.3dprintlog.test{hint.CtaRoute}?", email.Text);
+        Assert.DoesNotContain("See which badge", email.Text);
+    }
+
+    [Fact]
+    public async Task Welcome_WithNoNextBadge_PointsAtTheBadgePage()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await UserAsync(db, Created);
+        // Every Getting started badge held and no progress on anything else: there is no next badge.
+        foreach (var key in AchievementCatalog.Definitions.Where(d => d.Category == AchievementCategory.GettingStarted && !d.Retired).Select(d => d.Key))
+        {
+            db.UserAchievements.Add(new UserAchievement { UserId = user.Id, AchievementKey = key, Tier = 1, UnlockedAt = DateTime.UtcNow });
+        }
+        await db.SaveChangesAsync(Ct);
+
+        var email = await Campaign(scope).RenderAsync(Row(user.Id, "welcome"), Ct);
+
+        Assert.NotNull(email);
+        Assert.DoesNotContain("first printer", email.Text);
+        Assert.Contains("See which badge you're closest to earning.", email.Text);
+        Assert.Contains("See your badges: https://www.3dprintlog.test/achievements?utm_source=email", email.Text);
+    }
+
+    [Fact]
     public async Task UnknownStep_IsNotRelevant()
     {
         using var scope = _factory.Services.CreateScope();

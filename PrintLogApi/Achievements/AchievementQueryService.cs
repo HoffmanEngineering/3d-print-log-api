@@ -14,7 +14,12 @@ public interface IAchievementQueryService
     Task<AchievementCatalogDto> GetCatalogAsync(CancellationToken ct);
 
     /// <summary>Runs a full reconciliation pass for the user, then describes what they hold.</summary>
-    Task<MyAchievementsDto> GetMineAsync(long userId, CancellationToken ct);
+    /// <param name="honorDismissedHint">
+    /// True on the in-app hint card, where dismissing means "stop showing me this here". Email passes
+    /// false: a dismissal is not a request to drop the suggestion everywhere, and a null hint there
+    /// has nothing better to fall back to.
+    /// </param>
+    Task<MyAchievementsDto> GetMineAsync(long userId, bool honorDismissedHint, CancellationToken ct);
 
     /// <exception cref="ArgumentException">The key or tier is not in the catalog.</exception>
     Task DismissHintAsync(long userId, string key, int tier, CancellationToken ct);
@@ -112,7 +117,7 @@ public sealed class AchievementQueryService(
         return new AchievementCatalogDto(AchievementCatalog.Version, hiddenCount, visible);
     }
 
-    public async Task<MyAchievementsDto> GetMineAsync(long userId, CancellationToken ct)
+    public async Task<MyAchievementsDto> GetMineAsync(long userId, bool honorDismissedHint, CancellationToken ct)
     {
         // The pass saves its grants on this request's context, so mark it first: reconciling
         // must never raise triggers for yet another pass.
@@ -153,7 +158,7 @@ public sealed class AchievementQueryService(
             }
         }
 
-        var dismissed = await db.UserSettings
+        var dismissed = !honorDismissedHint ? null : await db.UserSettings
             .AsNoTracking()
             .Where(s => s.UserId == userId && s.UserSettingTypeId == DismissedHintSettingTypeId)
             .Select(s => s.Value)
