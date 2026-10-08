@@ -46,7 +46,7 @@ public class AchievementsController(IAchievementQueryService achievements) : Con
             return Unauthorized();
         }
 
-        return Ok(await achievements.GetMineAsync(userId.Value, ct));
+        return Ok(await achievements.GetMineAsync(userId.Value, honorDismissedHint: true, ct));
     }
 
     /// <summary>

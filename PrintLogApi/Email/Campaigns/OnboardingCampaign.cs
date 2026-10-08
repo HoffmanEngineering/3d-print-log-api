@@ -25,6 +25,8 @@ public sealed class OnboardingCampaign(
     private static readonly TimeSpan Window = TimeSpan.FromDays(14);
 
     /// <summary>The button label for each Getting started hint; anything else falls back to the badges page.</summary>
+    private const string DefaultCtaLabel = "See your badges";
+
     private static readonly IReadOnlyDictionary<string, string> CtaLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["first-printer"] = "Add your printer",
@@ -132,17 +134,22 @@ public sealed class OnboardingCampaign(
         string Link(string path) => links.Web(path, CampaignName, row.PeriodKey);
 
         // Hints only matter on the steps that show them; GetMineAsync runs a reconciliation pass.
-        var hintRoute = "/printers/new";
-        var hintLabel = CtaLabels["first-printer"];
-        var hintText = "Add your first printer.";
+        // With no next badge (every one earned, or none started) point at the badge page rather
+        // than at any one step: a default of "add your first printer" told users who own several
+        // printers to add one.
+        var hintRoute = AchievementHints.DefaultCtaRoute;
+        var hintLabel = DefaultCtaLabel;
+        var hintText = "See which badge you're closest to earning.";
         int held = 0, total = 0;
         if (row.PeriodKey is OnboardingTemplates.Welcome or OnboardingTemplates.NextSteps)
         {
-            var mine = await achievements.GetMineAsync(row.UserId, ct);
+            // Dismissing the in-app hint card means "stop showing me this here", not "never
+            // suggest it", so the email still names the real next badge.
+            var mine = await achievements.GetMineAsync(row.UserId, honorDismissedHint: false, ct);
             if (mine.NextHint is { } hint && AchievementCatalog.Find(hint.Key) is { } definition)
             {
                 hintRoute = hint.CtaRoute;
-                hintLabel = CtaLabels.GetValueOrDefault(hint.Key, "See your badges");
+                hintLabel = CtaLabels.GetValueOrDefault(hint.Key, DefaultCtaLabel);
                 hintText = AchievementCopy.Format(definition.DescriptionTemplate, definition.Thresholds[Math.Clamp(hint.Tier, 1, definition.Thresholds.Count) - 1]);
             }
 
