@@ -43,6 +43,9 @@ public class PrinterDetailDto
 
     public double? WattageW { get; set; }
 
+    /// <summary>How many filament positions the printer has. 1 for a single-tool printer.</summary>
+    public int SlotCount { get; set; }
+
     /// <summary>
     /// Photos of this printer, ordered by display order. Hydrated explicitly after
     /// materialization and never projected: SAS signing cannot run inside ProjectTo.

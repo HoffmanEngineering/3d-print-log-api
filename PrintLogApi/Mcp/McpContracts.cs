@@ -122,10 +122,14 @@ public sealed record PrinterListItem(
     long Id, string Name, string? Make, string? Model,
     double? NozzleDiameterMm, bool IsActive);
 
-/// <summary>A spool currently mounted on a printer (never one that has been unloaded).</summary>
+/// <summary>
+/// A spool currently mounted on a printer (never one that has been unloaded). <c>Slot</c> is the
+/// 0-based tool or AMS position, null when the spool was loaded without one.
+/// </summary>
 public sealed record LoadedFilament(
     Guid FilamentId, string? Name, string? Brand, string? Material, string? Color,
-    double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt);
+    double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt,
+    int? Slot, string? SlotLabel);
 
 public sealed record PrinterDetailResult(
     long Id, string Name, string? Make, string? Model, string? Description,
@@ -143,7 +147,9 @@ public sealed record PrinterDetailResult(
     double? FilamentDiameterMm,
     double? BeamDiameterMm,
     double? ScreenResolutionXPixels,
-    double? ScreenResolutionYPixels);
+    double? ScreenResolutionYPixels,
+    // Appended: how many filament positions the printer has, 1 for a single-tool printer.
+    int SlotCount);
 
 public sealed record SummaryMetrics(
     int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,
