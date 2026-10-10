@@ -114,4 +114,11 @@ public class Print : TimestampEntity
     /// <summary>The job's identity in <see cref="ExternalSource"/>. See there.</summary>
     [MaxLength(200)]
     public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// The connection that logged this print, if any. Nulled when the connection is deleted: the
+    /// print is the user's record and outlives the connector that wrote it.
+    /// </summary>
+    public Guid? ConnectionId { get; set; }
+    public Connection? Connection { get; set; }
 }

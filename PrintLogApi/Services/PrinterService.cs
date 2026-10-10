@@ -294,6 +294,10 @@ public class PrinterService(
             if (image.ThumbnailFile is not null) context.Files.Remove(image.ThumbnailFile);
         }
 
+        // Loaded so ClientSetNull unbinds them: the database FK does not set null (see
+        // PrintLogContext), and the connection outlives the printer until the user deletes it.
+        await context.Connections.Where(c => c.PrinterId == printerId).LoadAsync();
+
         context.Printers.Remove(printer);
 
         await context.SaveChangesAsync();

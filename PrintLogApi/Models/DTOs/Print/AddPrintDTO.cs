@@ -72,6 +72,14 @@ public class AddPrintDTO : IValidatableObject
     [StringLength(200)]
     public string? ExternalId { get; set; }
 
+    /// <summary>
+    /// The <c>instanceId</c> of the connection (<c>PUT /api/Connections/{instanceId}</c>) logging
+    /// this print, so it shows "Logged automatically by" that connection. An id that is not one of
+    /// yours is ignored, never rejected.
+    /// </summary>
+    [StringLength(100)]
+    public string? ConnectionInstanceId { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (ExternalSource is null && ExternalId is null)
