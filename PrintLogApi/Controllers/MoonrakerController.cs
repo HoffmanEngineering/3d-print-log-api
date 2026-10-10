@@ -5,8 +5,6 @@ using Humanizer;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Moonraker;
@@ -22,13 +20,16 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 [Authorize]
 public class MoonrakerController(
-    PrintLogContext context,
     TelemetryClient telemetry,
     ILogger<MoonrakerController> logger,
-    IPrintService printService,
-    INotificationService notificationService,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    IPrintEventService printEventService,
+    TimeProvider clock) : ControllerBase
 {
+    /// <summary>The <c>externalSource</c> of prints the notifier logs.</summary>
+    public const string NotifierSource = "moonraker-notifier";
+
+    private static readonly HashSet<string> PrintEvents = ["started", "cancelled", "error", "complete"];
+
     /// <summary>
     /// Receive a print event from Moonraker (Klipper).
     /// </summary>
@@ -39,6 +40,9 @@ public class MoonrakerController(
     /// The body is Moonraker's JSON notification, whose `message` field carries the print event.
     /// `started` creates a print in the Printing status. `complete` marks that print Success, and
     /// `cancelled` or `error` mark it Failed.
+    ///
+    /// When the printer also has a live printlog-bridge connection, the bridge logs the job and
+    /// these events are dropped (and counted on the connection), so each job is logged once.
     /// </remarks>
     /// <see cref="PrintEventDto"/>
     /// <see cref="PrintEventMessageDto"/>
@@ -74,6 +78,13 @@ public class MoonrakerController(
         var printEventDto = JsonSerializer.Deserialize<PrintEventDto>(decodedString, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
         var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message!)!;
+
+        if (dto.PrinterId > 0 && dto.EventName is { } eventName && PrintEvents.Contains(eventName)
+            && await printEventService.DropNotifierEventForBridge(userId.Value, dto.PrinterId))
+        {
+            telemetry.TrackEvent("Moonraker_Webhook_DroppedForBridge", new Dictionary<string, string> { { "event", eventName } });
+            return Ok(dto);
+        }
 
         try
         {
@@ -119,301 +130,68 @@ public class MoonrakerController(
 
     private async Task HandlePrintStarted(PrintEventMessageDto data, long userId)
     {
-        var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
-        var filenameWithExtension = Path.GetFileName(data.Filename);
-
-        // var splitFilename = filenameWithoutExtension.Replace('_', ' ').Replace('-', ' ');
-        var splitFilename = filenameWithoutExtension.Humanize();
-        var textInfo = new CultureInfo("en-US", false).TextInfo;
-        var title = textInfo.ToTitleCase(splitFilename);
-
-        var newPrint = new Print
-        {
-            Status = PrintStatus.Printing,
-            Source = PrintSource.Moonraker,
-            CreatedById = userId,
-            UpdatedById = userId,
-            Title = title[..Math.Min(title.Length, 100)] ?? "",
-            // The start payload carries no estimate. Record its ABSENCE, not a fake zero: a 0
-            // looks recorded, so no read-side fallback can ever recover from it.
-            EstimatedPrintTimeInSeconds = null,
-            FilamentUsage = new List<PrintFilament>(),
-            FileName = filenameWithExtension ?? ""
-        };
-
-        if (data.PrinterId > 0)
-        {
-            // Check the Printer to make sure the user has access to it.
-            var printer = await context.Printers
-                .Where(p => p.Id == data.PrinterId)
-                .Include(p => p.LoadedFilaments)
-                .FirstOrDefaultAsync();
-            newPrint.Printer = printer!;
-
-            // Null-forgiven: an unknown PrinterId already threw here before nullable analysis
-            // was enabled. It still fails closed, just as a 500 rather than a clean error.
-            // Turning that into an explicit not-found is a behaviour change, tracked in #57.
-            if (userId != printer!.UserId)
-            {
-                throw new UserCannotAccessPrinterException();
-            }
-        }
-        else
+        if (data.PrinterId <= 0)
         {
             throw new Exception("Invalid PrinterId");
         }
 
+        var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
+        var filenameWithExtension = Path.GetFileName(data.Filename) ?? "";
 
-        try
+        var splitFilename = filenameWithoutExtension.Humanize();
+        var textInfo = new CultureInfo("en-US", false).TextInfo;
+        var title = textInfo.ToTitleCase(splitFilename);
+
+        // The notifier payload carries no start time, so the job is identified by when its start
+        // arrived. That makes a redelivery within the same second the one it can recognise.
+        var startDate = clock.GetUtcNow();
+        var externalId = $"{data.PrinterId}:{startDate.ToUnixTimeSeconds()}:{filenameWithExtension}";
+
+        await printEventService.Started(new PrintStartedEvent
         {
-            // Determine the Allow Comments settings
-            var lastSelectedAllowCommentsUserSettingTypeId = 3;
-            var setting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
-            var lastSelectedAllowCommentsValue = setting?.Value ?? "false";
-
-            if (bool.TryParse(lastSelectedAllowCommentsValue, out var allowComments))
-            {
-                newPrint.AllowComments = allowComments;
-            }
-            else
-            {
-                // Printer isn't found, so... shrug
-                newPrint.AllowComments = false;
-            }
-        }
-        catch (Exception)
-        {
-            newPrint.AllowComments = false;
-        }
-
-        try
-        {
-            // Determine the last view status
-            var defaultViewStatus = 1;
-            var defaultPrintViewStatusSetting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
-            // Null-forgiven deliberately: a user with no saved default has no row here, and
-            // the resulting throw is what the catch below turns into the Private fallback.
-            // The catch is load-bearing control flow, not defensive padding.
-            var viewStatusValue = defaultPrintViewStatusSetting!.Value;
-
-            if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
-            {
-                newPrint.ViewStatus = viewStatus;
-            }
-            else
-            {
-                // Printer isn't found, so... shrug
-                newPrint.ViewStatus = PrintViewStatus.Private;
-            }
-        }
-        catch (Exception)
-        {
-            newPrint.ViewStatus = PrintViewStatus.Private;
-        }
-
-        // Provably non-null: Printer is assigned from the query above, and the access check
-        // that follows it already dereferenced the same instance, so a null would have thrown
-        // before reaching this line.
-        var printersLoadedFilament = newPrint.Printer!.LoadedFilaments ?? new List<PrinterFilament>();
-
-
-        newPrint.FilamentUsage.Add(new PrintFilament
-        {
-            EstimatedSource = PrintFilament.SourceMeasurement.Length,
-            Id = Guid.Empty,
-            FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-            EstimatedLengthInM = 0,
-            Source = PrintFilament.SourceMeasurement.Length,
-            LengthInM = 0,
-            Notes = "Added by Moonraker"
+            UserId = userId,
+            PrinterId = data.PrinterId,
+            Source = PrintSource.Moonraker,
+            ExternalSource = NotifierSource,
+            ExternalId = externalId[..Math.Min(externalId.Length, 200)],
+            Title = title[..Math.Min(title.Length, 100)],
+            FileName = filenameWithExtension,
+            StartDate = startDate,
+            // The start payload carries no estimate. Record its ABSENCE, not a fake zero: a 0
+            // looks recorded, so no read-side fallback can ever recover from it.
+            EstimatedPrintTimeInSeconds = null,
+            Usage =
+            [
+                new PrintEventUsage(
+                    Slot: 0,
+                    EstimatedSource: PrintFilament.SourceMeasurement.Length,
+                    EstimatedLengthInM: 0,
+                    Source: PrintFilament.SourceMeasurement.Length,
+                    LengthInM: 0,
+                    Notes: "Added by Moonraker"),
+            ],
         });
-
-        await printService.UpdateFilamentUsageWeights(newPrint);
-
-
-        newPrint.StartDate = DateTimeOffset.UtcNow;
-
-
-        _ = context.Prints.Add(newPrint);
-
-        _ = await context.SaveChangesAsync();
-
-        // Webhooks are how most prints get created for automated setups. Saving straight
-        // through the context skips the invalidation the controllers do, so the cached
-        // print summary and analytics aggregates would keep serving pre-print figures.
-        cacheVersionService.InvalidateUserCache(userId);
     }
 
+    private Task HandlePrintFailed(PrintEventMessageDto data, long userId)
+        => printEventService.Finished(Finished(data, userId, PrintStatus.Failed, data.PrintDuration));
 
+    private Task HandlePrintCompleted(PrintEventMessageDto data, long userId)
+        => printEventService.Finished(Finished(data, userId, PrintStatus.Success, data.TotalDuration));
 
-
-    private async Task HandlePrintFailed(PrintEventMessageDto data, long userId)
+    private static PrintFinishedEvent Finished(PrintEventMessageDto data, long userId, PrintStatus status, double duration)
     {
-        Print? print = null;
-
-
-        var filename = Path.GetFileName(data.Filename);
-
-
-        // Find a print thats Printing with that same filename and printer
-        if (filename is not null)
-        {
-
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileName == filename
-                            && p.PrinterId == data.PrinterId
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .Include(p => p.Printer)
-            .ThenInclude(pr => pr.LoadedFilaments)
-            .FirstOrDefaultAsync();
-        }
-        else
-        {
-            // We have no other way of coorlating files other than filehash or name, so...
-            logger.LogWarning("Not enough information from moonraker to find matching print.", data);
-            return;
-        }
-
-        if (print == null)
-        {
-            logger.LogWarning("Matching print was not found.", data);
-            return;
-        }
-
-        print.Status = PrintStatus.Failed;
-
         // Round FIRST, then test positivity: 0.3 is > 0 but rounds to 0, and persisting that 0
-        // would recreate the very "looks recorded but isn't" row we are eliminating.
-        var failedDuration = (int)Math.Round(data?.PrintDuration ?? 0.0);
-        print.PrintTimeInSeconds = failedDuration > 0 ? failedDuration : (int?)null;
-        print.UpdatedById = userId;
-        context.Entry(print).State = EntityState.Modified;
-
-
-        var printersLoadedFilament = print.Printer.LoadedFilaments ?? new List<PrinterFilament>();
-
-        if (data?.FilamentUsed is not null)
+        // would recreate the "looks recorded but isn't" row.
+        var seconds = (int)Math.Round(duration);
+        return new PrintFinishedEvent
         {
-            var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
-
-            if (print.FilamentUsage!.Count > 0)
-            {
-
-
-                print.FilamentUsage!.ElementAt(0).LengthInM = lengthInM;
-                print.FilamentUsage!.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
-
-
-            }
-            else
-            {
-                print.FilamentUsage!.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                    EstimatedLengthInM = lengthInM,
-                    Source = PrintFilament.SourceMeasurement.Length,
-                    LengthInM = lengthInM,
-                    Notes = ""
-                });
-            }
-
-            await printService.UpdateFilamentUsageWeights(print);
-        }
-
-        _ = await context.SaveChangesAsync();
-        cacheVersionService.InvalidateUserCache(userId);
-
-        // Send notification for print failure
-        await notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
-
+            UserId = userId,
+            PrinterId = data.PrinterId,
+            FileName = Path.GetFileName(data.Filename),
+            Status = status,
+            PrintTimeInSeconds = seconds > 0 ? seconds : null,
+            ActualLengthInM = Math.Round(data.FilamentUsed / 1000, 3),
+        };
     }
-
-    private async Task HandlePrintCompleted(PrintEventMessageDto data, long userId)
-    {
-        Print? print = null;
-
-        var filename = Path.GetFileName(data.Filename);
-
-        // Find a print thats Printing with that same filename and printer
-        if (filename is not null)
-        {
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileName == filename
-                            && p.PrinterId == data.PrinterId
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .Include(p => p.Printer)
-            .ThenInclude(pr => pr.LoadedFilaments)
-            .FirstOrDefaultAsync();
-        }
-        else
-        {
-            // We have no other way of correlating files other than filename, so...
-            logger.LogWarning("Not enough information from moonraker to find matching print.", data);
-            return;
-        }
-
-        if (print == null)
-        {
-            logger.LogWarning("Matching print was not found.", data);
-            return;
-        }
-
-        print.Status = PrintStatus.Success;
-
-        // Round FIRST, then test positivity — see HandlePrintFailed.
-        var totalDuration = (int)Math.Round(data?.TotalDuration ?? 0.0);
-        print.PrintTimeInSeconds = totalDuration > 0 ? totalDuration : (int?)null;
-        print.UpdatedById = userId;
-        context.Entry(print).State = EntityState.Modified;
-
-        var printersLoadedFilament = print.Printer.LoadedFilaments ?? new List<PrinterFilament>();
-
-        if (data?.FilamentUsed is not null)
-        {
-            var lengthInM = Math.Round(data?.FilamentUsed / 1000 ?? 0.0, 3);
-
-            if (print.FilamentUsage!.Count > 0)
-            {
-                print.FilamentUsage!.ElementAt(0).LengthInM = lengthInM;
-                print.FilamentUsage!.ElementAt(0).Source = PrintFilament.SourceMeasurement.Length;
-            }
-            else
-            {
-                print.FilamentUsage!.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                    EstimatedLengthInM = lengthInM,
-                    Source = PrintFilament.SourceMeasurement.Length,
-                    LengthInM = lengthInM,
-                    Notes = ""
-                });
-            }
-
-            await printService.UpdateFilamentUsageWeights(print);
-        }
-
-        _ = await context.SaveChangesAsync();
-        cacheVersionService.InvalidateUserCache(userId);
-
-        // Send notification for print completion
-        await notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
-
-    }
-
 }

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "title": "",
+  "message": "{\"printerId\": __PRINTER_ID__, \"event_name\": \"cancelled\", \"filename\": \"jobs/__RUN___Benchy_0.2mm_PLA_MK3S_1h5m.gcode\", \"total_duration\": 1402.733, \"print_duration\": 1388.104, \"filament_used\": 1530.88, \"state\": \"cancelled\", \"message\": \"\", \"info\": {\"total_layer\": 240, \"current_layer\": 87}}",
+  "attachments": [],
+  "type": "info"
+}

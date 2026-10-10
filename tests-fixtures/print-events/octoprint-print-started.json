@@ -1,0 +1,14 @@
+{
+  "deviceIdentifier": "__PRINTER_ID__",
+  "apiSecret": "redacted",
+  "topic": "Print Started",
+  "message": "Your print has started.",
+  "extra": "{\"name\": \"__RUN___benchy.gcode\", \"path\": \"__RUN___benchy.gcode\", \"origin\": \"local\", \"size\": 1834567, \"owner\": \"printer-owner\", \"user\": \"printer-owner\"}",
+  "state": "{\"text\": \"Printing\", \"flags\": {\"operational\": true, \"printing\": true, \"cancelling\": false, \"pausing\": false, \"resuming\": false, \"finishing\": false, \"closedOrError\": false, \"error\": false, \"paused\": false, \"ready\": false, \"sdReady\": false}, \"error\": \"\"}",
+  "job": "{\"file\": {\"name\": \"__RUN___benchy.gcode\", \"path\": \"__RUN___benchy.gcode\", \"display\": \"__RUN___benchy.gcode\", \"origin\": \"local\", \"size\": 1834567, \"date\": 1728560000}, \"estimatedPrintTime\": 3812.62, \"averagePrintTime\": null, \"lastPrintTime\": null, \"filament\": {\"tool0\": {\"length\": 4210.33, \"volume\": 10.127}}, \"user\": \"printer-owner\"}",
+  "progress": "{\"completion\": 0.0, \"filepos\": 0, \"printTime\": 0, \"printTimeLeft\": null, \"printTimeLeftOrigin\": null}",
+  "currentZ": "0.2",
+  "offsets": "{}",
+  "meta": "{\"hash\": \"__HASH__\", \"analysis\": {\"printingArea\": {\"minX\": 10.5, \"maxX\": 70.1, \"minY\": 12.2, \"maxY\": 61.0, \"minZ\": 0.2, \"maxZ\": 48.0}, \"dimensions\": {\"width\": 59.6, \"depth\": 48.8, \"height\": 47.8}, \"estimatedPrintTime\": 3812.62, \"filament\": {\"tool0\": {\"length\": 4210.33, \"volume\": 10.127}}}, \"history\": [], \"statistics\": {\"averagePrintTime\": {}, \"lastPrintTime\": {}}}",
+  "currentTime": "1728560100"
+}

@@ -16,6 +16,9 @@ public class Connection
     /// <summary>How long without a heartbeat before a connection is stale. Agents beat every 5 minutes.</summary>
     public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(15);
 
+    /// <summary>The <see cref="Kind"/> the printlog-bridge registers for a Moonraker printer.</summary>
+    public const string MoonrakerKind = "moonraker";
+
     [Key]
     public Guid Id { get; set; }
 
@@ -49,4 +52,16 @@ public class Connection
 
     /// <summary>The last heartbeat, UTC.</summary>
     public DateTime LastSeenAt { get; set; }
+
+    /// <summary>
+    /// Moonraker notifier events dropped because this connection was logging the same printer
+    /// (#150). Non-zero means the user still has a <c>[notifier]</c> section they can remove.
+    /// </summary>
+    public int DroppedNotifierEventCount { get; set; }
+
+    /// <summary>When a notifier event was last dropped for this connection, UTC.</summary>
+    public DateTime? LastDroppedNotifierEventAt { get; set; }
+
+    /// <summary>When the user dismissed the "remove your notifier" notice, UTC. It never returns.</summary>
+    public DateTime? NotifierNoticeDismissedAt { get; set; }
 }

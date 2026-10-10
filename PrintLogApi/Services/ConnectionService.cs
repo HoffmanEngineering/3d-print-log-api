@@ -70,6 +70,23 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
             .AsNoTracking()
             .SingleOrDefaultAsync(c => c.UserId == userId && c.InstanceId == instanceId);
 
+    public async Task<bool> DismissNotifierNotice(long userId, string instanceId)
+    {
+        var connection = await context.Connections
+            .SingleOrDefaultAsync(c => c.UserId == userId && c.InstanceId == instanceId);
+        if (connection is null)
+        {
+            return false;
+        }
+
+        if (connection.NotifierNoticeDismissedAt is null)
+        {
+            connection.NotifierNoticeDismissedAt = clock.GetUtcNow().UtcDateTime;
+            await context.SaveChangesAsync();
+        }
+        return true;
+    }
+
     public async Task<bool> Delete(long userId, string instanceId)
     {
         var connection = await context.Connections

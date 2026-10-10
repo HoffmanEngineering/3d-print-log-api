@@ -49,6 +49,8 @@
   <ItemGroup>
     <None Include="..\tests-fixtures\cost-fixtures.json" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\cost-fixtures.json" />
     <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
+    <!-- Notifier and OctoPrint webhook bodies in the shape real traffic has (PrintEventPipelineTests). -->
+    <None Include="..\tests-fixtures\print-events\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\print-events" />
     <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->

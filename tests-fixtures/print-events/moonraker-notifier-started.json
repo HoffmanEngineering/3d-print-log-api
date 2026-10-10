@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "title": "",
+  "message": "{\"printerId\": __PRINTER_ID__, \"event_name\": \"started\", \"filename\": \"jobs/__RUN___Benchy_0.2mm_PLA_MK3S_1h5m.gcode\", \"total_duration\": 0.0011823, \"print_duration\": 0.0, \"filament_used\": 0.0, \"state\": \"printing\", \"message\": \"\", \"info\": {\"total_layer\": 240, \"current_layer\": 0}}",
+  "attachments": [],
+  "type": "info"
+}
