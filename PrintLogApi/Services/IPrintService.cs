@@ -106,6 +106,22 @@ public interface IPrintService
     Task<int> GetMaxImagesPerPrint(long userId);
     Task SetDefaultImage(long printId, int newDefaultImageId);
     Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
+
+    /// <summary>
+    /// Changes only the fields <paramref name="dto"/> sends, and nulls the ones it names in
+    /// Clear. Sent usage rows replace the print's rows. Throws DoesNotExistException for a missing
+    /// print or project, and UserCannotAccessPrinterException or UserCannotAccessFilamentException
+    /// for a printer or filament the user does not own; nothing is written when it throws.
+    /// </summary>
+    Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId);
+
+    /// <summary>
+    /// Records how a job ended: status, duration, and actual usage merged by filament (see
+    /// CompletePrintDto). Leaves every other field alone, and is safe to repeat: remaining filament
+    /// follows the rows, so a second identical call changes nothing. Throws BadRequestException
+    /// when endedAt is before the start date.
+    /// </summary>
+    Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
 
