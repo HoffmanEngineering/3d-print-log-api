@@ -680,6 +680,7 @@ public sealed class PrintService(
     {
         var print = await context.Prints
             .Include(p => p.Printer)
+            .Include(p => p.Connection)
             .Include(p => p.Images!)
                 .ThenInclude(p => p.File)
             .Include(p => p.Comments!)
@@ -869,6 +870,17 @@ public sealed class PrintService(
         {
             if (filament.FilamentId.HasValue && filament.FilamentId == default(Guid))
                 filament.FilamentId = null;
+        }
+
+        // Only the caller's own connection links; any other id is ignored rather than rejected,
+        // so a print is never lost because its agent has not registered yet.
+        if (!string.IsNullOrWhiteSpace(print.ConnectionInstanceId))
+        {
+            var instanceId = print.ConnectionInstanceId.Trim();
+            newPrint.ConnectionId = await context.Connections
+                .Where(c => c.UserId == userId && c.InstanceId == instanceId)
+                .Select(c => (Guid?)c.Id)
+                .FirstOrDefaultAsync();
         }
 
         var filamentIdsToCheck = newPrint.FilamentUsage!

@@ -335,6 +335,12 @@ public class UserDeletionService : IUserDeletionService
                 }
             }
 
+            // Delete Connections. After Prints, whose FK to them does not cascade, and before
+            // Printers, which their own FK would otherwise block.
+            await _context.Connections
+                .Where(c => c.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete Printers
             await _context.Printers
                 .Where(p => p.UserId == userId)

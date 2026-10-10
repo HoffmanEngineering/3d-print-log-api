@@ -277,6 +277,7 @@ public class PrintsController(
         {
             printDetailDto.ExternalSource = null;
             printDetailDto.ExternalId = null;
+            printDetailDto.ConnectionDisplayName = null;
         }
 
         return printDetailDto;

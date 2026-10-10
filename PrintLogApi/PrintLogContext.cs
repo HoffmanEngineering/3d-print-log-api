@@ -59,6 +59,7 @@ public class PrintLogContext : DbContext
 
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<DeviceToken> DeviceTokens { get; set; }
+    public DbSet<Connection> Connections { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -438,6 +439,35 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<DeviceToken>()
             .HasIndex(dt => dt.Token)
             .IsUnique();
+
+        // Connections (#149). The agent upserts by its own instance id, so the pair is the key a
+        // racing first heartbeat collides on. Scoped per user: re-pairing a bridge to another
+        // account must not reach into the first account's row.
+        modelBuilder.Entity<Connection>()
+            .HasIndex(c => new { c.UserId, c.InstanceId })
+            .IsUnique();
+
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Neither of these may cascade or set null in the database: Printers and Prints already
+        // cascade from Users, so a second path from Users to Connections or back to Prints is
+        // SQL Server error 1785. ClientSetNull nulls tracked rows; ConnectionService and
+        // PrinterService null the rest explicitly before deleting.
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.Printer)
+            .WithMany()
+            .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        modelBuilder.Entity<Print>()
+            .HasOne(p => p.Connection)
+            .WithMany()
+            .HasForeignKey(p => p.ConnectionId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
 
         modelBuilder.Entity<UserSetting>()
             .HasIndex(us => new { us.UserId, us.UserSettingTypeId })
