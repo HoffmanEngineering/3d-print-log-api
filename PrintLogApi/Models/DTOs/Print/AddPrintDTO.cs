@@ -1,9 +1,10 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print;
 
-public class AddPrintDTO
+public class AddPrintDTO : IValidatableObject
 {
     public long PrinterId { get; set; }
 
@@ -58,4 +59,41 @@ public class AddPrintDTO
     /// is missing (purged) or owned by someone else is ignored, never rejected.
     /// </summary>
     public Guid? CuraSettingId { get; set; }
+
+    /// <summary>
+    /// The system a connector logged this print from, e.g. <c>moonraker</c>, <c>octoprint</c>.
+    /// Send together with <see cref="ExternalId"/>: a pair the caller already used returns the
+    /// existing print with 200 instead of creating a duplicate.
+    /// </summary>
+    [StringLength(50)]
+    public string? ExternalSource { get; set; }
+
+    /// <summary>The job's identity in <see cref="ExternalSource"/>, unique per user and source.</summary>
+    [StringLength(200)]
+    public string? ExternalId { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (ExternalSource is null && ExternalId is null)
+        {
+            yield break;
+        }
+
+        // Half a pair cannot dedupe anything, and a blank half would dedupe everything the
+        // caller ever sends under it.
+        if (string.IsNullOrWhiteSpace(ExternalSource) || string.IsNullOrWhiteSpace(ExternalId))
+        {
+            yield return new ValidationResult(
+                "externalSource and externalId must be sent together, and neither may be blank.",
+                [nameof(ExternalSource), nameof(ExternalId)]);
+            yield break;
+        }
+
+        if (ExternalPrintIds.NormalizeSource(ExternalSource) == ExternalPrintIds.McpSource)
+        {
+            yield return new ValidationResult(
+                $"externalSource '{ExternalPrintIds.McpSource}' is reserved for MCP create_print.",
+                [nameof(ExternalSource)]);
+        }
+    }
 }

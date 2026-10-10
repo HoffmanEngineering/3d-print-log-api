@@ -563,6 +563,15 @@ public sealed class PrintService(
             .Select(p => mapper.Map<PrintSummaryDTO>(p))
             .ToList();
 
+        // The external pair is the creator's business (it embeds a connector's instance id).
+        // Hidden here, before the controller caches the page, because a cached page is shared
+        // and read-only. The cache key includes the caller, so each caller's page is its own.
+        foreach (var dto in dtos.Where(d => d.CreatedByUserId != currentUserId))
+        {
+            dto.ExternalSource = null;
+            dto.ExternalId = null;
+        }
+
         // **Restore original sort order**
         var dtoById = dtos.ToDictionary(d => d.Id);
         var orderedDtos = printIds
@@ -687,6 +696,134 @@ public sealed class PrintService(
         }
 
         return print;
+    }
+
+    public async Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate)
+    {
+        // AddPrintDTO.Validate has already rejected half a pair, so either both are set or neither.
+        if (print.ExternalSource is not { } rawSource || print.ExternalId is not { } rawExternalId)
+        {
+            return new AddPrintResult(await AddPrint(print, userId, sourceCandidate), WasReplayed: false);
+        }
+
+        print.ExternalSource = ExternalPrintIds.NormalizeSource(rawSource);
+        print.ExternalId = ExternalPrintIds.NormalizeId(rawExternalId);
+
+        if (await ReplayExternalPrint(print, userId) is { } replayed)
+        {
+            return replayed;
+        }
+
+        try
+        {
+            return new AddPrintResult(await AddPrint(print, userId, sourceCandidate), WasReplayed: false);
+        }
+        catch (DbUpdateException)
+        {
+            // A racing create with the same pair won IX_Prints_User_ExternalSource_ExternalId.
+            // Drop the failed insert's tracked entities so the lookup reads committed state, then
+            // replay the winner. No such print means the failure was something else.
+            context.ChangeTracker.Clear();
+            if (await ReplayExternalPrint(print, userId) is { } winner)
+            {
+                return winner;
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The replay half of <see cref="CreatePrint"/>: finds the caller's print for the pair and
+    /// applies only the fields a connector owns. Null when the pair is new.
+    /// </summary>
+    private async Task<AddPrintResult?> ReplayExternalPrint(AddPrintDTO print, long userId)
+    {
+        var existing = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .Where(p => p.CreatedById == userId && p.ExternalSource == print.ExternalSource && p.ExternalId == print.ExternalId)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync();
+        if (existing is null)
+        {
+            return null;
+        }
+
+        if (await ApplyConnectorOwnedFields(existing, print, userId))
+        {
+            existing.UpdatedById = userId;
+            await context.SaveChangesAsync();
+            cacheVersionService.InvalidateUserCache(userId);
+        }
+
+        // Null-forgiven: the row was read a moment ago and replay never deletes it.
+        return new AddPrintResult((await GetPrintById(existing.Id))!, WasReplayed: true);
+    }
+
+    /// <summary>
+    /// Copies status, durations and usage from a replayed create onto the stored print. Everything
+    /// else (title, notes, visibility, project…) belongs to the user, who may have edited it
+    /// while the print ran, so a replay never touches it. A field the replay omits keeps its value.
+    /// Returns whether anything changed.
+    /// </summary>
+    private async Task<bool> ApplyConnectorOwnedFields(Print existing, AddPrintDTO replay, long userId)
+    {
+        var changed = false;
+
+        // A finished print is never reopened: a start call that timed out client-side but landed
+        // can be retried after the finish, and must not put the print back to Printing.
+        var reopens = existing.Status is not (PrintStatus.Pending or PrintStatus.Printing)
+            && replay.Status is PrintStatus.Pending or PrintStatus.Printing;
+        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status && !reopens)
+        {
+            existing.Status = replay.Status;
+            changed = true;
+        }
+
+        changed |= SetIfSupplied(replay.PrintTimeInSeconds, v => existing.PrintTimeInSeconds = v, existing.PrintTimeInSeconds);
+        changed |= SetIfSupplied(replay.EstimatedPrintTimeInSeconds, v => existing.EstimatedPrintTimeInSeconds = v, existing.EstimatedPrintTimeInSeconds);
+        changed |= SetIfSupplied(replay.FilamentUsageMg, v => existing.FilamentUsageMg = v, existing.FilamentUsageMg);
+        changed |= SetIfSupplied(replay.EstimatedFilamentUsageMg, v => existing.EstimatedFilamentUsageMg = v, existing.EstimatedFilamentUsageMg);
+
+        if (replay.FilamentUsage is { Count: > 0 } rows)
+        {
+            var newRows = mapper.Map<List<PrintFilament>>(rows);
+            foreach (var row in newRows)
+            {
+                // Fresh keys: the rows being replaced are still tracked under theirs, and a
+                // connector resending the same row ids would otherwise collide with them.
+                row.Id = Guid.NewGuid();
+                row.PrintId = existing.Id;
+                if (row.FilamentId == default(Guid))
+                {
+                    row.FilamentId = null;
+                }
+            }
+
+            if (!await filamentService.CanUserAccessAllFilaments(userId, newRows.Select(r => r.FilamentId).OfType<Guid>()))
+            {
+                throw new UserCannotAccessFilamentException();
+            }
+
+            context.PrintFilament.RemoveRange(existing.FilamentUsage!);
+            // Added explicitly: discovered through the navigation, a row with a key already set
+            // is taken for an existing one and saved as an UPDATE that matches nothing.
+            context.PrintFilament.AddRange(newRows);
+            existing.FilamentUsage = newRows;
+            await UpdateFilamentUsageWeights(existing);
+            changed = true;
+        }
+
+        return changed;
+
+        static bool SetIfSupplied(int? value, Action<int?> set, int? current)
+        {
+            if (value is null || value == current)
+            {
+                return false;
+            }
+            set(value);
+            return true;
+        }
     }
 
     /// <summary>
@@ -879,6 +1016,11 @@ public sealed class PrintService(
             UpdatedById = userId,
             FilamentUsage = materials.Select(ToPrintFilament).ToList(),
             Source = PrintSource.Mcp,
+            // The same pair a connector's print carries (#144), so the prints unique index backs
+            // this key as well as IX_McpIdempotencyRecords_User_Tool_Key. The record still holds
+            // the fingerprint that tells a retry from a key reused with different arguments.
+            ExternalSource = ExternalPrintIds.McpSource,
+            ExternalId = idempotencyKey,
         };
 
         await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);

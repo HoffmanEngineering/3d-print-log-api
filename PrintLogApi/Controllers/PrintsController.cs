@@ -271,7 +271,55 @@ public class PrintsController(
         // properly is a behaviour change, tracked in #57.
         printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
 
+        // The external pair is the creator's business: it embeds a connector's instance id,
+        // and this endpoint serves public prints to anyone.
+        if (User.GetUserId() != print.CreatedById)
+        {
+            printDetailDto.ExternalSource = null;
+            printDetailDto.ExternalId = null;
+        }
+
         return printDetailDto;
+    }
+
+    /// <summary>
+    /// Find one of your prints by the id a connector logged it under.
+    /// </summary>
+    /// <remarks>
+    /// `source` is the connector (`moonraker`, `octoprint`…) and `id` its job id, the same pair
+    /// sent as `externalSource` and `externalId` when the print was created. Sources are not
+    /// case-sensitive; ids are.
+    /// </remarks>
+    /// <param name="source">The connector the print was logged from.</param>
+    /// <param name="id">The job's id in that connector.</param>
+    /// <response code="200">The print's detail.</response>
+    /// <response code="400">Returned when `source` or `id` is missing.</response>
+    /// <response code="404">Returned when you have no print with that pair.</response>
+    [HttpGet("external")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrintDetailDTO>> GetPrintByExternalId([FromQuery] string? source, [FromQuery] string? id)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(id))
+        {
+            return BadRequest("source and id are both required.");
+        }
+
+        var normalizedSource = ExternalPrintIds.NormalizeSource(source);
+        var normalizedId = ExternalPrintIds.NormalizeId(id);
+        var printId = await context.Prints
+            .Where(p => p.CreatedById == userId && p.ExternalSource == normalizedSource && p.ExternalId == normalizedId)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+
+        // Scoped to the caller, so another user's pair is indistinguishable from an unknown one.
+        return printId is { } found ? await GetPrintById(found) : NotFound();
     }
 
     /// <summary>
@@ -541,11 +589,20 @@ public class PrintsController(
     /// in seconds and filament amounts in milligrams. `status` is an integer (`1` Pending,
     /// `2` Printing, `3` Success, `4` Cancelled, `5` Failed, `6` PartialSuccess), and `viewStatus`
     /// is `1` Public, `2` Unlisted or `3` Private.
+    ///
+    /// Connectors should send `externalSource` (e.g. `moonraker`) and `externalId` (their job id)
+    /// together. Re-sending a pair you already used returns that print with `200` instead of
+    /// creating a duplicate, so retries and backfills are safe. On such a replay only the fields a
+    /// connector owns are applied (`status`, the durations, the filament totals and the usage
+    /// rows), and only when sent; the title, notes and every other field keep any edits the user
+    /// made. A finished print is never moved back to Pending or Printing. `mcp` is reserved.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
+    /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
     /// <response code="400">Returned if the new Print is not valid. Inspect Problem Details object for message as to what failed validation.</response>
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
@@ -560,12 +617,21 @@ public class PrintsController(
         try
         {
             var sourceCandidate = AuthMethodClaim.IsApiKey(User) ? PrintSource.ApiKey : PrintSource.Web;
-            var newPrint = await printService.AddPrint(print, userId.Value, sourceCandidate);
+            var (newPrint, wasReplayed) = await printService.CreatePrint(print, userId.Value, sourceCandidate);
+            var body = mapper.Map<PrintDetailDTO>(newPrint);
+
+            if (wasReplayed)
+            {
+                // Absolute, the same URL CreatedAtAction gave the original create.
+                Response.Headers.Location = Url.Action("GetPrintById", null, new { id = newPrint.Id }, Request.Scheme);
+                return Ok(body);
+            }
+
             telemetry.TrackEvent("PrintAdded");
 
             cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, mapper.Map<PrintDetailDTO>(newPrint));
+            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, body);
         }
         catch (UserCannotAccessPrinterException)
         {

@@ -16,6 +16,13 @@ public interface IPrintService
     Task<Print> AddPrint(AddPrintDTO print, long userId, PrintSource sourceCandidate = PrintSource.Web);
 
     /// <summary>
+    /// The REST create. Without an external pair it is <see cref="AddPrint"/>. With one that
+    /// <paramref name="userId"/> already used, it returns that print with WasReplayed = true
+    /// instead of creating a duplicate.
+    /// </summary>
+    Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate);
+
+    /// <summary>
     /// Creates a print and its PrintFilament usage rows for the MCP write surface, in one
     /// transaction keyed by <paramref name="idempotencyKey"/>. Printer, project and every material
     /// must belong to <paramref name="userId"/> (else NotFound). Does NOT mutate printer
@@ -116,3 +123,6 @@ public interface IPrintService
     /// </summary>
     Task<BulkPrintOperationResult> BulkDeletePrints(long userId, IReadOnlyList<long> printIds, CancellationToken ct);
 }
+
+/// <summary>A created print, or the existing one an external pair resolved to.</summary>
+public sealed record AddPrintResult(Print Print, bool WasReplayed);

@@ -102,4 +102,16 @@ public class Print : TimestampEntity
     /// <summary>The slicer version as the plugin reported it.</summary>
     [MaxLength(50)]
     public string? SlicerVersion { get; set; }
+
+    /// <summary>
+    /// The system a connector logged this print from (<c>moonraker</c>, <c>octoprint</c>,
+    /// <c>mcp</c>…). Set once at creation, never edited. Unique with <see cref="ExternalId"/>
+    /// per user, which is what makes a connector's retried create return the same print.
+    /// </summary>
+    [MaxLength(50)]
+    public string? ExternalSource { get; set; }
+
+    /// <summary>The job's identity in <see cref="ExternalSource"/>. See there.</summary>
+    [MaxLength(200)]
+    public string? ExternalId { get; set; }
 }

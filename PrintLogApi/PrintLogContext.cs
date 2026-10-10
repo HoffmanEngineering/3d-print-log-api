@@ -679,6 +679,16 @@ public class PrintLogContext : DbContext
             .HasIndex(p => p.ProjectId)
             .HasDatabaseName("IX_Prints_ProjectId");
 
+        // Connector idempotency (#144): one print per (user, source, external id). The unique
+        // index is the concurrency guard; a racing duplicate create fails here and is replayed.
+        // The filter is required on SQL Server, where a unique index otherwise admits only one
+        // row whose key columns are all NULL, i.e. one ordinary print per user.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => new { p.CreatedById, p.ExternalSource, p.ExternalId })
+            .IsUnique()
+            .HasFilter("[ExternalSource] IS NOT NULL AND [ExternalId] IS NOT NULL")
+            .HasDatabaseName("IX_Prints_User_ExternalSource_ExternalId");
+
         // MCP write idempotency: one created entity per (user, tool, key). The unique index is
         // the concurrency guard — a racing duplicate call fails here and is replayed.
         modelBuilder.Entity<McpIdempotencyRecord>()
