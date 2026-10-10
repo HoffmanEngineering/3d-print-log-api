@@ -22,4 +22,10 @@ public interface IConnectionService
     /// Deletes the caller's connection, keeping the prints it logged. False when there was none.
     /// </summary>
     Task<bool> Delete(long userId, string instanceId);
+
+    /// <summary>
+    /// Records that the user dismissed the notifier notice; the first dismissal's time is kept.
+    /// False when the caller has no such connection.
+    /// </summary>
+    Task<bool> DismissNotifierNotice(long userId, string instanceId);
 }

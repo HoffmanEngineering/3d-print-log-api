@@ -129,6 +129,32 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
         return NoContent();
     }
 
+    /// <summary>Dismisses the suggestion to remove the Moonraker notifier, for good.</summary>
+    /// <remarks>
+    /// The suggestion shows while `showNotifierNotice` is true: notifier events for this
+    /// connection's printer were dropped because the connection logs the same jobs. Dismissing it
+    /// keeps the count.
+    /// </remarks>
+    /// <param name="instanceId">The agent's own stable id for the printer.</param>
+    /// <response code="204">The notice was dismissed, or already had been.</response>
+    /// <response code="404">Returned when you have no connection with that instance id.</response>
+    [HttpPost("{instanceId}/notifier-notice/dismiss")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DismissNotifierNotice(string instanceId)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        return await connectionService.DismissNotifierNotice(userId, instanceId) ? NoContent() : NotFound();
+    }
+
+    private static DateTimeOffset? Utc(DateTime? value)
+        => value is { } v ? new DateTimeOffset(DateTime.SpecifyKind(v, DateTimeKind.Utc)) : null;
+
     private ConnectionDto ToDto(Connection connection)
     {
         // Stored as UTC, but SQLite hands it back as Unspecified.
@@ -144,6 +170,10 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
             CreatedDate = new DateTimeOffset(DateTime.SpecifyKind(connection.CreatedDate, DateTimeKind.Utc)),
             LastSeenAt = lastSeen,
             Status = clock.GetUtcNow() - lastSeen >= Connection.StaleAfter ? ConnectionStatus.Stale : ConnectionStatus.Online,
+            DroppedNotifierEventCount = connection.DroppedNotifierEventCount,
+            LastDroppedNotifierEventAt = Utc(connection.LastDroppedNotifierEventAt),
+            NotifierNoticeDismissedAt = Utc(connection.NotifierNoticeDismissedAt),
+            ShowNotifierNotice = connection.DroppedNotifierEventCount > 0 && connection.NotifierNoticeDismissedAt is null,
         };
     }
 }

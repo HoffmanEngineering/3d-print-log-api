@@ -35,4 +35,22 @@ public class ConnectionDto
 
     /// <summary>Stale after 15 minutes without a heartbeat.</summary>
     public ConnectionStatus Status { get; set; }
+
+    /// <summary>
+    /// Moonraker notifier events dropped because this connection logs the same printer. Each job
+    /// is logged once, by the connection.
+    /// </summary>
+    public int DroppedNotifierEventCount { get; set; }
+
+    /// <summary>When a notifier event was last dropped.</summary>
+    public DateTimeOffset? LastDroppedNotifierEventAt { get; set; }
+
+    /// <summary>When you dismissed the notice about the notifier.</summary>
+    public DateTimeOffset? NotifierNoticeDismissedAt { get; set; }
+
+    /// <summary>
+    /// Whether to suggest removing the <c>[notifier]</c> section from moonraker.conf: events were
+    /// dropped and the notice has not been dismissed.
+    /// </summary>
+    public bool ShowNotifierNotice { get; set; }
 }
