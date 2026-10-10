@@ -79,6 +79,25 @@ public class CreatePrintServiceTests : IClassFixture<McpDataWebApplicationFactor
     }
 
     [Fact]
+    public async Task CreatePrintForMcp_StampsTheIdempotencyKeyAsAnMcpExternalPair()
+    {
+        // One dedupe path (#144): an MCP-created print carries the same external pair a
+        // connector's would, so the prints unique index guards it too.
+        using var scope = _factory.Services.CreateScope();
+        var svc = Svc(scope);
+        var key = $"svc-key-external-{Guid.NewGuid()}";
+
+        var result = await svc.CreatePrintForMcp(IntegrationTestSeeder.TestUserId, "Benchy", McpTestData.SearchPrinterId,
+            Print.PrintStatus.Success, null, null, null, null, null, null, null, null, null, null,
+            new List<MaterialUsageInput>(), key, CancellationToken.None);
+
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var print = db.Prints.Single(p => p.Id == result.Print.Id);
+        Assert.Equal("mcp", print.ExternalSource);
+        Assert.Equal(key, print.ExternalId);
+    }
+
+    [Fact]
     public async Task CreatePrintForMcp_ForeignPrinter_Throws()
     {
         using var scope = _factory.Services.CreateScope();

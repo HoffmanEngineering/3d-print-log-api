@@ -36,4 +36,10 @@ public class PrintSummaryDTO
 
     public Guid? ProjectId { get; set; }
     public string? ProjectName { get; set; }
+
+    /// <summary>The connector that logged this print, if any. Shown to the creator only.</summary>
+    public string? ExternalSource { get; set; }
+
+    /// <summary>The job's id in <see cref="ExternalSource"/>. Shown to the creator only.</summary>
+    public string? ExternalId { get; set; }
 }
