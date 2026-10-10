@@ -28,6 +28,16 @@ public interface IPrinterService
     Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds);
 
     /// <summary>
+    /// Loads a spool into one slot of <paramref name="printer"/>, unloading whatever is in that
+    /// slot and the spool from wherever else it is loaded. Reloading the spool already there
+    /// keeps its row and loaded time. The caller validates the slot and saves.
+    /// </summary>
+    Task LoadSlot(Printer printer, int slot, Guid filamentId, string? slotLabel);
+
+    /// <summary>Unloads whatever is in one slot of <paramref name="printer"/>. The caller saves.</summary>
+    Task UnloadSlot(Printer printer, int slot);
+
+    /// <summary>
     /// The caller's printers, paginated. Lets an agent resolve a printer by name to an id;
     /// previously printer names only ever leaked out embedded in print results.
     /// </summary>

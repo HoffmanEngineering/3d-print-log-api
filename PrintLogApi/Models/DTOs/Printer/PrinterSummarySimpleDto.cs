@@ -20,6 +20,9 @@ public class PrinterSummarySimpleDto
 
     public double? WattageW { get; set; }
 
+    /// <summary>How many filament positions the printer has. 1 for a single-tool printer.</summary>
+    public int SlotCount { get; set; }
+
     public PrinterCategoryDto? Category { get; set; }
 
     public ICollection<PrinterFilamentForSummaryDto>? LoadedFilaments { get; set; }

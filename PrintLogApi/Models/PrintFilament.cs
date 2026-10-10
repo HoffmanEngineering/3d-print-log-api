@@ -25,6 +25,11 @@ public class PrintFilament
 
     public Guid? FilamentId { get; set; }
 
+    /// <summary>
+    /// The printer slot (tool) the material was fed from, recorded even when no spool is linked.
+    /// </summary>
+    public int? Slot { get; set; }
+
     // Can be null
     public Filament? Filament { get; set; }
 

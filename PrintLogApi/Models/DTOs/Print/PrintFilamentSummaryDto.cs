@@ -9,6 +9,9 @@ public class PrintFilamentSummaryDto
 
     public FilamentSummaryDto? Filament { get; set; }
 
+    /// <summary>The printer slot (tool) the material was fed from, if known.</summary>
+    public int? Slot { get; set; }
+
     public int? EstimatedAmountMg { get; set; }
     public int? AmountMg { get; set; }
 
