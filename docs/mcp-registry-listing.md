@@ -145,7 +145,8 @@ mcp-publisher publish
 mcp-publisher logout
 ```
 
-The release job then finds `1.0.0` already published and identical, and passes.
+The release job then finds the version already published and identical, and passes. (Done
+2026-10-10 for `1.1.0`.)
 
 ### 5. Enable the publish job
 
@@ -153,6 +154,20 @@ GitHub → Settings → Secrets and variables → Actions → **Variables** → 
 `MCP_REGISTRY_PUBLISH` = `true`.
 
 Unset it (or set anything else) to turn publishing off again; the job is skipped, not failed.
+
+To prove the job works without cutting a release, re-run just that job from the latest `v*`
+deploy run. Upstream jobs are not re-run, so nothing is redeployed, and the re-run reads the
+variable's current value:
+
+```bash
+gh run list --workflow deploy.yml --limit 1                  # the run id
+gh run view <run-id> --json jobs --jq '.jobs[] | {name, databaseId}'
+gh run rerun <run-id> --job <publish-mcp-registry job id>    # then approve mcp-registry
+```
+
+Against an unchanged `server.json` it logs "already published and unchanged" and skips the login,
+so it does **not** exercise `MCP_REGISTRY_PRIVATE_KEY`; the first real publish after a version bump
+is what does.
 
 ### 6. Verify the listing
 
@@ -185,19 +200,37 @@ connection, which Anthropic itself warns against for directory traffic
 the `3D Print Log MCP` API with `read:printdata` and `write:printdata`. The **Resource Parameter
 Compatibility Profile** tenant setting is already required and stays on.
 
+Smoke-test each app before handing it over: open
+`https://3dprintlog.auth0.com/authorize?response_type=code&client_id=<id>&redirect_uri=<callback>&scope=openid%20offline_access%20read:printdata%20write:printdata&resource=https://api.3dprintlog.com/mcp`,
+sign in, copy `code` from the directory's error page, and exchange it at `/oauth/token` with the
+secret. The access token's `aud` must include `https://api.3dprintlog.com/mcp`, its `scope` both
+data scopes, and the response must carry a refresh token. `invalid_client` means the app's token
+endpoint auth method (Post vs Basic) is wrong; missing login options mean its connections are not
+enabled.
+
 Also needed by both:
 
-- **A reviewer test account**: a real Auth0 login, no 2FA, with a populated print history,
-  printers, materials, and projects. OpenAI rejects a submission whose account needs sign-up or
-  2FA.
+- **A reviewer test account per directory**: a real Auth0 username/password login (no 2FA, no
+  social login), never shared between directories or with the Google Play reviewer account,
+  because reviewers use the write tools. OpenAI rejects a submission whose account needs sign-up
+  or 2FA. Populate each with `scripts/seed-reviewer-account.py` and an API key created on that
+  account, then revoke the key. The script also sets the currency and electricity rate, without
+  which every cost tile reports `RateMissing`.
 - **You have run every tool yourself** (both portals ask you to attest to it), through
   MCP Inspector or as a custom connector.
 - **Privacy policy**: `https://www.3dprintlog.com/docs/privacy-policy`. OpenAI requires it to cover
-  categories of personal data, purposes, recipients, retention and user controls; check it does.
+  categories of personal data, purposes, recipients, retention and user controls. As of
+  2026-10-10 it does not: it covers logs, analytics, email and ad cookies, but not account data,
+  its processors, retention or deletion, nor AI connectors. Fix it in `3d-print-log-ui` before the
+  ChatGPT submission.
 - **Terms of service** (ChatGPT only): an HTTPS URL. The site has no terms page today; it needs one
   before the ChatGPT submission.
 - **Docs**: `https://www.3dprintlog.com/docs/mcp`. **Support**: `hello@3dprintlog.com`.
-- **Icon**: `docs/assets/mcp-icon-512.png` (512×512 PNG). ChatGPT also wants a dark-theme variant.
+- **Icon**: `docs/assets/mcp-icon-512.png` (512×512 PNG). It is an opaque disc on transparency, so
+  the same file serves as ChatGPT's dark-theme logo.
+
+All the paste-ready copy for steps 8 and 9 (descriptions, example prompts, test cases) is in
+`mcp-directory-listing-copy.md`.
 
 ### 8. Claude Connectors Directory
 
