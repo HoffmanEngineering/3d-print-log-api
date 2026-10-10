@@ -54,4 +54,11 @@ public class AddPrinterDTO
 
     [Range(0, double.MaxValue, ErrorMessage = "Only positive number allowed")]
     public double? WattageW { get; set; }
+
+    /// <summary>
+    /// How many filament positions the printer has (tools, AMS slots). Omit to keep the current
+    /// value; a new printer defaults to 1.
+    /// </summary>
+    [Range(1, Models.Printer.MaxSlotCount)]
+    public int? SlotCount { get; set; }
 }

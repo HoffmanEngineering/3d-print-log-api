@@ -90,6 +90,7 @@ public class PrintersController(
                 Model = item.Model,
                 IsActive = item.IsActive,
                 WattageW = item.WattageW,
+                SlotCount = item.SlotCount,
                 Category = item.Category,
                 LoadedFilaments = item.LoadedFilaments,
                 DefaultImageThumbnailUrl = defaultImage?.BlobPath is null
@@ -257,7 +258,8 @@ public class PrintersController(
 
         existingPrinter.Category = printerCategory;
 
-        foreach (var filament in existingPrinter.LoadedFilaments!)
+        var requestedFilaments = printer.LoadedFilaments ?? [];
+        foreach (var filament in requestedFilaments)
         {
             if (filament.FilamentId != default)
             {
@@ -270,7 +272,7 @@ public class PrintersController(
             }
         }
 
-        await printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
+        await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList());
 
         context.Entry(existingPrinter).State = EntityState.Modified;
 
@@ -332,6 +334,12 @@ public class PrintersController(
 
         newPrinter.UserId = userId.Value;
 
+        var loadedAt = DateTimeOffset.Now;
+        newPrinter.LoadedFilaments = (printer.LoadedFilaments ?? [])
+            .Where(f => f.FilamentId != default)
+            .Select(f => new PrinterFilament { FilamentId = f.FilamentId, LoadedDateTime = loadedAt })
+            .ToList();
+
         context.Printers.Add(newPrinter);
         await context.SaveChangesAsync();
 
@@ -376,7 +384,119 @@ public class PrintersController(
             return Forbid();
         }
 
-        return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments!
+            .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime));
+    }
+
+    /// <summary>
+    /// Load a spool into one of a printer's slots.
+    /// </summary>
+    /// <remarks>
+    /// Slots are 0-based and must be below the printer's `slotCount`. Whatever is in the slot is
+    /// unloaded, and so is the spool from any other slot or printer it was loaded on: a spool is
+    /// loaded in one place at a time. Loading the spool that is already there only updates the
+    /// label. Returns the printer's loaded filament, in slot order.
+    /// </remarks>
+    /// <param name="id">The ID of the printer.</param>
+    /// <param name="slot">The 0-based slot, such as 2 for T2.</param>
+    /// <param name="body">The spool to load, and what the printer calls the slot.</param>
+    /// <response code="200">Returned with the printer's loaded filament.</response>
+    /// <response code="400">Returned if the slot is outside the printer's slot count.</response>
+    /// <response code="401">Returned if the user is not authenticated.</response>
+    /// <response code="403">Returned if the current user cannot access the printer or the spool.</response>
+    /// <response code="404">Returned if the printer does not exist.</response>
+    [HttpPut("{id}/slots/{slot}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> LoadSlot(long id, int slot, LoadPrinterSlotDto body)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var printer = await printerService.getPrinterById(id);
+        if (printer == null)
+        {
+            return NotFound();
+        }
+
+        if (printer.UserId != userId)
+        {
+            return Forbid();
+        }
+
+        if (slot < 0 || slot >= printer.SlotCount)
+        {
+            return BadRequest($"slot must be between 0 and {printer.SlotCount - 1}; this printer has {printer.SlotCount}.");
+        }
+
+        // [Required] guarantees a value.
+        var filamentId = body.FilamentId!.Value;
+        if (!await filamentService.CanUserAccessFilament(userId.Value, filamentId))
+        {
+            return StatusCode(403, "User does not have access to filament.");
+        }
+
+        var label = string.IsNullOrWhiteSpace(body.SlotLabel) ? null : body.SlotLabel.Trim();
+        await printerService.LoadSlot(printer, slot, filamentId, label);
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrinterSlotLoaded");
+        cacheVersionService.InvalidateUserCache(userId.Value);
+
+        // The tracked printer still holds the rows just unloaded; read the result fresh.
+        context.ChangeTracker.Clear();
+        return await GetLoadedFilament(id);
+    }
+
+    /// <summary>
+    /// Unload whatever spool is in one of a printer's slots.
+    /// </summary>
+    /// <remarks>
+    /// Unloading an empty slot succeeds. To unload every slot, use `PUT /api/Printers/{id}/filament/unload`.
+    /// </remarks>
+    /// <param name="id">The ID of the printer.</param>
+    /// <param name="slot">The 0-based slot.</param>
+    /// <response code="204">Returned when the slot is empty.</response>
+    /// <response code="401">Returned if the user is not authenticated.</response>
+    /// <response code="403">Returned if the current user cannot access the printer.</response>
+    /// <response code="404">Returned if the printer does not exist.</response>
+    [HttpDelete("{id}/slots/{slot}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UnloadSlot(long id, int slot)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var printer = await printerService.getPrinterById(id);
+        if (printer == null)
+        {
+            return NotFound();
+        }
+
+        if (printer.UserId != userId)
+        {
+            return Forbid();
+        }
+
+        await printerService.UnloadSlot(printer, slot);
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrinterSlotUnloaded");
+        cacheVersionService.InvalidateUserCache(userId.Value);
+
+        return NoContent();
     }
 
     /// <summary>

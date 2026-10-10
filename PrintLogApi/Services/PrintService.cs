@@ -900,8 +900,13 @@ public sealed class PrintService(
             .OfType<Guid>()
             .Where(id => id != default);
 
-        // PrinterService setLoadedFilament
-        await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+        // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
+        // the slots say what is loaded, and replacing them with one print's spools would unload
+        // every tool the print did not use.
+        if (newPrint.Printer.SlotCount <= 1)
+        {
+            await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+        }
 
 
         await UpdateFilamentUsageWeights(newPrint);
@@ -1647,21 +1652,49 @@ public sealed class PrintService(
     }
 
     /// <summary>
-    /// Writes actual usage onto the print's rows, matching by filament. Rows with no filament are
-    /// matched in order against the print's unlinked rows, so a retried completion updates the row
-    /// the first one added instead of adding another. A match keeps its estimate and notes; an
-    /// incoming row with no match is added. Rows the completion does not mention are untouched.
+    /// Writes actual usage onto the print's rows, matching by filament. A row with no filament is
+    /// matched to the print's unlinked row for its slot when it names one, otherwise in order
+    /// against the remaining unlinked rows, so a retried completion updates the row the first one
+    /// added instead of adding another. A match keeps its estimate and notes; an incoming row with
+    /// no match is added. Rows the completion does not mention are untouched.
     /// </summary>
     private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage)
     {
         var rows = print.FilamentUsage!;
-        var unlinked = new Queue<PrintFilament>(rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id));
+        var unlinked = rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id).ToList();
 
-        foreach (var incoming in usage)
+        // Slots first, so an in-order match below cannot take a row a later slot names.
+        var incomingRows = usage.ToList();
+        var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
+        foreach (var incoming in incomingRows.Where(u => u.FilamentId is null && u.Slot is not null))
         {
-            var row = incoming.FilamentId is { } filamentId
-                ? rows.FirstOrDefault(r => r.FilamentId == filamentId)
-                : unlinked.Count > 0 ? unlinked.Dequeue() : null;
+            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
+            if (bySlot != null)
+            {
+                unlinked.Remove(bySlot);
+            }
+            matches[incoming] = bySlot;
+        }
+
+        foreach (var incoming in incomingRows)
+        {
+            PrintFilament? row;
+            if (incoming.FilamentId is { } filamentId)
+            {
+                row = rows.FirstOrDefault(r => r.FilamentId == filamentId);
+            }
+            else if (incoming.Slot is not null)
+            {
+                row = matches[incoming];
+            }
+            else
+            {
+                row = unlinked.FirstOrDefault();
+                if (row != null)
+                {
+                    unlinked.Remove(row);
+                }
+            }
 
             if (row == null)
             {
@@ -1670,6 +1703,7 @@ public sealed class PrintService(
                     Id = Guid.NewGuid(),
                     PrintId = print.Id,
                     FilamentId = incoming.FilamentId,
+                    Slot = incoming.Slot,
                     EstimatedSource = PrintFilament.SourceMeasurement.Weight,
                 };
                 // Added explicitly, for the same reason as in ReplaceUsageRows.

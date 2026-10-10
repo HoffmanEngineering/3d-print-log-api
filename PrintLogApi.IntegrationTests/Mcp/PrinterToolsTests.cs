@@ -31,7 +31,8 @@ public class PrinterToolsTests : IClassFixture<McpDataWebApplicationFactory>
 
     private sealed record LoadedFilament(
         Guid FilamentId, string? Name, string? Brand, string? Material, string? Color,
-        double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt);
+        double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt,
+        int? Slot, string? SlotLabel);
 
     private sealed record PrinterDetail(
         long Id, string Name, string? Make, string? Model, string? Description,
@@ -41,7 +42,8 @@ public class PrinterToolsTests : IClassFixture<McpDataWebApplicationFactory>
         List<LoadedFilament> LoadedFilaments, int LoadedFilamentCount,
         bool LoadedFilamentsTruncated, int ExcludedUnreadableSpools,
         double? FilamentDiameterMm, double? BeamDiameterMm,
-        double? ScreenResolutionXPixels, double? ScreenResolutionYPixels);
+        double? ScreenResolutionXPixels, double? ScreenResolutionYPixels,
+        int SlotCount);
 
     private static T Parse<T>(CallToolResult result)
     {
@@ -161,6 +163,56 @@ public class PrinterToolsTests : IClassFixture<McpDataWebApplicationFactory>
         Assert.Equal(1.75, loaded.DiameterMm);
         // 1,000,000 mg initial, no usage or adjustment against this spool.
         Assert.Equal(1000.0, loaded.RemainingGrams);
+    }
+
+    [Fact]
+    public async Task LoadedFilaments_CarryTheirSlotsInSlotOrder()
+    {
+        long printerId;
+        var loadedAt = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var printer = new Printer
+            {
+                Name = "Four Tool Printer",
+                Make = "Snapmaker",
+                Model = "U1",
+                UserId = IntegrationTestSeeder.TestUserId,
+                IsActive = true,
+                SlotCount = 4,
+            };
+            ctx.Printers.Add(printer);
+            await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
+            printerId = printer.Id;
+
+            // Slot 2 loaded last, so slot order and load order disagree.
+            ctx.Set<PrinterFilament>().AddRange(
+                new PrinterFilament
+                {
+                    PrinterId = printerId,
+                    FilamentId = IntegrationTestSeeder.TestFilamentId1,
+                    Slot = 2,
+                    SlotLabel = "T2",
+                    LoadedDateTime = loadedAt.AddHours(1),
+                },
+                new PrinterFilament
+                {
+                    PrinterId = printerId,
+                    FilamentId = IntegrationTestSeeder.TestFilamentId2,
+                    Slot = 0,
+                    SlotLabel = "T0",
+                    LoadedDateTime = loadedAt,
+                });
+            await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using var client = await _factory.ConnectAsync();
+        var detail = await Get(client, printerId);
+
+        Assert.Equal(4, detail.SlotCount);
+        Assert.Equal([0, 2], detail.LoadedFilaments.Select(f => f.Slot));
+        Assert.Equal(["T0", "T2"], detail.LoadedFilaments.Select(f => f.SlotLabel));
     }
 
     /// <summary>

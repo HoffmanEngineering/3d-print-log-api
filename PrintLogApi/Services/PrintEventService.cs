@@ -63,7 +63,8 @@ public class PrintEventService(
             {
                 EstimatedSource = usage.EstimatedSource,
                 Id = Guid.Empty,
-                FilamentId = loaded.ElementAtOrDefault(usage.Slot)?.FilamentId,
+                FilamentId = SpoolInSlot(loaded, usage.Slot),
+                Slot = usage.Slot,
                 EstimatedLengthInM = usage.EstimatedLengthInM,
                 Source = usage.Source,
                 LengthInM = usage.LengthInM,
@@ -163,7 +164,7 @@ public class PrintEventService(
                 {
                     EstimatedSource = PrintFilament.SourceMeasurement.Length,
                     Id = Guid.Empty,
-                    FilamentId = loaded.ElementAtOrDefault(0)?.FilamentId,
+                    FilamentId = SpoolInSlot(loaded, 0),
                     EstimatedLengthInM = lengthInM,
                     Source = PrintFilament.SourceMeasurement.Length,
                     LengthInM = lengthInM,
@@ -226,6 +227,21 @@ public class PrintEventService(
                 .SetProperty(c => c.LastDroppedNotifierEventAt, now));
 
         return dropped > 0;
+    }
+
+    /// <summary>
+    /// The spool loaded in <paramref name="slot"/>. Slot 0 falls back to a spool loaded with no
+    /// slot, which is how every single-tool printer was loaded before slots existed.
+    /// </summary>
+    private static Guid? SpoolInSlot(IEnumerable<PrinterFilament> loaded, int slot)
+    {
+        var rows = loaded.ToList();
+        var inSlot = rows.FirstOrDefault(pf => pf.Slot == slot);
+        if (inSlot is null && slot == 0)
+        {
+            inSlot = rows.Where(pf => pf.Slot is null).OrderBy(pf => pf.LoadedDateTime).FirstOrDefault();
+        }
+        return inSlot?.FilamentId;
     }
 
     private async Task<Print?> FindByExternalId(PrintStartedEvent started)

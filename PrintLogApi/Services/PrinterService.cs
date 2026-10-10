@@ -237,6 +237,54 @@ public class PrinterService(
 
     }
 
+    public async Task LoadSlot(Printer printer, int slot, Guid filamentId, string? slotLabel)
+    {
+        // Local time, matching setLoadedFilament: these columns already hold DateTimeOffset.Now
+        // values, and mixing in UTC would make rows either side of a deploy mean different things.
+        var now = DateTimeOffset.Now;
+
+        var displaced = await context.PrinterFilament
+            .Where(pf => pf.FilamentId == filamentId || (pf.PrinterId == printer.Id && pf.Slot == slot))
+            .ToListAsync();
+
+        // The bridge reasserts every slot when it reconnects; that is not a reload.
+        var current = displaced.FirstOrDefault(pf =>
+            pf.PrinterId == printer.Id && pf.Slot == slot && pf.FilamentId == filamentId);
+
+        foreach (var row in displaced.Where(pf => pf != current))
+        {
+            row.UnloadedDateTime = now;
+        }
+
+        if (current != null)
+        {
+            current.SlotLabel = slotLabel ?? current.SlotLabel;
+            return;
+        }
+
+        context.PrinterFilament.Add(new PrinterFilament
+        {
+            PrinterId = printer.Id,
+            FilamentId = filamentId,
+            Slot = slot,
+            SlotLabel = slotLabel,
+            LoadedDateTime = now,
+        });
+    }
+
+    public async Task UnloadSlot(Printer printer, int slot)
+    {
+        var now = DateTimeOffset.Now;
+        var rows = await context.PrinterFilament
+            .Where(pf => pf.PrinterId == printer.Id && pf.Slot == slot)
+            .ToListAsync();
+
+        foreach (var row in rows)
+        {
+            row.UnloadedDateTime = now;
+        }
+    }
+
     /// <summary>
     /// Delete a Printer if that printer isn't in use by a print.
     /// </summary>
@@ -383,6 +431,7 @@ public class PrinterService(
                 p.BeamDiameter,
                 p.ScreenResolutionXPixels,
                 p.ScreenResolutionYPixels,
+                p.SlotCount,
 
                 // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                 // without the UnloadedDateTime filter every spool ever mounted would be reported
@@ -398,7 +447,11 @@ public class PrinterService(
 
                 Loaded = p.LoadedFilaments!
                     .Where(pf => pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId)
-                    .OrderByDescending(pf => pf.LoadedDateTime)
+                    // Slot order, so "what is in T2" reads straight off the list; spools with no
+                    // slot follow, newest first as before.
+                    .OrderBy(pf => pf.Slot == null)
+                    .ThenBy(pf => pf.Slot)
+                    .ThenByDescending(pf => pf.LoadedDateTime)
                     .ThenBy(pf => pf.Id)
                     .Select(pf => new
                     {
@@ -420,6 +473,8 @@ public class PrinterService(
                             + pf.Filament.FilamentAdjustments!.Sum(adj => adj.AmountMg),
 
                         pf.LoadedDateTime,
+                        pf.Slot,
+                        pf.SlotLabel,
                     })
                     // Capped in SQL, not after materialization: LoadedCount above already
                     // reports the true total, so there is no reason to pull every row back.
@@ -436,7 +491,7 @@ public class PrinterService(
         var loaded = row.Loaded
             .Select(f => new LoadedFilament(
                 f.FilamentId, f.Name, f.Brand, f.Material, f.Color, f.DiameterMm,
-                McpUnits.MgToGrams(f.RemainingMg), f.LoadedDateTime))
+                McpUnits.MgToGrams(f.RemainingMg), f.LoadedDateTime, f.Slot, f.SlotLabel))
             .ToList();
 
         // Named arguments deliberately: this record has 22 fields, many of them double? or
@@ -466,7 +521,8 @@ public class PrinterService(
             FilamentDiameterMm: row.FilamentDiameter,
             BeamDiameterMm: row.BeamDiameter,
             ScreenResolutionXPixels: row.ScreenResolutionXPixels,
-            ScreenResolutionYPixels: row.ScreenResolutionYPixels);
+            ScreenResolutionYPixels: row.ScreenResolutionYPixels,
+            SlotCount: row.SlotCount);
     }
 
     /// <summary>

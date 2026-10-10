@@ -15,6 +15,9 @@ public class PutPrintFilamentSummaryDto
     /// </summary>
     public Guid? FilamentId { get; set; }
 
+    /// <summary>The printer slot (tool) the material was fed from, if known.</summary>
+    public int? Slot { get; set; }
+
     /// <summary>
     /// The estimated weight of filament used in milligrams.
     /// </summary>

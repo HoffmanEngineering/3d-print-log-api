@@ -51,6 +51,13 @@ public class CompletePrintDto : IValidatableObject
             yield return new ValidationResult("Each filamentId may appear at most once.", [nameof(FilamentUsage)]);
         }
 
+        var unlinkedSlots = usage.Where(u => !u.FilamentId.HasValue && u.Slot.HasValue).Select(u => u.Slot).ToList();
+        if (unlinkedSlots.Count != unlinkedSlots.Distinct().Count())
+        {
+            // A row with no filament is matched to the print by slot, so two for one slot are ambiguous.
+            yield return new ValidationResult("Each slot may appear at most once among rows with no filamentId.", [nameof(FilamentUsage)]);
+        }
+
         if (usage.Any(u => u.ResolveSource() is null))
         {
             yield return new ValidationResult(
@@ -65,6 +72,12 @@ public class CompletePrintFilamentUsageDto
 {
     /// <summary>The filament used, or null when no spool is linked.</summary>
     public Guid? FilamentId { get; set; }
+
+    /// <summary>
+    /// The printer slot (tool) the material was fed from. A row with no filament is matched to
+    /// the print's row for this slot.
+    /// </summary>
+    public int? Slot { get; set; }
 
     /// <summary>The actual weight used in milligrams.</summary>
     public int? AmountMg { get; set; }

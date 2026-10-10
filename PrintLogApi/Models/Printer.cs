@@ -47,4 +47,12 @@ public class Printer
 
     public double? WattageW { get; set; }
 
+    /// <summary>
+    /// How many filament positions the printer has (tools, AMS slots). 1 for a single-tool
+    /// printer.
+    /// </summary>
+    public int SlotCount { get; set; } = 1;
+
+    public const int MaxSlotCount = 64;
+
 }

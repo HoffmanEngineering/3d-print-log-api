@@ -1224,6 +1224,9 @@ namespace PrintLogApi.Migrations
                     b.Property<long>("PrintId")
                         .HasColumnType("bigint");
 
+                    b.Property<int?>("Slot")
+                        .HasColumnType("int");
+
                     b.Property<int>("Source")
                         .HasColumnType("int");
 
@@ -1354,6 +1357,9 @@ namespace PrintLogApi.Migrations
 
                     b.Property<double?>("ScreenResolutionYPixels")
                         .HasColumnType("float");
+
+                    b.Property<int>("SlotCount")
+                        .HasColumnType("int");
 
                     b.Property<long>("UserId")
                         .HasColumnType("bigint");
@@ -1577,6 +1583,13 @@ namespace PrintLogApi.Migrations
 
                     b.Property<long>("PrinterId")
                         .HasColumnType("bigint");
+
+                    b.Property<int?>("Slot")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SlotLabel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTimeOffset?>("UnloadedDateTime")
                         .HasColumnType("datetimeoffset");
