@@ -429,6 +429,112 @@ public class PrintsController(
     }
 
     /// <summary>
+    /// Change some of a print's details.
+    /// </summary>
+    /// <remarks>
+    /// Send only the fields to change; a field left out, or sent as null, keeps its value. To null
+    /// out `startDate`, `estimatedPrintTimeInSeconds`, `printTimeInSeconds`, `notes`, `url`,
+    /// `fileName` or `projectId`, name it in `clear`. Setting and clearing the same field is a 400.
+    /// `filamentUsage`, when sent, replaces every usage row, and remaining filament moves by the
+    /// net difference. Unlike `PUT`, a patch cannot undo an edit somebody else made to another field.
+    /// </remarks>
+    /// <param name="id">The ID of the print to update.</param>
+    /// <param name="patch">The fields to change.</param>
+    /// <response code="200">The updated print.</response>
+    /// <response code="400">The patch is invalid, or names a printer or filament the caller does not own.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the caller may not edit this print.</response>
+    /// <response code="404">Returned when the print, or the project named, does not exist.</response>
+    [HttpPatch("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrintDetailDTO>> PatchPrint(long id, PatchPrintDto patch)
+    {
+        return await EditPrint(id, userId => printService.PatchPrint(id, patch, userId));
+    }
+
+    /// <summary>
+    /// Record how a print ended.
+    /// </summary>
+    /// <remarks>
+    /// For connectors reporting a finished job. Sets `status` (Success `3`, Cancelled `4`, Failed
+    /// `5` or PartialSuccess `6`) and `printTimeInSeconds`, and merges `filamentUsage` into the
+    /// print's rows by `filamentId`: actual values are set, estimates and notes are kept, and a
+    /// filament not yet on the print is added. Rows with no `filamentId` are matched in order
+    /// against the print's unlinked rows. `endedAt` fills in the duration from the start date, or
+    /// the start date from the duration, when one is missing. Every other field is left alone,
+    /// and repeating the call is safe: remaining filament changes by the net difference only.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="completion">How the print ended.</param>
+    /// <response code="200">The updated print.</response>
+    /// <response code="400">The body is invalid, `endedAt` is before the start date, or a filament is not the caller's.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the caller may not edit this print.</response>
+    /// <response code="404">Returned when the print does not exist.</response>
+    [HttpPost("{id}/complete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrintDetailDTO>> CompletePrint(long id, CompletePrintDto completion)
+    {
+        return await EditPrint(id, userId => printService.CompletePrint(id, completion, userId));
+    }
+
+    /// <summary>
+    /// The access check and error mapping PATCH and complete share with PUT: the print's creator
+    /// or its printer's owner may edit it.
+    /// </summary>
+    private async Task<ActionResult<PrintDetailDTO>> EditPrint(long id, Func<long, Task<Print>> edit)
+    {
+        var existingPrint = await printService.GetPrintById(id);
+        if (existingPrint == null)
+        {
+            return NotFound();
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var updatedPrint = await edit(userId.Value);
+
+            // Same reason as PutPrint: the printer's owner can edit a print another user created.
+            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
+
+            return Ok(mapper.Map<PrintDetailDTO>(updatedPrint));
+        }
+        catch (UserCannotAccessPrinterException)
+        {
+            return BadRequest("The printer does not belong to the current user.");
+        }
+        catch (UserCannotAccessFilamentException)
+        {
+            return BadRequest("A filament does not belong to the current user.");
+        }
+        catch (BadRequestException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
     ///   Update a print with a new PrintStatus.
     /// </summary>
     /// <remarks>

@@ -786,30 +786,7 @@ public sealed class PrintService(
 
         if (replay.FilamentUsage is { Count: > 0 } rows)
         {
-            var newRows = mapper.Map<List<PrintFilament>>(rows);
-            foreach (var row in newRows)
-            {
-                // Fresh keys: the rows being replaced are still tracked under theirs, and a
-                // connector resending the same row ids would otherwise collide with them.
-                row.Id = Guid.NewGuid();
-                row.PrintId = existing.Id;
-                if (row.FilamentId == default(Guid))
-                {
-                    row.FilamentId = null;
-                }
-            }
-
-            if (!await filamentService.CanUserAccessAllFilaments(userId, newRows.Select(r => r.FilamentId).OfType<Guid>()))
-            {
-                throw new UserCannotAccessFilamentException();
-            }
-
-            context.PrintFilament.RemoveRange(existing.FilamentUsage!);
-            // Added explicitly: discovered through the navigation, a row with a key already set
-            // is taken for an existing one and saved as an UPDATE that matches nothing.
-            context.PrintFilament.AddRange(newRows);
-            existing.FilamentUsage = newRows;
-            await UpdateFilamentUsageWeights(existing);
+            await ReplaceUsageRows(existing, mapper.Map<List<PrintFilament>>(rows), userId);
             changed = true;
         }
 
@@ -824,6 +801,39 @@ public sealed class PrintService(
             set(value);
             return true;
         }
+    }
+
+    /// <summary>
+    /// Swaps every usage row on <paramref name="existing"/> for <paramref name="newRows"/>. Remaining
+    /// filament is derived from the rows, so a replacement moves inventory by the net difference.
+    /// Throws <see cref="UserCannotAccessFilamentException"/> before changing anything when a row
+    /// names a filament the user does not own.
+    /// </summary>
+    private async Task ReplaceUsageRows(Print existing, List<PrintFilament> newRows, long userId)
+    {
+        foreach (var row in newRows)
+        {
+            // Fresh keys: the rows being replaced are still tracked under theirs, and a
+            // caller resending the same row ids would otherwise collide with them.
+            row.Id = Guid.NewGuid();
+            row.PrintId = existing.Id;
+            if (row.FilamentId == default(Guid))
+            {
+                row.FilamentId = null;
+            }
+        }
+
+        if (!await filamentService.CanUserAccessAllFilaments(userId, newRows.Select(r => r.FilamentId).OfType<Guid>()))
+        {
+            throw new UserCannotAccessFilamentException();
+        }
+
+        context.PrintFilament.RemoveRange(existing.FilamentUsage!);
+        // Added explicitly: discovered through the navigation, a row with a key already set
+        // is taken for an existing one and saved as an UPDATE that matches nothing.
+        context.PrintFilament.AddRange(newRows);
+        existing.FilamentUsage = newRows;
+        await UpdateFilamentUsageWeights(existing);
     }
 
     /// <summary>
@@ -1521,6 +1531,147 @@ public sealed class PrintService(
 
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(updatedPrint.Id))!;
+    }
+
+    public async Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId)
+    {
+        var print = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .FirstOrDefaultAsync(p => p.Id == id)
+            ?? throw new DoesNotExistException();
+
+        // ---- Validate everything first: a rejected patch must leave the print untouched. ----
+        if (dto.PrinterId.HasValue &&
+            !await context.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value && p.UserId == userId))
+        {
+            throw new UserCannotAccessPrinterException();
+        }
+        if (dto.ProjectId.HasValue &&
+            !await context.Projects.AnyAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId))
+        {
+            throw new DoesNotExistException();
+        }
+
+        // ---- Mutate. ----
+        if (dto.FilamentUsage != null)
+        {
+            // First, because it is the one step that can still refuse (a foreign filament), and
+            // it throws before touching the print.
+            await ReplaceUsageRows(print, mapper.Map<List<PrintFilament>>(dto.FilamentUsage), userId);
+        }
+
+        if (dto.Title != null) { print.Title = dto.Title.Trim(); }
+        if (dto.Status.HasValue) { print.Status = dto.Status.Value; }
+        if (dto.PrinterId.HasValue) { print.PrinterId = dto.PrinterId.Value; }
+        if (dto.ViewStatus.HasValue) { print.ViewStatus = dto.ViewStatus.Value; }
+        if (dto.AllowComments.HasValue) { print.AllowComments = dto.AllowComments.Value; }
+        if (dto.AllowFileDownloads.HasValue) { print.AllowFileDownloads = dto.AllowFileDownloads.Value; }
+
+        if (dto.StartDate.HasValue) { print.StartDate = dto.StartDate; } else if (dto.Clears("startDate")) { print.StartDate = null; }
+        if (dto.EstimatedPrintTimeInSeconds.HasValue) { print.EstimatedPrintTimeInSeconds = dto.EstimatedPrintTimeInSeconds; } else if (dto.Clears("estimatedPrintTimeInSeconds")) { print.EstimatedPrintTimeInSeconds = null; }
+        if (dto.PrintTimeInSeconds.HasValue) { print.PrintTimeInSeconds = dto.PrintTimeInSeconds; } else if (dto.Clears("printTimeInSeconds")) { print.PrintTimeInSeconds = null; }
+        if (dto.Notes != null) { print.Notes = dto.Notes; } else if (dto.Clears("notes")) { print.Notes = null; }
+        if (dto.Url != null) { print.Url = dto.Url; } else if (dto.Clears("url")) { print.Url = null; }
+        if (dto.FileName != null) { print.FileName = dto.FileName; } else if (dto.Clears("fileName")) { print.FileName = null; }
+        if (dto.ProjectId.HasValue) { print.ProjectId = dto.ProjectId; } else if (dto.Clears("projectId")) { print.ProjectId = null; }
+
+        print.UpdatedById = userId;
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrintPatch");
+
+        // Null-forgiven: the print was just saved, so the re-read always finds it.
+        return (await GetPrintById(id))!;
+    }
+
+    public async Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId)
+    {
+        var print = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .FirstOrDefaultAsync(p => p.Id == id)
+            ?? throw new DoesNotExistException();
+
+        var usage = dto.FilamentUsage ?? [];
+        if (!await filamentService.CanUserAccessAllFilaments(userId, usage.Select(u => u.FilamentId).OfType<Guid>()))
+        {
+            throw new UserCannotAccessFilamentException();
+        }
+
+        // The end time only fills a gap: a start date or duration already known wins over one
+        // derived from it.
+        var printTime = dto.PrintTimeInSeconds;
+        if (dto.EndedAt is { } endedAt)
+        {
+            if (print.StartDate is { } start)
+            {
+                if (endedAt < start)
+                {
+                    throw new BadRequestException("endedAt is before the print's start date.");
+                }
+                printTime ??= (int)(endedAt - start).TotalSeconds;
+            }
+            else if (printTime.HasValue)
+            {
+                print.StartDate = endedAt.AddSeconds(-printTime.Value);
+            }
+        }
+
+        print.Status = dto.Status;
+        if (printTime.HasValue)
+        {
+            print.PrintTimeInSeconds = printTime;
+        }
+
+        MergeActualUsage(print, usage);
+        await UpdateFilamentUsageWeights(print);
+
+        print.UpdatedById = userId;
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrintComplete");
+
+        // Null-forgiven: the print was just saved, so the re-read always finds it.
+        return (await GetPrintById(id))!;
+    }
+
+    /// <summary>
+    /// Writes actual usage onto the print's rows, matching by filament. Rows with no filament are
+    /// matched in order against the print's unlinked rows, so a retried completion updates the row
+    /// the first one added instead of adding another. A match keeps its estimate and notes; an
+    /// incoming row with no match is added. Rows the completion does not mention are untouched.
+    /// </summary>
+    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage)
+    {
+        var rows = print.FilamentUsage!;
+        var unlinked = new Queue<PrintFilament>(rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id));
+
+        foreach (var incoming in usage)
+        {
+            var row = incoming.FilamentId is { } filamentId
+                ? rows.FirstOrDefault(r => r.FilamentId == filamentId)
+                : unlinked.Count > 0 ? unlinked.Dequeue() : null;
+
+            if (row == null)
+            {
+                row = new PrintFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrintId = print.Id,
+                    FilamentId = incoming.FilamentId,
+                    EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                };
+                // Added explicitly, for the same reason as in ReplaceUsageRows.
+                context.PrintFilament.Add(row);
+                rows.Add(row);
+            }
+
+            // Validation guarantees a source. All three values are replaced so a figure from an
+            // earlier completion cannot outlive the measurement that produced it.
+            row.Source = incoming.ResolveSource()!.Value;
+            row.AmountMg = incoming.AmountMg;
+            row.LengthInM = incoming.LengthInM;
+            row.VolumeMl = incoming.VolumeMl;
+        }
     }
 
     /// <summary>
