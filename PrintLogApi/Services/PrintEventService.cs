@@ -8,7 +8,7 @@ namespace PrintLogApi.Services;
 public class PrintEventService(
     PrintLogContext context,
     IPrintService printService,
-    INotificationService notificationService,
+    IPrintFinishNotifier printFinishNotifier,
     IBlobStorageService blobStorageService,
     ICacheVersionService cacheVersionService,
     TimeProvider clock,
@@ -198,14 +198,8 @@ public class PrintEventService(
         await context.SaveChangesAsync();
         cacheVersionService.InvalidateUserCache(finished.UserId);
 
-        if (finished.Status == PrintStatus.Success)
-        {
-            await notificationService.CreatePrintCompletedNotification(finished.UserId, print.Id, print.Title);
-        }
-        else
-        {
-            await notificationService.CreatePrintFailedNotification(finished.UserId, print.Id, print.Title);
-        }
+        // Only a Printing print matches above, so this is always the transition to finished.
+        await printFinishNotifier.NotifyIfJustFinished(print, PrintStatus.Printing);
 
         return print;
     }

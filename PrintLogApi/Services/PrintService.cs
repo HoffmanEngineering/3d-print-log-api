@@ -26,7 +26,8 @@ public sealed class PrintService(
     IFilamentService filamentService,
     IPrinterService printerService,
     INotificationService notificationService,
-    ICacheVersionService cacheVersionService) : IPrintService
+    ICacheVersionService cacheVersionService,
+    IPrintFinishNotifier printFinishNotifier) : IPrintService
 {
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
@@ -1643,6 +1644,9 @@ public sealed class PrintService(
             }
         }
 
+        // Read before it is overwritten: only the move to a finished status notifies, so a retry
+        // or an edit of a print that had already finished stays quiet (#166).
+        var previousStatus = print.Status;
         print.Status = dto.Status;
         if (printTime.HasValue)
         {
@@ -1656,6 +1660,8 @@ public sealed class PrintService(
         await context.SaveChangesAsync();
 
         telemetry.TrackEvent("PrintComplete");
+
+        await printFinishNotifier.NotifyIfJustFinished(print, previousStatus);
 
         // Null-forgiven: the print was just saved, so the re-read always finds it.
         return (await GetPrintById(id))!;
