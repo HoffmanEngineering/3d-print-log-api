@@ -338,6 +338,190 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     [Fact]
+    public async Task Complete_SpoolOnASlotWithAnUnlinkedRow_LinksThatRow()
+    {
+        var filament = await CreateFilamentAsync();
+        var estimate = UnlinkedEstimateRow(slot: 0, estimatedMg: 12_780);
+        estimate.Notes = "loaded mid-print";
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [estimate]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, SlotCompletion(0, filament.Id, 12_760)));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(filament.Id, row.Filament?.Id);
+        Assert.Equal(0, row.Slot);
+        Assert.Equal(12_780, row.EstimatedAmountMg);
+        Assert.Equal(12_760, row.AmountMg);
+        Assert.Equal("loaded mid-print", row.Notes);
+        Assert.Equal(PrintFilament.SourceMeasurement.Weight, row.Source);
+        Assert.Equal(1_000_000 - 12_760, await GetRemainingAsync(filament.Id));
+    }
+
+    [Fact]
+    public async Task Complete_SpoolOnASlotWithAnUnlinkedRow_ByLength_DerivesTheWeightAndRemaining()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_780)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, LengthInM = 4.2784 }],
+        }));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(filament.Id, row.Filament?.Id);
+        Assert.Equal(PrintFilament.SourceMeasurement.Length, row.Source);
+        Assert.Equal(12_780, row.EstimatedAmountMg);
+        Assert.InRange(row.AmountMg!.Value, 12_500, 13_000); // 1.75 mm PLA at 1.24 g/cm3 is ~2.98 g/m
+        Assert.Equal(1_000_000 - row.AmountMg.Value, await GetRemainingAsync(filament.Id));
+    }
+
+    [Fact]
+    public async Task Complete_RowAlreadyOnTheSpool_MatchesBySpoolOnAnySlot()
+    {
+        var filament = await CreateFilamentAsync();
+        var linked = EstimateRow(filament.Id, 20_000);
+        linked.Slot = 1;
+        var created = await CreatePrintAsync(
+            status: PrintStatus.Printing,
+            usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 5_000), linked]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, SlotCompletion(0, filament.Id, 21_000)));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        var spoolRow = Assert.Single(completed.FilamentUsage, r => r.Filament?.Id == filament.Id);
+        Assert.Equal(1, spoolRow.Slot);
+        Assert.Equal(20_000, spoolRow.EstimatedAmountMg);
+        Assert.Equal(21_000, spoolRow.AmountMg);
+        var unlinkedRow = Assert.Single(completed.FilamentUsage, r => r.Filament == null);
+        Assert.Equal(0, unlinkedRow.Slot);
+        Assert.Equal(5_000, unlinkedRow.EstimatedAmountMg);
+        Assert.Null(unlinkedRow.AmountMg);
+    }
+
+    [Fact]
+    public async Task Complete_SpoolOnASlotTwice_IsIdempotent()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_780)]);
+        var body = SlotCompletion(0, filament.Id, 12_760);
+
+        await ReadAsync(await CompleteAsync(created.Id, body));
+        var afterFirst = await GetRemainingAsync(filament.Id);
+        var completed = await ReadAsync(await CompleteAsync(created.Id, body));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(filament.Id, row.Filament?.Id);
+        Assert.Equal(12_780, row.EstimatedAmountMg);
+        Assert.Equal(12_760, row.AmountMg);
+        Assert.Equal(1_000_000 - 12_760, afterFirst);
+        Assert.Equal(afterFirst, await GetRemainingAsync(filament.Id));
+    }
+
+    [Fact]
+    public async Task Complete_SpoolOnASlot_LeavesUnlinkedRowsOnOtherSlotsAlone()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(
+            status: PrintStatus.Printing,
+            usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 5_000), UnlinkedEstimateRow(slot: 1, estimatedMg: 7_000)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, SlotCompletion(1, filament.Id, 6_500)));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        var slot0 = Assert.Single(completed.FilamentUsage, r => r.Slot == 0);
+        Assert.Null(slot0.Filament);
+        Assert.Equal(5_000, slot0.EstimatedAmountMg);
+        Assert.Null(slot0.AmountMg);
+        var slot1 = Assert.Single(completed.FilamentUsage, r => r.Slot == 1);
+        Assert.Equal(filament.Id, slot1.Filament?.Id);
+        Assert.Equal(7_000, slot1.EstimatedAmountMg);
+        Assert.Equal(6_500, slot1.AmountMg);
+    }
+
+    [Fact]
+    public async Task Complete_TwoSpoolsOnOneSlot_ClaimTheUnlinkedRowOnce()
+    {
+        var first = await CreateFilamentAsync();
+        var second = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_000)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage =
+            [
+                new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = first.Id, AmountMg = 8_000 },
+                new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = second.Id, AmountMg = 4_000 },
+            ],
+        }));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        Assert.DoesNotContain(completed.FilamentUsage, r => r.Filament == null);
+        var firstRow = Assert.Single(completed.FilamentUsage, r => r.Filament?.Id == first.Id);
+        Assert.Equal(12_000, firstRow.EstimatedAmountMg);
+        Assert.Equal(8_000, firstRow.AmountMg);
+        var secondRow = Assert.Single(completed.FilamentUsage, r => r.Filament?.Id == second.Id);
+        Assert.Null(secondRow.EstimatedAmountMg);
+        Assert.Equal(4_000, secondRow.AmountMg);
+        Assert.Equal(1_000_000 - 8_000, await GetRemainingAsync(first.Id));
+        Assert.Equal(1_000_000 - 4_000, await GetRemainingAsync(second.Id));
+    }
+
+    [Fact]
+    public async Task Complete_SlotOnlyRowClaimsTheUnlinkedRow_SoASpoolOnThatSlotAddsARow()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_000)]);
+
+        // The spool row comes first, so only claiming slot-only rows up front keeps the two apart.
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage =
+            [
+                new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, AmountMg = 3_000 },
+                new CompletePrintFilamentUsageDto { Slot = 0, AmountMg = 9_000 },
+            ],
+        }));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        var unlinkedRow = Assert.Single(completed.FilamentUsage, r => r.Filament == null);
+        Assert.Equal(12_000, unlinkedRow.EstimatedAmountMg);
+        Assert.Equal(9_000, unlinkedRow.AmountMg);
+        var spoolRow = Assert.Single(completed.FilamentUsage, r => r.Filament?.Id == filament.Id);
+        Assert.Null(spoolRow.EstimatedAmountMg);
+        Assert.Equal(3_000, spoolRow.AmountMg);
+    }
+
+    [Fact]
+    public async Task Complete_InOrderRowBeforeASpoolOnASlot_DoesNotTakeThatSlotsRow()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_000)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage =
+            [
+                new CompletePrintFilamentUsageDto { AmountMg = 2_000 },
+                new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, AmountMg = 11_000 },
+            ],
+        }));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        var spoolRow = Assert.Single(completed.FilamentUsage, r => r.Filament?.Id == filament.Id);
+        Assert.Equal(0, spoolRow.Slot);
+        Assert.Equal(12_000, spoolRow.EstimatedAmountMg);
+        Assert.Equal(11_000, spoolRow.AmountMg);
+        var inOrderRow = Assert.Single(completed.FilamentUsage, r => r.Filament == null);
+        Assert.Null(inOrderRow.EstimatedAmountMg);
+        Assert.Equal(2_000, inOrderRow.AmountMg);
+    }
+
+    [Fact]
     public async Task Complete_LengthSource_DerivesTheWeightFromTheFilament()
     {
         var filament = await CreateFilamentAsync();
@@ -542,6 +726,21 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     {
         Status = PrintStatus.Success,
         FilamentUsage = [new CompletePrintFilamentUsageDto { FilamentId = filamentId, AmountMg = amountMg }],
+    };
+
+    private static CompletePrintDto SlotCompletion(int slot, Guid filamentId, int amountMg) => new()
+    {
+        Status = PrintStatus.Success,
+        FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = slot, FilamentId = filamentId, AmountMg = amountMg }],
+    };
+
+    /// <summary>An estimate on a slot with no spool linked, as a print started before a spool was loaded has.</summary>
+    private static PrintFilamentSummaryDto UnlinkedEstimateRow(int slot, int estimatedMg) => new()
+    {
+        Id = Guid.NewGuid(),
+        Slot = slot,
+        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+        EstimatedAmountMg = estimatedMg,
     };
 
     private static PrintFilamentSummaryDto EstimateRow(Guid filamentId, int estimatedMg) => new()
