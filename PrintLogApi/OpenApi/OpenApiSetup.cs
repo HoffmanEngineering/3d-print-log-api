@@ -59,6 +59,12 @@ The authorization code flow with PKCE, against the authorization server in the `
 ### AI agents
 
 Agents should prefer the MCP server at <https://api.3dprintlog.com/mcp>, which is built for tool calling and advertises its own OAuth metadata (RFC 9728). See <https://www.3dprintlog.com/docs/mcp>.
+
+## Rate limits
+
+Requests over a limit get `429 Too Many Requests` with a `Retry-After` header giving the wait in whole seconds. Back off for at least that long, and don't hard-code the numbers below: they can change.
+
+Writes made with a personal API key (`POST`, `PUT`, `PATCH` and `DELETE`) have their own budget, per key: a burst of 20, then 60 per minute. It is meant for connectors such as printer bridges and slicer plugins, so a backfill of old prints should send them steadily and honor `Retry-After`. Reads, and anything done through the web or mobile apps, don't count against it. Every request still counts against the general per-user limit at <https://www.3dprintlog.com/docs/api#rate-limits>.
 ";
 
     public static IServiceCollection AddPrintLogOpenApi(this IServiceCollection services, IConfiguration configuration)

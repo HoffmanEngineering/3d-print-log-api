@@ -131,6 +131,21 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
+    public async Task Description_DocumentsTheConnectorWriteLimit()
+    {
+        // Connectors generate clients and tool definitions from this document, so the write
+        // budget they will hit, and how to back off from it, belongs here as well as on the site
+        // (#151).
+        var document = await LoadDocument();
+
+        var description = document.GetProperty("info").GetProperty("description").GetString();
+        Assert.Contains("## Rate limits", description);
+        Assert.Contains("60 per minute", description);
+        Assert.Contains("burst of 20", description);
+        Assert.Contains("Retry-After", description);
+    }
+
+    [Fact]
     public async Task Servers_NameTheProductionApiBaseUrl()
     {
         // IntegrationTesting inherits OpenApi:ServerUrl from appsettings.json, which is the

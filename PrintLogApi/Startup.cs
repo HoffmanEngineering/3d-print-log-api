@@ -233,8 +233,12 @@ public class Startup
             {
                 if (context.Lease.TryGetMetadata(System.Threading.RateLimiting.MetadataName.RetryAfter, out var retryAfter))
                 {
+                    // Rounded up, never down: Retry-After is whole seconds, and the connector
+                    // token bucket refills at fractional intervals for most rates. Truncating
+                    // sends a client that honours the header back before a token exists.
+                    var seconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
                     context.HttpContext.Response.Headers.RetryAfter =
-                        ((int)retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
                 return System.Threading.Tasks.ValueTask.CompletedTask;
             };
@@ -242,7 +246,12 @@ public class Startup
             // across all /api/email callers. All read Email:RateLimits; 0 disables, as in tests.
             options.AddPolicy<string, EmailRateLimiting.TokenPolicyImpl>(EmailRateLimiting.TokenPolicy);
             options.AddPolicy<string, EmailRateLimiting.EventsPolicyImpl>(EmailRateLimiting.EventsPolicy);
-            options.GlobalLimiter = EmailRateLimiting.CreateGlobalLimiter(Configuration);
+            // The global limiter runs in addition to each endpoint's own policy, so it also
+            // carries the per-credential connector write budget (#151); see
+            // ConnectorWriteRateLimiting for why it lives here rather than as a policy.
+            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.CreateChained(
+                EmailRateLimiting.CreateGlobalLimiter(Configuration),
+                ConnectorWriteRateLimiting.CreateLimiter(Configuration));
 
             options.AddPolicy("mcp", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
