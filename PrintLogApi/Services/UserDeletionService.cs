@@ -403,6 +403,12 @@ public class UserDeletionService : IUserDeletionService
                 }
             }
 
+            // Delete FilamentTags. Their user FK is NoAction (a cascade would be a second path from
+            // Users), so they must go before the filaments rather than relying on the filament cascade.
+            await _context.FilamentTags
+                .Where(t => t.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete Filaments
             await _context.Filaments
                 .Where(f => f.CreatedById == userId)

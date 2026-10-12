@@ -112,6 +112,12 @@ public interface IFilamentService
     bool FilamentExists(Guid id);
     Task<string[]> GetFilamentBrands(long userId);
     Task<Filament?> GetFilamentById(Guid id);
+    /// <summary>
+    /// The user's filament carrying this tag UID, in any case and with any separators (#147), or
+    /// null when none does. Throws <see cref="Exceptions.BadRequestException"/> when the UID is
+    /// not hex bytes. Another user's tag is never returned.
+    /// </summary>
+    Task<Filament?> GetFilamentByTag(long userId, string uid);
     Task<string[]> GetFilamentPurchaseLocations(long userId);
     Task<string[]> GetFilamentStorageLocations(long userId);
     Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string? searchText, string? filterByMaterialCategoryNickname, string? filterByStorageLocation, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly, List<ColorPatternType>? colorPatterns = null, List<FilamentFinishType>? finishTypes = null, List<FilamentEffect>? effects = null);

@@ -91,6 +91,49 @@ public class FilamentsController(
 
 
     /// <summary>
+    /// Find the current user's spool carrying an RFID or NFC tag.
+    /// </summary>
+    /// <remarks>
+    /// The UID is matched in any case and with any separators, so `04:A2:3f:11` and `04A23F11`
+    /// find the same spool. Inactive spools are included. Another user's tag is a 404.
+    /// </remarks>
+    /// <param name="uid">The tag UID, as hex bytes.</param>
+    /// <response code="200">The spool carrying the tag.</response>
+    /// <response code="400">The UID is not hex bytes.</response>
+    /// <response code="404">None of the user's spools carries the tag.</response>
+    [HttpGet("by-tag/{uid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FilamentDetailDto>> GetFilamentByTag(string uid)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        Filament? filament;
+        try
+        {
+            filament = await filamentService.GetFilamentByTag(userId.Value, uid);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (filament is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<FilamentDetailDto>(filament);
+        await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+        return dto;
+    }
+
+    /// <summary>
     /// Returns detailed information for a filament roll by ID.
     /// </summary>
     /// <param name="id">The GUID of the filament.</param>
@@ -140,10 +183,12 @@ public class FilamentsController(
     /// <response code="401">Returned if the request is not authenticated.</response>
     /// <response code="403">Returned if the current user tries to update a filament which is not theirs.</response>
     /// <response code="404">Returned if a filament with the specified ID is not found.</response>
+    /// <response code="409">A tag UID is already on another of the user's spools. The body names it.</response>
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> PutFilament(Guid id, FilamentDetailDto filamentDto)
     {
         if (id != filamentDto.Id)
@@ -182,6 +227,14 @@ public class FilamentsController(
         {
             return NotFound();
         }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (TagUidConflictException ex)
+        {
+            return TagConflict(ex);
+        }
     }
 
     /// <summary>
@@ -194,10 +247,14 @@ public class FilamentsController(
     /// <param name="filamentDto">The dto containing all of the details for the filament to create.</param>
     /// <returns>The filament detail DTO that was created.</returns>
     /// <response code="201">The filament detail DTO that was created.</response>
+    /// <response code="400">A tag UID is not hex bytes, or there are too many.</response>
     /// <response code="401">Returned if the request is not authenticated.</response>
+    /// <response code="409">A tag UID is already on another of the user's spools. The body names it.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<FilamentDetailDto>> PostFilament(AddFilamentDto filamentDto)
     {
         var userId = User.GetUserId();
@@ -207,7 +264,19 @@ public class FilamentsController(
             return Unauthorized();
         }
 
-        var newFilament = await filamentService.AddFilament(filamentDto, userId.Value);
+        Filament newFilament;
+        try
+        {
+            newFilament = await filamentService.AddFilament(filamentDto, userId.Value);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (TagUidConflictException ex)
+        {
+            return TagConflict(ex);
+        }
 
 
         return CreatedAtAction("GetFilament", new { id = newFilament.Id }, mapper.Map<Filament, FilamentDetailDto>(newFilament));
@@ -465,5 +534,27 @@ public class FilamentsController(
             return NoContent();
         }
         catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// The 409 for a tag already on another spool (#147). ProblemDetails like the rest of the
+    /// API's errors, with the holding spool as extension members so a client can name and link it.
+    /// </summary>
+    private ObjectResult TagConflict(TagUidConflictException ex)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(
+            HttpContext,
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Tag already assigned",
+            detail: ex.Message);
+        problem.Extensions["tagUid"] = ex.TagUid;
+        problem.Extensions["filamentId"] = ex.FilamentId;
+        problem.Extensions["filamentDisplayName"] = ex.FilamentDisplayName;
+
+        return new ObjectResult(problem)
+        {
+            StatusCode = StatusCodes.Status409Conflict,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 }

@@ -157,6 +157,55 @@ public class UserDeletionServiceTests
         Assert.Equal(1, await context.EmailSuppressions.CountAsync(ct));
     }
 
+    [Fact]
+    public async Task DeleteAllDataForUser_DeletesFilamentTagsBeforeFilaments()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(commandInterceptor)
+            .Options;
+
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|tag-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        var now = DateTime.UtcNow;
+        var filament = new Filament
+        {
+            MaterialCategoryNickname = "filament",
+            DisplayName = "Tagged",
+            CreatedById = user.Id,
+            UpdatedById = user.Id,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        context.Filaments.Add(filament);
+        await context.SaveChangesAsync(ct);
+        context.FilamentTags.Add(new FilamentTag { FilamentId = filament.Id, UserId = user.Id, Uid = "04A23F11", CreatedDate = now });
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        var tagDeleteIndex = commandInterceptor.Commands.FindIndex(command => IsDeleteFrom(command, "FilamentTags"));
+        var filamentDeleteIndex = commandInterceptor.Commands.FindIndex(command => command.Contains("DELETE FROM \"Filaments\"", StringComparison.OrdinalIgnoreCase));
+        Assert.True(tagDeleteIndex >= 0, "Expected filament tags to be deleted during user deletion.");
+        Assert.True(tagDeleteIndex < filamentDeleteIndex, "Filament tags must be deleted before filaments.");
+        Assert.Equal(0, await context.FilamentTags.CountAsync(ct));
+    }
+
     private static UserDeletionService CreateService(PrintLogContext context) => new(
         context,
         NullLogger<UserDeletionService>.Instance,

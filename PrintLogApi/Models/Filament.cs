@@ -161,4 +161,6 @@ public class Filament : TimestampEntity
     public ICollection<PrinterFilament>? PrinterFilaments { get; set; }
     // Nagivation Element to PrintFilament
     public ICollection<FilamentAdjustment>? FilamentAdjustments { get; set; }
+    /// <summary>RFID/NFC tags on this spool (#147).</summary>
+    public ICollection<FilamentTag> Tags { get; set; } = new List<FilamentTag>();
 }

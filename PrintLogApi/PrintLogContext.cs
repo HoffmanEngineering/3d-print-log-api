@@ -32,6 +32,8 @@ public class PrintLogContext : DbContext
 
     public DbSet<FilamentAdjustment> FilamentAdjustments { get; set; }
 
+    public DbSet<FilamentTag> FilamentTags { get; set; } = null!;
+
     public DbSet<MaterialCategory> MaterialCategories { get; set; }
 
     public DbSet<MaterialType> MaterialTypes { get; set; }
@@ -616,6 +618,27 @@ public class PrintLogContext : DbContext
             })
             .HasDatabaseName("IX_PrintImages_PrintId_Default")
             .HasFilter("[IsDefault] = 1");
+
+        // Tag UIDs (#147). One physical tag is one spool, per user: two accounts may each have
+        // scanned the same tag, so the index is not global. The race between two requests
+        // assigning one UID lands here, and FilamentService reports it as the same 409.
+        modelBuilder.Entity<FilamentTag>(entity =>
+        {
+            entity.HasIndex(t => new { t.UserId, t.Uid }).IsUnique();
+
+            entity.HasOne(t => t.Filament)
+                .WithMany(f => f.Tags)
+                .HasForeignKey(t => t.FilamentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction, not Cascade: Filaments already cascade from Users, so a second path from
+            // Users to FilamentTags is SQL Server error 1785. UserDeletionService deletes tags
+            // explicitly before the filaments.
+            entity.HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
 
         modelBuilder.Entity<FilamentImage>(entity =>
         {
