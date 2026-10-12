@@ -49,6 +49,8 @@ public class PatchPrintDto : IValidatableObject
 
     /// <summary>
     /// When sent, replaces every usage row on the print. Leave it out to keep the rows as they are.
+    /// Sending it (an empty list included) also clears the legacy <c>filamentType</c>,
+    /// <c>filamentUsageMg</c> and <c>estimatedFilamentUsageMg</c> fields, which the rows supersede.
     /// </summary>
     public ICollection<PutPrintFilamentSummaryDto>? FilamentUsage { get; set; }
 

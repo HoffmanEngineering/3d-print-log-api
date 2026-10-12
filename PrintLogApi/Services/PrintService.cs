@@ -1575,6 +1575,16 @@ public sealed class PrintService(
             // First, because it is the one step that can still refuse (a foreign filament), and
             // it throws before touching the print.
             await ReplaceUsageRows(print, mapper.Map<List<PrintFilament>>(dto.FilamentUsage), userId);
+
+            // The rows supersede the legacy scalar fields. The edit form shows a print's legacy
+            // usage as one row and sends it back as a row, so keeping the scalars would count
+            // that usage twice (totals add the scalar to the rows), and a row the user deleted
+            // would reappear from them on reopen. This is what the full PUT always did, since the
+            // form sends the scalars as null. Inventory is untouched: it is derived from rows
+            // only, and a legacy scalar names no spool.
+            print.FilamentType = null;
+            print.FilamentUsageMg = null;
+            print.EstimatedFilamentUsageMg = null;
         }
 
         if (dto.Title != null) { print.Title = dto.Title.Trim(); }

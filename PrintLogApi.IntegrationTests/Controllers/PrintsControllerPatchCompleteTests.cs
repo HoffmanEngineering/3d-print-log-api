@@ -171,6 +171,80 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         Assert.Null(row.EstimatedAmountMg);
     }
 
+    // The edit form shows a print's legacy fields (filamentType, filamentUsageMg,
+    // estimatedFilamentUsageMg) as one usage row. When it sends rows back they supersede the
+    // legacy fields, or the print reports both and the deleted row comes back on reopen.
+
+    [Fact]
+    public async Task Patch_FilamentUsage_OnALegacyPrint_SupersedesTheLegacyFields()
+    {
+        var created = await CreateLegacyPrintAsync();
+
+        var patched = await ReadAsync(await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[]
+            {
+                new
+                {
+                    amountMg = 16_000,
+                    estimatedAmountMg = 14_000,
+                    source = PrintFilament.SourceMeasurement.Weight,
+                    estimatedSource = PrintFilament.SourceMeasurement.Weight,
+                    notes = "PLA",
+                },
+            },
+        }));
+
+        var row = Assert.Single(patched.FilamentUsage!);
+        Assert.Equal(16_000, row.AmountMg);
+        Assert.Null(patched.FilamentType);
+        Assert.Null(patched.FilamentUsageMg);
+        Assert.Null(patched.EstimatedFilamentUsageMg);
+    }
+
+    [Fact]
+    public async Task Patch_EmptyFilamentUsage_OnALegacyPrint_ClearsTheLegacyFields()
+    {
+        var created = await CreateLegacyPrintAsync();
+
+        var patched = await ReadAsync(await PatchAsync(created.Id, new { filamentUsage = Array.Empty<object>() }));
+
+        Assert.Empty(patched.FilamentUsage!);
+        Assert.Null(patched.FilamentType);
+        Assert.Null(patched.FilamentUsageMg);
+        Assert.Null(patched.EstimatedFilamentUsageMg);
+    }
+
+    [Fact]
+    public async Task Patch_WithoutFilamentUsage_KeepsTheLegacyFields()
+    {
+        var created = await CreateLegacyPrintAsync();
+
+        var patched = await ReadAsync(await PatchAsync(created.Id, new { title = "Renamed legacy" }));
+
+        Assert.Equal("PLA", patched.FilamentType);
+        Assert.Equal(15_000, patched.FilamentUsageMg);
+        Assert.Equal(14_000, patched.EstimatedFilamentUsageMg);
+    }
+
+    [Fact]
+    public async Task Patch_FilamentTheCallerDoesNotOwn_OnALegacyPrint_KeepsTheLegacyFields()
+    {
+        var created = await CreateLegacyPrintAsync();
+        var foreign = await CreateFilamentAsync(IntegrationTestSeeder.SecondaryUserOAuthId);
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new { filamentId = foreign.Id, amountMg = 1_000 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var detail = await GetDetailAsync(created.Id);
+        Assert.Equal("PLA", detail.FilamentType);
+        Assert.Equal(15_000, detail.FilamentUsageMg);
+        Assert.Equal(14_000, detail.EstimatedFilamentUsageMg);
+    }
+
     [Fact]
     public async Task Patch_FilamentTheCallerDoesNotOwn_IsBadRequest()
     {
@@ -500,6 +574,29 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
             FilamentUsage = usage ?? [],
         });
         return await ReadAsync(await _httpClient.SendAsync(request, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>A print recorded before usage rows existed: only the legacy scalar fields.</summary>
+    private async Task<PrintDetailDTO> CreateLegacyPrintAsync()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = $"patch-legacy {Guid.NewGuid():N}",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = PrintStatus.Success,
+            ViewStatus = PrintViewStatus.Private,
+            FilamentType = "PLA",
+            FilamentUsageMg = 15_000,
+            EstimatedFilamentUsageMg = 14_000,
+            FilamentUsage = [],
+        });
+        var created = await ReadAsync(await _httpClient.SendAsync(request, TestContext.Current.CancellationToken));
+        Assert.Equal("PLA", created.FilamentType);
+        Assert.Equal(15_000, created.FilamentUsageMg);
+        Assert.Empty(created.FilamentUsage!);
+        return created;
     }
 
     private async Task<HttpResponseMessage> PatchAsync(long id, object body, string userOAuthId = IntegrationTestSeeder.TestUserOAuthId)
