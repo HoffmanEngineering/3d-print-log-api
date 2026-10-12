@@ -605,6 +605,42 @@ namespace PrintLogApi.Migrations
                     b.ToTable("FilamentImages");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.FilamentTag", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FilamentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Format")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Uid")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FilamentId");
+
+                    b.HasIndex("UserId", "Uid")
+                        .IsUnique();
+
+                    b.ToTable("FilamentTags");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2441,6 +2477,25 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.FilamentTag", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Filament", "Filament")
+                        .WithMany("Tags")
+                        .HasForeignKey("FilamentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Filament");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.File", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
@@ -2932,6 +2987,8 @@ namespace PrintLogApi.Migrations
                     b.Navigation("PrintFilaments");
 
                     b.Navigation("PrinterFilaments");
+
+                    b.Navigation("Tags");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>

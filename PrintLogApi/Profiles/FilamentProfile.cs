@@ -72,6 +72,8 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
 
         CreateMap<Filament, FilamentDetailDto>()
+            // Ordered so a client diffing the list sees a stable order. GetFilamentById Includes Tags.
+            .ForMember(dest => dest.TagUids, src => src.MapFrom(src => src.Tags.Select(t => t.Uid).OrderBy(u => u).ToList()))
             // Volume and length are NOT mapped here: FilamentDetailDto derives them from
             // this figure, which also gives them the untracked-spool null for free. Without
             // that an untracked spool would return remaining null alongside length 0 and

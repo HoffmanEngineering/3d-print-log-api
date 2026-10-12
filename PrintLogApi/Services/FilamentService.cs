@@ -1313,8 +1313,126 @@ public class FilamentService(
                 .Include(f => f.FilamentAdjustments)
                 .Include(f => f.PrintFilaments)
                 .Include(f => f.MaterialCategory)
+                .Include(f => f.Tags)
                 .AsSplitQuery()
                 .SingleOrDefaultAsync();
+    }
+
+    public async Task<Filament?> GetFilamentByTag(long userId, string uid)
+    {
+        var normalized = TagUid.Normalize(uid) ?? throw InvalidTagUid(uid);
+
+        var filamentId = await context.FilamentTags
+            .Where(t => t.UserId == userId && t.Uid == normalized)
+            .Select(t => (Guid?)t.FilamentId)
+            .SingleOrDefaultAsync();
+
+        return filamentId.HasValue ? await GetFilamentById(filamentId.Value) : null;
+    }
+
+    private static BadRequestException InvalidTagUid(string? uid) =>
+        new($"'{uid}' is not a tag UID. Expected hex bytes, such as 04:A2:3F:11.");
+
+    /// <summary>
+    /// Normalizes a requested tag list (#147), dropping duplicates that differ only in case or
+    /// separators. Throws <see cref="BadRequestException"/> for an invalid UID or too many tags.
+    /// </summary>
+    private static List<string> NormalizeTagUids(IEnumerable<string?> requested)
+    {
+        var normalized = new List<string>();
+        foreach (var uid in requested)
+        {
+            var value = TagUid.Normalize(uid) ?? throw InvalidTagUid(uid);
+            if (!normalized.Contains(value))
+            {
+                normalized.Add(value);
+            }
+        }
+
+        if (normalized.Count > TagUid.MaxPerFilament)
+        {
+            throw new BadRequestException($"A spool can carry at most {TagUid.MaxPerFilament} tags.");
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Throws <see cref="TagUidConflictException"/> naming a spool of <paramref name="ownerId"/>,
+    /// other than <paramref name="filamentId"/>, that already carries one of <paramref name="uids"/>.
+    /// </summary>
+    private async Task ThrowIfTagsHeldElsewhere(long ownerId, Guid? filamentId, IReadOnlyCollection<string> uids)
+    {
+        if (uids.Count == 0)
+        {
+            return;
+        }
+
+        var held = context.FilamentTags
+            .AsNoTracking()
+            .Where(t => t.UserId == ownerId && uids.Contains(t.Uid));
+        if (filamentId is { } own)
+        {
+            held = held.Where(t => t.FilamentId != own);
+        }
+
+        var holder = await held
+            .OrderBy(t => t.Uid)
+            .Select(t => new { t.Uid, t.FilamentId, t.Filament.DisplayName })
+            .FirstOrDefaultAsync();
+
+        if (holder is not null)
+        {
+            throw new TagUidConflictException(holder.Uid, holder.FilamentId, holder.DisplayName);
+        }
+    }
+
+    /// <summary>
+    /// Makes <paramref name="filament"/>'s tags exactly <paramref name="uids"/>, keeping the rows
+    /// (and any <see cref="FilamentTag.Format"/>) of the ones it already has.
+    /// </summary>
+    private void ReplaceTags(Filament filament, IReadOnlyCollection<string> uids)
+    {
+        foreach (var tag in filament.Tags.Where(t => !uids.Contains(t.Uid)).ToList())
+        {
+            filament.Tags.Remove(tag);
+            context.FilamentTags.Remove(tag);
+        }
+
+        foreach (var uid in uids.Where(uid => filament.Tags.All(t => t.Uid != uid)).ToList())
+        {
+            filament.Tags.Add(new FilamentTag
+            {
+                Uid = uid,
+                UserId = filament.CreatedById,
+                CreatedDate = DateTime.UtcNow,
+            });
+        }
+    }
+
+    /// <summary>
+    /// SaveChanges, reporting a lost race on the (UserId, Uid) index as the same conflict the
+    /// pre-check raises. Any other failure is rethrown unchanged.
+    /// </summary>
+    private async Task SaveTaggedFilamentChanges(Filament filament, IReadOnlyCollection<string>? uids)
+    {
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && uids is { Count: > 0 })
+        {
+            try
+            {
+                await ThrowIfTagsHeldElsewhere(filament.CreatedById, filament.Id, uids);
+            }
+            catch (TagUidConflictException conflict)
+            {
+                throw new TagUidConflictException(conflict.TagUid, conflict.FilamentId, conflict.FilamentDisplayName, ex);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -1337,6 +1455,10 @@ public class FilamentService(
 
     public async Task<Filament> AddFilament(AddFilamentDto filament, long userId)
     {
+        // Before anything else, so an invalid or taken tag rejects the whole create (#147).
+        var tagUids = NormalizeTagUids(filament.TagUids ?? []);
+        await ThrowIfTagsHeldElsewhere(userId, null, tagUids);
+
         // Backward-compat: old clients send ColorHex only — normalize to Colors array
         if ((filament.Colors == null || filament.Colors.Count == 0) && !string.IsNullOrWhiteSpace(filament.ColorHex))
         {
@@ -1378,8 +1500,10 @@ public class FilamentService(
         newFilament.CreatedById = userId;
         newFilament.UpdatedById = userId;
 
+        ReplaceTags(newFilament, tagUids);
+
         context.Filaments.Add(newFilament);
-        await context.SaveChangesAsync();
+        await SaveTaggedFilamentChanges(newFilament, tagUids);
 
         var filamentId = newFilament.Id;
 
@@ -1532,6 +1656,10 @@ public class FilamentService(
             dto.ColorHex = dto.Colors[0];
         }
 
+        // Null keeps the tags (#147): clients that predate them send the whole filament without
+        // the field, and must not wipe tags another client added.
+        var tagUids = dto.TagUids is null ? null : NormalizeTagUids(dto.TagUids);
+
         var existingFilament = await GetFilamentById(id);
 
         if (existingFilament == null)
@@ -1539,7 +1667,18 @@ public class FilamentService(
             throw new ArgumentNullException(nameof(id));
         }
 
+        if (tagUids is not null)
+        {
+            // The owner, not the caller: the controller has already checked they are the same.
+            await ThrowIfTagsHeldElsewhere(existingFilament.CreatedById, existingFilament.Id, tagUids);
+        }
+
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
+
+        if (tagUids is not null)
+        {
+            ReplaceTags(updatedFilament, tagUids);
+        }
 
         var materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);
 
@@ -1573,7 +1712,7 @@ public class FilamentService(
 
         try
         {
-            await context.SaveChangesAsync();
+            await SaveTaggedFilamentChanges(updatedFilament, tagUids);
         }
         catch (DbUpdateConcurrencyException)
         {

@@ -138,4 +138,11 @@ public class AddFilamentDto
     public FilamentFinishType? FinishType { get; set; }
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// RFID or NFC tag UIDs on this spool, in any case and with any separators
+    /// (<c>04:A2:3f:11</c>). Stored as uppercase hex without separators (<c>04A23F11</c>), and
+    /// unique across the user's spools: a UID already on another spool is a 409.
+    /// </summary>
+    public List<string>? TagUids { get; set; }
 }

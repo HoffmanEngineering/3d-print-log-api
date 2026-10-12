@@ -183,6 +183,15 @@ public class FilamentDetailDto
     public List<FilamentEffect> Effects { get; set; } = new();
 
     /// <summary>
+    /// RFID or NFC tag UIDs on this spool, as uppercase hex without separators (<c>04A23F11</c>),
+    /// in order. Always a list in responses.
+    /// On PUT, any case and separators are accepted and the list replaces the spool's tags;
+    /// leave it out (or null) to keep them, which is what clients that predate tags do. A UID
+    /// already on another of the user's spools is a 409 naming that spool.
+    /// </summary>
+    public List<string>? TagUids { get; set; }
+
+    /// <summary>
     /// Response-only, populated by <c>FilamentService.HydrateDetailImageUrlsAsync</c>.
     /// This DTO doubles as the PUT request body, so a caller can send anything here —
     /// nothing reads it inbound. <c>Filament</c> has no <c>Images</c> navigation, so
