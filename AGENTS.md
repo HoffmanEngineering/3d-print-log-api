@@ -160,6 +160,26 @@ One thing `UseHttpMetrics` readers should know: the codec runs during the endpoi
 calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
 response-size metric, so no byte count is distorted.
 
+## Connector write budget (#151)
+
+Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`) made with a connector credential get a
+per-credential token bucket on top of the per-user "api" policy: `Api:ConnectorWrites:Burst`
+(20) to start, refilled at `Api:ConnectorWrites:PerMinute` (60). Either at 0 disables it, which is
+how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting.cs`.
+
+- **"Connector" means the request carries `ConnectorCredentialClaim`.** `ApiKeyMiddleware` adds it
+  for API keys; no interactive scheme does, which is the whole of "web app traffic is not
+  affected". Device tokens (#148, not built yet) should add the same claim with a `device:` value
+  rather than teach the limiter a second rule.
+- **It is in `GlobalLimiter`, chained after the email ceiling, not an endpoint policy.** An
+  endpoint carries one `[EnableRateLimiting]` and "api" already holds it. The global limiter runs
+  in addition.
+- **`Retry-After` is rounded up** in the shared `OnRejected`. A token bucket refills at fractional
+  intervals (60/7 per minute is 8.57 s); truncating told clients to come back before a token
+  existed. `ConnectorWriteRateLimitTests.RetryAfter_RoundsAFractionalWaitUp` pins it.
+- **The limits are in-process**, like every other budget here. More than one App Service instance
+  multiplies them.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
