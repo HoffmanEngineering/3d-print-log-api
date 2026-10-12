@@ -1662,11 +1662,16 @@ public sealed class PrintService(
     }
 
     /// <summary>
-    /// Writes actual usage onto the print's rows, matching by filament. A row with no filament is
-    /// matched to the print's unlinked row for its slot when it names one, otherwise in order
-    /// against the remaining unlinked rows, so a retried completion updates the row the first one
-    /// added instead of adding another. A match keeps its estimate and notes; an incoming row with
-    /// no match is added. Rows the completion does not mention are untouched.
+    /// Writes actual usage onto the print's rows, matching by filament first. A row with a
+    /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
+    /// and links that row to the filament (#162): a spool loaded after the print started then
+    /// completes the row its estimate is on instead of adding a second row for the same tool. A
+    /// row with no filament is matched to the print's unlinked row for its slot when it names one,
+    /// otherwise in order against the remaining unlinked rows, so a retried completion updates the
+    /// row the first one added instead of adding another. Each unlinked row is claimed at most
+    /// once, with slot-only rows claiming theirs before rows with a filament. A match keeps its
+    /// estimate and notes; an incoming row with no match is added. Rows the completion does not
+    /// mention are untouched.
     /// </summary>
     private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage)
     {
@@ -1686,12 +1691,35 @@ public sealed class PrintService(
             matches[incoming] = bySlot;
         }
 
+        // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
+        // slot's unlinked row. Claimed here rather than in the loop below for the same reason.
+        foreach (var incoming in incomingRows.Where(u => u.FilamentId is not null && u.Slot is not null))
+        {
+            if (rows.Any(r => r.FilamentId == incoming.FilamentId))
+            {
+                continue;
+            }
+            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
+            if (bySlot != null)
+            {
+                unlinked.Remove(bySlot);
+            }
+            matches[incoming] = bySlot;
+        }
+
         foreach (var incoming in incomingRows)
         {
             PrintFilament? row;
             if (incoming.FilamentId is { } filamentId)
             {
-                row = rows.FirstOrDefault(r => r.FilamentId == filamentId);
+                row = rows.FirstOrDefault(r => r.FilamentId == filamentId)
+                    ?? matches.GetValueOrDefault(incoming);
+                // Linked before UpdateFilamentUsageWeights runs, so the row's weight is derived
+                // from this filament and counts against its remaining amount.
+                if (row != null)
+                {
+                    row.FilamentId = filamentId;
+                }
             }
             else if (incoming.Slot is not null)
             {
