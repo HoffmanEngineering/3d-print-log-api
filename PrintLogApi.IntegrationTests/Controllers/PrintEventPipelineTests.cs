@@ -54,6 +54,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         var usage = Assert.Single(done.FilamentUsage!);
         Assert.Equal(4.21, usage.LengthInM);
         Assert.Equal(PrintFilament.SourceMeasurement.Length, usage.Source);
+        Assert.Equal(NotificationType.PrintCompleted, Assert.Single(await NotificationsForPrintAsync(done.Id)).Type);
     }
 
     [Theory]
@@ -70,6 +71,21 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         var print = Assert.Single(await PrintsForRunAsync(run));
         Assert.Equal(PrintStatus.Failed, print.Status);
         Assert.Equal(printSeconds, print.PrintTimeInSeconds);
+        Assert.Equal(NotificationType.PrintFailed, Assert.Single(await NotificationsForPrintAsync(print.Id)).Type);
+    }
+
+    [Fact]
+    public async Task Notifier_CompleteDeliveredTwice_NotifiesOnce()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+
+        await PostNotifierAsync("moonraker-notifier-complete.json", printerId, run);
+        await PostNotifierAsync("moonraker-notifier-complete.json", printerId, run);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Single(await NotificationsForPrintAsync(print.Id));
     }
 
     #endregion
@@ -98,6 +114,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(started.Id, done.Id);
         Assert.Equal(PrintStatus.Success, done.Status);
         Assert.Equal(3901, done.PrintTimeInSeconds);
+        Assert.Equal(NotificationType.PrintCompleted, Assert.Single(await NotificationsForPrintAsync(done.Id)).Type);
     }
 
     [Fact]
@@ -114,6 +131,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(PrintStatus.Failed, print.Status);
         // 1200.5 rounds to even, as it always has.
         Assert.Equal(1200, print.PrintTimeInSeconds);
+        Assert.Equal(NotificationType.PrintFailed, Assert.Single(await NotificationsForPrintAsync(print.Id)).Type);
     }
 
     [Fact]
@@ -429,6 +447,16 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         return await db.Prints
             .Include(p => p.FilamentUsage)
             .Where(p => p.CreatedById == IntegrationTestSeeder.TestUserId && p.FileName!.Contains(run))
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
+    private async Task<List<Notification>> NotificationsForPrintAsync(long printId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.Notifications
+            .Where(n => n.PrintId == printId)
             .AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken);
     }

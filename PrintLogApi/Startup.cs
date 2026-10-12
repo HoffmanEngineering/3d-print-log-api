@@ -163,6 +163,7 @@ public class Startup
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<IPrintEventService, PrintEventService>();
+        services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();

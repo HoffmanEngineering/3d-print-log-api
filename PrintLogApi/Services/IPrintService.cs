@@ -118,8 +118,10 @@ public interface IPrintService
     /// <summary>
     /// Records how a job ended: status, duration, and actual usage merged by filament (see
     /// CompletePrintDto). Leaves every other field alone, and is safe to repeat: remaining filament
-    /// follows the rows, so a second identical call changes nothing. Throws BadRequestException
-    /// when endedAt is before the start date.
+    /// follows the rows, so a second identical call changes nothing. Notifies the print's creator
+    /// only when this moves it from a not-finished status to a finished one (IPrintFinishNotifier),
+    /// so a repeat does not notify again. Throws BadRequestException when endedAt is before the
+    /// start date.
     /// </summary>
     Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);

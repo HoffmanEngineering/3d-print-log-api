@@ -89,7 +89,8 @@ public class GroupedFeedQueryShapeTests : IClassFixture<CustomWebApplicationFact
             sp.GetRequiredService<IFilamentService>(),
             sp.GetRequiredService<IPrinterService>(),
             sp.GetRequiredService<INotificationService>(),
-            sp.GetRequiredService<ICacheVersionService>());
+            sp.GetRequiredService<ICacheVersionService>(),
+            sp.GetRequiredService<IPrintFinishNotifier>());
 
         return (service, recorder);
     }

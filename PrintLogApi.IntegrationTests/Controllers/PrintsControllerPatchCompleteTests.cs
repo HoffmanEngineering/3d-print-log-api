@@ -1,8 +1,11 @@
 ﻿using System.Net;
+using System.Reflection;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -14,10 +17,12 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 /// </summary>
 public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplicationFactory>
 {
+    private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _httpClient;
 
     public PrintsControllerPatchCompleteTests(CustomWebApplicationFactory factory)
     {
+        _factory = factory;
         _httpClient = factory.CreateClient();
     }
 
@@ -721,6 +726,126 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     #endregion
+
+    #region complete notifications (#166)
+
+    [Fact]
+    public async Task Complete_PrintingPrintAsSuccess_SendsOneCompletedNotification()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto { Status = PrintStatus.Success }));
+
+        var notification = Assert.Single(await NotificationsForPrintAsync(created.Id));
+        Assert.Equal(NotificationType.PrintCompleted, notification.Type);
+        Assert.Equal(IntegrationTestSeeder.TestUserId, notification.UserId);
+    }
+
+    [Theory]
+    [InlineData(PrintStatus.Failed)]
+    [InlineData(PrintStatus.Cancelled)]
+    [InlineData(PrintStatus.PartialSuccess)]
+    public async Task Complete_PrintingPrintAsAnythingButSuccess_SendsOneFailedNotification(PrintStatus status)
+    {
+        // The same split the event pipeline makes: only Success is "completed".
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto { Status = status }));
+
+        var notification = Assert.Single(await NotificationsForPrintAsync(created.Id));
+        Assert.Equal(NotificationType.PrintFailed, notification.Type);
+        Assert.Equal(IntegrationTestSeeder.TestUserId, notification.UserId);
+    }
+
+    [Fact]
+    public async Task Complete_Retried_DoesNotNotifyAgain()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        var body = new CompletePrintDto { Status = PrintStatus.Success, PrintTimeInSeconds = 600 };
+
+        await ReadAsync(await CompleteAsync(created.Id, body));
+        await ReadAsync(await CompleteAsync(created.Id, body));
+
+        Assert.Single(await NotificationsForPrintAsync(created.Id));
+    }
+
+    [Theory]
+    [InlineData(PrintStatus.Success, PrintStatus.Failed)]
+    [InlineData(PrintStatus.Failed, PrintStatus.Success)]
+    [InlineData(PrintStatus.Cancelled, PrintStatus.Cancelled)]
+    public async Task Complete_AlreadyFinishedPrint_DoesNotNotify(PrintStatus existing, PrintStatus completion)
+    {
+        var created = await CreatePrintAsync(status: existing);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto { Status = completion }));
+
+        Assert.Equal(completion, completed.Status);
+        Assert.Empty(await NotificationsForPrintAsync(created.Id));
+    }
+
+    [Fact]
+    public async Task Complete_PendingPrint_Notifies()
+    {
+        // Pending is not finished either, so finishing it is still the transition.
+        var created = await CreatePrintAsync(status: PrintStatus.Pending);
+
+        await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto { Status = PrintStatus.Success }));
+
+        Assert.Equal(NotificationType.PrintCompleted, Assert.Single(await NotificationsForPrintAsync(created.Id)).Type);
+    }
+
+    [Fact]
+    public async Task Complete_NotificationFails_StillCompletesThePrint()
+    {
+        using var failing = _factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+            s.AddTransient<INotificationService>(sp =>
+                FailingPrintNotifications.Wrap(ActivatorUtilities.CreateInstance<NotificationService>(sp)))));
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{created.Id}/complete");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new CompletePrintDto { Status = PrintStatus.Success });
+        var response = await failing.CreateClient().SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PrintStatus.Success, (await ReadAsync(response)).Status);
+        Assert.Equal(PrintStatus.Success, (await GetDetailAsync(created.Id)).Status);
+        Assert.Empty(await NotificationsForPrintAsync(created.Id));
+    }
+
+    #endregion
+
+    private async Task<List<Notification>> NotificationsForPrintAsync(long printId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.Notifications
+            .Where(n => n.PrintId == printId)
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>A notification service whose print-finish notifications throw; every other call passes through.</summary>
+    public class FailingPrintNotifications : DispatchProxy
+    {
+        private INotificationService _inner = null!;
+
+        public static INotificationService Wrap(INotificationService inner)
+        {
+            var proxy = Create<INotificationService, FailingPrintNotifications>();
+            ((FailingPrintNotifications)(object)proxy)._inner = inner;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name is nameof(INotificationService.CreatePrintCompletedNotification)
+                or nameof(INotificationService.CreatePrintFailedNotification))
+            {
+                throw new InvalidOperationException("Notification store unavailable.");
+            }
+            return targetMethod.Invoke(_inner, args);
+        }
+    }
 
     private static CompletePrintDto Completion(Guid filamentId, int amountMg) => new()
     {
