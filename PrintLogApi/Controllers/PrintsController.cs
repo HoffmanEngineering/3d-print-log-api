@@ -486,6 +486,115 @@ public class PrintsController(
     }
 
     /// <summary>
+    /// Link a connector's job to a print that is already Printing.
+    /// </summary>
+    /// <remarks>
+    /// For connectors that report a job the slicer uploader, the Cura plugin or a hand entry has
+    /// already logged. Find the print with `GET /api/Prints/claimable`, then claim it instead of
+    /// creating a second one. Sets `externalSource` and `externalId` (same rules as on create),
+    /// the connection named by `connectionInstanceId` when it is yours, and `startDate` when the
+    /// print has none. The print keeps its title, notes, usage rows and how it was created. Finish
+    /// it with `POST /api/Prints/{id}/complete`.
+    ///
+    /// Only your own print can be claimed, only while it is Printing (`2`) and not yet linked to a
+    /// job. Claiming again with the same pair returns the print unchanged, so retries are safe. A
+    /// different pair, a print that is no longer Printing, or a pair already on another of your
+    /// prints is a `409`; in the last case `printId` in the body names that print. After a claim,
+    /// `POST /api/Prints` with the same pair returns this print rather than creating one.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="claim">The job claiming it.</param>
+    /// <response code="200">The claimed print.</response>
+    /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the print is not yours.</response>
+    /// <response code="404">Returned when the print does not exist.</response>
+    /// <response code="409">The print is linked to another job or not Printing, or the job is already another print.</response>
+    [HttpPost("{id}/claim")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<PrintDetailDTO>> ClaimPrint(long id, ClaimPrintDto claim)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var result = await printService.ClaimPrint(id, claim, userId);
+            return Ok(mapper.Map<PrintDetailDTO>(result.Print));
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+        catch (ForbiddenException)
+        {
+            return Forbid();
+        }
+        catch (BadRequestException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (PrintClaimConflictException ex)
+        {
+            var problem = ProblemDetailsFactory.CreateProblemDetails(
+                HttpContext,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Print cannot be claimed",
+                detail: ex.Message);
+            if (ex.ConflictingPrintId is { } printId)
+            {
+                problem.Extensions["printId"] = printId;
+            }
+
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status409Conflict,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
+    }
+
+    /// <summary>
+    /// List your prints on a printer that a connector could claim.
+    /// </summary>
+    /// <remarks>
+    /// Prints that are Printing and not yet linked to a connector's job, newest first. Match one to
+    /// the job by `fileHash` (SHA-1, lowercase hex) or `fileName`, then claim it with
+    /// `POST /api/Prints/{id}/claim`. `hasSlicerSettings` says whether the print already has its
+    /// slicer settings recorded, so a connector can skip sending its own. Usage rows carry the
+    /// `slot` each material was fed from, where known.
+    /// </remarks>
+    /// <param name="printerId">The printer the job is running on.</param>
+    /// <param name="createdAfter">Only prints created after this instant, e.g. a little before the job started.</param>
+    /// <param name="limit">The most prints to return, 1 to 100. Defaults to 20.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">The claimable prints. Empty when there are none, or the printer is not yours.</response>
+    /// <response code="400">Returned when `printerId` is missing or `limit` is out of range.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpGet("claimable")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<List<ClaimablePrintDto>>> GetClaimablePrints(
+        [FromQuery, BindRequired] long printerId,
+        [FromQuery] DateTimeOffset? createdAfter,
+        [FromQuery, Range(1, 100)] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        return await printService.GetClaimablePrints(userId, printerId, createdAfter, limit, cancellationToken);
+    }
+
+    /// <summary>
     /// The access check and error mapping PATCH and complete share with PUT: the print's creator
     /// or its printer's owner may edit it.
     /// </summary>

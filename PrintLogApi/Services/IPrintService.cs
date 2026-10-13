@@ -124,6 +124,24 @@ public interface IPrintService
     /// start date.
     /// </summary>
     Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId);
+
+    /// <summary>
+    /// Links a connector's job to a print something else created (#165): sets the external pair,
+    /// the connection when <see cref="ClaimPrintDto.ConnectionInstanceId"/> is one of the user's,
+    /// and the start date when the print has none. <see cref="Print.Source"/> is kept. Only the
+    /// print's creator may claim it, only while it is Printing and has no pair yet. Claiming again
+    /// with the pair it already has returns it with WasReplayed = true. Throws
+    /// DoesNotExistException, ForbiddenException, or PrintClaimConflictException when the print
+    /// has another pair, is not Printing, or the pair is already on another of the user's prints.
+    /// </summary>
+    Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId);
+
+    /// <summary>
+    /// The user's prints on <paramref name="printerId"/> a connector could claim: Printing, with
+    /// no external pair, created after <paramref name="createdAfter"/> when given. Newest first,
+    /// at most <paramref name="limit"/>.
+    /// </summary>
+    Task<List<ClaimablePrintDto>> GetClaimablePrints(long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
 
