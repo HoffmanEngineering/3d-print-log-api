@@ -38,7 +38,7 @@
     <PackageVersion Include="AWSSDK.SimpleEmailV2" Version="4.0.106.1" />
     <PackageVersion Include="AWSSDK.SimpleNotificationService" Version="4.0.100.16" />
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.1" />
-    <PackageVersion Include="CsvHelper" Version="33.0.1" />
+    <PackageVersion Include="CsvHelper" Version="33.1.0" />
     <PackageVersion Include="FirebaseAdmin" Version="3.3.0" />
     <PackageVersion Include="Humanizer" Version="2.14.1" />
     <PackageVersion Include="JsonModelBinder" Version="2.1.1" />
