@@ -47,7 +47,7 @@ public class PrintFilament
     public double? LengthInM { get; set; }
 
     /// <summary>
-    /// The estimated length of filament used in meters.
+    /// The estimated volume of filament used in milliliters.
     /// </summary>
     public double? EstimatedVolumeMl { get; set; }
 

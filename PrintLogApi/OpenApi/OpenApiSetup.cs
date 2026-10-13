@@ -139,10 +139,16 @@ Writes made with a personal API key (`POST`, `PUT`, `PATCH` and `DELETE`) have t
             });
 
             c.OperationFilter<SecurityRequirementsOperationFilter>();
+            c.OperationFilter<OpenApiRequestBodyOperationFilter>();
+            c.OperationFilter<JsonFormPartsOperationFilter>();
+            c.OperationFilter<JsonRequestBodyMediaTypesOperationFilter>();
 
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
             c.IncludeXmlComments(xmlPath, true);
+
+            // After the XML comments, which would otherwise replace the description it extends.
+            c.SchemaFilter<EnumNamesSchemaFilter>();
 
             c.CustomSchemaIds(SchemaId);
         });

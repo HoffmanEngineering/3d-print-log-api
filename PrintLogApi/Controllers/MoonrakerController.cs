@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Moonraker;
+using PrintLogApi.OpenApi;
 using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
 
@@ -44,15 +45,13 @@ public class MoonrakerController(
     /// When the printer also has a live printlog-bridge connection, the bridge logs the job and
     /// these events are dropped (and counted on the connection), so each job is logged once.
     /// </remarks>
-    /// <see cref="PrintEventDto"/>
-    /// <see cref="PrintEventMessageDto"/>
-    /// <param>The body of the Post Request contains <see cref="PrintEventDto"/></param>
-    /// <response code="200">Returned if the webhook was handled successfully.</response>
+    /// <response code="200">Returned if the webhook was handled successfully, echoing the decoded event.</response>
     /// <response code="400">Returned if required data is missing in the webhook (like the printerId, etc).</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the printer specified.</response>
     [HttpPost("notifier")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [OpenApiRequestBody(typeof(PrintEventDto))]
+    [ProducesResponseType<PrintEventMessageDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> Webhook()

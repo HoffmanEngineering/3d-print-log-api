@@ -1,5 +1,8 @@
 ﻿namespace PrintLogApi.Models.DTOs.Octoprint;
 
+/// <summary>
+/// The file's metadata, sent as the JSON-encoded <c>Meta</c> form field.
+/// </summary>
 public class OctoprintWebhookMetaDto
 {
     /// <summary>
