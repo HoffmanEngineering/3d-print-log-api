@@ -459,6 +459,9 @@ namespace PrintLogApi.Migrations
                     b.Property<int>("Source")
                         .HasColumnType("int");
 
+                    b.Property<int?>("SpoolNumber")
+                        .HasColumnType("int");
+
                     b.Property<long?>("SpoolWeightMg")
                         .HasColumnType("bigint");
 
@@ -480,7 +483,8 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedById");
+                    b.HasIndex("CreatedById")
+                        .HasDatabaseName("IX_Filaments_CreatedById");
 
                     b.HasIndex("Id")
                         .HasDatabaseName("IX_Filaments_Id_Covering");
@@ -490,6 +494,10 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("MaterialCategoryNickname");
 
                     b.HasIndex("UpdatedById");
+
+                    b.HasIndex("CreatedById", "SpoolNumber")
+                        .IsUnique()
+                        .HasFilter("[SpoolNumber] IS NOT NULL");
 
                     b.ToTable("Filaments");
                 });
@@ -1982,6 +1990,9 @@ namespace PrintLogApi.Migrations
 
                     b.Property<bool>("EmailVerified")
                         .HasColumnType("bit");
+
+                    b.Property<int>("LastSpoolNumber")
+                        .HasColumnType("int");
 
                     b.Property<string>("OAuthUserId")
                         .HasColumnType("nvarchar(450)");

@@ -1330,6 +1330,79 @@ public class FilamentService(
         return filamentId.HasValue ? await GetFilamentById(filamentId.Value) : null;
     }
 
+    public async Task<Filament?> GetFilamentBySpoolNumber(long userId, int spoolNumber, CancellationToken ct = default)
+    {
+        await NumberUnnumberedSpoolsAsync(userId, ct);
+
+        var filamentId = await context.Filaments
+            .Where(f => f.CreatedById == userId && f.SpoolNumber == spoolNumber)
+            .Select(f => (Guid?)f.Id)
+            .SingleOrDefaultAsync(ct);
+
+        return filamentId.HasValue ? await GetFilamentById(filamentId.Value) : null;
+    }
+
+    public async Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default)
+    {
+        // The common case is one indexed EXISTS and nothing else: only a spool the previous app
+        // version created while the #174 migration ran can be unnumbered.
+        var unnumbered = await context.Filaments
+            .Where(f => f.CreatedById == userId && f.SpoolNumber == null)
+            .OrderBy(f => f.CreatedDate).ThenBy(f => f.Id)
+            .Select(f => f.Id)
+            .ToListAsync(ct);
+
+        foreach (var id in unnumbered)
+        {
+            var number = await ReserveSpoolNumberAsync(userId, ct);
+
+            // Conditional, so two lookups racing to number the same spool cannot both win and
+            // the second overwrite the first; the loser's reserved number becomes a gap.
+            await context.Filaments
+                .Where(f => f.Id == id && f.SpoolNumber == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(f => f.SpoolNumber, number), ct);
+        }
+    }
+
+    /// <summary>
+    /// Takes the owner's next spool number (#174) by bumping <see cref="User.LastSpoolNumber"/>
+    /// and reading the new value back in the same statement.
+    ///
+    /// <para><b>One statement is what makes it safe under concurrency.</b> The increment and the
+    /// read cannot interleave with another caller's, on SQL Server (the row's update lock is held
+    /// for the statement, and for the enclosing transaction if there is one) and on SQLite (one
+    /// writer at a time) alike, so two simultaneous creates for one user always get different
+    /// numbers with no retry loop and no explicit transaction. That matters because
+    /// <c>CreateMaterialForMcp</c> already holds one around this call, and a nested
+    /// <c>BeginTransaction</c> would throw.</para>
+    ///
+    /// <para>The high-water mark, not <c>max + 1</c>: spools are hard-deleted, so <c>max + 1</c>
+    /// would hand the deleted spool's number to the next one. The unique
+    /// <c>(CreatedById, SpoolNumber)</c> index backs this up rather than being the mechanism.</para>
+    ///
+    /// <para>Raw SQL because EF has no translation for an update that returns a value. The two
+    /// dialects differ only in where the returned column goes: <c>OUTPUT</c> on SQL Server,
+    /// <c>RETURNING</c> on SQLite (3.35+), which the integration suite runs on. The column is
+    /// aliased <c>Value</c>, which is what <c>SqlQuery&lt;int&gt;</c> reads.</para>
+    /// </summary>
+    private async Task<int> ReserveSpoolNumberAsync(long userId, CancellationToken ct = default)
+    {
+        var query = context.Database.IsSqlServer()
+            ? context.Database.SqlQuery<int>(
+                $"UPDATE [Users] SET [LastSpoolNumber] = [LastSpoolNumber] + 1 OUTPUT INSERTED.[LastSpoolNumber] AS [Value] WHERE [Id] = {userId}")
+            : context.Database.SqlQuery<int>(
+                $"UPDATE \"Users\" SET \"LastSpoolNumber\" = \"LastSpoolNumber\" + 1 WHERE \"Id\" = {userId} RETURNING \"LastSpoolNumber\" AS \"Value\"");
+
+        // AsAsyncEnumerable rather than a LINQ operator: anything composed on top would make EF
+        // wrap the statement in a SELECT, which an UPDATE cannot sit inside.
+        await foreach (var number in query.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            return number;
+        }
+
+        throw new InvalidOperationException($"User {userId} does not exist, so no spool number can be reserved.");
+    }
+
     private static BadRequestException InvalidTagUid(string? uid) =>
         new($"'{uid}' is not a tag UID. Expected hex bytes, such as 04:A2:3F:11.");
 
@@ -1501,6 +1574,10 @@ public class FilamentService(
         newFilament.UpdatedById = userId;
 
         ReplaceTags(newFilament, tagUids);
+
+        // Reserved before the insert, so a create that then fails (a tag conflict) leaves a gap
+        // rather than a number someone else could be given later. Gaps are harmless; reuse is not.
+        newFilament.SpoolNumber = await ReserveSpoolNumberAsync(userId);
 
         context.Filaments.Add(newFilament);
         await SaveTaggedFilamentChanges(newFilament, tagUids);

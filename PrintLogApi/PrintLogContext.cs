@@ -484,6 +484,20 @@ public class PrintLogContext : DbContext
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");
 
+        // A spool number is unique per owner (#174). Filtered, because a spool the previous app
+        // version created during the migration window has none until it is next looked up.
+        modelBuilder.Entity<Filament>()
+            .HasIndex(f => new { f.CreatedById, f.SpoolNumber })
+            .IsUnique()
+            .HasFilter("[SpoolNumber] IS NOT NULL");
+
+        // Declared explicitly, or EF drops it as redundant with the index above, whose leading
+        // column it is. It is not redundant: that index is filtered, so SQL Server cannot use it
+        // for the plain "this user's filaments" seek every list and summary query starts with.
+        modelBuilder.Entity<Filament>()
+            .HasIndex(f => f.CreatedById)
+            .HasDatabaseName("IX_Filaments_CreatedById");
+
         // Only every query for currently-loaded filament.
         modelBuilder.Entity<PrinterFilament>()
             .HasQueryFilter(pf => !pf.UnloadedDateTime.HasValue);

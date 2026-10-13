@@ -134,6 +134,40 @@ public class FilamentsController(
     }
 
     /// <summary>
+    /// Find the current user's spool by its spool number.
+    /// </summary>
+    /// <remarks>
+    /// Every spool has a short number of its own (1, 2, 3…), unique among the user's spools and
+    /// never reused after a delete, so a number written on a label always means the same spool.
+    /// Spoolman-compatible clients use it as the spool id. Inactive spools are included. Another
+    /// user's number is a 404.
+    /// </remarks>
+    /// <param name="spoolNumber">The spool number.</param>
+    /// <response code="200">The spool with that number.</response>
+    /// <response code="404">None of the user's spools has that number.</response>
+    [HttpGet("by-number/{spoolNumber:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FilamentDetailDto>> GetFilamentBySpoolNumber(int spoolNumber)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var filament = await filamentService.GetFilamentBySpoolNumber(userId.Value, spoolNumber, HttpContext.RequestAborted);
+        if (filament is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<FilamentDetailDto>(filament);
+        await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+        return dto;
+    }
+
+    /// <summary>
     /// Returns detailed information for a filament roll by ID.
     /// </summary>
     /// <param name="id">The GUID of the filament.</param>

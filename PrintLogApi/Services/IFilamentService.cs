@@ -118,6 +118,19 @@ public interface IFilamentService
     /// not hex bytes. Another user's tag is never returned.
     /// </summary>
     Task<Filament?> GetFilamentByTag(long userId, string uid);
+
+    /// <summary>
+    /// The user's spool with this <see cref="Filament.SpoolNumber"/> (#174), or null when they
+    /// have none. Numbers any of the user's unnumbered spools first.
+    /// </summary>
+    Task<Filament?> GetFilamentBySpoolNumber(long userId, int spoolNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gives a number to each of the user's spools that has none, oldest first. Only a spool the
+    /// previous app version created while the #174 migration ran can be unnumbered, so this is
+    /// one indexed query in the normal case. Call it before resolving or listing by number.
+    /// </summary>
+    Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default);
     Task<string[]> GetFilamentPurchaseLocations(long userId);
     Task<string[]> GetFilamentStorageLocations(long userId);
     Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string? searchText, string? filterByMaterialCategoryNickname, string? filterByStorageLocation, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly, List<ColorPatternType>? colorPatterns = null, List<FilamentFinishType>? finishTypes = null, List<FilamentEffect>? effects = null);
