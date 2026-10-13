@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using System.Collections.Frozen;
+using System.Globalization;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Microsoft.ApplicationInsights;
@@ -33,7 +34,10 @@ public class UsersController(
 {
     private readonly string profileImageContainerName = "userprofile";
 
-    private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+    private static readonly FrozenSet<string> AllowedImageContentTypes = new[]
+    {
+        "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
@@ -270,7 +274,7 @@ public class UsersController(
             return BadRequest("Image file is required.");
         }
 
-        if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
+        if (!AllowedImageContentTypes.Contains(image.ContentType))
         {
             return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
         }
@@ -332,7 +336,7 @@ public class UsersController(
             return BadRequest("Image file is required.");
         }
 
-        if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
+        if (!AllowedImageContentTypes.Contains(image.ContentType))
         {
             return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
         }

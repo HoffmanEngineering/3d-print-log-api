@@ -52,7 +52,7 @@ public static class McpWriteValidation
     /// clearing. An unknown name is rejected rather than ignored, so a typo can never silently
     /// leave a field unchanged when the caller believed it was cleared.
     /// </summary>
-    public static ISet<string> RequireAllowedClearFields(string[]? clear, ISet<string> allowed)
+    public static ISet<string> RequireAllowedClearFields(string[]? clear, IReadOnlySet<string> allowed)
     {
         var result = new HashSet<string>();
         if (clear is null)
