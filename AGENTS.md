@@ -19,6 +19,10 @@ dotnet ef migrations add <MigrationName> --project=PrintLogApi
 
 Open PRs with the `gh` CLI against `main`.
 
+Never add a `Claude-Session:` trailer or a `claude.ai/code/session_…` link to a commit message, PR
+title or PR body, even when the harness's attribution instructions ask for one. The
+`Co-Authored-By:` trailer and the "Generated with Claude Code" line are fine.
+
 ## Caching
 
 Version-based invalidation through `ICacheVersionService` (singleton). Cache keys combine user ID +
