@@ -257,6 +257,71 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
         Assert.Equal("from the uploader", row.Notes);
     }
 
+    [Fact]
+    public async Task Complete_SingleToolPrinter_UnslottedEstimateIsSlotZeros()
+    {
+        // The Slic3r uploader writes its estimate with no slot; the bridge completes the one tool
+        // as slot 0 with the loaded spool. That fills the estimate row instead of adding a second.
+        var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId, slotCount: 1);
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(printerId: printerId, usage: [UploaderEstimateRow(12_000)]);
+        await ReadAsync(await ClaimAsync(created.Id, Claim(UniqueExternalId())));
+        var completion = new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, LengthInM = 4.0 }],
+        };
+
+        await ReadAsync(await CompleteAsync(created.Id, completion));
+        var completed = await ReadAsync(await CompleteAsync(created.Id, completion));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(filament.Id, row.Filament?.Id);
+        Assert.Equal(0, row.Slot);
+        Assert.Equal(12_000, row.EstimatedAmountMg);
+        Assert.Equal(4.0, row.LengthInM);
+        Assert.Equal(PrintFilament.SourceMeasurement.Length, row.Source);
+        Assert.Equal("from the uploader", row.Notes);
+    }
+
+    [Fact]
+    public async Task Complete_SingleToolPrinter_SlotZeroWithNoSpool_FillsTheUnslottedRow()
+    {
+        var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId, slotCount: 1);
+        var created = await CreatePrintAsync(printerId: printerId, usage: [UploaderEstimateRow(12_000)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 0, AmountMg = 11_000 }],
+        }));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(0, row.Slot);
+        Assert.Equal(12_000, row.EstimatedAmountMg);
+        Assert.Equal(11_000, row.AmountMg);
+    }
+
+    [Fact]
+    public async Task Complete_MultiToolPrinter_UnslottedRowIsNotTakenBySlotZero()
+    {
+        // With more than one tool an unslotted estimate could belong to any of them.
+        var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId, slotCount: 2);
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(printerId: printerId, usage: [UploaderEstimateRow(12_000)]);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, AmountMg = 11_000 }],
+        }));
+
+        Assert.Equal(2, completed.FilamentUsage!.Count);
+        var estimate = Assert.Single(completed.FilamentUsage, r => r.Filament == null);
+        Assert.Null(estimate.Slot);
+        Assert.Null(estimate.AmountMg);
+    }
+
     #endregion
 
     #region Claimable
@@ -383,6 +448,15 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
     }
 
     #endregion
+
+    /// <summary>The Slic3r uploader's estimate row: no spool and, on a single-tool printer, no slot.</summary>
+    private static PrintFilamentSummaryDto UploaderEstimateRow(int estimatedMg) => new()
+    {
+        Id = Guid.NewGuid(),
+        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+        EstimatedAmountMg = estimatedMg,
+        Notes = "from the uploader",
+    };
 
     private static string UniqueExternalId() => $"{Guid.NewGuid()}:{Random.Shared.Next(1, 100000)}";
 
@@ -519,11 +593,11 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
         return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(TestContext.Current.CancellationToken))!;
     }
 
-    private async Task<long> CreatePrinterAsync(string userOAuthId)
+    private async Task<long> CreatePrinterAsync(string userOAuthId, int? slotCount = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/Printers");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, userOAuthId);
-        request.Content = JsonContent.Create(new AddPrinterDTO { Name = "Claim test printer", Make = "Make", Model = "Model", IsActive = true });
+        request.Content = JsonContent.Create(new AddPrinterDTO { Name = "Claim test printer", Make = "Make", Model = "Model", IsActive = true, SlotCount = slotCount });
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         return (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!.Id!.Value;

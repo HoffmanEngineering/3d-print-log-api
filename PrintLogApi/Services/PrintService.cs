@@ -1653,7 +1653,12 @@ public sealed class PrintService(
             print.PrintTimeInSeconds = printTime;
         }
 
-        MergeActualUsage(print, usage);
+        // On a single-tool printer an unslotted row can only be slot 0's (#165).
+        var singleTool = await context.Printers
+            .Where(p => p.Id == print.PrinterId)
+            .Select(p => p.SlotCount)
+            .FirstOrDefaultAsync() == 1;
+        MergeActualUsage(print, usage, singleTool);
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
@@ -1840,23 +1845,40 @@ public sealed class PrintService(
     /// once, with slot-only rows claiming theirs before rows with a filament. A match keeps its
     /// estimate and notes; an incoming row with no match is added. Rows the completion does not
     /// mention are untouched.
+    /// <para>
+    /// On a <paramref name="singleTool"/> printer an unlinked row with no slot counts as slot 0's
+    /// in both slot passes, and is stamped slot 0 when one takes it (#165): the Slic3r uploader
+    /// writes its estimate with no slot, and a connector completes the same tool as slot 0. On a
+    /// multi-tool printer an unslotted row is ambiguous, so it is left to the in-order match.
+    /// </para>
     /// </summary>
-    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage)
+    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage, bool singleTool)
     {
         var rows = print.FilamentUsage!;
         var unlinked = rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id).ToList();
+
+        PrintFilament? TakeUnlinkedRowOnSlot(int? slot)
+        {
+            // A row stamped with the slot wins over an unslotted one.
+            var row = unlinked.FirstOrDefault(r => r.Slot == slot)
+                ?? (singleTool && slot == 0 ? unlinked.FirstOrDefault(r => r.Slot is null) : null);
+            if (row != null)
+            {
+                unlinked.Remove(row);
+                if (singleTool)
+                {
+                    row.Slot ??= 0;
+                }
+            }
+            return row;
+        }
 
         // Slots first, so an in-order match below cannot take a row a later slot names.
         var incomingRows = usage.ToList();
         var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
         foreach (var incoming in incomingRows.Where(u => u.FilamentId is null && u.Slot is not null))
         {
-            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
-            if (bySlot != null)
-            {
-                unlinked.Remove(bySlot);
-            }
-            matches[incoming] = bySlot;
+            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
         }
 
         // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
@@ -1867,12 +1889,7 @@ public sealed class PrintService(
             {
                 continue;
             }
-            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
-            if (bySlot != null)
-            {
-                unlinked.Remove(bySlot);
-            }
-            matches[incoming] = bySlot;
+            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
         }
 
         foreach (var incoming in incomingRows)

@@ -195,6 +195,11 @@ cached, partly anonymous, and has no `fileHash`.
   print finished.
 - **Prints carrying an `mcp` pair are never claimable.** That pair is `create_print`'s idempotency
   key, and overwriting it would break that key's replay.
+- **On a single-tool printer (`SlotCount == 1`), `/complete` treats an unlinked row with no slot as
+  slot 0's** and stamps it 0 when a slot pass takes it. The Slic3r uploader writes its estimate
+  with no slot, and the bridge completes that tool as `{slot: 0, filamentId}`; without the rule
+  that added a second row. On a multi-tool printer an unslotted row stays ambiguous, so it is left
+  to the in-order match.
 - `hasSlicerSettings` is `Slicer != null`. The print stores no link to its `CuraSetting`; `Slicer`
   is set exactly when settings were recorded, and #164 should keep that true.
 
