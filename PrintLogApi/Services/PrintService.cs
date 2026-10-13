@@ -1653,7 +1653,12 @@ public sealed class PrintService(
             print.PrintTimeInSeconds = printTime;
         }
 
-        MergeActualUsage(print, usage);
+        // On a single-tool printer an unslotted row can only be slot 0's (#165).
+        var singleTool = await context.Printers
+            .Where(p => p.Id == print.PrinterId)
+            .Select(p => p.SlotCount)
+            .FirstOrDefaultAsync() == 1;
+        MergeActualUsage(print, usage, singleTool);
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
@@ -1667,6 +1672,168 @@ public sealed class PrintService(
         return (await GetPrintById(id))!;
     }
 
+    public Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId) =>
+        ClaimPrint(id, dto, userId, retryIfRaced: true);
+
+    private async Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId, bool retryIfRaced)
+    {
+        // ClaimPrintDto.Validate has already rejected a missing half; restated where flow analysis
+        // can see it.
+        if (dto.ExternalSource is not { } rawSource || dto.ExternalId is not { } rawExternalId)
+        {
+            throw new BadRequestException("externalSource and externalId are both required.");
+        }
+
+        var source = ExternalPrintIds.NormalizeSource(rawSource);
+        var externalId = ExternalPrintIds.NormalizeId(rawExternalId);
+
+        var print = await context.Prints
+            .Where(p => p.Id == id)
+            .Select(p => new { p.CreatedById, p.Status, p.ExternalSource, p.ExternalId })
+            .FirstOrDefaultAsync()
+            ?? throw new DoesNotExistException();
+
+        if (print.CreatedById != userId)
+        {
+            throw new ForbiddenException();
+        }
+
+        // Checked before the status: a retried claim must still succeed after the print finished.
+        if (print.ExternalSource == source && print.ExternalId == externalId)
+        {
+            return await ClaimedResult(id, wasReplayed: true);
+        }
+
+        if (print.ExternalSource is not null || print.ExternalId is not null)
+        {
+            throw new PrintClaimConflictException("The print is already linked to another job.");
+        }
+
+        if (print.Status != PrintStatus.Printing)
+        {
+            throw new PrintClaimConflictException("Only a print that is Printing can be claimed.");
+        }
+
+        if (await FindPrintIdByExternalPair(userId, source, externalId) is { } holder)
+        {
+            throw new PrintClaimConflictException("The job is already logged as another print.", holder);
+        }
+
+        Guid? connectionId = null;
+        if (!string.IsNullOrWhiteSpace(dto.ConnectionInstanceId))
+        {
+            var instanceId = dto.ConnectionInstanceId.Trim();
+            connectionId = await context.Connections
+                .Where(c => c.UserId == userId && c.InstanceId == instanceId)
+                .Select(c => (Guid?)c.Id)
+                .FirstOrDefaultAsync();
+        }
+
+        // One conditional UPDATE, so two claims of the same print cannot both pass the checks
+        // above and the later one silently overwrite the earlier one's pair: whichever runs
+        // second matches no row. IX_Prints_User_ExternalSource_ExternalId rejects it instead when a
+        // create for the same job committed in between.
+        var startDate = dto.StartDate;
+        var now = DateTime.UtcNow;
+        int updated;
+        try
+        {
+            updated = await context.Prints
+                .Where(p => p.Id == id
+                    && p.Status == PrintStatus.Printing
+                    && p.ExternalSource == null
+                    && p.ExternalId == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(p => p.ExternalSource, source)
+                    .SetProperty(p => p.ExternalId, externalId)
+                    .SetProperty(p => p.ConnectionId, p => connectionId ?? p.ConnectionId)
+                    .SetProperty(p => p.StartDate, p => p.StartDate ?? startDate)
+                    .SetProperty(p => p.UpdatedById, userId)
+                    // ExecuteUpdate bypasses the context's SaveChanges timestamping.
+                    .SetProperty(p => p.UpdatedDate, now));
+        }
+        catch (System.Data.Common.DbException ex)
+        {
+            if (await FindPrintIdByExternalPair(userId, source, externalId) is { } winner && winner != id)
+            {
+                throw new PrintClaimConflictException("The job is already logged as another print.", winner, ex);
+            }
+            throw;
+        }
+
+        if (updated == 0)
+        {
+            // Lost to a concurrent claim or status change. Retry once against what is there now:
+            // the same pair replays, anything else is the conflict it would have been.
+            if (retryIfRaced)
+            {
+                return await ClaimPrint(id, dto, userId, retryIfRaced: false);
+            }
+            throw new PrintClaimConflictException("The print changed while it was being claimed.");
+        }
+
+        cacheVersionService.InvalidateUserCache(userId);
+        telemetry.TrackEvent("PrintClaimed");
+
+        return await ClaimedResult(id, wasReplayed: false);
+    }
+
+    private async Task<long?> FindPrintIdByExternalPair(long userId, string source, string externalId) =>
+        await context.Prints
+            .Where(p => p.CreatedById == userId && p.ExternalSource == source && p.ExternalId == externalId)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+
+    private async Task<AddPrintResult> ClaimedResult(long id, bool wasReplayed) =>
+        // Null-forgiven: the print was read a moment ago and a claim never deletes it.
+        new((await GetPrintById(id))!, wasReplayed);
+
+    public async Task<List<ClaimablePrintDto>> GetClaimablePrints(
+        long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct)
+    {
+        var query = context.Prints
+            .Where(p => p.CreatedById == userId
+                && p.PrinterId == printerId
+                && p.Status == PrintStatus.Printing
+                // A print MCP create_print made carries its idempotency key as the pair, so it is
+                // excluded too: claiming it would break that key's replay.
+                && p.ExternalSource == null
+                && p.ExternalId == null);
+
+        if (createdAfter is { } after)
+        {
+            var afterUtc = after.UtcDateTime;
+            query = query.Where(p => p.CreatedDate > afterUtc);
+        }
+
+        var prints = await query
+            .OrderByDescending(p => p.CreatedDate)
+            .ThenByDescending(p => p.Id)
+            .Take(limit)
+            .Include(p => p.FilamentUsage!)
+                .ThenInclude(pf => pf.Filament)
+            .AsSplitQuery()
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return prints.Select(p => new ClaimablePrintDto
+        {
+            Id = p.Id,
+            Title = p.Title,
+            PrinterId = p.PrinterId,
+            Status = p.Status,
+            Source = p.Source,
+            FileName = p.FileName,
+            FileHash = p.FileHash is { } hash ? Convert.ToHexStringLower(hash) : null,
+            CreatedDate = DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+            StartDate = p.StartDate,
+            // Slicer is set exactly when settings were recorded with the print: today through a
+            // CuraSetting (ApplyProvenance), and by #164 for connector-sent settings.
+            HasSlicerSettings = p.Slicer != null,
+            FilamentUsage = mapper.Map<List<PrintFilamentSummaryDto>>(p.FilamentUsage!.OrderBy(f => f.Slot ?? int.MaxValue)),
+        }).ToList();
+    }
+
     /// <summary>
     /// Writes actual usage onto the print's rows, matching by filament first. A row with a
     /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
@@ -1678,23 +1845,40 @@ public sealed class PrintService(
     /// once, with slot-only rows claiming theirs before rows with a filament. A match keeps its
     /// estimate and notes; an incoming row with no match is added. Rows the completion does not
     /// mention are untouched.
+    /// <para>
+    /// On a <paramref name="singleTool"/> printer an unlinked row with no slot counts as slot 0's
+    /// in both slot passes, and is stamped slot 0 when one takes it (#165): the Slic3r uploader
+    /// writes its estimate with no slot, and a connector completes the same tool as slot 0. On a
+    /// multi-tool printer an unslotted row is ambiguous, so it is left to the in-order match.
+    /// </para>
     /// </summary>
-    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage)
+    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage, bool singleTool)
     {
         var rows = print.FilamentUsage!;
         var unlinked = rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id).ToList();
+
+        PrintFilament? TakeUnlinkedRowOnSlot(int? slot)
+        {
+            // A row stamped with the slot wins over an unslotted one.
+            var row = unlinked.FirstOrDefault(r => r.Slot == slot)
+                ?? (singleTool && slot == 0 ? unlinked.FirstOrDefault(r => r.Slot is null) : null);
+            if (row != null)
+            {
+                unlinked.Remove(row);
+                if (singleTool)
+                {
+                    row.Slot ??= 0;
+                }
+            }
+            return row;
+        }
 
         // Slots first, so an in-order match below cannot take a row a later slot names.
         var incomingRows = usage.ToList();
         var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
         foreach (var incoming in incomingRows.Where(u => u.FilamentId is null && u.Slot is not null))
         {
-            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
-            if (bySlot != null)
-            {
-                unlinked.Remove(bySlot);
-            }
-            matches[incoming] = bySlot;
+            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
         }
 
         // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
@@ -1705,12 +1889,7 @@ public sealed class PrintService(
             {
                 continue;
             }
-            var bySlot = unlinked.FirstOrDefault(r => r.Slot == incoming.Slot);
-            if (bySlot != null)
-            {
-                unlinked.Remove(bySlot);
-            }
-            matches[incoming] = bySlot;
+            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
         }
 
         foreach (var incoming in incomingRows)
