@@ -59,9 +59,79 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         Assert.Equal("active", created.State);
         Assert.Matches(new Regex("^[A-Za-z0-9_-]{43,}$"), created.Secret);
         Assert.Equal(
-            $"[spoolman]\nserver: https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman\n",
+            ExpectedBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman",
+                $"jsons://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman/notifier"),
             created.ConfigBlock);
     }
+
+    [Fact]
+    public async Task ConfigBlock_IncludesTheNotifier_OverHttps()
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains(
+            $"url: jsons://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman/notifier\n",
+            created.ConfigBlock);
+        Assert.Equal(
+            ExpectedBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman",
+                $"jsons://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman/notifier"),
+            created.ConfigBlock);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_UsesJsonAndKeepsThePort_OverHttp()
+    {
+        await using var httpFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Spoolman:ServerUrl"] = "http://192.168.4.65:5100/spoolman",
+            })));
+        using var client = httpFactory.CreateClient();
+
+        long printer;
+        string oauthId;
+        using (var scope = httpFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var user = new User
+            {
+                OAuthUserId = $"auth0|spoolman-{Guid.NewGuid():N}",
+                DisplayName = "Spoolman",
+                ViewStatus = User.ProfileViewStatus.Private,
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync(Ct);
+            var p = new Printer { Name = "Http printer", UserId = user.Id, IsActive = true, CategoryNickname = "FDM" };
+            db.Printers.Add(p);
+            await db.SaveChangesAsync(Ct);
+            printer = p.Id;
+            oauthId = user.OAuthUserId;
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Printers/{printer}/spoolman-connection");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, oauthId);
+        var response = await client.SendAsync(request, Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(Ct)}");
+        var created = (await response.Content.ReadFromJsonAsync<SpoolmanConnectionCreatedDto>(Ct))!;
+
+        Assert.Equal(
+            ExpectedBlock($"http://printer-{printer}:{created.Secret}@192.168.4.65:5100/spoolman",
+                $"json://printer-{printer}:{created.Secret}@192.168.4.65:5100/spoolman/notifier"),
+            created.ConfigBlock);
+    }
+
+    private static string ExpectedBlock(string server, string notifierUrl) =>
+        $"[spoolman]\nserver: {server}\n\n"
+        + "[notifier 3d_print_log]\n"
+        + $"url: {notifierUrl}\n"
+        + "events: started, complete, error, cancelled\n"
+        + "body:\n"
+        + "    {% set payload = {\"event_name\": event_name} %}\n"
+        + "    {% do payload.update(event_args[1]) %}\n"
+        + "    { payload|tojson }\n";
 
     [Fact]
     public async Task Create_StoresOnlyAHashOfTheSecret()

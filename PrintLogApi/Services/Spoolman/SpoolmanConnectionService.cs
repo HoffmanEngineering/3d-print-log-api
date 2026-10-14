@@ -146,7 +146,7 @@ public sealed class SpoolmanConnectionService(
         {
             Secret = secret,
             ServerUrl = serverUrl,
-            ConfigBlock = $"[spoolman]\nserver: {serverUrl}\n",
+            ConfigBlock = ConfigBlock(serverUrl, NotifierUrl(requestOrigin, printer.Id, secret)),
         };
         Fill(created, connection, printer.Name);
         return created;
@@ -360,14 +360,41 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
         }
     }
 
-    private string ServerUrl(string requestOrigin, long printerId, string secret)
+    private Uri BaseUri(string requestOrigin)
     {
         var configured = string.IsNullOrWhiteSpace(_options.ServerUrl)
             ? requestOrigin.TrimEnd('/') + "/spoolman"
             : _options.ServerUrl;
-        var uri = new Uri(configured);
+        return new Uri(configured);
+    }
+
+    private string ServerUrl(string requestOrigin, long printerId, string secret)
+    {
+        var uri = BaseUri(requestOrigin);
         return $"{uri.Scheme}://printer-{printerId}:{secret}@{uri.Authority}{uri.AbsolutePath.TrimEnd('/')}";
     }
+
+    /// <summary>
+    /// The Moonraker notifier's Apprise URL: <c>jsons</c> over https, <c>json</c> over http, with
+    /// the same userinfo as the server URL (Apprise sends it as HTTP Basic). The secret is
+    /// base64url, so it is safe unescaped in userinfo.
+    /// </summary>
+    private string NotifierUrl(string requestOrigin, long printerId, string secret)
+    {
+        var uri = BaseUri(requestOrigin);
+        var apprise = uri.Scheme == Uri.UriSchemeHttps ? "jsons" : "json";
+        return $"{apprise}://printer-{printerId}:{secret}@{uri.Authority}{uri.AbsolutePath.TrimEnd('/')}/notifier";
+    }
+
+    private static string ConfigBlock(string serverUrl, string notifierUrl) =>
+        $"[spoolman]\nserver: {serverUrl}\n\n"
+        + "[notifier 3d_print_log]\n"
+        + $"url: {notifierUrl}\n"
+        + "events: started, complete, error, cancelled\n"
+        + "body:\n"
+        + "    {% set payload = {\"event_name\": event_name} %}\n"
+        + "    {% do payload.update(event_args[1]) %}\n"
+        + "    { payload|tojson }\n";
 
     private static T Fill<T>(T dto, SpoolmanConnection connection, string? printerName) where T : SpoolmanConnectionDto
     {
