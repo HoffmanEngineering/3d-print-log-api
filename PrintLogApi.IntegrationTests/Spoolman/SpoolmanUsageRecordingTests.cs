@@ -196,8 +196,9 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         Assert.All(rows, r =>
         {
             Assert.Equal(PrintFilament.SourceMeasurement.Length, r.Source);
-            Assert.Equal(PrintFilament.SourceMeasurement.Length, r.EstimatedSource);
-            Assert.Equal(r.LengthInM, r.EstimatedLengthInM);
+            // Several spools: nothing to estimate against, and no fabricated perfect sample.
+            Assert.Null(r.EstimatedLengthInM);
+            Assert.Null(r.EstimatedAmountMg);
             Assert.NotNull(r.AmountMg);
         });
         Assert.Empty(await UsagesAsync(print.Id));
@@ -254,6 +255,47 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         Assert.Equal(a.Id, row.FilamentId);
         Assert.Equal(1.0, row.LengthInM);
         Assert.Empty(await UsagesAsync(print.Id));
+    }
+
+    [Fact]
+    public async Task Complete_SingleSpool_KeepsTheStartedRowsEstimate()
+    {
+        var (user, secret, printer, a, _, file) = await StartedWithTwoSpoolsAsync();
+        var print = Assert.Single(await PrintsAsync(user, file));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await db.PrintFilament.Where(pf => pf.PrintId == print.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(pf => pf.EstimatedLengthInM, 7.5), Ct);
+        }
+        await UseAsync(secret, a, 1000);
+
+        await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999);
+
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(1.0, row.LengthInM);
+        Assert.Equal(7.5, row.EstimatedLengthInM);
+        Assert.NotEqual(row.LengthInM, row.EstimatedLengthInM);
+        Assert.NotNull(row.EstimatedAmountMg);
+    }
+
+    [Fact]
+    public async Task Complete_SingleSpoolOnAMultiSlotPrinter_HasNoSlot()
+    {
+        var (user, secret, printer) = await ConnectedAsync();
+        await SetSlotCountAsync(printer, 4);
+        var a = await AddSpoolAsync(user, "A");
+        await LoadAsync(printer, a, slot: 0);
+        var file = $"usage-{Guid.NewGuid():N}.gcode";
+        await NotifyAsync(secret, "started", printer, file);
+        await UseAsync(secret, a, 1000);
+
+        await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(a.Id, row.FilamentId);
+        Assert.Null(row.Slot);
     }
 
     [Fact]

@@ -263,8 +263,12 @@ public class PrintEventService(
             return false;
         }
 
-        // One spool keeps the slot the started event gave its usage; several cannot share one.
-        var slot = kept.Count == 1 ? print.FilamentUsage!.FirstOrDefault()?.Slot : null;
+        // One spool keeps the slot and estimate the started event gave its usage, but a slot only on
+        // a single-tool printer (the started row's 0 says nothing about where a multi-slot spool sits).
+        // Several spools cannot share either. The actual length is never copied into the estimate:
+        // that would put a perfect sample into the accuracy analytics.
+        var started = kept.Count == 1 ? print.FilamentUsage!.FirstOrDefault() : null;
+        var slot = print.Printer.SlotCount > 1 ? null : started?.Slot;
 
         context.PrintFilament.RemoveRange(print.FilamentUsage!);
         print.FilamentUsage!.Clear();
@@ -274,11 +278,13 @@ public class PrintEventService(
             var lengthInM = Math.Round(Math.Max(0, usage.LengthMm) / 1000, 3);
             print.FilamentUsage.Add(new PrintFilament
             {
-                EstimatedSource = PrintFilament.SourceMeasurement.Length,
+                EstimatedSource = started?.EstimatedSource ?? PrintFilament.SourceMeasurement.Length,
                 Id = Guid.Empty,
                 FilamentId = usage.FilamentId,
                 Slot = slot,
-                EstimatedLengthInM = lengthInM,
+                EstimatedAmountMg = started?.EstimatedAmountMg,
+                EstimatedLengthInM = started?.EstimatedLengthInM,
+                EstimatedVolumeMl = started?.EstimatedVolumeMl,
                 Source = PrintFilament.SourceMeasurement.Length,
                 LengthInM = lengthInM,
                 Notes = "Reported by Moonraker's Spoolman integration",
