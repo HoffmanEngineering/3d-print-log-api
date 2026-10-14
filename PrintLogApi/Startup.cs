@@ -29,6 +29,7 @@ using PrintLogApi.Models.Stripe;
 using PrintLogApi.OpenApi;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Moonraker;
 using PrintLogApi.Services.Push;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
@@ -164,6 +165,7 @@ public class Startup
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<IPrintEventService, PrintEventService>();
+        services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
