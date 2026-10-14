@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PrintLogApi.Models;
 
@@ -50,7 +51,14 @@ public class CuraSetting
     /// The print a connector sent these settings for (#164), at most one record per print. Null for
     /// settings the Cura plugin or the Slic3r uploader posted: a print created from those does not
     /// link back to them. Deleting the print deletes the record.
+    /// <para>
+    /// Server-side only: <c>GET /api/Cura/settings</c> returns this entity, and the Cura plugin and
+    /// the uploader read that shape, so neither member is serialized (or bound from a request).
+    /// </para>
     /// </summary>
+    [JsonIgnore]
     public long? PrintId { get; set; }
+
+    [JsonIgnore]
     public Print? Print { get; set; }
 }

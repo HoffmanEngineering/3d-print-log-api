@@ -330,6 +330,18 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
+    public async Task CuraSetting_DoesNotDocumentItsPrintLink()
+    {
+        // #164's CuraSetting.PrintId/Print are server-side only; the plugins' schema is unchanged.
+        var document = await LoadDocument();
+        var properties = document.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PrintLogApi.Models.CuraSetting").GetProperty("properties");
+
+        Assert.False(properties.TryGetProperty("printId", out _));
+        Assert.False(properties.TryGetProperty("print", out _));
+    }
+
+    [Fact]
     public async Task JsonRequestBodies_AreDocumentedAsApplicationJsonOnly()
     {
         // openapi-python-client skips any operation whose body also lists text/json or
