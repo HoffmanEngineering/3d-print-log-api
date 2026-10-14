@@ -31,6 +31,7 @@ namespace PrintLogApi.Controllers;
 [EnableRateLimiting(RateLimitPolicy)]
 public class SpoolmanController(
     ISpoolmanInventoryService inventory,
+    SpoolmanSocketHost sockets,
     PrintLogContext context,
     TelemetryClient telemetry) : ControllerBase
 {
@@ -82,6 +83,13 @@ public class SpoolmanController(
     [HttpGet("spool")]
     public async Task<IActionResult> FindSpools()
     {
+        // Moonraker's websocket (#178) shares this path with the REST list.
+        if (HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            await sockets.RunAsync(HttpContext);
+            return new EmptyResult();
+        }
+
         var all = await InventoryAsync();
         var q = Request.Query;
         try
@@ -116,10 +124,35 @@ public class SpoolmanController(
     /// under. Archived spools are returned.
     /// </summary>
     [HttpGet("spool/{id:int}")]
-    public async Task<IActionResult> GetSpool(int id) =>
-        (await InventoryAsync()).Spools.FirstOrDefault(s => s.Id == id) is { } spool
+    public async Task<IActionResult> GetSpool(int id)
+    {
+        // Spoolman serves a socket for one spool here too (#178).
+        if (HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            await sockets.RunAsync(HttpContext);
+            return new EmptyResult();
+        }
+
+        return (await InventoryAsync()).Spools.FirstOrDefault(s => s.Id == id) is { } spool
             ? Json(spool, SpoolmanJsonContext.Wire.SpoolmanSpool)
             : Message(StatusCodes.Status404NotFound, $"No spool with ID {id} found.");
+    }
+
+    /// <summary>
+    /// Spoolman's root websocket, for changes to anything (#178): Fluidd opens it from the browser,
+    /// through Moonraker, and spoolman2slicer directly. A plain GET here is a 404, as in Spoolman.
+    /// </summary>
+    [HttpGet("")]
+    public async Task<IActionResult> Root()
+    {
+        if (HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            await sockets.RunAsync(HttpContext);
+            return new EmptyResult();
+        }
+
+        return Message(StatusCodes.Status404NotFound, "Not found.");
+    }
 
     /// <summary>
     /// Moonraker's usage report. Validated as Spoolman does (exactly one of <c>use_length</c> and

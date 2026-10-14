@@ -176,6 +176,9 @@ public class Startup
         // Singleton: it holds only HybridCache and CachedComputation, both singletons.
         services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
         services.AddTransient<Services.Spoolman.ISpoolmanInventoryService, Services.Spoolman.SpoolmanInventoryService>();
+        // Singleton: it is the registry of this process's open sockets (#178).
+        services.AddSingleton<Services.Spoolman.SpoolmanSocketHost>();
+        services.AddHostedService<Services.Spoolman.SpoolmanSocketSampler>();
         // The wall clock, as a dependency. Every analytics service reads "now" to close an
         // open-ended window (a filter with no ToDate means "up to now"), and a test that has
         // to construct its fixture relative to the real current date can only assert what is
@@ -917,6 +920,17 @@ public class Startup
         // UseAuthentication, or the MCP SDK's handler answers this path with the MCP document;
         // see RestProtectedResource for that and for why REST needs a document of its own.
         app.UseRestProtectedResourceMetadata();
+
+        // Spoolman's websockets (#178). Before routing and authentication, so the upgrade is
+        // recognised when SpoolmanBasic authenticates the handshake. The server pings every 30 s
+        // and drops a peer that has not answered within 60 s more, comfortably inside Azure App
+        // Service's 230-second idle timeout and ahead of an older Moonraker that never pings.
+        // Needs "Web sockets" switched on in App Service, General settings.
+        app.UseWebSockets(new WebSocketOptions
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(30),
+            KeepAliveTimeout = TimeSpan.FromSeconds(60),
+        });
 
         app.UseRouting();
 
