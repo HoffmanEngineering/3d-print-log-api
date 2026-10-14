@@ -52,6 +52,26 @@ public class SlicerSettingsHelpersTests
             scrubbed);
     }
 
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\r\n")]
+    [InlineData("\f")]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void ScrubText_SplitsLinesLikeTheParser(string terminator)
+    {
+        // The parser library reads lines with EnumerateLines(), which also ends a line at each of
+        // these. Splitting only on \n would leave a CR-only block in one "line" and unscrubbed.
+        var text = string.Join(terminator, "; layer_height = 0.2", "; printhost_apikey = secret", "; print_host = http://secret", "; nozzle_diameter = 0.4");
+
+        var scrubbed = SlicerSettingsScrubber.ScrubText(text);
+
+        Assert.Equal(
+            string.Join(terminator, "; layer_height = 0.2", "; printhost_apikey =", "; print_host =", "; nozzle_diameter = 0.4"),
+            scrubbed);
+    }
+
     [Fact]
     public void ScrubText_NothingSensitive_ReturnsTheSameText()
     {
@@ -117,6 +137,22 @@ public class SlicerSettingsHelpersTests
 
         Assert.StartsWith(notes, updated);
         Assert.EndsWith(Section, updated);
+    }
+
+    [Fact]
+    public void Upsert_AfterAnOrphanedHeading_NeverReplacesTheUsersTextBelowIt()
+    {
+        // The user deleted the end line but kept the old section and wrote below it. The second
+        // send appends a fresh section; the third must replace only that one, not pair the
+        // orphaned heading with the new end line and take the user's paragraph with it.
+        var orphaned = "Mine.\n\n--- Slicer settings (PrusaSlicer 2.9.2) ---\nOld\n\nThe user's own paragraph.";
+        var second = SlicerSettingsNote.Upsert(orphaned, Section);
+        Assert.Equal(orphaned + "\n\n" + Section, second);
+
+        var third = SlicerSettingsNote.Section("OrcaSlicer", "2.3.2", "Layer Height: 0.28");
+        var updated = SlicerSettingsNote.Upsert(second, third);
+
+        Assert.Equal(orphaned + "\n\n" + third, updated);
     }
 
     [Fact]

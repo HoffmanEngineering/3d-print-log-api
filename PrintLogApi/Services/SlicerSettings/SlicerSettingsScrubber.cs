@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Buffers;
+using System.Text;
 
 namespace PrintLogApi.Services.SlicerSettings;
 
@@ -28,6 +29,13 @@ public static class SlicerSettingsScrubber
     // an argument, and always carries a local path with the user's account name in it.
     private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase) { "post_process" };
 
+    /// <summary>
+    /// Every character <see cref="MemoryExtensions.EnumerateLines(ReadOnlySpan{char})"/> ends a line
+    /// at, which is how the parser library reads the text. Splitting on fewer would leave, say, a
+    /// CR-only block as one "line" here and many lines there: unscrubbed, then parsed.
+    /// </summary>
+    private static readonly SearchValues<char> LineBreaks = SearchValues.Create("\r\n\f\u0085\u2028\u2029");
+
     public static bool IsSensitiveKey(string key)
     {
         var lower = key.Trim().ToLowerInvariant();
@@ -37,7 +45,7 @@ public static class SlicerSettingsScrubber
     /// <summary>
     /// Blanks the value of every <c>; key = value</c> (or <c>; key: value</c>) comment line whose
     /// key is sensitive, keeping the key so the line still parses as an empty setting. Every other
-    /// byte is unchanged. Linear in the length of the text.
+    /// character is unchanged. Lines end where the parser's do. Linear in the length of the text.
     /// </summary>
     public static string ScrubText(string text)
     {
@@ -46,8 +54,8 @@ public static class SlicerSettingsScrubber
         var lineStart = 0;
         while (lineStart < text.Length)
         {
-            var newline = text.IndexOf('\n', lineStart);
-            var lineEnd = newline < 0 ? text.Length : newline;
+            var lineBreak = text.AsSpan(lineStart).IndexOfAny(LineBreaks);
+            var lineEnd = lineBreak < 0 ? text.Length : lineStart + lineBreak;
 
             if (SensitiveValue(text, lineStart, lineEnd) is var (valueStart, valueEnd) && valueEnd > valueStart)
             {
@@ -56,7 +64,8 @@ public static class SlicerSettingsScrubber
                 copiedTo = valueEnd;
             }
 
-            lineStart = lineEnd + 1;
+            // "\r\n" is one break, as in EnumerateLines; an empty line between them is not a line.
+            lineStart = lineEnd + (lineEnd + 1 < text.Length && text[lineEnd] == '\r' && text[lineEnd + 1] == '\n' ? 2 : 1);
         }
 
         if (output is null)
@@ -84,8 +93,8 @@ public static class SlicerSettingsScrubber
     }
 
     /// <summary>
-    /// The span of the value on a <c>; key = value</c> line with a sensitive key, excluding a
-    /// trailing <c>\r</c>; null for any other line.
+    /// The span of the value on a <c>; key = value</c> line with a sensitive key; null for any other
+    /// line. <paramref name="lineEnd"/> excludes the line break.
     /// </summary>
     private static (int Start, int End)? SensitiveValue(string text, int lineStart, int lineEnd)
     {
@@ -113,8 +122,7 @@ public static class SlicerSettingsScrubber
             return null;
         }
 
-        var valueEnd = lineEnd > separator + 1 && text[lineEnd - 1] == '\r' ? lineEnd - 1 : lineEnd;
-        return (separator + 1, valueEnd);
+        return (separator + 1, lineEnd);
     }
 
     private static int SkipSpaces(string text, int index, int end)

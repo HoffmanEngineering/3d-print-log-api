@@ -421,6 +421,38 @@ public class PrintsControllerSlicerSettingsTests(CustomWebApplicationFactory fac
         Assert.Equal("0.2", record.Settings.GetProperty("settings").GetProperty("layer_height").GetString());
     }
 
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r")]
+    [InlineData("\u2028")]
+    public async Task CredentialKeys_ListedAsChangedFromTheProfile_NeverReachTheNote(string lineBreak)
+    {
+        // Orca's {{modified_settings}} renders "key = value" for every key in
+        // different_settings_to_system, so a host or key the user changed would be quoted in the
+        // note. Only the scrub before parsing stops that; dropping keys from the parsed settings
+        // afterwards does not reach the note. The parser also breaks lines at "\r" and U+2028.
+        var print = await CreatePrintAsync();
+        var body = FromFixture(OrcaCube);
+        var leading = string.Join(lineBreak,
+            "; different_settings_to_system = print_host;printhost_apikey;nozzle_temperature",
+            "; print_host = http://SECRET-host.local",
+            "; printhost_apikey = SECRET-apikey");
+        // First, so these win over the block's own copies (first non-empty value wins).
+        body.ConfigBlock = leading + lineBreak + body.ConfigBlock!.Replace("\n", lineBreak);
+
+        var response = await SendAsync(print.Id, body);
+        var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<PrintSlicerSettingsResultDto>(responseText, System.Text.Json.JsonSerializerOptions.Web)!;
+        // The section the secrets would have appeared in did render.
+        Assert.Contains("Profile Changes:", result.Note);
+        Assert.Contains("nozzle_temperature", result.Note);
+        Assert.DoesNotContain("SECRET", responseText);
+        Assert.DoesNotContain("SECRET", (await LoadPrintAsync(print.Id)).Notes);
+        Assert.DoesNotContain("SECRET", Assert.Single(await LoadSettingsAsync(print.Id)).Settings.GetRawText());
+    }
+
     [Fact]
     public async Task CredentialKeys_DoNotChangeTheNote()
     {

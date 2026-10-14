@@ -11,7 +11,8 @@ namespace PrintLogApi.Services.SlicerSettings;
 /// it rather than add a second one, and everything outside it, which is the user's, stays as it
 /// is. Notes are plain text in the web app, so the markers are plain text too. If the user deletes
 /// either marker the section can no longer be found, and a resend appends a fresh one: a duplicate
-/// is recoverable, deleting text the user wrote is not.
+/// is recoverable, deleting text the user wrote is not. An orphaned heading stays orphaned: a later
+/// end line is paired only with the nearest heading above it.
 /// </para>
 /// </summary>
 public static class SlicerSettingsNote
@@ -100,8 +101,9 @@ public static class SlicerSettingsNote
     private static string? Celsius(double? value) => value is null ? null : $"{Number(value)} °C";
 
     /// <summary>
-    /// The first heading line and the first end line after it, as [start, end): from the start of
-    /// the heading line to the end of the end line, excluding its line break.
+    /// The first well-formed section, as [start, end): the first end line, paired with the nearest
+    /// heading above it, so no other heading is ever inside the span. From the start of the heading
+    /// line to the end of the end line, excluding its line break.
     /// </summary>
     private static bool TryFind(string notes, out int start, out int end)
     {
@@ -114,14 +116,13 @@ public static class SlicerSettingsNote
             var lineEnd = newline < 0 ? notes.Length : newline;
             var line = notes.AsSpan(lineStart, lineEnd - lineStart).TrimEnd('\r');
 
-            if (start < 0)
+            if (line.StartsWith(HeadingPrefix, StringComparison.Ordinal) && line.EndsWith("---", StringComparison.Ordinal))
             {
-                if (line.StartsWith(HeadingPrefix, StringComparison.Ordinal) && line.EndsWith("---", StringComparison.Ordinal))
-                {
-                    start = lineStart;
-                }
+                // The nearest heading wins: a later one means the earlier lost its end line, and
+                // everything after that orphan (the user's text included) is not the section.
+                start = lineStart;
             }
-            else if (line.SequenceEqual(EndLine))
+            else if (start >= 0 && line.SequenceEqual(EndLine))
             {
                 // Before a "\r" too, so a CRLF line break after the section survives.
                 end = lineStart + line.Length;
