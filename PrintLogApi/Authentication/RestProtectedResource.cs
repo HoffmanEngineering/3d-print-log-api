@@ -60,7 +60,10 @@ public static class RestProtectedResource
 
         return app.Use(async (context, next) =>
         {
-            if (!context.Request.Path.StartsWithSegments(McpPath))
+            // /spoolman too (#176): its credential is HTTP Basic, not an OAuth token, so pointing
+            // its 401 at OAuth metadata would send a client looking for a flow that does not exist.
+            if (!context.Request.Path.StartsWithSegments(McpPath)
+                && !Spoolman.SpoolmanAuthentication.IsSpoolmanPath(context))
             {
                 context.Response.OnStarting(() =>
                 {

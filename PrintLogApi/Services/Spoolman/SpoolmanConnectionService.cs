@@ -57,6 +57,7 @@ public sealed class SpoolmanConnectionService(
     IOptions<SpoolmanOptions> options,
     IOptions<EmailOptions> emailOptions,
     IEmailSender emailSender,
+    ISpoolmanCredentialCache credentials,
     TimeProvider clock,
     TelemetryClient telemetry,
     ILogger<SpoolmanConnectionService> logger) : ISpoolmanConnectionService
@@ -111,6 +112,12 @@ public sealed class SpoolmanConnectionService(
         // connection per printer, so the insert must see the revocation, and a failure must not
         // leave the printer with neither. The execution strategy wraps it because SQL Server's
         // retrying strategy refuses a user transaction outside one.
+        // The hashes being revoked, so their cached "valid" lookups can be evicted after commit.
+        var rotatedHashes = await context.SpoolmanConnections
+            .Where(c => c.PrinterId == printer.Id && c.RevokedAt == null)
+            .Select(c => c.SecretHash)
+            .ToListAsync(ct);
+
         var strategy = context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
@@ -123,6 +130,7 @@ public sealed class SpoolmanConnectionService(
             await tx.CommitAsync(ct);
         });
 
+        await credentials.InvalidateAsync(rotatedHashes);
         telemetry.TrackEvent("SpoolmanConnection_Created");
 
         var activeCount = await context.SpoolmanConnections
@@ -169,6 +177,7 @@ public sealed class SpoolmanConnectionService(
         {
             connection.RevokedAt = clock.GetUtcNow().UtcDateTime;
             await context.SaveChangesAsync(ct);
+            await credentials.InvalidateAsync([connection.SecretHash]);
             telemetry.TrackEvent("SpoolmanConnection_Revoked");
         }
 
@@ -206,6 +215,7 @@ public sealed class SpoolmanConnectionService(
         if (changed.Count > 0)
         {
             await context.SaveChangesAsync(ct);
+            await credentials.InvalidateAsync(live.Where(c => changed.Contains(c.Id)).Select(c => c.SecretHash));
             telemetry.TrackEvent("SpoolmanConnection_TierApplied", new Dictionary<string, string>
             {
                 ["changed"] = changed.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),

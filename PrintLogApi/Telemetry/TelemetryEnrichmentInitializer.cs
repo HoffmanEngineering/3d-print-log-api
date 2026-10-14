@@ -28,6 +28,7 @@ public sealed class TelemetryEnrichmentInitializer(IHttpContextAccessor httpCont
 
     public const string ApiKey = "apiKey";
     public const string Mcp = "mcp";
+    public const string Spoolman = "spoolman";
     public const string Jwt = "jwt";
     public const string Anonymous = "anonymous";
 
@@ -70,6 +71,11 @@ public sealed class TelemetryEnrichmentInitializer(IHttpContextAccessor httpCont
         if (httpContext.Request.Path.StartsWithSegments("/mcp"))
         {
             return Mcp;
+        }
+
+        if (Authentication.Spoolman.SpoolmanAuthentication.IsSpoolmanPath(httpContext))
+        {
+            return Spoolman;
         }
 
         return Jwt;

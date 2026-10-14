@@ -18,6 +18,7 @@ using PrintLogApi.Achievements;
 using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.Authentication.Spoolman;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
 using PrintLogApi.Extensions;
@@ -172,6 +173,8 @@ public class Startup
         services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
         services.Configure<Services.Spoolman.SpoolmanOptions>(Configuration.GetSection(Services.Spoolman.SpoolmanOptions.SectionName));
         services.AddTransient<Services.Spoolman.ISpoolmanConnectionService, Services.Spoolman.SpoolmanConnectionService>();
+        // Singleton: it holds only HybridCache and CachedComputation, both singletons.
+        services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
         // The wall clock, as a dependency. Every analytics service reads "now" to close an
         // open-ended window (a filter with no ToDate means "up to now"), and a test that has
         // to construct its fixture relative to the real current date can only assert what is
@@ -728,9 +731,25 @@ public class Startup
             });
         }
 
+        // The Spoolman-compatible API's own credential (#176), in every environment: the dev
+        // bypass does not reach /spoolman, because the policy below pins this scheme.
+        services.AddAuthentication()
+            .AddScheme<AuthenticationSchemeOptions, Authentication.Spoolman.SpoolmanBasicAuthenticationHandler>(
+                Authentication.Spoolman.SpoolmanAuthentication.Scheme, null);
+
         // These policies use custom requirements (not scope-based) and are needed in all environments
         services.AddAuthorization(options =>
         {
+            // Every /spoolman endpoint. Pinning the scheme is what keeps JWTs, API keys and the
+            // dev bypass out: authorization re-authenticates with SpoolmanBasic alone, so any
+            // other identity arrives anonymous and is challenged with Spoolman's 401.
+            options.AddPolicy(Authentication.Spoolman.SpoolmanAuthentication.Policy, policy =>
+            {
+                policy.AuthenticationSchemes.Add(Authentication.Spoolman.SpoolmanAuthentication.Scheme);
+                policy.RequireAuthenticatedUser();
+                policy.RequireClaim(Authentication.Spoolman.SpoolmanAuthentication.ConnectionIdClaim);
+            });
+
             // ApiKeyMiddleware authenticates any /api request bearing a valid X-Api-Key header or
             // api_key query parameter, in the "ApiUser" role. Those are long-lived credentials
             // living in printer config files; they must not be able to register or delete the
@@ -867,6 +886,8 @@ public class Startup
         // CORS headers a browser needs to read them. Neither touches /mcp.
         app.UseProblemDetailsStatusCodePages();
         app.UseRestResourceMetadataChallenge();
+        // The same job for /spoolman, in Spoolman's {"message"} shape (#176).
+        app.UseSpoolmanErrorBodies();
 
         // RFC 9728 metadata for the REST audience, which every REST 401 points at. Before
         // UseAuthentication, or the MCP SDK's handler answers this path with the MCP document;

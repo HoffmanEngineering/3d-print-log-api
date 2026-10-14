@@ -12,7 +12,8 @@ public class PrinterService(
     TelemetryClient telemetry,
     IBlobStorageService blobStorage,
     ILogger<PrinterService> logger,
-    ICacheVersionService cacheVersionService) : IPrinterService
+    ICacheVersionService cacheVersionService,
+    Spoolman.ISpoolmanCredentialCache spoolmanCredentials) : IPrinterService
 {
     /// <summary>
     /// The category a printer gets when none is named. Shared with PrintersController so the web
@@ -350,7 +351,8 @@ public class PrinterService(
         // printer, and a printer that no longer exists must not keep reading the user's spools.
         // Loaded for the same ClientSetNull reason as above.
         var revokedAt = DateTime.UtcNow;
-        foreach (var spoolman in await context.SpoolmanConnections.Where(c => c.PrinterId == printerId).ToListAsync())
+        var spoolmanConnections = await context.SpoolmanConnections.Where(c => c.PrinterId == printerId).ToListAsync();
+        foreach (var spoolman in spoolmanConnections)
         {
             spoolman.RevokedAt ??= revokedAt;
         }
@@ -358,6 +360,9 @@ public class PrinterService(
         context.Printers.Remove(printer);
 
         await context.SaveChangesAsync();
+
+        // After commit, so a request racing the delete cannot re-cache the "valid" lookup.
+        await spoolmanCredentials.InvalidateAsync(spoolmanConnections.Select(c => c.SecretHash));
 
         // Blobs LAST, so a failed save leaves an orphaned blob rather than a row pointing at
         // destroyed bytes. Failures here are logged and swallowed for the same reason: the

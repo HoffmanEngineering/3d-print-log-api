@@ -51,6 +51,17 @@ public class TelemetryEnrichmentInitializerTests
     }
 
     [Fact]
+    public void Spoolman_request_is_classified_spoolman_with_the_internal_user_id()
+    {
+        var telemetry = new RequestTelemetry();
+
+        Initializer(Context(Authenticated(31, "SpoolmanBasic"), "/spoolman/api/v1/spool")).Initialize(telemetry);
+
+        Assert.Equal(TelemetryEnrichmentInitializer.Spoolman, telemetry.Properties[TelemetryEnrichmentInitializer.AuthMethodProperty]);
+        Assert.Equal("31", telemetry.Context.User.AuthenticatedUserId);
+    }
+
+    [Fact]
     public void ApiUser_role_is_classified_apiKey_even_on_mcp_path()
     {
         // The role is what ApiKeyMiddleware assigns; it outranks the path check because an

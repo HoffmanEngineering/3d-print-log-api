@@ -11,7 +11,8 @@ namespace PrintLogApi.Authentication;
 /// an interactive sign-in never carries it, which is how web and mobile app traffic stays out of
 /// that budget.
 ///
-/// Today the only connector credential is a personal API key, added by <c>ApiKeyMiddleware</c>.
+/// Today the connector credentials are a personal API key, added by <c>ApiKeyMiddleware</c>, and
+/// a Spoolman connection secret, added by <c>SpoolmanBasicAuthenticationHandler</c> (#176).
 /// Scoped device tokens (#148) are meant to plug in by adding this claim with a <c>device:</c>
 /// value from their own handler; the limiter needs no change for that.
 /// </summary>
@@ -27,6 +28,14 @@ public static class ConnectorCredentialClaim
     /// </summary>
     public static string ForApiKey(string key)
         => "api_key:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("connector-credential:" + key)));
+
+    /// <summary>
+    /// The value for a Spoolman connection secret (#176), on the same terms as
+    /// <see cref="ForApiKey"/>: domain-separated, so it is neither the secret nor the stored
+    /// <c>SecretHash</c> that looks it up.
+    /// </summary>
+    public static string ForSpoolman(string secret)
+        => "spoolman:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("connector-credential:spoolman:" + secret)));
 
     /// <summary>The credential the request authenticated with, or null for an interactive user.</summary>
     public static string? Get(ClaimsPrincipal user) => user.FindFirst(Type)?.Value;
