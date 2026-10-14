@@ -1,4 +1,5 @@
-﻿using AutoMapper;
+﻿using System.Linq.Expressions;
+using AutoMapper;
 using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -7,6 +8,36 @@ namespace PrintLogApi.Profiles;
 
 public class FilamentProfile : Profile
 {
+    /// <summary>
+    /// Remaining milligrams as the detail page reports it, or null for a spool with no nominal
+    /// weight (untracked). A field rather than inline so the Spoolman API (#177) projects the
+    /// same figure the web app shows; see the comments on the detail map below for each branch.
+    /// </summary>
+    public static readonly Expression<Func<Filament, long?>> RemainingMg = src => src.InitialNominalWeightMg.HasValue
+                    ? (long?)Math.Round(src.InitialNominalWeightMg.Value
+                    - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
+                    : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                    : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
+                    : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
+                    : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                    : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+                    : 0.0)
+                    + src.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
+                    : (long?)null;
+
+    /// <summary>Milligrams consumed by prints, actual where recorded and estimated otherwise.</summary>
+    public static readonly Expression<Func<Filament, long>> UsedMg = src => (long)Math.Round(src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
+                    : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                    : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
+                    : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
+                    : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
+                    : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+                        ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+                    : 0.0));
+
     public FilamentProfile()
     {
         // Lightweight mapping for printer summary views - avoids expensive calculations
@@ -88,19 +119,7 @@ public class FilamentProfile : Profile
             // around that path (seeded data, an import, a filament with no usable diameter
             // at save time) carries only what the user entered. Milligrams are the common
             // denominator every other figure here converts from.
-            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(src => src.InitialNominalWeightMg.HasValue
-                ? (long?)Math.Round(src.InitialNominalWeightMg.Value
-                - src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
-                : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
-                : 0.0)
-                + src.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
-                : (long?)null))
+            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(RemainingMg))
             // Distinct prints, not usage rows: there is no unique index on (PrintId, FilamentId),
             // so one print may hold two rows for the same spool.
             //
@@ -108,15 +127,7 @@ public class FilamentProfile : Profile
             // Print behind each one, and there is no lazy-loading proxy, so reaching through that
             // navigation here would NullReferenceException on every filament that has usage.
             .ForMember(dest => dest.PrintCount, src => src.MapFrom(src => src.PrintFilaments!.Select(p => p.PrintId).Distinct().Count()))
-            .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(src => (long)Math.Round(src.PrintFilaments!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-                : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
-                : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-                : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-                    ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
-                : 0.0))))
+            .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(UsedMg))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src =>
