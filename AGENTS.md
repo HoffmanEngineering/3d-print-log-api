@@ -229,6 +229,15 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   on the printer's open *notifier* print only: not with a live printlog-bridge (it records usage
   itself) and not without an open print. A spool's first report of a print loads it into slot 0
   on a single-slot printer. Increments are one `ExecuteUpdate` and never bump the cache version.
+- **`POST /spoolman/notifier`** (`SpoolmanNotifierController`, outside `/spoolman/api/v1`) takes
+  Moonraker's `[notifier 3d_print_log]` events over the same Basic credential, through the
+  `MoonrakerNotifierHandler` the user-level notifier shares. The printer comes from the credential,
+  never the body. The connection's config block carries `[spoolman]` and the notifier, so one paste
+  sets up both. A printer with a live printlog-bridge has its events dropped: **the bridge stays
+  authoritative** and the notifier tier is only for printers without one.
+- **Finishing a notifier print replaces its usage rows** with the accumulated `SpoolmanUsages`
+  (`PrintEventService.Finished`): clamped at 0, deleted spools skipped, and when every reported
+  spool is deleted it falls back to the notifier's own total.
 - **The inventory is cached on the user's version GUID.** Filament and print writes must bump it,
   as for the summaries.
 - **Websockets are in-process, on one instance.** `SpoolmanSocketHost` holds them open and sends no
@@ -242,7 +251,8 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   the local UI.
 - **`moonraker.log` prints the URL with the secret in it**, and users post that log publicly.
   That is why the credential is narrow and easy to rotate. Never widen what a Spoolman secret
-  can reach.
+  can reach. The one deliberate, owner-approved widening is the notifier route: the secret also
+  logs prints, for the connection's own printer only, and still only under `/spoolman`.
 
 ## The clock
 

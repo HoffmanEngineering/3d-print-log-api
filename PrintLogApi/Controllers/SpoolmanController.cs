@@ -140,8 +140,10 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Spoolman's root websocket, for changes to anything (#178): Fluidd opens it from the browser,
-    /// through Moonraker, and spoolman2slicer directly. A plain GET here is a 404, as in Spoolman.
+    /// Spoolman's root websocket, for changes to anything (#178): spoolman2slicer opens it with the
+    /// credential. Fluidd opens it straight from the browser, not through Moonraker and without the
+    /// printer's credential, so it is refused (401) and Fluidd shows a "live updates" warning. A
+    /// plain GET here is a 404, as in Spoolman.
     /// </summary>
     [HttpGet("")]
     public async Task<IActionResult> Root()
