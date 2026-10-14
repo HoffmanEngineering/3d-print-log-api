@@ -376,6 +376,16 @@ public class ProjectService(
             .FirstOrDefaultAsync(p => p.Id == id);
     }
 
+    public async Task<List<Guid>> GetPublicProjectIdsAsync(CancellationToken cancellationToken = default)
+    {
+        return await context.Projects
+            .AsNoTracking()
+            .Where(p => p.ViewStatus == Project.PubliclyListedViewStatus)
+            .OrderBy(p => p.Id)
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<Project> CreateProjectAsync(AddProjectDto dto, long userId)
     {
         // DateTime.UtcNow, not project.CreatedDate: CreatedDate is stamped by the SaveChanges

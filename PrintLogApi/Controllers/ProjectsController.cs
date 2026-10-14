@@ -38,6 +38,25 @@ public class ProjectsController(
         return Ok(result);
     }
 
+    /// <summary>
+    /// Returns the ids of every Public project, for the UI's deploy-time sitemap.
+    /// </summary>
+    /// <remarks>
+    /// Each id is one <c>GET {id}</c> serves to an anonymous caller. Unlisted projects are left out
+    /// even though they are viewable by link, matching <c>/api/Prints/public</c>. Declared before
+    /// <c>{id}</c> only for reading order: the literal segment outranks the parameter regardless.
+    /// </remarks>
+    /// <response code="200">The public project ids, ordered.</response>
+    [AllowAnonymous]
+    [HttpGet("public")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+    public async Task<ActionResult<IEnumerable<Guid>>> GetPublicProjectIds(CancellationToken cancellationToken)
+    {
+        telemetry.TrackEvent("PublicProjectsQueried");
+        return await projectService.GetPublicProjectIdsAsync(cancellationToken);
+    }
+
     /// <summary>Get a project's full detail by ID. Public/Unlisted projects are accessible without auth.</summary>
     [HttpGet("{id}")]
     [AllowAnonymous]
@@ -53,7 +72,7 @@ public class ProjectsController(
         var currentUserId = User.GetUserId();
         var isOwner = currentUserId.HasValue && project.CreatedById == currentUserId.Value;
 
-        if (project.ViewStatus == Project.ProjectViewStatus.Private && !isOwner)
+        if (!isOwner && !Project.IsViewableByNonOwner(project.ViewStatus))
             return Forbid();
 
         return Ok(mapper.Map<ProjectDetailDto>(project));

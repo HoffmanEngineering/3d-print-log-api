@@ -53,6 +53,24 @@ public class Project : TimestampEntity
 
     public ProjectViewStatus ViewStatus { get; set; }
 
+    /// <summary>
+    /// Whether a caller who does not own the project may open its detail page
+    /// (<c>GET /api/Projects/{id}</c>). Public and Unlisted both may; Unlisted is reachable only
+    /// by someone who already has the link.
+    /// </summary>
+    public static bool IsViewableByNonOwner(ProjectViewStatus viewStatus) =>
+        viewStatus != ProjectViewStatus.Private;
+
+    /// <summary>
+    /// Whether the project is enumerated for anonymous discovery (<c>GET /api/Projects/public</c>,
+    /// the sitemap). Only Public: an Unlisted project passes <see cref="IsViewableByNonOwner"/>
+    /// but listing it would defeat "only via direct link", the same line <c>/api/Prints/public</c>
+    /// and <c>/api/Users/public</c> draw. Every status listed here must also pass
+    /// <see cref="IsViewableByNonOwner"/>, or the sitemap would advertise a page that refuses
+    /// the crawler; <c>ProjectsControllerTests</c> fetches every listed id anonymously to pin it.
+    /// </summary>
+    public const ProjectViewStatus PubliclyListedViewStatus = ProjectViewStatus.Public;
+
     public ICollection<ProjectImage>? Images { get; set; }
 
     public ICollection<Print>? Prints { get; set; }
