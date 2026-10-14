@@ -14,11 +14,19 @@ version: 2
 #   - PrintLogApi/Dockerfile. Add a `docker` ecosystem entry if that is wanted; note it only affects
 #     local docker-compose, since deploy.yml publishes rather than building the image.
 
+# Every entry waits five days before proposing a new version. Compromised releases
+# (the 2025 npm worms, for one) are usually pulled within hours to a day, and
+# patch/minor bumps are auto-merged once CI is green in the repos that run
+# dependabot-auto-merge.yml, so without a delay a malicious patch release is exactly
+# what would pass CI and merge itself. Security updates ignore the cooldown.
+
 updates:
   - package-ecosystem: nuget
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5
 
     groups:
@@ -74,4 +82,6 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5
