@@ -346,6 +346,15 @@ public class PrinterService(
         // PrintLogContext), and the connection outlives the printer until the user deletes it.
         await context.Connections.Where(c => c.PrinterId == printerId).LoadAsync();
 
+        // Spoolman connections (#175) are revoked as well as unbound: the credential was for this
+        // printer, and a printer that no longer exists must not keep reading the user's spools.
+        // Loaded for the same ClientSetNull reason as above.
+        var revokedAt = DateTime.UtcNow;
+        foreach (var spoolman in await context.SpoolmanConnections.Where(c => c.PrinterId == printerId).ToListAsync())
+        {
+            spoolman.RevokedAt ??= revokedAt;
+        }
+
         context.Printers.Remove(printer);
 
         await context.SaveChangesAsync();

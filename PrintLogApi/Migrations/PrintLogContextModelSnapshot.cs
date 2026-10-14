@@ -1881,6 +1881,120 @@ namespace PrintLogApi.Migrations
                     b.ToTable("ProjectImages");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DisabledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DisabledReason")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("HashAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("PrinterId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SecretHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId")
+                        .IsUnique()
+                        .HasFilter("[PrinterId] IS NOT NULL AND [RevokedAt] IS NULL");
+
+                    b.HasIndex("SecretHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedDate");
+
+                    b.ToTable("SpoolmanConnections");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanFairUseAlert", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("LastSentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Signal")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Signal")
+                        .IsUnique();
+
+                    b.ToTable("SpoolmanFairUseAlerts");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanNetworkSighting", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("NetworkHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "NetworkHash")
+                        .IsUnique();
+
+                    b.ToTable("SpoolmanNetworkSightings");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Subscription", b =>
                 {
                     b.Property<long>("Id")
@@ -2891,6 +3005,45 @@ namespace PrintLogApi.Migrations
                     b.Navigation("Project");
 
                     b.Navigation("UpdatedBy");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanConnection", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId");
+
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanFairUseAlert", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanNetworkSighting", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Subscription", b =>
