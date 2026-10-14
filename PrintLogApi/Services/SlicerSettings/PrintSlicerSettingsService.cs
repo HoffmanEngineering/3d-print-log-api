@@ -121,6 +121,9 @@ public sealed class PrintSlicerSettingsService(
         print.Slicer = slicer;
         print.SlicerVersion = version;
 
+        // Print has no concurrency token, so this is last-write-wins like every other print write:
+        // a web-form save that started before this send writes back the notes it loaded and drops
+        // the section. The settings record and Slicer survive that, and a resend restores the note.
         var notes = SlicerSettingsNote.Upsert(print.Notes, SlicerSettingsNote.Section(parsed.Slicer, version, parsed.Note));
         var noteAppended = notes.Length <= SlicerSettingsNote.MaxNotesLength;
         if (noteAppended)
