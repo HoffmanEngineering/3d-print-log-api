@@ -46,4 +46,11 @@ public class CuraSetting
     [StringLength(50)]
     public string? Slicer { get; set; }
 
+    /// <summary>
+    /// The print a connector sent these settings for (#164), at most one record per print. Null for
+    /// settings the Cura plugin or the Slic3r uploader posted: a print created from those does not
+    /// link back to them. Deleting the print deletes the record.
+    /// </summary>
+    public long? PrintId { get; set; }
+    public Print? Print { get; set; }
 }

@@ -480,6 +480,19 @@ public class PrintLogContext : DbContext
             .Property(c => c._Settings)
             .HasColumnName("Settings");
 
+        // A connector's settings for a print (#164): one record per print, replaced on a resend.
+        // Filtered, because every plugin-posted record has no print.
+        modelBuilder.Entity<CuraSetting>()
+            .HasOne(c => c.Print)
+            .WithMany()
+            .HasForeignKey(c => c.PrintId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.PrintId)
+            .IsUnique()
+            .HasFilter("[PrintId] IS NOT NULL");
+
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");

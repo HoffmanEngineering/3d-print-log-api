@@ -20,6 +20,7 @@ using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.Services.SlicerSettings;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers;
@@ -592,6 +593,104 @@ public class PrintsController(
         }
 
         return await printService.GetClaimablePrints(userId, printerId, createdAfter, limit, cancellationToken);
+    }
+
+    /// <summary>
+    /// Largest body the slicer-settings action reads. The fields are capped separately, in bytes of
+    /// text; this leaves room for JSON escaping, which can grow ASCII text up to sixfold
+    /// (<c>\u0001</c>), so a block under its own cap is never refused by the server first.
+    /// </summary>
+    private const int MaxSlicerSettingsRequestBytes = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// Record a print's slicer settings from a connector.
+    /// </summary>
+    /// <remarks>
+    /// For connectors that read the G-code a print came from. Send `configBlock`, the
+    /// `; key = value` settings the slicer wrote (at most 512 KiB), with `header`, the start of
+    /// the file through `; HEADER_BLOCK_END` (at most 64 KiB), which names the slicer and its
+    /// version. OrcaSlicer, PrusaSlicer, Bambu Studio, FLSun Slicer and Anycubic Slicer Next are
+    /// read; Anycubic Slicer Next only with its header. When there is no block, send `metadata`,
+    /// the summary Moonraker extracts; its `slicer` is then required. With a block, `metadata`
+    /// only fills in what the block lacks: the version, and the slicer when there is no header.
+    ///
+    /// The print gets its slicer and version, and the settings note the Slic3r uploader would
+    /// write, added to the print's notes under a `--- Slicer settings (…) ---` heading. The user's
+    /// own notes are kept. How the print was logged (`source`, `externalSource`) does not change.
+    /// Host and credential settings (`print_host`, `printhost_*`, anything with `apikey`,
+    /// `password`, `token`, `secret` or `user` in its name, `post_process`) are removed before
+    /// anything is parsed or stored; the block itself is never stored.
+    ///
+    /// Sending again is safe: it replaces the settings and the note an earlier call recorded. A
+    /// print whose settings came from the Cura plugin or the Slic3r uploader keeps them, and the
+    /// call is a `409`; `hasSlicerSettings` on `GET /api/Prints/claimable` says so up front.
+    /// Errors never change the print. Only your own print's settings can be sent.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="settings">The settings block, the metadata summary, or both.</param>
+    /// <param name="slicerSettingsService">Records the settings.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">What was recorded.</response>
+    /// <response code="400">Neither field was sent, the block holds no settings and there is no metadata, or the metadata has no slicer.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="404">Returned when the print does not exist or is not yours.</response>
+    /// <response code="409">The print's settings came from a slicer plugin.</response>
+    /// <response code="413">`configBlock` is over 512 KiB or `header` over 64 KiB.</response>
+    [HttpPost("{id}/slicer-settings")]
+    [RequestSizeLimit(MaxSlicerSettingsRequestBytes)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<PrintSlicerSettingsResultDto>> PostSlicerSettings(
+        long id,
+        PrintSlicerSettingsDto settings,
+        [FromServices] IPrintSlicerSettingsService slicerSettingsService,
+        CancellationToken cancellationToken)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        // Checked here, not with [StringLength], so an oversized field is a 413 like an oversized
+        // body, not a 400 a connector would read as malformed.
+        if (TooLarge(settings.ConfigBlock, PrintSlicerSettingsDto.MaxConfigBlockBytes))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Slicer settings are too large",
+                detail: $"configBlock is over {PrintSlicerSettingsDto.MaxConfigBlockBytes / 1024} KiB. Send only the settings block, not the toolpaths.");
+        }
+        if (TooLarge(settings.Header, PrintSlicerSettingsDto.MaxHeaderBytes))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Slicer settings are too large",
+                detail: $"header is over {PrintSlicerSettingsDto.MaxHeaderBytes / 1024} KiB. Send the file only through `; HEADER_BLOCK_END`.");
+        }
+
+        try
+        {
+            return await slicerSettingsService.Record(id, settings, userId, cancellationToken);
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "No usable slicer settings", detail: ex.Message);
+        }
+        catch (SlicerSettingsConflictException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status409Conflict, title: "Print already has slicer settings", detail: ex.Message);
+        }
+
+        static bool TooLarge(string? text, int maxBytes) =>
+            // One UTF-16 code unit is at most three UTF-8 bytes, so only a long text needs counting.
+            text is { } t && t.Length * 3 > maxBytes && System.Text.Encoding.UTF8.GetByteCount(t) > maxBytes;
     }
 
     /// <summary>

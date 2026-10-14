@@ -296,6 +296,40 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
+    public async Task SlicerSettings_DocumentsItsFieldsAndLimits()
+    {
+        // #164: connectors generate their client from this document.
+        var document = await LoadDocument();
+        var operation = document.GetProperty("paths").GetProperty("/api/Prints/{id}/slicer-settings").GetProperty("post");
+
+        Assert.Equal("Prints_PostSlicerSettings", operation.GetProperty("operationId").GetString());
+        var responses = operation.GetProperty("responses");
+        foreach (var status in new[] { "200", "400", "404", "409", "413" })
+        {
+            Assert.True(responses.TryGetProperty(status, out _), $"no {status} response");
+        }
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var body = schemas.GetProperty("PrintLogApi.Models.DTOs.Print.PrintSlicerSettingsDto").GetProperty("properties");
+        Assert.Contains("512 KiB", body.GetProperty("configBlock").GetProperty("description").GetString());
+        Assert.Contains("HEADER_BLOCK_END", body.GetProperty("header").GetProperty("description").GetString());
+        Assert.True(body.TryGetProperty("metadata", out _));
+        // A computed helper, not a field a caller sends.
+        Assert.False(body.TryGetProperty("hasConfigBlock", out _));
+
+        var metadata = schemas.GetProperty("PrintLogApi.Models.DTOs.Print.SlicerMetadataDto").GetProperty("properties");
+        foreach (var field in new[]
+        {
+            "slicer", "slicerVersion", "layerHeightMm", "firstLayerHeightMm", "nozzleDiameterMm",
+            "filamentName", "filamentType", "firstLayerNozzleTemperatureC", "firstLayerBedTemperatureC",
+        })
+        {
+            Assert.True(metadata.TryGetProperty(field, out var property), $"metadata.{field} is not documented");
+            Assert.True(property.TryGetProperty("description", out _), $"metadata.{field} has no description");
+        }
+    }
+
+    [Fact]
     public async Task JsonRequestBodies_AreDocumentedAsApplicationJsonOnly()
     {
         // openapi-python-client skips any operation whose body also lists text/json or
