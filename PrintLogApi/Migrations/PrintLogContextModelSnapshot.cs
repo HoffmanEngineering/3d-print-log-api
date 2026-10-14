@@ -1995,6 +1995,34 @@ namespace PrintLogApi.Migrations
                     b.ToTable("SpoolmanNetworkSightings");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanUsage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid>("FilamentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<double>("LengthMm")
+                        .HasColumnType("float");
+
+                    b.Property<long>("PrintId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrintId", "FilamentId")
+                        .IsUnique();
+
+                    b.ToTable("SpoolmanUsages");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Subscription", b =>
                 {
                     b.Property<long>("Id")
@@ -3044,6 +3072,17 @@ namespace PrintLogApi.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.SpoolmanUsage", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Print", "Print")
+                        .WithMany()
+                        .HasForeignKey("PrintId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Print");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Subscription", b =>

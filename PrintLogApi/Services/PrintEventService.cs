@@ -207,20 +207,32 @@ public class PrintEventService(
     public async Task<bool> DropNotifierEventForBridge(long userId, long printerId)
     {
         var now = clock.GetUtcNow().UtcDateTime;
-        var liveSince = now - Connection.StaleAfter;
 
-        // One statement, so concurrent events cannot lose an increment. A stale bridge does not
-        // count: while it is down, the notifier is the only thing logging the printer.
-        var dropped = await context.Connections
-            .Where(c => c.UserId == userId
-                && c.PrinterId == printerId
-                && c.Kind == Connection.MoonrakerKind
-                && c.LastSeenAt > liveSince)
+        // One statement, so concurrent events cannot lose an increment.
+        var dropped = await LiveBridges(userId, printerId, now)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(c => c.DroppedNotifierEventCount, c => c.DroppedNotifierEventCount + 1)
                 .SetProperty(c => c.LastDroppedNotifierEventAt, now));
 
         return dropped > 0;
+    }
+
+    public Task<bool> IsBridgeLive(long userId, long printerId) =>
+        LiveBridges(userId, printerId, clock.GetUtcNow().UtcDateTime).AnyAsync();
+
+    /// <summary>
+    /// The printer's bridge connections seen within <see cref="Connection.StaleAfter"/> of
+    /// <paramref name="now"/>. A stale bridge does not count: while it is down, the notifier is the
+    /// only thing logging the printer.
+    /// </summary>
+    private IQueryable<Connection> LiveBridges(long userId, long printerId, DateTime now)
+    {
+        var liveSince = now - Connection.StaleAfter;
+        return context.Connections
+            .Where(c => c.UserId == userId
+                && c.PrinterId == printerId
+                && c.Kind == Connection.MoonrakerKind
+                && c.LastSeenAt > liveSince);
     }
 
     /// <summary>

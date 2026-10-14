@@ -22,7 +22,7 @@ namespace PrintLogApi.Controllers;
 /// partitioned by connection, so a user's own REST traffic cannot starve their printers.</para>
 ///
 /// <para>Writes (<c>POST</c>/<c>PATCH</c>/<c>DELETE</c>, <c>/measure</c>, settings) answer 400 until
-/// #172. <c>PUT /spool/{id}/use</c> is accepted and validated but not persisted (#171).</para>
+/// #172. <c>PUT /spool/{id}/use</c> is recorded against the printer's open notifier print (#171).</para>
 /// </summary>
 [Route("spoolman/api/v1")]
 [ApiController]
@@ -32,6 +32,7 @@ namespace PrintLogApi.Controllers;
 public class SpoolmanController(
     ISpoolmanInventoryService inventory,
     SpoolmanSocketHost sockets,
+    ISpoolmanUsageRecorder usage,
     PrintLogContext context,
     TelemetryClient telemetry) : ControllerBase
 {
@@ -156,9 +157,12 @@ public class SpoolmanController(
 
     /// <summary>
     /// Moonraker's usage report. Validated as Spoolman does (exactly one of <c>use_length</c> and
-    /// <c>use_weight</c>) and answered with the spool, but <b>not persisted</b> in phase 1: prints
-    /// are still recorded by the notifier or printlog-bridge, and recording these as well is #171.
-    /// Counted, per user in Application Insights and in total in Prometheus, to size that work.
+    /// <c>use_weight</c>) and answered with the spool. Added to the spool's running total on the
+    /// connection's printer's open notifier print (#171), which the notifier's finish turns into the
+    /// print's usage; with no such print, or with a live printlog-bridge logging the printer, it is
+    /// not stored (<see cref="ISpoolmanUsageRecorder"/>). Answered the same either way, because
+    /// Moonraker cannot act on the difference. Counted, per user in Application Insights and by
+    /// outcome in Prometheus.
     /// </summary>
     [HttpPut("spool/{id:int}/use")]
     public async Task<IActionResult> Use(int id)
@@ -203,7 +207,23 @@ public class SpoolmanController(
             SpoolmanMetrics.UseMillimetres.Inc(millimetres);
         }
         // Pre-aggregated per minute by the SDK: one metric per user, count = calls, sum = mm.
-        telemetry.GetMetric("Spoolman_UseMm", "userId").TrackValue(millimetres, UserId().ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var userId = UserId();
+        telemetry.GetMetric("Spoolman_UseMm", "userId").TrackValue(millimetres, userId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        // The wire id is the spool number; the inventory carries no filament id. Null only if the
+        // filament was deleted after the cached inventory was read, and then there is nothing to record.
+        var filamentId = await context.Filaments.AsNoTracking()
+            .Where(f => f.CreatedById == userId && f.SpoolNumber == id)
+            .Select(f => (Guid?)f.Id)
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+        // A finite use_weight near double.MaxValue converts to an infinite length, which SQL Server's
+        // float column cannot hold. Nothing real reports that; answer it, but store nothing.
+        if (filamentId is { } filament && double.IsFinite(millimetres))
+        {
+            var printerId = long.TryParse(User.FindFirst(SpoolmanAuthentication.PrinterIdClaim)?.Value, out var claimed) ? claimed : (long?)null;
+            var outcome = await usage.RecordAsync(userId, printerId, filament, millimetres, HttpContext.RequestAborted);
+            SpoolmanMetrics.UseRecorded.WithLabels(SpoolmanMetrics.OutcomeLabel(outcome)).Inc();
+        }
 
         return Json(spool, SpoolmanJsonContext.Wire.SpoolmanSpool);
     }

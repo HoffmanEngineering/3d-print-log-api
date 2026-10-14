@@ -224,7 +224,11 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   oldest, from `SubscriptionService`, at the handshake, and on the socket timer.
 - **Bodies are Spoolman's v0.27.0 shapes**, written by `SpoolmanJsonContext` and never by MVC.
   Errors are `{"message"}`, and the path is excluded from `ProblemDetailsStatusCodePages`.
-  `PUT /spool/{id}/use` is validated and **not persisted** until #171. Writes return 400 until #172.
+  Writes return 400 until #172.
+- **`PUT /spool/{id}/use` accumulates** (#171) into `SpoolmanUsages`, one row per (print, spool),
+  on the printer's open *notifier* print only: not with a live printlog-bridge (it records usage
+  itself) and not without an open print. A spool's first report of a print loads it into slot 0
+  on a single-slot printer. Increments are one `ExecuteUpdate` and never bump the cache version.
 - **The inventory is cached on the user's version GUID.** Filament and print writes must bump it,
   as for the summaries.
 - **Websockets are in-process, on one instance.** `SpoolmanSocketHost` holds them open and sends no
