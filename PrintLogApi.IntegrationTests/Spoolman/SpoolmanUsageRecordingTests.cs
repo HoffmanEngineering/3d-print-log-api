@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using PrintLogApi.Controllers;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.Moonraker;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Spoolman;
 using Xunit;
@@ -173,6 +174,148 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         Assert.Equal(SpoolmanUseOutcome.Recorded, first);
         Assert.True(race.Fired);
         Assert.Equal(150, Assert.Single(await UsagesAsync(print)).LengthMm, 6);
+    }
+
+    [Fact]
+    public async Task Complete_WithAccumulations_ReplacesTheTotal()
+    {
+        var (user, secret, printer, a, b, file) = await StartedWithTwoSpoolsAsync();
+        await UseAsync(secret, a, 1000);
+        await UseAsync(secret, b, 500);
+
+        Assert.Equal(HttpStatusCode.OK, (await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999)).StatusCode);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        Assert.Equal(PrintStatus.Success, print.Status);
+        var rows = (await FilamentUsageAsync(print.Id)).OrderBy(r => r.LengthInM).ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(b.Id, rows[0].FilamentId);
+        Assert.Equal(0.5, rows[0].LengthInM);
+        Assert.Equal(a.Id, rows[1].FilamentId);
+        Assert.Equal(1.0, rows[1].LengthInM);
+        Assert.All(rows, r =>
+        {
+            Assert.Equal(PrintFilament.SourceMeasurement.Length, r.Source);
+            Assert.Equal(PrintFilament.SourceMeasurement.Length, r.EstimatedSource);
+            Assert.Equal(r.LengthInM, r.EstimatedLengthInM);
+            Assert.NotNull(r.AmountMg);
+        });
+        Assert.Empty(await UsagesAsync(print.Id));
+    }
+
+    [Fact]
+    public async Task Cancelled_WithAccumulations_AlsoReplaces()
+    {
+        var (user, secret, printer, a, b, file) = await StartedWithTwoSpoolsAsync();
+        await UseAsync(secret, a, 1000);
+        await UseAsync(secret, b, 500);
+
+        Assert.Equal(HttpStatusCode.OK, (await NotifyAsync(secret, "cancelled", printer, file, filamentUsed: 9999)).StatusCode);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        Assert.Equal(PrintStatus.Failed, print.Status);
+        var rows = (await FilamentUsageAsync(print.Id)).OrderBy(r => r.LengthInM).ToList();
+        Assert.Equal([0.5, 1.0], rows.Select(r => r.LengthInM));
+        Assert.Equal([b.Id, a.Id], rows.Select(r => r.FilamentId));
+        Assert.Empty(await UsagesAsync(print.Id));
+    }
+
+    [Fact]
+    public async Task Complete_NegativeTotal_RecordsZero()
+    {
+        var (user, secret, printer, a, _, file) = await StartedWithTwoSpoolsAsync();
+        await UseAsync(secret, a, 100);
+        await UseAsync(secret, a, -300);
+
+        await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(a.Id, row.FilamentId);
+        Assert.Equal(0, row.LengthInM);
+    }
+
+    [Fact]
+    public async Task Complete_DeletedSpool_IsSkipped()
+    {
+        var (user, secret, printer, a, b, file) = await StartedWithTwoSpoolsAsync();
+        await UseAsync(secret, a, 1000);
+        await UseAsync(secret, b, 500);
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IFilamentService>().DeleteFilament(b.Id);
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999)).StatusCode);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        Assert.Equal(PrintStatus.Success, print.Status);
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(a.Id, row.FilamentId);
+        Assert.Equal(1.0, row.LengthInM);
+        Assert.Empty(await UsagesAsync(print.Id));
+    }
+
+    [Fact]
+    public async Task Complete_WithoutAccumulations_Unchanged()
+    {
+        var (user, secret, printer, a, _, file) = await StartedWithTwoSpoolsAsync();
+
+        await NotifyAsync(secret, "complete", printer, file, filamentUsed: 2500);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(a.Id, row.FilamentId);
+        Assert.Equal(2.5, row.LengthInM);
+    }
+
+    /// <summary>
+    /// A single-slot printer with spool A loaded, and a notifier print started through the real
+    /// route (so it carries the slot-0 row on A). Spool B is the user's but not loaded.
+    /// </summary>
+    private async Task<(User User, string Secret, long Printer, Filament A, Filament B, string File)> StartedWithTwoSpoolsAsync()
+    {
+        var (user, secret, printer) = await ConnectedAsync();
+        var a = await AddSpoolAsync(user, "A");
+        var b = await AddSpoolAsync(user, "B");
+        await LoadAsync(printer, a, slot: 0);
+        var file = $"usage-{Guid.NewGuid():N}.gcode";
+        Assert.Equal(HttpStatusCode.OK, (await NotifyAsync(secret, "started", printer, file)).StatusCode);
+        return (user, secret, printer, a, b, file);
+    }
+
+    private Task<HttpResponseMessage> NotifyAsync(string secret, string name, long printer, string file, double filamentUsed = 0)
+    {
+        var inner = JsonSerializer.Serialize(new PrintEventMessageDto
+        {
+            EventName = name,
+            Filename = file,
+            PrinterId = printer,
+            FilamentUsed = filamentUsed,
+            TotalDuration = 120,
+            PrintDuration = 120,
+        });
+        var outer = JsonSerializer.Serialize(new PrintEventDto { Message = inner }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var request = new HttpRequestMessage(HttpMethod.Post, "/spoolman/notifier")
+        {
+            Content = new StringContent(outer, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = SpoolmanTestSupport.Basic(secret);
+        return _client.SendAsync(request, Ct);
+    }
+
+    private async Task<List<Print>> PrintsAsync(User user, string file)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.Prints.AsNoTracking().Where(p => p.CreatedById == user.Id && p.FileName == file).ToListAsync(Ct);
+    }
+
+    private async Task<List<PrintFilament>> FilamentUsageAsync(long print)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.PrintFilament.AsNoTracking().Where(pf => pf.PrintId == print).ToListAsync(Ct);
     }
 
     /// <summary>Runs <paramref name="before"/> once, just before the first insert into SpoolmanUsages.</summary>

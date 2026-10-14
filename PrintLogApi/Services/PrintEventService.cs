@@ -149,7 +149,17 @@ public class PrintEventService(
         print.UpdatedById = finished.UserId;
         context.Entry(print).State = EntityState.Modified;
 
-        if (finished.ActualLengthInM is { } lengthInM)
+        // Moonraker's per-spool reports (#171), when the notifier collected any, are the better
+        // account of the job than its single total, which cannot say which spool it came from.
+        var accumulated = await context.SpoolmanUsages.Where(u => u.PrintId == print.Id).ToListAsync();
+        var replaced = accumulated.Count > 0 && await ReplaceUsageWithAccumulations(print, accumulated, finished.UserId);
+        context.SpoolmanUsages.RemoveRange(accumulated);
+
+        if (replaced)
+        {
+            await printService.UpdateFilamentUsageWeights(print);
+        }
+        else if (finished.ActualLengthInM is { } lengthInM)
         {
             if (print.FilamentUsage!.Count > 0)
             {
@@ -233,6 +243,48 @@ public class PrintEventService(
                 && c.PrinterId == printerId
                 && c.Kind == Connection.MoonrakerKind
                 && c.LastSeenAt > liveSince);
+    }
+
+    /// <summary>
+    /// Replaces the print's usage rows with one per accumulated spool, charging each what Moonraker
+    /// reported for it. A spool deleted since (filaments are hard-deleted) is skipped.
+    /// </summary>
+    /// <returns>False, leaving the print's usage as it was, when no accumulated spool still exists.</returns>
+    private async Task<bool> ReplaceUsageWithAccumulations(Print print, List<SpoolmanUsage> accumulated, long userId)
+    {
+        var ids = accumulated.Select(u => u.FilamentId).ToList();
+        var existing = (await context.Filaments
+            .Where(f => ids.Contains(f.Id) && f.CreatedById == userId)
+            .Select(f => f.Id)
+            .ToListAsync()).ToHashSet();
+        var kept = accumulated.Where(u => existing.Contains(u.FilamentId)).OrderBy(u => u.UpdatedAt).ToList();
+        if (kept.Count == 0)
+        {
+            return false;
+        }
+
+        // One spool keeps the slot the started event gave its usage; several cannot share one.
+        var slot = kept.Count == 1 ? print.FilamentUsage!.FirstOrDefault()?.Slot : null;
+
+        context.PrintFilament.RemoveRange(print.FilamentUsage!);
+        print.FilamentUsage!.Clear();
+        foreach (var usage in kept)
+        {
+            // A spool Moonraker took back more from than it gave records nothing, never a negative length.
+            var lengthInM = Math.Round(Math.Max(0, usage.LengthMm) / 1000, 3);
+            print.FilamentUsage.Add(new PrintFilament
+            {
+                EstimatedSource = PrintFilament.SourceMeasurement.Length,
+                Id = Guid.Empty,
+                FilamentId = usage.FilamentId,
+                Slot = slot,
+                EstimatedLengthInM = lengthInM,
+                Source = PrintFilament.SourceMeasurement.Length,
+                LengthInM = lengthInM,
+                Notes = "Reported by Moonraker's Spoolman integration",
+            });
+        }
+        return true;
     }
 
     /// <summary>
