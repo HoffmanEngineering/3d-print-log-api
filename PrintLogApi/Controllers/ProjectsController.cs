@@ -43,10 +43,10 @@ public class ProjectsController(
     /// </summary>
     /// <remarks>
     /// Each id is one <c>GET {id}</c> serves to an anonymous caller. Unlisted projects are left out
-    /// even though they are viewable by link, matching <c>/api/Prints/public</c>. Declared before
-    /// <c>{id}</c> only for reading order: the literal segment outranks the parameter regardless.
+    /// even though they are viewable by link, matching <c>/api/Prints/public</c>.
     /// </remarks>
     /// <response code="200">The public project ids, ordered.</response>
+    // Declared before {id} only for reading order: the literal segment outranks the parameter regardless.
     [AllowAnonymous]
     [HttpGet("public")]
     [ProducesResponseType(StatusCodes.Status200OK)]
