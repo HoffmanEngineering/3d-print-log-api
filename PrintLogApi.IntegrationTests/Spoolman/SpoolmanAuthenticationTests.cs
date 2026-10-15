@@ -2,6 +2,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Spoolman;
 using PrintLogApi.IntegrationTests.Mcp;
@@ -237,12 +238,12 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
     }
 
     /// <summary>
-    /// Moonraker retries a refused websocket every 2 seconds, forever. The refusal is cached, so
-    /// the second and every later attempt is answered without a query: proved here by making the
-    /// database say "valid" behind the cache's back and seeing the refusal stand.
+    /// A secret matching no row is not cached (#193): a caller choosing random secrets would
+    /// otherwise fill the shared cache budget. Proved by making the database say "valid" after
+    /// the first refusal and seeing the second attempt reach it.
     /// </summary>
     [Fact]
-    public async Task AnUnknownSecret_IsRefusedFromTheCache_TheSecondTime()
+    public async Task AnUnknownSecret_IsNotCached_SoTheSecondAttemptQueriesAgain()
     {
         var user = await _support.CreateUserAsync();
         var printer = await _support.CreatePrinterAsync(user);
@@ -251,9 +252,15 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
 
         await InsertConnectionAsync(user, printer, secret, revoked: false);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(HttpMethod.Get, ProbePath, SpoolmanTestSupport.Basic(secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Get, ProbePath, SpoolmanTestSupport.Basic(secret))).StatusCode);
     }
 
+    /// <summary>
+    /// Moonraker retries a refused websocket every 2 seconds, forever. A revoked or paused
+    /// connection's refusal is cached, so the second and every later attempt is answered without
+    /// a query: proved here by making the database say "valid" behind the cache's back and seeing
+    /// the refusal stand.
+    /// </summary>
     [Fact]
     public async Task ARevokedSecret_IsRefusedFromTheCache_TheSecondTime()
     {
@@ -619,6 +626,56 @@ public class SpoolmanAuthenticationLimitTests(SpoolmanAuthenticationTests.Limite
         request.Headers.Authorization = SpoolmanTestSupport.Basic(connection.Secret!);
 
         Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(request, Ct)).StatusCode);
+    }
+
+    /// <summary>
+    /// A burst of random secrets, past the failed-attempt limit, writes nothing to the cache
+    /// (#193). The limiter answers after the lookup, so it was never what kept those entries
+    /// out. A valid secret's entry is looked up the same way as a control, so a change to the
+    /// key format fails here instead of passing vacuously.
+    /// </summary>
+    [Fact]
+    public async Task ABurstOfUnknownSecrets_LeavesNoCacheEntries()
+    {
+        var unknown = Enumerable.Range(0, SpoolmanAuthenticationTests.LimitedFactory.MaxFailures + 5)
+            .Select(_ => SpoolmanSecret.Generate())
+            .ToList();
+        var statuses = new List<HttpStatusCode>();
+        foreach (var secret in unknown)
+        {
+            var wrong = new HttpRequestMessage(HttpMethod.Get, SpoolmanAuthenticationTests.ProbePath);
+            wrong.Headers.Authorization = SpoolmanTestSupport.Basic(secret);
+            statuses.Add((await _client.SendAsync(wrong, Ct)).StatusCode);
+        }
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses);
+
+        var user = await _support.CreateUserAsync();
+        var connection = await _support.ConnectAsync(user);
+        var valid = new HttpRequestMessage(HttpMethod.Get, SpoolmanAuthenticationTests.ProbePath);
+        valid.Headers.Authorization = SpoolmanTestSupport.Basic(connection.Secret!);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(valid, Ct)).StatusCode);
+
+        Assert.NotNull(await PeekAsync(connection.Secret!));
+        foreach (var secret in unknown)
+        {
+            Assert.Null(await PeekAsync(secret));
+        }
+    }
+
+    /// <summary>Reads a credential's cache entry without computing or writing one.</summary>
+    private async Task<SpoolmanCredential?> PeekAsync(string secret)
+    {
+        var cache = factory.Services.GetRequiredService<HybridCache>();
+        return await cache.GetOrCreateAsync<SpoolmanCredential?>(
+            $"spoolman_credential:{SpoolmanSecret.Hash(secret)}",
+            _ => ValueTask.FromResult<SpoolmanCredential?>(null),
+            new HybridCacheEntryOptions
+            {
+                Flags = HybridCacheEntryFlags.DisableUnderlyingData
+                    | HybridCacheEntryFlags.DisableLocalCacheWrite
+                    | HybridCacheEntryFlags.DisableDistributedCacheWrite,
+            },
+            cancellationToken: Ct);
     }
 
     [Fact]
