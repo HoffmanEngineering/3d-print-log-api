@@ -911,7 +911,9 @@ public class PrintsController(
     /// creating a duplicate, so retries and backfills are safe. On such a replay only the fields a
     /// connector owns are applied (`status`, the durations, the filament totals and the usage
     /// rows), and only when sent; the title, notes and every other field keep any edits the user
-    /// made. A finished print is never moved back to Pending or Printing. `mcp` is reserved.
+    /// made. A replay with `status` Pending or Printing, or with no `status`, onto a finished print
+    /// changes nothing and returns the print as it is, so a start retried after the finish cannot
+    /// undo it. `mcp` is reserved.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
