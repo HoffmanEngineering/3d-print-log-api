@@ -208,9 +208,10 @@ public sealed class SpoolmanBasicAuthenticationHandler(
         if (credential.Status == SpoolmanCredentialStatus.Valid && Context.Connection.RemoteIpAddress is { } address)
         {
             var key = NetworkPrefix + credential.ConnectionId + ":" + SpoolmanNetwork.Prefix(address);
-            if (!memoryCache.TryGetValue(key, out _))
+            // Throttled only once recorded, so a failed record is retried on the next handshake.
+            if (!memoryCache.TryGetValue(key, out _)
+                && await connections.RecordNetworkAsync(credential.UserId, address, Context.RequestAborted))
             {
-                await connections.RecordNetworkAsync(credential.UserId, address, Context.RequestAborted);
                 memoryCache.Set(key, true, new MemoryCacheEntryOptions()
                     .SetSize(CacheBudget.SmallEntryBytes)
                     .SetAbsoluteExpiration(NetworkThrottle));

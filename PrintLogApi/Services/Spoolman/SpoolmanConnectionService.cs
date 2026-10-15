@@ -37,8 +37,10 @@ public interface ISpoolmanConnectionService
     /// <summary>
     /// Records that one of the user's connections connected from <paramref name="address"/>'s
     /// network, and emails the admin when that makes more than the fair-use number this week.
+    /// Best-effort: false when the database failed and nothing was recorded, so the caller can
+    /// try again sooner.
     /// </summary>
-    Task RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct);
+    Task<bool> RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct);
 }
 
 /// <summary>
@@ -231,7 +233,7 @@ public sealed class SpoolmanConnectionService(
     /// blip in a fair-use count must not cost the printer its socket. Only a cancelled request
     /// propagates.
     /// </summary>
-    public async Task RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct)
+    public async Task<bool> RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct)
     {
         int networks;
         try
@@ -243,7 +245,7 @@ public sealed class SpoolmanConnectionService(
             context.ChangeTracker.Clear();
             telemetry.TrackEvent("SpoolmanFairUse_NetworkRecordFailed");
             telemetry.TrackException(ex);
-            return;
+            return false;
         }
 
         if (networks > _options.FairUseNetworkThreshold)
@@ -251,6 +253,7 @@ public sealed class SpoolmanConnectionService(
             await AlertBestEffortAsync(userId, SpoolmanFairUseAlert.NetworkCountSignal,
                 $"Spoolman connections from more than {_options.FairUseNetworkThreshold} networks in the last 7 days.");
         }
+        return true;
     }
 
     /// <summary>Records the sighting and returns the user's distinct networks in the last 7 days.</summary>
@@ -272,9 +275,11 @@ public sealed class SpoolmanConnectionService(
         var networks = await context.SpoolmanNetworkSightings
             .CountAsync(s => s.UserId == userId && s.LastSeenAt >= weekAgo, ct);
 
-        // At the cap a new network adds no signal (the count is already far past the threshold),
-        // so it is not stored. That bounds what a secret holder hopping networks can insert.
-        if (seen == 0 && networks < SpoolmanNetworkSighting.MaxPerUserPerWeek)
+        // At the cap a new network adds no signal (the count is already past the threshold), so
+        // it is not stored. That bounds what a secret holder hopping networks can insert. The cap
+        // never sits at or below a configured threshold, or the alert could never fire.
+        var cap = Math.Max(SpoolmanNetworkSighting.MaxPerUserPerWeek, _options.FairUseNetworkThreshold + 1);
+        if (seen == 0 && networks < cap)
         {
             context.SpoolmanNetworkSightings.Add(new SpoolmanNetworkSighting
             {
@@ -408,6 +413,9 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
         {
             telemetry.TrackEvent("SpoolmanFairUse_AlertFailed", new Dictionary<string, string> { ["signal"] = signal });
             telemetry.TrackException(ex);
+            // A failed insert other than a unique-key loss would otherwise stay tracked and be
+            // retried by the next SaveChanges on this context.
+            context.ChangeTracker.Clear();
             if (claim is { } held)
             {
                 await ReleaseClaimBestEffortAsync(held.Id, held.Previous, now);
@@ -423,7 +431,6 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
     {
         try
         {
-            context.ChangeTracker.Clear();
             var mine = context.SpoolmanFairUseAlerts.Where(a => a.Id == alertId && a.LastSentAt == claimedAt);
             if (previous is { } restored)
             {

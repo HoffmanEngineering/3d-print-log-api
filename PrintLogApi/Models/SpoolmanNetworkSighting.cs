@@ -20,7 +20,9 @@ public class SpoolmanNetworkSighting
 
     /// <summary>
     /// Networks seen in the last 7 days past which a new one is not stored. Ten times the default
-    /// alert threshold (<c>Spoolman:FairUseNetworkThreshold</c>), so detection is unaffected, and it bounds the rows one valid secret can add.
+    /// alert threshold (<c>Spoolman:FairUseNetworkThreshold</c>), so detection is unaffected, and
+    /// it bounds the rows one valid secret can add. A threshold configured at or above it raises
+    /// the cap to one past the threshold, so the alert can still fire.
     /// </summary>
     public const int MaxPerUserPerWeek = 50;
 

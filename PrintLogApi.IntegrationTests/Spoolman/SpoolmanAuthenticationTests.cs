@@ -458,6 +458,10 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(0, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
         Assert.NotEmpty(factory.Telemetry.Events("SpoolmanFairUse_NetworkRecordFailed"));
+
+        // Not throttled by the failure: the next handshake from the same network records it.
+        Assert.Equal(HttpStatusCode.OK, (await SendHandshakeAsync(connection.Secret!, IPAddress.Parse("203.0.113.42"))).StatusCode);
+        Assert.Equal(1, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Spoolman;
 using PrintLogApi.Services;
@@ -557,6 +558,31 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
 
         Assert.Equal(SpoolmanNetworkSighting.MaxPerUserPerWeek,
             await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
+        Assert.Single(factory.EmailSender.Matching($"User id: {user.Id}<br>"));
+    }
+
+    [Fact]
+    public async Task Networks_ACapAtOrBelowAConfiguredThreshold_IsRaised_SoTheAlertStillFires()
+    {
+        var user = await CreateUserAsync();
+        using var scope = factory.Services.CreateScope();
+        var configured = scope.ServiceProvider.GetRequiredService<IOptions<SpoolmanOptions>>().Value;
+        var threshold = SpoolmanNetworkSighting.MaxPerUserPerWeek;
+        var service = ActivatorUtilities.CreateInstance<SpoolmanConnectionService>(scope.ServiceProvider,
+            Options.Create(new SpoolmanOptions
+            {
+                ServerUrl = configured.ServerUrl,
+                AdminEmailAddress = configured.AdminEmailAddress,
+                NetworkHashKey = configured.NetworkHashKey,
+                FairUseNetworkThreshold = threshold,
+            }));
+
+        for (var i = 1; i <= threshold + 1; i++)
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse($"198.18.{i}.1"), Ct);
+        }
+
+        Assert.Equal(threshold + 1, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
         Assert.Single(factory.EmailSender.Matching($"User id: {user.Id}<br>"));
     }
 
