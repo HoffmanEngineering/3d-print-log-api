@@ -402,6 +402,26 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
         Assert.Equal(["After"], Names(await JsonAsync(await GetAsync(secret, "/spool"))));
     }
 
+    [Fact]
+    public async Task AccountDeletion_RefusesTheOldSecretAtOnce()
+    {
+        var (user, secret) = await ConnectedUserAsync();
+        await AddSpoolAsync(user, "Galaxy Black");
+        // Served once, so the credential is cached as valid.
+        Assert.Equal(HttpStatusCode.OK, (await GetAsync(secret, "/spool")).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var tracked = await db.Users.SingleAsync(u => u.Id == user.Id, Ct);
+            await scope.ServiceProvider.GetRequiredService<IUserDeletionService>().DeleteAllDataForUser(tracked);
+        }
+
+        var response = await GetAsync(secret, "/spool");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     /// <summary>
     /// A spool the old app created during the #174 deploy has no number. Numbering runs on a
     /// cache miss only (#195), not on every request: a cached read leaves the straggler alone, and

@@ -4,9 +4,11 @@ using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Spoolman;
 using Xunit;
 using static PrintLogApi.Models.User;
 
@@ -95,7 +97,9 @@ public class UserDeletionServiceTests
                 })
                 .Build(),
             new TestAuth0Service(),
-            new InMemoryBlobStorageService());
+            new InMemoryBlobStorageService(),
+            new CacheVersionService(new MemoryCache(new MemoryCacheOptions())),
+            new NoOpSpoolmanCredentialCache());
 
         await service.DeleteAllDataForUser(userToDelete);
 
@@ -206,7 +210,32 @@ public class UserDeletionServiceTests
         Assert.Equal(0, await context.FilamentTags.CountAsync(ct));
     }
 
-    private static UserDeletionService CreateService(PrintLogContext context) => new(
+    [Fact]
+    public async Task DeleteAllDataForUser_InvalidatesTheUsersCacheVersion()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlite(connection).Options;
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|version-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        // One instance for the service and the assertion, so the bump is observable (#194).
+        var cacheVersions = new CacheVersionService(new MemoryCache(new MemoryCacheOptions()));
+        var before = cacheVersions.GetUserCacheVersion(user.Id);
+
+        await CreateService(context, cacheVersions).DeleteAllDataForUser(user);
+
+        Assert.NotEqual(before, cacheVersions.GetUserCacheVersion(user.Id));
+    }
+
+    private static UserDeletionService CreateService(PrintLogContext context, ICacheVersionService? cacheVersions = null) => new(
         context,
         NullLogger<UserDeletionService>.Instance,
         new TelemetryClient(TelemetryConfiguration.CreateDefault()),
@@ -214,7 +243,19 @@ public class UserDeletionServiceTests
             .AddInMemoryCollection(new Dictionary<string, string?> { ["PendingUserDeactivationTimeInMinutes"] = "1440" })
             .Build(),
         new TestAuth0Service(),
-        new InMemoryBlobStorageService());
+        new InMemoryBlobStorageService(),
+        cacheVersions ?? new CacheVersionService(new MemoryCache(new MemoryCacheOptions())),
+        new NoOpSpoolmanCredentialCache());
+
+    /// <summary>These tests assert on SQL, not on eviction; SpoolmanApiTests covers that end to end.</summary>
+    private sealed class NoOpSpoolmanCredentialCache : ISpoolmanCredentialCache
+    {
+        public Task<SpoolmanCredential> ResolveAsync(string secretHash, CancellationToken ct) => Task.FromResult(SpoolmanCredential.Unknown);
+
+        public Task InvalidateAsync(IEnumerable<string> secretHashes) => Task.CompletedTask;
+
+        public Task InvalidateConnectionsAsync(PrintLogContext context, IEnumerable<Guid> connectionIds) => Task.CompletedTask;
+    }
 
     private static bool IsDeleteFrom(string command, string tableName)
     {
