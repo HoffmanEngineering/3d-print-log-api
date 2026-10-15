@@ -68,8 +68,9 @@ public class SpoolmanController(
     private const int CurrencySettingTypeId = 5; // Currency_Name
 
     /// <summary>
-    /// The largest <c>/use</c> report accepted, either sign: 1,000 km, thousands of spools. Anything
-    /// bigger is not a real report, and would poison the process-wide counter and the stored total (#196).
+    /// The largest single <c>/use</c> report accepted, either sign: 1,000 km, thousands of spools.
+    /// Anything bigger is not a real report, and would poison the process-wide counter (#196). It
+    /// bounds each report, not the accumulated total.
     /// </summary>
     public const double MaxUseMillimetres = 1e9;
 
