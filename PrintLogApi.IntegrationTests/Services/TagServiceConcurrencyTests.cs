@@ -2,6 +2,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Caching.Memory;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
@@ -57,6 +58,12 @@ public class TagServiceConcurrencyTests
             .AddInterceptors(interceptors)
             .Options);
 
+    private static PrintLogContext RetryingContext(SqliteConnection connection, params IInterceptor[] interceptors) =>
+        new(new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection, o => o.ExecutionStrategy(d => new RetryOnceStrategy(d)))
+            .AddInterceptors(interceptors)
+            .Options);
+
     private static TagService Service(PrintLogContext context) =>
         new(context, new CacheVersionService(new MemoryCache(new MemoryCacheOptions())));
 
@@ -100,6 +107,53 @@ public class TagServiceConcurrencyTests
 
         await Assert.ThrowsAsync<PrintTagsConflictException>(() =>
             Service(context).SetPrintTagsAsync(world.UserId, world.PrintId, [world.TagId], ct));
+    }
+
+    [Fact]
+    public async Task SetPrintTags_SucceedsWhenTheStrategyRetriesAfterATransientFailure()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var world = await Seed(ct);
+        await using var _ = world.Connection;
+
+        // The first attempt adds the link to the change tracker and then fails, as a transient
+        // SQL Server error would. The retry must not trip over that attempt's tracked entity.
+        var failOnce = new FailFirstSave();
+        await using var context = RetryingContext(world.Connection, failOnce);
+
+        var tags = await Service(context).SetPrintTagsAsync(world.UserId, world.PrintId, [world.TagId], ct);
+
+        Assert.Equal(2, failOnce.Attempts);
+        Assert.Equal([world.TagId], tags!.Select(t => t.Id));
+        await using var check = NewContext(world.Connection);
+        Assert.Equal(1, await check.PrintTags.CountAsync(pt => pt.PrintId == world.PrintId, ct));
+    }
+
+    private sealed class TransientTestException() : Exception("transient");
+
+    /// <summary>Retries once on <see cref="TransientTestException"/>, with no delay.</summary>
+    private sealed class RetryOnceStrategy(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, maxRetryCount: 1, maxRetryDelay: TimeSpan.Zero)
+    {
+        protected override bool ShouldRetryOn(Exception exception) => exception is TransientTestException;
+
+        protected override TimeSpan? GetNextDelay(Exception lastException) =>
+            base.GetNextDelay(lastException) is null ? null : TimeSpan.Zero;
+    }
+
+    /// <summary>Fails the first SaveChanges after the entities are tracked, before any SQL runs.</summary>
+    private sealed class FailFirstSave : SaveChangesInterceptor
+    {
+        public int Attempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Attempts++;
+            if (Attempts == 1)
+                throw new TransientTestException();
+            return ValueTask.FromResult(result);
+        }
     }
 
     /// <summary>Inserts the link itself just before EF's own INSERT into PrintTags runs.</summary>

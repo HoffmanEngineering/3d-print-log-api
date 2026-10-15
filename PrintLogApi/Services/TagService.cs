@@ -183,6 +183,13 @@ public class TagService(PrintLogContext context, ICacheVersionService cacheVersi
             var strategy = context.Database.CreateExecutionStrategy();
             found = await strategy.ExecuteAsync(async () =>
             {
+                // A retry starts over, but a failed SaveChanges leaves its links tracked as
+                // Added, and re-adding the same key would throw. Only PrintTag entries are
+                // detached: nothing else in this scope is written, and clearing the whole
+                // tracker would reach state the caller may still hold.
+                foreach (var entry in context.ChangeTracker.Entries<PrintTag>().ToList())
+                    entry.State = EntityState.Detached;
+
                 await using var tx = await context.Database.BeginTransactionAsync(ct);
 
                 // A no-op UPDATE of the print row, for two things at once. It is the ownership
