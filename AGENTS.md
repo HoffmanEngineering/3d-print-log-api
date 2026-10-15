@@ -166,8 +166,8 @@ response-size metric, so no byte count is distorted.
 
 ## Connector write budget (#151)
 
-Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`) made with a connector credential get a
-per-credential token bucket on top of the per-user "api" policy: `Api:ConnectorWrites:Burst`
+Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`, except the heartbeat below) made with a
+connector credential get a per-credential token bucket on top of the per-user "api" policy: `Api:ConnectorWrites:Burst`
 (20) to start, refilled at `Api:ConnectorWrites:PerMinute` (60). Either at 0 disables it, which is
 how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting.cs`.
 
@@ -189,7 +189,8 @@ how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting
   and takes each token as it refills, so a heartbeat sharing that bucket starves: three missed
   ones mark the bridge stale, the Moonraker notifier stops being suppressed, and its prints
   duplicate the bridge's. The per-user "api" policy still bounds it. Never put the attribute on a
-  write that changes print data. `[DisableRateLimiting]` would not do: it also drops "api".
+  write that changes print data. `[DisableRateLimiting]` would not do: it also drops "api". The
+  same PUT also registers a new connection, so first registration is exempt too.
 
 ## Claiming a print (#165)
 
