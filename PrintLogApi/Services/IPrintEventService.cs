@@ -22,4 +22,10 @@ public interface IPrintEventService
     /// must be dropped: the bridge logs the same job. The drop is counted on the connection.
     /// </summary>
     Task<bool> DropNotifierEventForBridge(long userId, long printerId);
+
+    /// <summary>
+    /// True when the printer has a live bridge connection, as for
+    /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted.
+    /// </summary>
+    Task<bool> IsBridgeLive(long userId, long printerId);
 }

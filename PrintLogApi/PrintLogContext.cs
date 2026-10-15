@@ -65,6 +65,7 @@ public class PrintLogContext : DbContext
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
     public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
+    public DbSet<SpoolmanUsage> SpoolmanUsages { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -517,6 +518,18 @@ public class PrintLogContext : DbContext
             .HasOne(a => a.User)
             .WithMany()
             .HasForeignKey(a => a.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One row per (print, spool): reports increment it, and the index is what makes two
+        // racing first reports end as one row (the loser retries as an increment).
+        modelBuilder.Entity<SpoolmanUsage>()
+            .HasIndex(u => new { u.PrintId, u.FilamentId })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanUsage>()
+            .HasOne(u => u.Print)
+            .WithMany()
+            .HasForeignKey(u => u.PrintId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Print>()

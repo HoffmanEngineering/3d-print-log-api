@@ -1,16 +1,11 @@
-﻿using System.Globalization;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
-using Humanizer;
-using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Extensions;
-using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Moonraker;
 using PrintLogApi.OpenApi;
-using PrintLogApi.Services;
-using static PrintLogApi.Models.Print;
+using PrintLogApi.Services.Moonraker;
 
 namespace PrintLogApi.Controllers;
 
@@ -21,15 +16,11 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 [Authorize]
 public class MoonrakerController(
-    TelemetryClient telemetry,
     ILogger<MoonrakerController> logger,
-    IPrintEventService printEventService,
-    TimeProvider clock) : ControllerBase
+    IMoonrakerNotifierHandler handler) : ControllerBase
 {
     /// <summary>The <c>externalSource</c> of prints the notifier logs.</summary>
     public const string NotifierSource = "moonraker-notifier";
-
-    private static readonly HashSet<string> PrintEvents = ["started", "cancelled", "error", "complete"];
 
     /// <summary>
     /// Receive a print event from Moonraker (Klipper).
@@ -78,119 +69,8 @@ public class MoonrakerController(
 
         var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message!)!;
 
-        if (dto.PrinterId > 0 && dto.EventName is { } eventName && PrintEvents.Contains(eventName)
-            && await printEventService.DropNotifierEventForBridge(userId.Value, dto.PrinterId))
-        {
-            telemetry.TrackEvent("Moonraker_Webhook_DroppedForBridge", new Dictionary<string, string> { { "event", eventName } });
-            return Ok(dto);
-        }
-
-        try
-        {
-            //# started
-            //# complete
-            //# error
-            //# cancelled
-            //# paused
-            //# resumed
-            switch (dto.EventName)
-            {
-                case "started":
-                    telemetry.TrackEvent("Moonraker_Webhook_Started");
-                    await HandlePrintStarted(dto, userId.Value);
-                    break;
-                case "cancelled":
-                    telemetry.TrackEvent("Moonraker_Webhook_Cancelled");
-                    await HandlePrintFailed(dto, userId.Value);
-                    break;
-                case "error":
-                    telemetry.TrackEvent("Moonraker_Webhook_Error");
-                    await HandlePrintFailed(dto, userId.Value);
-                    break;
-                case "complete":
-                    telemetry.TrackEvent("Moonraker_Webhook_Completed");
-                    await HandlePrintCompleted(dto, userId.Value);
-                    break;
-                default:
-                    var properties = new Dictionary<string, string> { { "event", dto.EventName! } };
-                    telemetry.TrackEvent("Moonraker_Webhook_Unhandled", properties);
-                    break;
-            }
-        }
-        catch (Exception)
-        {
-            logger.LogError("An error occurred in the Moonraker Webhook", dto);
-            throw;
-        }
+        await handler.HandleAsync(userId.Value, dto);
 
         return Ok(dto);
-
-    }
-
-    private async Task HandlePrintStarted(PrintEventMessageDto data, long userId)
-    {
-        if (data.PrinterId <= 0)
-        {
-            throw new Exception("Invalid PrinterId");
-        }
-
-        var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
-        var filenameWithExtension = Path.GetFileName(data.Filename) ?? "";
-
-        var splitFilename = filenameWithoutExtension.Humanize();
-        var textInfo = new CultureInfo("en-US", false).TextInfo;
-        var title = textInfo.ToTitleCase(splitFilename);
-
-        // The notifier payload carries no start time, so the job is identified by when its start
-        // arrived. That makes a redelivery within the same second the one it can recognise.
-        var startDate = clock.GetUtcNow();
-        var externalId = $"{data.PrinterId}:{startDate.ToUnixTimeSeconds()}:{filenameWithExtension}";
-
-        await printEventService.Started(new PrintStartedEvent
-        {
-            UserId = userId,
-            PrinterId = data.PrinterId,
-            Source = PrintSource.Moonraker,
-            ExternalSource = NotifierSource,
-            ExternalId = externalId[..Math.Min(externalId.Length, 200)],
-            Title = title[..Math.Min(title.Length, 100)],
-            FileName = filenameWithExtension,
-            StartDate = startDate,
-            // The start payload carries no estimate. Record its ABSENCE, not a fake zero: a 0
-            // looks recorded, so no read-side fallback can ever recover from it.
-            EstimatedPrintTimeInSeconds = null,
-            Usage =
-            [
-                new PrintEventUsage(
-                    Slot: 0,
-                    EstimatedSource: PrintFilament.SourceMeasurement.Length,
-                    EstimatedLengthInM: 0,
-                    Source: PrintFilament.SourceMeasurement.Length,
-                    LengthInM: 0,
-                    Notes: "Added by Moonraker"),
-            ],
-        });
-    }
-
-    private Task HandlePrintFailed(PrintEventMessageDto data, long userId)
-        => printEventService.Finished(Finished(data, userId, PrintStatus.Failed, data.PrintDuration));
-
-    private Task HandlePrintCompleted(PrintEventMessageDto data, long userId)
-        => printEventService.Finished(Finished(data, userId, PrintStatus.Success, data.TotalDuration));
-
-    private static PrintFinishedEvent Finished(PrintEventMessageDto data, long userId, PrintStatus status, double duration)
-    {
-        // Round FIRST, then test positivity: 0.3 is > 0 but rounds to 0, and persisting that 0
-        // would recreate the "looks recorded but isn't" row.
-        var seconds = (int)Math.Round(duration);
-        return new PrintFinishedEvent
-        {
-            UserId = userId,
-            PrinterId = data.PrinterId,
-            FileName = Path.GetFileName(data.Filename),
-            Status = status,
-            PrintTimeInSeconds = seconds > 0 ? seconds : null,
-            ActualLengthInM = Math.Round(data.FilamentUsed / 1000, 3),
-        };
     }
 }

@@ -29,6 +29,7 @@ using PrintLogApi.Models.Stripe;
 using PrintLogApi.OpenApi;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Moonraker;
 using PrintLogApi.Services.Push;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
@@ -165,6 +166,7 @@ public class Startup
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<IPrintEventService, PrintEventService>();
+        services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
@@ -177,6 +179,7 @@ public class Startup
         // Singleton: it holds only HybridCache and CachedComputation, both singletons.
         services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
         services.AddTransient<Services.Spoolman.ISpoolmanInventoryService, Services.Spoolman.SpoolmanInventoryService>();
+        services.AddTransient<Services.Spoolman.ISpoolmanUsageRecorder, Services.Spoolman.SpoolmanUsageRecorder>();
         // Singleton: it is the registry of this process's open sockets (#178).
         services.AddSingleton<Services.Spoolman.SpoolmanSocketHost>();
         services.AddHostedService<Services.Spoolman.SpoolmanSocketSampler>();
