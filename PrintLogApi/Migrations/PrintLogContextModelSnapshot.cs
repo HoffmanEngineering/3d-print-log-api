@@ -1385,6 +1385,21 @@ namespace PrintLogApi.Migrations
                     b.ToTable("PrintImages");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.PrintTag", b =>
+                {
+                    b.Property<long>("PrintId")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("PrintId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("PrintTags");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
                 {
                     b.Property<long>("Id")
@@ -2138,6 +2153,49 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_Subscriptions_UserId");
 
                     b.ToTable("Subscriptions");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.Tag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(7)
+                        .HasColumnType("nvarchar(7)");
+
+                    b.Property<long>("CreatedById")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<long>("UpdatedById")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedById");
+
+                    b.HasIndex("CreatedById", "NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Tags_CreatedById_NormalizedName");
+
+                    b.ToTable("Tags");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.User", b =>
@@ -2922,6 +2980,25 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.PrintTag", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Print", "Print")
+                        .WithMany("PrintTags")
+                        .HasForeignKey("PrintId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PrintLogApi.Models.Tag", "Tag")
+                        .WithMany("PrintTags")
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Print");
+
+                    b.Navigation("Tag");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
                 {
                     b.HasOne("PrintLogApi.Models.PrinterCategory", "Category")
@@ -3167,6 +3244,25 @@ namespace PrintLogApi.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.Tag", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
+                        .WithMany()
+                        .HasForeignKey("UpdatedById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("UpdatedBy");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.UserAchievement", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "User")
@@ -3258,6 +3354,8 @@ namespace PrintLogApi.Migrations
                     b.Navigation("FilamentUsage");
 
                     b.Navigation("Images");
+
+                    b.Navigation("PrintTags");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
@@ -3270,6 +3368,11 @@ namespace PrintLogApi.Migrations
                     b.Navigation("Images");
 
                     b.Navigation("Prints");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.Tag", b =>
+                {
+                    b.Navigation("PrintTags");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.User", b =>

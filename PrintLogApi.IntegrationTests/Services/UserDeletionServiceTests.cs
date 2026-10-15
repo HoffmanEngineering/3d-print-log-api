@@ -211,6 +211,66 @@ public class UserDeletionServiceTests
     }
 
     [Fact]
+    public async Task DeleteAllDataForUser_DeletesPrintTagsAndTags_BeforeTheUser()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(commandInterceptor)
+            .Options;
+
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|print-tag-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        var printer = new Printer { Name = "Tagged Printer", UserId = user.Id, IsActive = true };
+        context.Printers.Add(printer);
+        await context.SaveChangesAsync(ct);
+
+        var now = DateTime.UtcNow;
+        var print = new Print
+        {
+            Title = "Tagged",
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Private,
+            PrinterId = printer.Id,
+            CreatedById = user.Id,
+            UpdatedById = user.Id,
+        };
+        var tag = new Tag { Id = Guid.NewGuid(), Name = "Gifts", NormalizedName = "GIFTS", CreatedById = user.Id, UpdatedById = user.Id };
+        var unused = new Tag { Id = Guid.NewGuid(), Name = "Unused", NormalizedName = "UNUSED", CreatedById = user.Id, UpdatedById = user.Id };
+        context.Prints.Add(print);
+        context.Tags.AddRange(tag, unused);
+        await context.SaveChangesAsync(ct);
+        context.PrintTags.Add(new PrintTag { PrintId = print.Id, TagId = tag.Id });
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        // Tags' audit FKs are NoAction on SQL Server (AddPrintTags), so nothing cascades them
+        // away with the user: they must be deleted explicitly, and their links before them.
+        var linkDeleteIndex = commandInterceptor.Commands.FindIndex(command => command.Contains("DELETE FROM \"PrintTags\"", StringComparison.OrdinalIgnoreCase));
+        var tagDeleteIndex = commandInterceptor.Commands.FindIndex(command => command.Contains("DELETE FROM \"Tags\"", StringComparison.OrdinalIgnoreCase));
+        Assert.True(linkDeleteIndex >= 0, "Expected print tags to be deleted during user deletion.");
+        Assert.True(tagDeleteIndex >= 0, "Expected tags to be deleted during user deletion.");
+        Assert.True(linkDeleteIndex < tagDeleteIndex, "Print tags must be deleted before tags.");
+        Assert.Equal(0, await context.PrintTags.CountAsync(ct));
+        Assert.Equal(0, await context.Tags.CountAsync(ct));
+    }
+
+    [Fact]
     public async Task DeleteAllDataForUser_InvalidatesTheUsersCacheVersion()
     {
         var ct = TestContext.Current.CancellationToken;

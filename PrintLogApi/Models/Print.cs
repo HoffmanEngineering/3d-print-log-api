@@ -91,6 +91,9 @@ public class Print : TimestampEntity
     public Guid? ProjectId { get; set; }
     public Project? Project { get; set; }
 
+    /// <summary>The owner's tags on this print (UI #7). Never shown to anyone else.</summary>
+    public ICollection<PrintTag>? PrintTags { get; set; }
+
     /// <summary>How the print reached the API. Server-set; see <see cref="PrintSource"/>.</summary>
     public PrintSource Source { get; set; }
 
