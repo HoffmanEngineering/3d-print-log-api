@@ -163,7 +163,7 @@ public sealed class PrintService(
     public async Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
         long userId, int page, int pageSize, PrintStatus? status, long? printerId,
         Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? searchQuery,
-        CancellationToken ct)
+        CancellationToken ct, string? tag = null)
     {
         var query = context.Prints.AsNoTracking().Where(p => p.CreatedById == userId);
 
@@ -190,6 +190,19 @@ public sealed class PrintService(
                 || (p.Project != null
                     && p.Project.CreatedById == userId
                     && p.Project.Name!.ToLower().Contains(term)));
+        }
+
+        if (tag is not null)
+        {
+            if (string.IsNullOrWhiteSpace(tag))
+            {
+                throw McpToolException.InvalidArguments("tag must not be empty.");
+            }
+            // Exact name, ignoring case and surrounding spaces: the same rule that makes tag
+            // names unique. Only the caller's own tags, so a name cannot probe anyone else's.
+            var normalizedTag = Tag.Normalize(tag);
+            query = query.Where(p => p.PrintTags!.Any(pt =>
+                pt.Tag.CreatedById == userId && pt.Tag.NormalizedName == normalizedTag));
         }
 
         if (status.HasValue)
@@ -376,6 +389,12 @@ public sealed class PrintService(
 
         var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
 
+        // The print is the caller's (filtered above), so its tags are theirs to see.
+        var tagsByPrint = await TagService.LoadForPrints(context, [row.Id], ct);
+        var tagNames = tagsByPrint.TryGetValue(row.Id, out var tags)
+            ? tags.Select(t => t.Name!).ToList()
+            : [];
+
         return new PrintDetailResult(
             row.Id, row.Title!, row.Status.ToString(), row.PrinterId, row.PrinterName,
             row.StartDate, McpUnits.MgToGrams(row.MaterialMg),
@@ -392,7 +411,8 @@ public sealed class PrintService(
             materialsUsed.Sum(m => m.Grams),
             FileName: row.FileName, Url: row.Url, ViewStatus: row.ViewStatus.ToString(),
             EstimatedDurationSeconds: row.EstimatedPrintTimeInSeconds,
-            AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads);
+            AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads,
+            Tags: tagNames);
     }
 
     /// <summary>
@@ -418,7 +438,8 @@ public sealed class PrintService(
         long? currentUserId,
         IReadOnlyCollection<Guid>? projectIds = null,
         DateTimeOffset? fromDate = null,
-        DateTimeOffset? toDate = null)
+        DateTimeOffset? toDate = null,
+        IReadOnlyCollection<Guid>? tagIds = null)
     {
         if (pagingRequest == null)
         {
@@ -481,6 +502,15 @@ public sealed class PrintService(
         if (projectIds != null && projectIds.Count > 0)
         {
             printQuery = printQuery.Where(p => p.ProjectId.HasValue && projectIds.Contains(p.ProjectId.Value));
+        }
+
+        // Any of the tags. Tags are the viewer's own, never the profile owner's: on someone
+        // else's public profile the filter matches nothing, so a tag id cannot be used to learn
+        // which of their prints carry it.
+        if (tagIds != null && tagIds.Count > 0)
+        {
+            printQuery = printQuery.Where(p => p.PrintTags!.Any(pt =>
+                tagIds.Contains(pt.TagId) && pt.Tag.CreatedById == currentUserId));
         }
 
         if (sortRequest != null)
@@ -571,6 +601,14 @@ public sealed class PrintService(
         {
             dto.ExternalSource = null;
             dto.ExternalId = null;
+        }
+
+        // Tags are the creator's too, and for the same reason are filled here, before caching.
+        var ownIds = dtos.Where(d => d.CreatedByUserId == currentUserId).Select(d => d.Id).ToList();
+        var tagsByPrint = await TagService.LoadForPrints(context, ownIds);
+        foreach (var dto in dtos.Where(d => d.CreatedByUserId == currentUserId))
+        {
+            dto.Tags = tagsByPrint.TryGetValue(dto.Id, out var tags) ? tags : [];
         }
 
         // **Restore original sort order**

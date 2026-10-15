@@ -51,6 +51,9 @@ public class PrintLogContext : DbContext
     public DbSet<Project> Projects { get; set; }
     public DbSet<ProjectImage> ProjectImages { get; set; }
 
+    public DbSet<Tag> Tags { get; set; } = null!;
+    public DbSet<PrintTag> PrintTags { get; set; } = null!;
+
     public DbSet<FilamentImage> FilamentImages { get; set; } = null!;
 
     public DbSet<PrinterImage> PrinterImages { get; set; } = null!;
@@ -825,6 +828,36 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<Print>()
             .HasIndex(p => p.ProjectId)
             .HasDatabaseName("IX_Prints_ProjectId");
+
+        // Print tags (UI #7). The unique index is the race guard for "one name per user": two
+        // creates of the same name both pass the service's pre-check and one fails here, which
+        // TagService reports as the same 409. It is on NormalizedName so the rule is
+        // case-insensitive on SQLite as well as SQL Server.
+        modelBuilder.Entity<Tag>()
+            .HasIndex(t => new { t.CreatedById, t.NormalizedName })
+            .IsUnique()
+            .HasDatabaseName("IX_Tags_CreatedById_NormalizedName");
+
+        modelBuilder.Entity<PrintTag>(entity =>
+        {
+            entity.HasKey(pt => new { pt.PrintId, pt.TagId });
+
+            // "Which prints carry this tag" — the summary filter and the stats both start there.
+            entity.HasIndex(pt => pt.TagId);
+
+            entity.HasOne(pt => pt.Print)
+                .WithMany(p => p.PrintTags)
+                .HasForeignKey(pt => pt.PrintId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Cascade from both ends is one path from Users only because the AddPrintTags
+            // migration makes Tags' audit FKs NoAction (Users -> Printers -> Prints -> PrintTags
+            // is the other). See the comment in that migration.
+            entity.HasOne(pt => pt.Tag)
+                .WithMany(t => t.PrintTags)
+                .HasForeignKey(pt => pt.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Connector idempotency (#144): one print per (user, source, external id). The unique
         // index is the concurrency guard; a racing duplicate create fails here and is replayed.

@@ -49,6 +49,12 @@ public class PrintDetailDTO
 
     public Guid? ProjectId { get; set; }
 
+    /// <summary>
+    /// The print's tags, ordered by name. Shown to the creator only: null for anyone else, and
+    /// on endpoints that do not load tags; an empty list for a creator's untagged print.
+    /// </summary>
+    public List<Tag.TagDto>? Tags { get; set; }
+
     public ICollection<PrintImageDto>? Images { get; set; }
 
     public ICollection<CommentDetailDto>? Comments { get; set; }

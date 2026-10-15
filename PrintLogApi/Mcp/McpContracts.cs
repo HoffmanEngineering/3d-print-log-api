@@ -40,7 +40,10 @@ public sealed record PrintDetailResult(
     bool MaterialsUsedTruncated,
     double ReturnedMaterialsUsedGrams,
     string? FileName, string? Url, string ViewStatus,
-    int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads);
+    int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads,
+    // The print's tag names, ordered by name (UI #7). Defaulted only so the write tools' echoes,
+    // which re-read through GetOwnPrintDetailForMcp, need no change; that read always sets it.
+    IReadOnlyList<string>? Tags = null);
 
 public sealed record MaterialInventoryItem(
     Guid Id, string Name, string? Brand, string Material, string? Color,

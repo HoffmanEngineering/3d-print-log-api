@@ -220,6 +220,17 @@ public class UserDeletionService : IUserDeletionService
                 }
             }
 
+            // Delete print tags (UI #7): the links on this user's prints and on this user's tags,
+            // then the tags. Explicit rather than by cascade: Tags' audit FKs are NoAction on SQL
+            // Server (AddPrintTags), so a tag left behind would block the user row's delete.
+            await _context.PrintTags
+                .Where(pt => pt.Tag.CreatedById == userId || pt.Print.CreatedById == userId)
+                .ExecuteDeleteAsync();
+
+            await _context.Tags
+                .Where(t => t.CreatedById == userId)
+                .ExecuteDeleteAsync();
+
             // Delete Prints
             await _context.Prints
                 .Where(p => p.CreatedById == userId)

@@ -21,6 +21,8 @@ public class PrintProfile : Profile
             });
 
         CreateMap<Print, PrintSummaryDTO>()
+            // Owner-only, so filled by the caller that knows the viewer (SearchPrintSummary).
+            .ForMember(dest => dest.Tags, opt => opt.Ignore())
             .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images!
                                                                     .Where(i => i.IsDefault == true)
                                                                     .Select(i => i.Id)
@@ -58,7 +60,9 @@ public class PrintProfile : Profile
             .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images!.OrderBy(i => i.DisplayOrder)))
             .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
             .ForMember(dest => dest.Comments, opt => opt.MapFrom(src => src.Comments!.Select(c => c.Comment)))
-            .ForMember(dest => dest.ProjectId, opt => opt.MapFrom(src => src.ProjectId));
+            .ForMember(dest => dest.ProjectId, opt => opt.MapFrom(src => src.ProjectId))
+            // Owner-only, so filled by the caller that knows the viewer (GetPrintById).
+            .ForMember(dest => dest.Tags, opt => opt.Ignore());
 
         CreateMap<PrintDetailDTO, Print>()
             .ForMember(dest => dest.Printer, opt => opt.Ignore())

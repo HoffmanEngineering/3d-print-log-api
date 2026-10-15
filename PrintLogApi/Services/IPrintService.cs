@@ -60,7 +60,7 @@ public interface IPrintService
     Task<McpPage<PrintListItem>> SearchOwnPrintsForMcp(
         long userId, int page, int pageSize, Print.PrintStatus? status, long? printerId,
         Guid? filamentId, DateTimeOffset? from, DateTimeOffset? to, string? query,
-        CancellationToken ct);
+        CancellationToken ct, string? tag = null);
 
     /// <summary>
     /// Creator-only print detail for the MCP server. Returns null when the print does not exist
@@ -97,7 +97,7 @@ public interface IPrintService
     /// folds any legacy scalar parameters into them so there is a single code path here.
     /// The date range is half-open [fromDate, toDate).
     /// </summary>
-    Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string? searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long>? filterByPrinterIds, IEnumerable<Guid>? filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus>? statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid>? projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null);
+    Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string? searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long>? filterByPrinterIds, IEnumerable<Guid>? filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus>? statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid>? projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null, IReadOnlyCollection<Guid>? tagIds = null);
     Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
     Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(
         int pageNumber,

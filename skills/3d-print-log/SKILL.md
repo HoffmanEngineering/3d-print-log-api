@@ -136,9 +136,10 @@ used material that no logged print accounts for.
 
 ## Find a past print
 
-`search_prints(query, status, printerId, materialId, from, to)` matches `query` as a substring of the
-print title and of its project's name, newest first. `get_print(id)` returns the details and a
-per-material breakdown. Slicer settings are not separate fields: prints imported by a slicer
+`search_prints(query, status, printerId, materialId, from, to, tag)` matches `query` as a substring
+of the print title and of its project's name, newest first. `tag` is the exact name of one of the
+user's tags, ignoring case. `get_print(id)` returns the details, the print's `tags` and a
+per-material breakdown. Tags are set in the web app; no tool adds or removes one. Slicer settings are not separate fields: prints imported by a slicer
 integration carry a settings summary in `notes`. Quote it when asked. A print logged by hand without
 such notes has no settings to report.
 

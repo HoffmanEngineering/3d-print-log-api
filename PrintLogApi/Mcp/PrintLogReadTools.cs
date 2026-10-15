@@ -33,7 +33,7 @@ public class PrintLogReadTools(
         "Search your own 3D prints. Use 'query' to find a print by name — it is a " +
         "case-insensitive substring match over the print title AND its project name, so 'bench' " +
         "finds 'Dual Color 3D Benchy'. Other optional filters: status, printer id, material id, " +
-        "and an inclusive UTC start-date range. Results are paginated (default 25, max 100 per " +
+        "an inclusive UTC start-date range, and one of the user's tags by name. Results are paginated (default 25, max 100 per " +
         "page) and ordered newest first. Weights are grams, durations are seconds. " +
         "'durationIsEstimated' is true when 'durationSeconds' came from the slicer's estimate " +
         "rather than a measured print time: say so rather than stating it as fact. A null " +
@@ -46,6 +46,7 @@ public class PrintLogReadTools(
         [Description("Optional material (filament) id filter.")] Guid? materialId = null,
         [Description("Optional inclusive start of the UTC start-date range.")] DateTimeOffset? from = null,
         [Description("Optional inclusive end of the UTC start-date range.")] DateTimeOffset? to = null,
+        [Description("Optional tag name: only prints carrying the user's tag with this exact name, ignoring case. get_print lists a print's tags.")] string? tag = null,
         [Description("1-based page number.")] int page = 1,
         [Description("Page size (default 25, max 100).")] int? pageSize = null,
         CancellationToken ct = default)
@@ -63,7 +64,7 @@ public class PrintLogReadTools(
 
         return printService.SearchOwnPrintsForMcp(
             userId, validPage, validPageSize, status, printerId, materialId,
-            normalizedFrom, normalizedTo, query, ct);
+            normalizedFrom, normalizedTo, query, ct, tag);
     }
 
     [McpServerTool(Title = "Get Print", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
@@ -77,7 +78,8 @@ public class PrintLogReadTools(
         "the value was never recorded, not zero — say it is not recorded rather than reporting 0. " +
         "'durationIsEstimated' is true when 'durationSeconds' came from the slicer's estimate " +
         "rather than a measured print time: say so rather than stating it as fact. " +
-        "'materialIsEstimated' works the same way for filament weight.")]
+        "'materialIsEstimated' works the same way for filament weight. 'tags' lists the " +
+        "labels the user put on the print.")]
     public async Task<PrintDetailResult> GetPrint(
         [Description("The print id.")] long id,
         CancellationToken ct = default)

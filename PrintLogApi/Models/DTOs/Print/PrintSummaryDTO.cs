@@ -37,6 +37,12 @@ public class PrintSummaryDTO
     public Guid? ProjectId { get; set; }
     public string? ProjectName { get; set; }
 
+    /// <summary>
+    /// The print's tags, ordered by name. Shown to the creator only: null for anyone else, and
+    /// on endpoints that do not load tags; an empty list for a creator's untagged print.
+    /// </summary>
+    public List<Tag.TagDto>? Tags { get; set; }
+
     /// <summary>The connector that logged this print, if any. Shown to the creator only.</summary>
     public string? ExternalSource { get; set; }
 

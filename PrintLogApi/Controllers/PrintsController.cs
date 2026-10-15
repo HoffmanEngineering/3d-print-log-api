@@ -67,6 +67,7 @@ public class PrintsController(
     /// <param name="filterByStatus">Optionally filter by a specific print status. <see cref="PrintStatus"/></param>
     /// <param name="userId">Optionally search for public</param>
     /// <param name="filterByProjectId">Optionally filter prints belonging to a specific project.</param>
+    /// <param name="filterByTagIds">Optionally filter to your prints carrying any of these tags. Matches nothing on another user's prints.</param>
     /// <returns>A Paged List of Print Summaries matching the search criteria.</returns>
     /// <response code="200">A Paged List of Print Summaries matching the search criteria.</response>
     /// <response code="400">Returned if no user is logged in, and no userId is provided.</response>
@@ -91,7 +92,8 @@ public class PrintsController(
         [FromQuery] DateTimeOffset? fromDate = null,
         [FromQuery] DateTimeOffset? toDate = null,
         [FromQuery] IEnumerable<Print.PrintStatus>? filterByStatuses = null,
-        [FromQuery] IEnumerable<Guid>? filterByProjectIds = null)
+        [FromQuery] IEnumerable<Guid>? filterByProjectIds = null,
+        [FromQuery] IEnumerable<Guid>? filterByTagIds = null)
     {
 
         long? currentUserId = User.GetUserId();
@@ -131,10 +133,12 @@ public class PrintsController(
             projectIds.Add(filterByProjectId.Value);
         }
 
+        var tagIds = (filterByTagIds ?? Enumerable.Empty<Guid>()).Distinct().ToList();
+
         var version = cacheVersionService.GetUserCacheVersion(targetUserId);
         var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                         filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
-                                        fromDate, toDate);
+                                        fromDate, toDate, tagIds);
 
         // Stampede protection is the point of routing this through HybridCache: concurrent
         // misses on one key run SearchPrintSummary once between them. The cold window is not
@@ -156,7 +160,7 @@ public class PrintsController(
                 (services, _) => services.GetRequiredService<IPrintService>()
                     .SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
                                         filterByFilamentIds, statuses, userId, currentUserId, projectIds,
-                                        fromDate, toDate),
+                                        fromDate, toDate, tagIds),
                 ct),
             SummaryCacheOptions,
             cancellationToken: HttpContext.RequestAborted);
@@ -279,6 +283,12 @@ public class PrintsController(
             printDetailDto.ExternalSource = null;
             printDetailDto.ExternalId = null;
             printDetailDto.ConnectionDisplayName = null;
+        }
+        else
+        {
+            // Tags are the creator's alone, so only the creator's response carries them.
+            var tagsByPrint = await TagService.LoadForPrints(context, [id]);
+            printDetailDto.Tags = tagsByPrint.TryGetValue(id, out var tags) ? tags : [];
         }
 
         return printDetailDto;
@@ -1740,7 +1750,8 @@ public class PrintsController(
                                     IReadOnlyCollection<Print.PrintStatus> statuses,
                                     IReadOnlyCollection<Guid> projectIds,
                                     DateTimeOffset? fromDate,
-                                    DateTimeOffset? toDate)
+                                    DateTimeOffset? toDate,
+                                    IReadOnlyCollection<Guid> tagIds)
     {
         var printerIds = filterByPrinterIds?.Any() == true
             ? string.Join(",", filterByPrinterIds.OrderBy(x => x))
@@ -1765,6 +1776,10 @@ public class PrintsController(
             ? string.Join(",", projectIds.OrderBy(x => x))
             : "none";
 
+        var tagKey = tagIds.Count > 0
+            ? string.Join(",", tagIds.OrderBy(x => x))
+            : "none";
+
         // Round-trip format: two instants differing by a tick must produce different keys.
         var fromKey = fromDate?.ToUniversalTime().ToString("O") ?? "none";
         var toKey = toDate?.ToUniversalTime().ToString("O") ?? "none";
@@ -1777,7 +1792,8 @@ public class PrintsController(
                $"st{sortRequest?.SortColumn}_{sortRequest?.SortDirection}_" +
                $"fs{statusKey}_" +
                $"fp{projectKey}_" +
-               $"df{fromKey}_dt{toKey}";
+               $"df{fromKey}_dt{toKey}_" +
+               $"tg{tagKey}";
     }
 
     // EstimateCacheSize is gone: HybridCache charges the entry's real serialized byte length
