@@ -148,6 +148,14 @@ public interface IPrintService
     /// at most <paramref name="limit"/>.
     /// </summary>
     Task<List<ClaimablePrintDto>> GetClaimablePrints(long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// The user's own prints on the printer whose start date (or, without one, created date) is in
+    /// [<paramref name="from"/>, <paramref name="to"/>), ordered by id, with ids above
+    /// <paramref name="afterId"/> when given, at most <paramref name="limit"/>. Empty when the
+    /// printer is not theirs.
+    /// </summary>
+    Task<List<PrintOnPrinterDto>> GetPrintsOnPrinter(long userId, long printerId, DateTimeOffset from, DateTimeOffset to, long? afterId, int limit, CancellationToken ct);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
 

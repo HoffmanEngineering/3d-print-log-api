@@ -1826,6 +1826,43 @@ public sealed class PrintService(
         // Null-forgiven: the print was read a moment ago and a claim never deletes it.
         new((await GetPrintById(id))!, wasReplayed);
 
+    public async Task<List<PrintOnPrinterDto>> GetPrintsOnPrinter(
+        long userId, long printerId, DateTimeOffset from, DateTimeOffset to, long? afterId, int limit, CancellationToken ct)
+    {
+        // CreatedDate is a UTC DateTime column, StartDate a DateTimeOffset, so each is compared
+        // in its own type rather than through a coalesce that mixes them.
+        var fromUtc = from.UtcDateTime;
+        var toUtc = to.UtcDateTime;
+        var query = context.Prints
+            .Where(p => p.CreatedById == userId
+                && p.PrinterId == printerId
+                && ((p.StartDate != null && p.StartDate >= from && p.StartDate < to)
+                    || (p.StartDate == null && p.CreatedDate >= fromUtc && p.CreatedDate < toUtc)));
+        if (afterId is { } after)
+        {
+            query = query.Where(p => p.Id > after);
+        }
+
+        var prints = await query
+            .OrderBy(p => p.Id)
+            .Take(limit)
+            .Select(p => new { p.Id, p.Title, p.FileName, p.Status, p.StartDate, p.CreatedDate, p.ExternalSource, p.ExternalId })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return prints.Select(p => new PrintOnPrinterDto
+        {
+            Id = p.Id,
+            Title = p.Title,
+            FileName = p.FileName,
+            Status = p.Status,
+            StartDate = p.StartDate,
+            CreatedDate = DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+            ExternalSource = p.ExternalSource,
+            ExternalId = p.ExternalId,
+        }).ToList();
+    }
+
     public async Task<List<ClaimablePrintDto>> GetClaimablePrints(
         long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct)
     {
