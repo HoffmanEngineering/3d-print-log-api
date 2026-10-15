@@ -170,6 +170,8 @@ public class Startup
         services.AddTransient<IProjectService, ProjectService>();
         services.AddTransient<IFeedbackService, FeedbackService>();
         services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
+        services.Configure<Services.Spoolman.SpoolmanOptions>(Configuration.GetSection(Services.Spoolman.SpoolmanOptions.SectionName));
+        services.AddTransient<Services.Spoolman.ISpoolmanConnectionService, Services.Spoolman.SpoolmanConnectionService>();
         // The wall clock, as a dependency. Every analytics service reads "now" to close an
         // open-ended window (a filter with no ToDate means "up to now"), and a test that has
         // to construct its fixture relative to the real current date can only assert what is

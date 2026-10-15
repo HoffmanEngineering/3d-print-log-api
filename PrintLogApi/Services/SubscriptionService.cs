@@ -19,6 +19,7 @@ public class SubscriptionService : ISubscriptionService
     private readonly StripeOptions _stripeOptions;
     private readonly INotificationService _notificationService;
     private readonly IMediaStorageQuotaService _quota;
+    private readonly Spoolman.ISpoolmanConnectionService _spoolman;
 
     public SubscriptionService(
         PrintLogContext context,
@@ -26,7 +27,8 @@ public class SubscriptionService : ISubscriptionService
         TelemetryClient telemetry,
         IOptions<StripeOptions> stripeOptions,
         INotificationService notificationService,
-        IMediaStorageQuotaService quota)
+        IMediaStorageQuotaService quota,
+        Spoolman.ISpoolmanConnectionService spoolman)
     {
         _context = context;
         _mapper = mapper;
@@ -34,6 +36,7 @@ public class SubscriptionService : ISubscriptionService
         _stripeOptions = stripeOptions.Value;
         _notificationService = notificationService;
         _quota = quota;
+        _spoolman = spoolman;
     }
 
     public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -241,6 +244,8 @@ public class SubscriptionService : ISubscriptionService
         subscription.CanceledAt = DateTimeOffset.UtcNow;
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         _telemetry.TrackEvent("Subscription_CanceledImmediately", new Dictionary<string, string>
         {
             { "userId", userId.ToString() }
@@ -326,6 +331,8 @@ public class SubscriptionService : ISubscriptionService
 
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
         {
             { "userId", subscription.UserId.ToString() },
@@ -374,6 +381,8 @@ public class SubscriptionService : ISubscriptionService
 
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         _telemetry.TrackEvent("Subscription_Updated", new Dictionary<string, string>
         {
             { "userId", subscription.UserId.ToString() },
@@ -398,6 +407,8 @@ public class SubscriptionService : ISubscriptionService
         subscription.CanceledAt = DateTimeOffset.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
 
         try
         {
@@ -429,6 +440,8 @@ public class SubscriptionService : ISubscriptionService
 
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         try
         {
             await _notificationService.CreateSubscriptionPaymentFailedNotification(subscription.UserId);
@@ -442,6 +455,24 @@ public class SubscriptionService : ISubscriptionService
         {
             { "userId", subscription.UserId.ToString() }
         });
+    }
+
+    /// <summary>
+    /// Pauses or resumes the user's Spoolman connections to match the status just saved (#175):
+    /// a downgrade keeps the oldest active, a re-subscribe resumes the rest. Best-effort, because
+    /// the status is already committed and the webhook must still succeed; authentication
+    /// re-applies the tier defensively in any case.
+    /// </summary>
+    private async Task ApplySpoolmanTierBestEffort(long userId)
+    {
+        try
+        {
+            await _spoolman.ApplyTierAsync(userId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _telemetry.TrackException(ex);
+        }
     }
 
     private SubscriptionPlan MapPriceIdToPlan(string? priceId)

@@ -62,6 +62,9 @@ public class PrintLogContext : DbContext
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<DeviceToken> DeviceTokens { get; set; }
     public DbSet<Connection> Connections { get; set; }
+    public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
+    public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
+    public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -464,6 +467,57 @@ public class PrintLogContext : DbContext
             .WithMany()
             .HasForeignKey(c => c.PrinterId)
             .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Spoolman connections (#175). The secret hash is the lookup key every authenticated
+        // request uses, so it is unique and indexed.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => c.SecretHash)
+            .IsUnique();
+
+        // At most one unrevoked (active or paused) connection per printer. Reconnecting revokes
+        // the old one in the same transaction before inserting the new one.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => c.PrinterId)
+            .IsUnique()
+            .HasFilter("[PrinterId] IS NOT NULL AND [RevokedAt] IS NULL");
+
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => new { c.UserId, c.CreatedDate });
+
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Not a database cascade or set-null, for the reason given for Connection.Printer above:
+        // Printers already cascade from Users, so a second path is SQL Server error 1785.
+        // PrinterService revokes and unbinds these explicitly before deleting a printer.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasOne(c => c.Printer)
+            .WithMany()
+            .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        modelBuilder.Entity<SpoolmanNetworkSighting>()
+            .HasIndex(s => new { s.UserId, s.NetworkHash })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanNetworkSighting>()
+            .HasOne(s => s.User)
+            .WithMany()
+            .HasForeignKey(s => s.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SpoolmanFairUseAlert>()
+            .HasIndex(a => new { a.UserId, a.Signal })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanFairUseAlert>()
+            .HasOne(a => a.User)
+            .WithMany()
+            .HasForeignKey(a => a.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Print>()
             .HasOne(p => p.Connection)

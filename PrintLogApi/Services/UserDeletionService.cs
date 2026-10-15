@@ -335,6 +335,19 @@ public class UserDeletionService : IUserDeletionService
                 }
             }
 
+            // Spoolman connections (#175) and their fair-use rows, before Printers for the same
+            // reason as Connections below. The two fair-use tables would cascade with the user,
+            // but are cleared here so the account's data is gone in one place.
+            await _context.SpoolmanConnections
+                .Where(c => c.UserId == userId)
+                .ExecuteDeleteAsync();
+            await _context.SpoolmanNetworkSightings
+                .Where(s => s.UserId == userId)
+                .ExecuteDeleteAsync();
+            await _context.SpoolmanFairUseAlerts
+                .Where(a => a.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete Connections. After Prints, whose FK to them does not cascade, and before
             // Printers, which their own FK would otherwise block.
             await _context.Connections
