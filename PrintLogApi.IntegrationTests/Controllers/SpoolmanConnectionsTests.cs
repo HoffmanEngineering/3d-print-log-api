@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Spoolman;
 using PrintLogApi.Services;
@@ -475,6 +476,114 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         await service.RecordNetworkAsync(user.Id, IPAddress.Parse("198.19.0.1"), Ct);
 
         Assert.Empty(factory.EmailSender.Matching($"User id: {user.Id}<br>"));
+    }
+
+    [Fact]
+    public async Task NetworkEmail_AFailedSend_DeletesTheClaimItInserted_SoTheNextTriggerSends()
+    {
+        var user = await CreateUserAsync();
+        var marker = $"User id: {user.Id}<br>";
+        using var scope = factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ISpoolmanConnectionService>();
+        for (var i = 1; i <= 5; i++)
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse($"198.18.{i}.1"), Ct);
+        }
+
+        factory.EmailSender.ThrowOnSend = true;
+        try
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse("198.18.6.1"), Ct); // the sixth
+        }
+        finally
+        {
+            factory.EmailSender.ThrowOnSend = false;
+        }
+        Assert.Empty(factory.EmailSender.Matching(marker));
+        Assert.Equal(0, await WithDbAsync(db => db.SpoolmanFairUseAlerts.CountAsync(a => a.UserId == user.Id, Ct)));
+
+        await service.RecordNetworkAsync(user.Id, IPAddress.Parse("198.18.7.1"), Ct);
+
+        Assert.Single(factory.EmailSender.Matching(marker));
+    }
+
+    [Fact]
+    public async Task NetworkEmail_AFailedSend_RestoresThePreviousCooldown_SoTheNextTriggerSends()
+    {
+        var user = await CreateUserAsync();
+        var marker = $"User id: {user.Id}<br>";
+        using var scope = factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ISpoolmanConnectionService>();
+        for (var i = 1; i <= 6; i++)
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse($"198.18.{i}.1"), Ct);
+        }
+        Assert.Single(factory.EmailSender.Matching(marker));
+
+        // A week on, the cool-down has lapsed.
+        var lapsed = DateTime.UtcNow.AddDays(-8);
+        await WithDbAsync(db => db.SpoolmanFairUseAlerts
+            .Where(a => a.UserId == user.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, lapsed), Ct));
+
+        factory.EmailSender.ThrowOnSend = true;
+        try
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse("198.18.7.1"), Ct);
+        }
+        finally
+        {
+            factory.EmailSender.ThrowOnSend = false;
+        }
+        Assert.Single(factory.EmailSender.Matching(marker));
+        var restored = await WithDbAsync(db => db.SpoolmanFairUseAlerts.SingleAsync(a => a.UserId == user.Id, Ct));
+        Assert.Equal(lapsed, restored.LastSentAt, TimeSpan.FromMilliseconds(1));
+
+        await service.RecordNetworkAsync(user.Id, IPAddress.Parse("198.18.8.1"), Ct);
+
+        Assert.Equal(2, factory.EmailSender.Matching(marker).Count);
+    }
+
+    [Fact]
+    public async Task Networks_StopBeingStoredAtTheWeeklyCap_WithoutAffectingTheAlert()
+    {
+        var user = await CreateUserAsync();
+        using var scope = factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ISpoolmanConnectionService>();
+
+        for (var i = 1; i <= SpoolmanNetworkSighting.MaxPerUserPerWeek + 5; i++)
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse($"198.18.{i}.1"), Ct);
+        }
+
+        Assert.Equal(SpoolmanNetworkSighting.MaxPerUserPerWeek,
+            await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
+        Assert.Single(factory.EmailSender.Matching($"User id: {user.Id}<br>"));
+    }
+
+    [Fact]
+    public async Task Networks_ACapAtOrBelowAConfiguredThreshold_IsRaised_SoTheAlertStillFires()
+    {
+        var user = await CreateUserAsync();
+        using var scope = factory.Services.CreateScope();
+        var configured = scope.ServiceProvider.GetRequiredService<IOptions<SpoolmanOptions>>().Value;
+        var threshold = SpoolmanNetworkSighting.MaxPerUserPerWeek;
+        var service = ActivatorUtilities.CreateInstance<SpoolmanConnectionService>(scope.ServiceProvider,
+            Options.Create(new SpoolmanOptions
+            {
+                ServerUrl = configured.ServerUrl,
+                AdminEmailAddress = configured.AdminEmailAddress,
+                NetworkHashKey = configured.NetworkHashKey,
+                FairUseNetworkThreshold = threshold,
+            }));
+
+        for (var i = 1; i <= threshold + 1; i++)
+        {
+            await service.RecordNetworkAsync(user.Id, IPAddress.Parse($"198.18.{i}.1"), Ct);
+        }
+
+        Assert.Equal(threshold + 1, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
+        Assert.Single(factory.EmailSender.Matching($"User id: {user.Id}<br>"));
     }
 
     [Fact]
