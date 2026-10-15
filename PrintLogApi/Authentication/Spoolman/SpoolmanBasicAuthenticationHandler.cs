@@ -25,8 +25,8 @@ namespace PrintLogApi.Authentication.Spoolman;
 /// request URL App Service, App Insights and the metrics ever see.</para>
 ///
 /// <para><b>What it costs.</b> One cached lookup (<see cref="ISpoolmanCredentialCache"/>, revoked
-/// and paused results included, unknown secrets never cached) and, at most once a minute per connection, a <c>LastSeenAt</c> update. The
-/// handshake does more: it re-applies the user's tier, so a lapsed subscription the billing path
+/// and paused results included, unknown secrets never cached) and, at most once a minute per
+/// connection, a <c>LastSeenAt</c> update. The handshake does more: it re-applies the user's tier, so a lapsed subscription the billing path
 /// missed still pauses extra printers, and records the network for the fair-use count. Moonraker
 /// sends no usage while its socket is down, so refusing at the handshake also stops a refused
 /// printer's REST traffic. Pro is re-checked for open sockets on a timer (#178), not per request.</para>
