@@ -700,6 +700,13 @@ public sealed class PrintService(
         return print;
     }
 
+    public Task<PrintEditors?> GetPrintEditors(long id) =>
+        context.Prints
+            .AsNoTracking()
+            .Where(p => p.Id == id)
+            .Select(p => new PrintEditors(p.CreatedById, p.Printer.UserId))
+            .FirstOrDefaultAsync();
+
     public async Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate)
     {
         // AddPrintDTO.Validate has already rejected half a pair, so either both are set or neither.

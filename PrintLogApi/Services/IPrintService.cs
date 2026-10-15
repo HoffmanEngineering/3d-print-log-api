@@ -79,6 +79,12 @@ public interface IPrintService
     /// </summary>
     Task WritePrintReportAsCsvForUser(long userId, Stream destination, CancellationToken cancellationToken = default);
     Task<Print?> GetPrintById(long id);
+
+    /// <summary>
+    /// The two users who may edit a print, read untracked without loading the print graph, or
+    /// null when the print does not exist.
+    /// </summary>
+    Task<PrintEditors?> GetPrintEditors(long id);
     Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
     Task<List<long>> GetPublicPrintIds();
     /// <summary>
@@ -162,3 +168,6 @@ public interface IPrintService
 
 /// <summary>A created print, or the existing one an external pair resolved to.</summary>
 public sealed record AddPrintResult(Print Print, bool WasReplayed);
+
+/// <summary>A print's creator and its printer's owner: the users who may edit it.</summary>
+public sealed record PrintEditors(long CreatedById, long PrinterOwnerId);
