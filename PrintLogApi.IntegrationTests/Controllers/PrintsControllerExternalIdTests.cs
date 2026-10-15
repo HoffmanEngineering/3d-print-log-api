@@ -205,6 +205,52 @@ public class PrintsControllerExternalIdTests : IClassFixture<CustomWebApplicatio
     }
 
     [Fact]
+    public async Task PostPrint_Replay_StartWithRowsRetriedAfterComplete_KeepsTheActualUsage()
+    {
+        // #191: the late start carries its estimate rows, and replacing the completed rows with
+        // them would drop the actual amount, the slot and the spool link the completion recorded.
+        var externalId = UniqueExternalId();
+        var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId);
+        var filament = await CreateFilamentAsync();
+        AddPrintDTO Start()
+        {
+            var start = NewExternalPrint(externalId);
+            start.PrinterId = printerId;
+            start.EstimatedPrintTimeInSeconds = 3500;
+            start.EstimatedFilamentUsageMg = 20_000;
+            start.FilamentUsage = [UnlinkedEstimateRow(estimatedMg: 20_000)];
+            return start;
+        }
+        var created = await ReadAsync(await PostAsync(Start()));
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            PrintTimeInSeconds = 3600,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 0, FilamentId = filament.Id, AmountMg = 22_000 }],
+        }));
+        var completedRow = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(0, completedRow.Slot);
+        Assert.Equal(1_000_000 - 22_000, await GetRemainingAsync(filament.Id));
+
+        var lateStart = Start();
+        lateStart.EstimatedPrintTimeInSeconds = 4000;
+        var replay = await PostAsync(lateStart);
+
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var detail = await GetDetailAsync(created.Id, IntegrationTestSeeder.TestUserOAuthId);
+        Assert.Equal(PrintStatus.Success, detail.Status);
+        Assert.Equal(3600, detail.PrintTimeInSeconds);
+        Assert.Equal(3500, detail.EstimatedPrintTimeInSeconds);
+        var row = Assert.Single(detail.FilamentUsage!);
+        Assert.Equal(completedRow.Id, row.Id);
+        Assert.Equal(filament.Id, row.Filament?.Id);
+        Assert.Equal(0, row.Slot);
+        Assert.Equal(22_000, row.AmountMg);
+        Assert.Equal(20_000, row.EstimatedAmountMg);
+        Assert.Equal(1_000_000 - 22_000, await GetRemainingAsync(filament.Id));
+    }
+
+    [Fact]
     public async Task PostPrint_Replay_OmittedConnectorFields_KeepTheirStoredValues()
     {
         var externalId = UniqueExternalId();
@@ -320,6 +366,53 @@ public class PrintsControllerExternalIdTests : IClassFixture<CustomWebApplicatio
         Source = actualMg.HasValue ? PrintFilament.SourceMeasurement.Weight : null,
         AmountMg = actualMg,
     };
+
+    /// <summary>An estimate with no spool or slot, as a slicer's start call sends.</summary>
+    private static PrintFilamentSummaryDto UnlinkedEstimateRow(int estimatedMg) => new()
+    {
+        Id = Guid.NewGuid(),
+        EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+        EstimatedAmountMg = estimatedMg,
+    };
+
+    private async Task<HttpResponseMessage> CompleteAsync(long id, CompletePrintDto body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{id}/complete");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(body);
+        return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>A fresh 1 kg spool, so remaining-weight assertions see only this test's prints.</summary>
+    private async Task<FilamentDetailDto> CreateFilamentAsync()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddFilamentDto
+        {
+            DisplayName = $"External id test {Guid.NewGuid():N}",
+            Brand = "Test Brand",
+            MaterialType = "PLA",
+            ColorName = "Green",
+            ColorHex = "00FF00",
+            DiameterMm = 1.75,
+            InitialNominalWeightMg = 1_000_000,
+            MaterialDensityGramPerCubicCm = 1.24,
+            IsActive = true,
+        });
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task<long?> GetRemainingAsync(Guid filamentId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filamentId}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(TestContext.Current.CancellationToken))!.FilamentRemaining;
+    }
 
     private async Task<PrintDetailDTO> ReadAsync(HttpResponseMessage response)
     {

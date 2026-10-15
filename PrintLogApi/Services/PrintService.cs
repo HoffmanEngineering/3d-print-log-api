@@ -769,13 +769,21 @@ public sealed class PrintService(
     /// </summary>
     private async Task<bool> ApplyConnectorOwnedFields(Print existing, AddPrintDTO replay, long userId)
     {
-        var changed = false;
-
         // A finished print is never reopened: a start call that timed out client-side but landed
-        // can be retried after the finish, and must not put the print back to Printing.
+        // can be retried after the finish, and must not put the print back to Printing. Nor may it
+        // touch anything else: its durations and usage are the start's estimates, and replacing
+        // the finished rows would drop the actual amounts, slots and spool links the finish (or
+        // /complete) recorded, moving the spool's remaining weight back to the estimate (#191).
+        // A finish replayed onto a finished print is not a reopen, and still applies.
         var reopens = existing.Status is not (PrintStatus.Pending or PrintStatus.Printing)
             && replay.Status is PrintStatus.Pending or PrintStatus.Printing;
-        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status && !reopens)
+        if (reopens)
+        {
+            return false;
+        }
+
+        var changed = false;
+        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status)
         {
             existing.Status = replay.Status;
             changed = true;
