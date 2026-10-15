@@ -218,6 +218,157 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
         Assert.Equal(!allowsAnonymous, operation.GetProperty("responses").TryGetProperty("401", out _));
     }
 
+    [Theory]
+    // The three the integrator spec named (#152); the filter covers every integer enum.
+    [InlineData("PrintLogApi.Models.Print_PrintStatus", new[] { 1, 2, 3, 4, 5, 6 }, new[] { "Pending", "Printing", "Success", "Cancelled", "Failed", "PartialSuccess" })]
+    [InlineData("PrintLogApi.Models.Print_PrintViewStatus", new[] { 1, 2, 3 }, new[] { "Public", "Unlisted", "Private" })]
+    [InlineData("PrintLogApi.Models.PrintFilament_SourceMeasurement", new[] { 1, 2, 3 }, new[] { "Weight", "Length", "Volume" })]
+    public async Task Enums_StayIntegers_AndNameTheirMembers(string schemaName, int[] values, string[] names)
+    {
+        var document = await LoadDocument();
+        var schema = document.GetProperty("components").GetProperty("schemas").GetProperty(schemaName);
+
+        // The wire format is unchanged: every client today sends and parses the numbers.
+        Assert.Equal("integer", schema.GetProperty("type").GetString());
+        Assert.Equal(values, schema.GetProperty("enum").EnumerateArray().Select(v => v.GetInt32()));
+
+        // NSwag and openapi-typescript read the first, openapi-generator the second.
+        Assert.Equal(names, schema.GetProperty("x-enumNames").EnumerateArray().Select(v => v.GetString()));
+        Assert.Equal(names, schema.GetProperty("x-enum-varnames").EnumerateArray().Select(v => v.GetString()));
+        Assert.Contains($"`{values[0]}` = {names[0]}", schema.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task EveryIntegerEnum_NamesItsMembers()
+    {
+        var document = await LoadDocument();
+
+        var unnamed = document.GetProperty("components").GetProperty("schemas").EnumerateObject()
+            .Where(s => s.Value.TryGetProperty("enum", out _) && s.Value.GetProperty("type").GetString() == "integer")
+            .Where(s => !s.Value.TryGetProperty("x-enumNames", out var n)
+                || n.GetArrayLength() != s.Value.GetProperty("enum").GetArrayLength())
+            .Select(s => s.Name)
+            .ToList();
+
+        Assert.Empty(unnamed);
+    }
+
+    [Fact]
+    public async Task MoonrakerNotifier_DocumentsItsJsonBody()
+    {
+        // The action reads Request.Body itself, so ApiExplorer had no body to describe.
+        var document = await LoadDocument();
+        var operation = document.GetProperty("paths").GetProperty("/api/Moonraker/notifier").GetProperty("post");
+
+        var body = operation.GetProperty("requestBody");
+        Assert.True(body.GetProperty("required").GetBoolean());
+        Assert.Equal(
+            "#/components/schemas/PrintLogApi.Models.DTOs.Moonraker.PrintEventDto",
+            body.GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+
+        // The event inside `message` is described by the response, which echoes it decoded.
+        Assert.Equal(
+            "#/components/schemas/PrintLogApi.Models.DTOs.Moonraker.PrintEventMessageDto",
+            operation.GetProperty("responses").GetProperty("200").GetProperty("content")
+                .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+
+        var message = document.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PrintLogApi.Models.DTOs.Moonraker.PrintEventMessageDto").GetProperty("properties");
+        Assert.True(message.TryGetProperty("event_name", out _));
+        Assert.True(message.TryGetProperty("printerId", out _));
+    }
+
+    [Theory]
+    [InlineData("Extra", "PrintLogApi.Models.DTOs.Octoprint.OctoprintWebhookExtraDto")]
+    [InlineData("Job", "PrintLogApi.Models.DTOs.Octoprint.OctoprintWebhookJobDto")]
+    [InlineData("Meta", "PrintLogApi.Models.DTOs.Octoprint.OctoprintWebhookMetaDto")]
+    public async Task OctoprintWebhook_DocumentsItsJsonFormParts(string field, string schemaName)
+    {
+        // Fields bound with JsonModelBinder were missing from the form schema entirely.
+        var document = await LoadDocument();
+        var form = document.GetProperty("paths").GetProperty("/api/Octoprint").GetProperty("post")
+            .GetProperty("requestBody").GetProperty("content").GetProperty("multipart/form-data");
+
+        Assert.Equal(
+            $"#/components/schemas/{schemaName}",
+            form.GetProperty("schema").GetProperty("properties").GetProperty(field).GetProperty("$ref").GetString());
+        Assert.Equal("application/json", form.GetProperty("encoding").GetProperty(field).GetProperty("contentType").GetString());
+    }
+
+    [Fact]
+    public async Task SlicerSettings_DocumentsItsFieldsAndLimits()
+    {
+        // #164: connectors generate their client from this document.
+        var document = await LoadDocument();
+        var operation = document.GetProperty("paths").GetProperty("/api/Prints/{id}/slicer-settings").GetProperty("post");
+
+        Assert.Equal("Prints_PostSlicerSettings", operation.GetProperty("operationId").GetString());
+        var responses = operation.GetProperty("responses");
+        foreach (var status in new[] { "200", "400", "404", "409", "413" })
+        {
+            Assert.True(responses.TryGetProperty(status, out _), $"no {status} response");
+        }
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var body = schemas.GetProperty("PrintLogApi.Models.DTOs.Print.PrintSlicerSettingsDto").GetProperty("properties");
+        Assert.Contains("512 KiB", body.GetProperty("configBlock").GetProperty("description").GetString());
+        Assert.Contains("HEADER_BLOCK_END", body.GetProperty("header").GetProperty("description").GetString());
+        Assert.True(body.TryGetProperty("metadata", out _));
+        // A computed helper, not a field a caller sends.
+        Assert.False(body.TryGetProperty("hasConfigBlock", out _));
+
+        var metadata = schemas.GetProperty("PrintLogApi.Models.DTOs.Print.SlicerMetadataDto").GetProperty("properties");
+        foreach (var field in new[]
+        {
+            "slicer", "slicerVersion", "layerHeightMm", "firstLayerHeightMm", "nozzleDiameterMm",
+            "filamentName", "filamentType", "firstLayerNozzleTemperatureC", "firstLayerBedTemperatureC",
+        })
+        {
+            Assert.True(metadata.TryGetProperty(field, out var property), $"metadata.{field} is not documented");
+            Assert.True(property.TryGetProperty("description", out _), $"metadata.{field} has no description");
+        }
+    }
+
+    [Fact]
+    public async Task CuraSetting_DoesNotDocumentItsPrintLink()
+    {
+        // #164's CuraSetting.PrintId/Print are server-side only; the plugins' schema is unchanged.
+        var document = await LoadDocument();
+        var properties = document.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PrintLogApi.Models.CuraSetting").GetProperty("properties");
+
+        Assert.False(properties.TryGetProperty("printId", out _));
+        Assert.False(properties.TryGetProperty("print", out _));
+    }
+
+    [Fact]
+    public async Task JsonRequestBodies_AreDocumentedAsApplicationJsonOnly()
+    {
+        // openapi-python-client skips any operation whose body also lists text/json or
+        // application/*+json, and that was 33 of them.
+        var document = await LoadDocument();
+
+        var aliased = Operations(document)
+            .Where(o => o.Operation.TryGetProperty("requestBody", out var body)
+                && body.GetProperty("content").EnumerateObject().Any(c => c.Name is "text/json" or "application/*+json"))
+            .Select(o => $"{o.Method.ToUpperInvariant()} {o.Path}")
+            .ToList();
+
+        Assert.Empty(aliased);
+    }
+
+    [Fact]
+    public async Task EstimatedVolumeMl_IsDescribedAsAVolume()
+    {
+        // Was copied from the length field above it: "The estimated length of filament used in meters."
+        var document = await LoadDocument();
+
+        var description = document.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PrintLogApi.Models.DTOs.Print.PrintFilamentSummaryDto").GetProperty("properties")
+            .GetProperty("estimatedVolumeMl").GetProperty("description").GetString();
+        Assert.Equal("The estimated volume of filament used in milliliters.", description);
+    }
+
     [Fact]
     public async Task Document_IsWrittenForLinting_WhenCiAsksForIt()
     {

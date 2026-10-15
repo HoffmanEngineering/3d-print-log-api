@@ -138,6 +138,23 @@ public class CuraControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task GetSettings_ResponseShape_IsWhatThePluginsRead()
+    {
+        // #164 linked connector settings to their print. That link is server-side only: the Cura
+        // plugin's and the uploader's response must not grow a printId or a print.
+        var settingId = await SaveCuraSettingsAsync();
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Cura/settings?id={settingId}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            ["createdDate", "curaVersion", "id", "pluginVersion", "settings", "slicer", "userId"],
+            body.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task GetSettings_Authenticated_LocksToUser()
     {
         // Arrange - save and retrieve to lock the setting to the test user
