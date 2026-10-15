@@ -31,7 +31,17 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
 
             // Lost the insert race on (UserId, InstanceId): an agent's first heartbeat retried
             // while the first was still in flight. The row exists now, so take the update path.
-            return await UpsertOnce(userId, instanceId, dto);
+            try
+            {
+                return await UpsertOnce(userId, instanceId, dto);
+            }
+            catch (DbUpdateException)
+            {
+                // The printer can also go between the recheck and this save.
+                context.ChangeTracker.Clear();
+                await RequirePrinter(userId, dto.PrinterId);
+                throw;
+            }
         }
     }
 
