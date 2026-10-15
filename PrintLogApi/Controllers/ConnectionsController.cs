@@ -64,6 +64,13 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
     /// registers three connections. Each call replaces `kind`, `displayName`, `agentVersion` and
     /// `printerId`: send the printer the user chose at pairing every time, because leaving it out
     /// unbinds the connection.
+    ///
+    /// An agent can also report its health with each heartbeat (printlog-bridge#37): `mode`,
+    /// `klipperVersion`, `moonrakerVersion`, `printerModel`, `outboxDepth`,
+    /// `outboxOldestAgeSeconds`, `lastError` (scrubbed of host names, IP addresses, file names
+    /// and keys by the agent), `lastErrorAt`, `errorCount` (since its previous heartbeat),
+    /// `snapshots` and `slicerSettings`. All are optional and replaced on every call; a value
+    /// too long is cut and a negative number counts as 0, so health never fails the heartbeat.
     /// </remarks>
     /// <param name="instanceId">The agent's own stable id for the printer, at most 100 characters.</param>
     /// <param name="dto">The connection's details.</param>
@@ -174,6 +181,17 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
             LastDroppedNotifierEventAt = Utc(connection.LastDroppedNotifierEventAt),
             NotifierNoticeDismissedAt = Utc(connection.NotifierNoticeDismissedAt),
             ShowNotifierNotice = connection.DroppedNotifierEventCount > 0 && connection.NotifierNoticeDismissedAt is null,
+            Mode = connection.Mode,
+            KlipperVersion = connection.KlipperVersion,
+            MoonrakerVersion = connection.MoonrakerVersion,
+            PrinterModel = connection.PrinterModel,
+            OutboxDepth = connection.OutboxDepth,
+            OutboxOldestQueuedAt = Utc(connection.OutboxOldestQueuedAt),
+            LastError = connection.LastError,
+            LastErrorAt = Utc(connection.LastErrorAt),
+            ErrorCount = connection.ErrorCount,
+            Snapshots = connection.Snapshots,
+            SlicerSettings = connection.SlicerSettings,
         };
     }
 }

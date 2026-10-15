@@ -53,4 +53,37 @@ public class ConnectionDto
     /// dropped and the notice has not been dismissed.
     /// </summary>
     public bool ShowNotifierNotice { get; set; }
+
+    // The agent's health as of its last heartbeat, null when it sent none (printlog-bridge#37).
+
+    /// <summary>How the agent reaches the printer: <c>local</c> or <c>remote</c>.</summary>
+    public string? Mode { get; set; }
+
+    public string? KlipperVersion { get; set; }
+
+    public string? MoonrakerVersion { get; set; }
+
+    /// <summary>The printer model the slicer wrote in the last job's file.</summary>
+    public string? PrinterModel { get; set; }
+
+    /// <summary>Events and pictures waiting in the agent's outbox to be sent.</summary>
+    public int? OutboxDepth { get; set; }
+
+    /// <summary>When the oldest of them was queued.</summary>
+    public DateTimeOffset? OutboxOldestQueuedAt { get; set; }
+
+    /// <summary>The last warning or error the agent logged for this printer.</summary>
+    public string? LastError { get; set; }
+
+    /// <summary>When it was logged.</summary>
+    public DateTimeOffset? LastErrorAt { get; set; }
+
+    /// <summary>Warnings and errors logged between the agent's last two heartbeats.</summary>
+    public int? ErrorCount { get; set; }
+
+    /// <summary>Whether a webcam frame is added to each print.</summary>
+    public bool? Snapshots { get; set; }
+
+    /// <summary>Whether each print's slicer settings are sent.</summary>
+    public bool? SlicerSettings { get; set; }
 }

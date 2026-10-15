@@ -52,10 +52,44 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         connection.AgentVersion = dto.AgentVersion?.Trim();
         connection.PrinterId = dto.PrinterId;
         connection.LastSeenAt = now;
+        ApplyHealth(connection, dto, now);
 
         await context.SaveChangesAsync();
         return (connection, created);
     }
+
+    /// <summary>
+    /// Replaces the connection's health with what this heartbeat sent (printlog-bridge#37). Cut
+    /// and clamped rather than validated: an agent must never lose its heartbeat over health.
+    /// </summary>
+    private static void ApplyHealth(Connection connection, PutConnectionDto dto, DateTime now)
+    {
+        connection.Mode = Cut(dto.Mode, 20);
+        connection.KlipperVersion = Cut(dto.KlipperVersion, 50);
+        connection.MoonrakerVersion = Cut(dto.MoonrakerVersion, 50);
+        connection.PrinterModel = Cut(dto.PrinterModel, 100);
+        connection.OutboxDepth = dto.OutboxDepth is { } depth ? Math.Max(0, depth) : null;
+        connection.OutboxOldestQueuedAt = dto.OutboxOldestAgeSeconds is { } age
+            ? now - TimeSpan.FromSeconds(Math.Clamp(age, 0, (long)TimeSpan.FromDays(3650).TotalSeconds))
+            : null;
+        connection.LastError = Cut(dto.LastError, 500);
+        connection.LastErrorAt = dto.LastErrorAt is { } at ? Min(at.UtcDateTime, now) : null;
+        connection.ErrorCount = dto.ErrorCount is { } count ? Math.Max(0, count) : null;
+        connection.Snapshots = dto.Snapshots;
+        connection.SlicerSettings = dto.SlicerSettings;
+    }
+
+    private static string? Cut(string? value, int maxLength)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+        return trimmed.Length > maxLength ? trimmed[..maxLength] : trimmed;
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
 
     public async Task<IReadOnlyList<Connection>> List(long userId, long? printerId)
         => await context.Connections
