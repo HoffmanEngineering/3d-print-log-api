@@ -128,6 +128,9 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<long?>("PrintId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Slicer")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -140,6 +143,10 @@ namespace PrintLogApi.Migrations
                         .HasColumnName("Settings");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PrintId")
+                        .IsUnique()
+                        .HasFilter("[PrintId] IS NOT NULL");
 
                     b.ToTable("CuraSettings");
                 });
@@ -2463,6 +2470,16 @@ namespace PrintLogApi.Migrations
                     b.Navigation("Printer");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.CuraSetting", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Print", "Print")
+                        .WithMany()
+                        .HasForeignKey("PrintId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Print");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.DeviceToken", b =>

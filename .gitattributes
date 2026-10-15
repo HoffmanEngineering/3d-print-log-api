@@ -57,3 +57,7 @@ Dockerfile  text eol=lf
 *.exe       binary
 *.pfx       binary
 *.snk       binary
+
+# Slicer settings fixtures are compared byte for byte with the uploader's rendered notes (LF, and a
+# UTF-8 "×"), so no checkout may rewrite them.
+tests-fixtures/slicer-settings/** -text

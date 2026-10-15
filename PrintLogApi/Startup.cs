@@ -148,6 +148,7 @@ public class Startup
         );
         services.AddTransient<IUserService, UserService>();
         services.AddTransient<IPrintService, PrintService>();
+        services.AddScoped<Services.SlicerSettings.IPrintSlicerSettingsService, Services.SlicerSettings.PrintSlicerSettingsService>();
         services.AddTransient<IPrinterService, PrinterService>();
         services.AddTransient<IPrinterCategoryService, PrinterCategoryService>();
         services.AddTransient<ICommentService, CommentService>();

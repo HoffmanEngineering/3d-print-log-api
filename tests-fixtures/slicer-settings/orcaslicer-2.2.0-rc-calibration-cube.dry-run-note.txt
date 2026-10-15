@@ -1,0 +1,93 @@
+Profiles:
+  Print: 0.20mm Standard @MyMarlin
+  Printer: JGMaker R1 (Generic Marlin Printer, 0.4mm nozzle)
+  Filament: PLA (PLA, Generic)
+  Bed Type: High Temp Plate
+  Host: octoprint
+
+Profile Changes:
+  Changed from profile: nozzle_temperature = 205, nozzle_temperature_initial_layer = 205, printable_area = 0x0,230x0,230x230,0x230
+
+Models:
+  Calibration Cube.stl  ×1   20.0 × 20.0 × 20.0 mm
+
+Settings:
+
+Quality:
+  Layer Height:
+    Layer Height: 0.2
+    First Layer Height: 0.200
+  Line Width:
+    Default Line Width: 0.4
+  Seam:
+    Seam Position: aligned
+  Precision:
+    Precise Wall: 0
+  Ironing:
+    Ironing: no ironing
+  Wall Generator:
+    Generator: arachne
+  Walls And Surfaces:
+    Only One Wall on Top Surfaces: 0
+
+Strength:
+  Walls:
+    Wall Loops: 3
+  Top/Bottom Shells:
+    Top Shell Layers: 4
+    Top Shell Thickness: 0.8
+    Bottom Shell Layers: 3
+    Bottom Shell Thickness: 0
+  Infill:
+    Sparse Infill Density: 15%
+    Sparse Infill Pattern: crosshatch
+
+Speed:
+  First Layer Speed:
+    First Layer: 45
+    Number of Slow Layers: 0
+  Other Layers Speed:
+    Outer Wall: 60
+    Inner Wall: 80
+    Sparse Infill: 80
+    Internal Solid Infill: 80
+    Top Surface: 50
+  Travel Speed:
+    Travel: 150
+
+Support:
+  Support:
+    Enable Support: 0
+    Type: normal(auto)
+    Style: default
+    Threshold Angle: 30
+    On Build Plate Only: 0
+  Raft:
+    Raft Layers: 0
+
+Multimaterial:
+  Prime Tower:
+    Enable: 0
+    Width: 60
+    Brim Width: 3
+  Ooze Prevention:
+    Enable: 0
+  Flush Options:
+    Flush into Objects' Infill: 0
+    Flush into Objects' Support: 1
+  Advanced:
+    Use Beam Interlocking: 0
+
+Other:
+  Skirt:
+    Skirt Type: combined
+    Skirt Loops: 0
+    Skirt Min Extrusion Length: 4
+  Brim:
+    Brim Type: auto_brim
+    Brim Width: 5
+  Special Mode:
+    Slicing Mode: regular
+    Print Sequence: by layer
+    Spiral Vase: 0
+    Fuzzy Skin: none

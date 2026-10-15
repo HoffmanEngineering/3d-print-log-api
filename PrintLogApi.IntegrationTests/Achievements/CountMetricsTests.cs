@@ -116,17 +116,22 @@ public class CountMetricsTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SlicerKeys_AreOneWhenUsedThroughThePlugin()
+    public async Task SlicerKeys_AreOneWhenTheSlicerWasRecorded()
     {
         var (scope, db, user) = await ArrangeAsync();
         using var _ = scope;
         await AchievementTestData.AddPrintAsync(db, user, p => { p.Source = PrintSource.SlicerPlugin; p.Slicer = "orcaslicer"; });
-        // A slicer recorded on a non-plugin print does not count.
-        await AchievementTestData.AddPrintAsync(db, user, p => { p.Source = PrintSource.Web; p.Slicer = "prusaslicer"; });
+        // A connector's print counts too once it sent its slicer settings (#164): the slicer is
+        // recorded only by a slicer plugin or by those settings, never typed by hand.
+        await AchievementTestData.AddPrintAsync(db, user, p => { p.Source = PrintSource.Moonraker; p.Slicer = "prusaslicer"; });
+        await AchievementTestData.AddPrintAsync(db, user, p => p.Source = PrintSource.Moonraker);
 
         Assert.Equal(1, await MeasureAsync(scope, db, user, "slicer.orcaslicer"));
-        Assert.Equal(0, await MeasureAsync(scope, db, user, "slicer.prusaslicer"));
+        Assert.Equal(1, await MeasureAsync(scope, db, user, "slicer.prusaslicer"));
         Assert.Equal(0, await MeasureAsync(scope, db, user, "slicer.cura"));
+        Assert.Equal(2, await MeasureAsync(scope, db, user, "slicer.distinct"));
+        // How the print arrived is still its own count.
+        Assert.Equal(1, await MeasureAsync(scope, db, user, "prints.slicerPlugin"));
     }
 
     [Fact]

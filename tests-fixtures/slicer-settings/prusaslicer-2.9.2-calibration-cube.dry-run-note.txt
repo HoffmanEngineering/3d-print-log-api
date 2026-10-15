@@ -1,0 +1,93 @@
+Settings:
+
+Layers and Perimeters:
+  Layer Height:
+    Layer Height: 0.2
+    First Layer Height: 0.28
+  Vertical Shells:
+    Perimeters: 3
+    Spiral Vase: 0
+  Horizontal Shells:
+    Top Solid Layers: 3
+    Top Min Shell Thickness: 0
+    Bottom Solid Layers: 3
+    Bottom Min Shell Thickness: 0
+  Advanced:
+    Seam Position: aligned
+    Perimeter Generator: classic
+  Fuzzy Skin:
+    Fuzzy Skin: none
+
+Infill:
+  Infill:
+    Fill Density: 10%
+    Fill Pattern: grid
+    Top Fill Pattern: monotonic
+    Bottom Fill Pattern: monotonic
+  Ironing:
+    Enable Ironing: 0
+    Ironing Type: top
+
+Skirt And Brim:
+  Skirt:
+    Loops (min): 0
+    Distance from brim/object: 2
+    Minimal Filament Extrusion Length: 0
+  Brim:
+    Brim Type: no_brim
+    Brim Width: 3
+
+Support Material:
+  Support Material:
+    Generate Support: 0
+    Overhang Threshold: 10
+  Raft:
+    Raft Layers: 0
+  Options for Support Material:
+    Style: organic
+    Support on Build Plate Only: 0
+
+Speed:
+  Speed for Print Moves:
+    Perimeters: 150
+    Small Perimeters: 50%
+    External Perimeters: 50%
+    Infill: 150
+    Solid Infill: 150
+    Top Solid Infill: 120
+    Support Material: 50
+    Bridges: 40
+  Speed For Non-Print Moves:
+    Travel: 120
+    Z Travel: 120
+  Modifiers:
+    First Layer Speed: 50
+    Speed of Object First Layer Over Raft: 30
+  Auto Speed (advanced):
+    Max Print Speed: 150
+    Max Volumetric Speed: 0
+
+Multiple Extruders:
+  Extruders:  
+    Perimeter Extruder: 1
+    Infill Extruder: 1
+    Solid Infill Extruder: 1
+    Support Material/Raft/Skirt Extruder: 1
+    Support Material/Raft Interface Extruder: 1
+    Wipe Tower Extruder: 0
+  Ooze Prevention:
+    Enable: 0
+  Wipe Tower:
+    Enable: 0
+    Width: 60
+
+Advanced:
+  Extrusion Width:
+    Default Extrusion Width: 0.42
+    First Layer Extrusion Width: 200%
+    Perimeters: 0.45
+    External Perimeters: 0.42
+    Infill: 0.45
+    Solid Infill: 0.5
+    Top Solid Infill: 0.42
+    Support Material: 0

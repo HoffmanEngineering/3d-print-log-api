@@ -23,6 +23,8 @@ public static class TriggerExtractor
         nameof(Print.EstimatedPrintTimeInSeconds), nameof(Print.ViewStatus), nameof(Print.ProjectId),
         // The "other filament" scalar is part of the canonical material total.
         nameof(Print.FilamentUsageMg), nameof(Print.EstimatedFilamentUsageMg),
+        // A connector's slicer settings arrive after the print was logged (#164).
+        nameof(Print.Slicer),
     ];
 
     private static readonly string[] ProfileProperties =

@@ -7,6 +7,7 @@ using PrintLogApi.IntegrationTests.Support;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Services;
+using PrintLogApi.Services.SlicerSettings;
 using Xunit;
 using static PrintLogApi.IntegrationTests.Achievements.AchievementMetricTestKit;
 
@@ -408,6 +409,26 @@ public class AchievementInterceptorTests : IClassFixture<CustomWebApplicationFac
 
         Assert.True(await HoldsAsync(user.Id, "first-print"));
         Assert.True(await HoldsAsync(user.Id, "first-printer"));
+    }
+
+    [Fact]
+    public async Task ConnectorSlicerSettings_SentAfterThePrint_GrantTheSlicerBadge()
+    {
+        // #164: a connector logs the print first and sends its settings later, so the slicer
+        // arrives on an update, not on PrintAdded.
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var print = await AchievementTestData.AddPrintAsync(db, user, p => p.Source = PrintSource.Moonraker);
+        Assert.False(await HoldsAsync(user.Id, "slicer-orcaslicer"));
+
+        using var sendScope = _factory.Services.CreateScope();
+        await sendScope.ServiceProvider.GetRequiredService<IPrintSlicerSettingsService>().Record(
+            print.Id,
+            new PrintSlicerSettingsDto { Metadata = new SlicerMetadataDto { Slicer = "OrcaSlicer", LayerHeightMm = 0.2 } },
+            user.Id,
+            Ct);
+
+        Assert.True(await HoldsAsync(user.Id, "slicer-orcaslicer"));
     }
 
     [Fact]

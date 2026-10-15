@@ -86,6 +86,12 @@ public class PrinterImageHydrationTests(CustomWebApplicationFactory factory)
         };
         context.Printers.Add(printer);
         await context.SaveChangesAsync(ct);
+
+        // Written straight to the database, so nothing bumped the owner's cache version: without
+        // this, a /summary a sibling test cached earlier still lacks the printer, and whether that
+        // happens depends on test order (which xUnit v3 derives from, among other things, the
+        // assembly's path, so it differs between checkouts).
+        scope.ServiceProvider.GetRequiredService<ICacheVersionService>().InvalidateUserCache(userId.Value);
         return printer.Id;
     }
 

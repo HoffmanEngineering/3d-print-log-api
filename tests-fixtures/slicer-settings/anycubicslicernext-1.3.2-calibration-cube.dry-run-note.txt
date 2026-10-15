@@ -1,0 +1,80 @@
+Settings:
+
+Quality:
+  Layer Height:
+    Layer Height: 0.2
+    First Layer Height: 0.200
+  Line Width:
+    Default Line Width: 0.42
+  Seam:
+    Seam Position: aligned
+  Precision:
+    Precise Wall: 0
+  Ironing:
+    Ironing: 
+  Wall Generator:
+    Generator: classic
+  Walls And Surfaces:
+    Only One Wall on Top Surfaces: 1
+
+Strength:
+  Walls:
+    Wall Loops: 2
+  Top/Bottom Shells:
+    Top Shell Layers: 5
+    Top Shell Thickness: 1
+    Bottom Shell Layers: 3
+    Bottom Shell Thickness: 0.6
+  Infill:
+    Sparse Infill Density: 15%
+    Sparse Infill Pattern: gyroid
+
+Speed:
+  First Layer Speed:
+    First Layer: 45
+    Number of Slow Layers: 1
+  Other Layers Speed:
+    Outer Wall: 130
+    Inner Wall: 200
+    Sparse Infill: 300
+    Internal Solid Infill: 130
+    Top Surface: 130
+  Travel Speed:
+    Travel: 350
+
+Support:
+  Support:
+    Enable Support: 0
+    Type: tree(auto)
+    Style: default
+    Threshold Angle: 40
+    On Build Plate Only: 1
+  Raft:
+    Raft Layers: 0
+
+Multimaterial:
+  Prime Tower:
+    Enable: 0
+    Width: 35
+    Brim Width: 5
+  Ooze Prevention:
+    Enable: 0
+  Flush Options:
+    Flush into Objects' Infill: 0
+    Flush into Objects' Support: 1
+  Advanced:
+    Use Beam Interlocking: 0
+
+Other:
+  Skirt:
+    Skirt Type: combined
+    Skirt Loops: 0
+    Skirt Min Extrusion Length: 0
+  Brim:
+    Brim Type: auto_brim
+    Brim Width: 5
+  Special Mode:
+    Slicing Mode: regular
+    Print Sequence: by layer
+    Spiral Vase: 0
+    Fuzzy Skin: none

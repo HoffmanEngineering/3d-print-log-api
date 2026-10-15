@@ -26,7 +26,10 @@ public sealed record PrintRow(
 /// prints: per-filament rows, each falling back to its own estimate, plus the scalar "other
 /// filament".
 /// </param>
-/// <param name="PluginSlicers">Distinct normalized slicers on <see cref="PrintSource.SlicerPlugin"/> prints.</param>
+/// <param name="PluginSlicers">
+/// Distinct normalized slicers recorded on the user's prints, by a slicer plugin or by a connector's
+/// slicer settings (#164).
+/// </param>
 public sealed record PrintAggregate(
     long PrintCount,
     long SuccessSeconds,
@@ -84,8 +87,10 @@ public sealed record PrintAggregate(
         var rowMaterial = usage.Where(u => Successful(u.Status)).Sum(u => (long)PrintMetrics.Resolve(u.AmountMg, u.EstimatedAmountMg));
         var otherMaterial = prints.Where(p => Successful(p.Status)).Sum(p => (long)PrintMetrics.Resolve(p.FilamentUsageMg, p.EstimatedFilamentUsageMg));
 
+        // Any print with a recorded slicer, whatever logged it: the slicer is set only by a slicer
+        // plugin (ApplyProvenance) or by a connector's slicer settings (#164), never by hand.
         var pluginSlicers = prints
-            .Where(p => p.Source == PrintSource.SlicerPlugin && p.Slicer is not null)
+            .Where(p => p.Slicer is not null)
             .Select(p => p.Slicer!)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
