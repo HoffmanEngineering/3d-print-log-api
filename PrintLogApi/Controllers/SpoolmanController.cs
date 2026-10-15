@@ -67,6 +67,12 @@ public class SpoolmanController(
 
     private const int CurrencySettingTypeId = 5; // Currency_Name
 
+    /// <summary>
+    /// The largest <c>/use</c> report accepted, either sign: 1,000 km, thousands of spools. Anything
+    /// bigger is not a real report, and would poison the process-wide counter and the stored total (#196).
+    /// </summary>
+    public const double MaxUseMillimetres = 1e9;
+
     [HttpGet("info")]
     public IActionResult Info() => Json(
         new SpoolmanInfo(SpoolmanVersion, DebugMode: false, AutomaticBackups: false, DataDir: "", LogsDir: "", BackupsDir: "",
@@ -203,6 +209,13 @@ public class SpoolmanController(
             ?? SpoolmanInventoryService.LengthMm(body.UseWeight!.Value, spool.Filament.Density, spool.Filament.Diameter);
         var unit = body.UseLength is not null ? "length" : "weight";
 
+        // Checked after the weight conversion and before any metric or write: a finite use_weight
+        // near double.MaxValue converts to an infinite length. Negated so NaN fails too.
+        if (!(Math.Abs(millimetres) <= MaxUseMillimetres))
+        {
+            return Message(StatusCodes.Status400BadRequest, "use_weight or use_length is too large.");
+        }
+
         SpoolmanMetrics.UseCalls.WithLabels(unit).Inc();
         if (millimetres > 0)
         {
@@ -218,9 +231,7 @@ public class SpoolmanController(
             .Where(f => f.CreatedById == userId && f.SpoolNumber == id)
             .Select(f => (Guid?)f.Id)
             .FirstOrDefaultAsync(HttpContext.RequestAborted);
-        // A finite use_weight near double.MaxValue converts to an infinite length, which SQL Server's
-        // float column cannot hold. Nothing real reports that; answer it, but store nothing.
-        if (filamentId is { } filament && double.IsFinite(millimetres))
+        if (filamentId is { } filament)
         {
             var printerId = long.TryParse(User.FindFirst(SpoolmanAuthentication.PrinterIdClaim)?.Value, out var claimed) ? claimed : (long?)null;
             var outcome = await usage.RecordAsync(userId, printerId, filament, millimetres, HttpContext.RequestAborted);
