@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services.Analytics;
 
@@ -337,10 +339,8 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     }
 
     /// <summary>
-    /// Remaining follows the canonical rule in FilamentProfile (InitialNominalWeightMg minus
-    /// resolved usage plus adjustments). It is inlined because EF cannot share the AutoMapper
-    /// expression, and MaterialAnalyticsServiceTests pins this copy against
-    /// FilamentSummaryDto.FilamentRemaining. Negative values are reported as-is.
+    /// Remaining is <see cref="FilamentProfile.RemainingMg"/>, spliced into the projection so
+    /// there is no second copy of the rule to drift. Negative values are reported as-is.
     /// </summary>
     private async Task<IReadOnlyList<SpoolRow>> TopSpools(
         long userId, IReadOnlyList<UsageRow> rows, CostInputs inputs, CancellationToken ct)
@@ -355,7 +355,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
 
         var spools = await context.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == userId && ids.Contains(f.Id))
-            .Select(f => new
+            .Select(ExpressionSplice.With((Filament f, long? remainingMg) => new
             {
                 f.Id,
                 f.DisplayName,
@@ -369,21 +369,8 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                 f.PurchasePriceCurrency,
                 f.MaterialDensityGramPerCubicCm,
                 f.DiameterMm,
-                RemainingMg = f.InitialNominalWeightMg.HasValue
-                    ? (long?)Math.Round(f.InitialNominalWeightMg.Value
-                        - f.PrintFilaments!.Sum(pf =>
-                            pf.AmountMg.HasValue && pf.AmountMg > 0 ? (double)pf.AmountMg.Value
-                            : pf.VolumeMl.HasValue && pf.VolumeMl > 0 ? pf.VolumeMl.Value * pf.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                            : pf.LengthInM.HasValue && pf.LengthInM > 0 && pf.Filament!.DiameterMm.HasValue && pf.Filament.DiameterMm > 0
-                                ? 250.0 * Math.PI * pf.Filament!.MaterialDensityGramPerCubicCm * pf.Filament.DiameterMm!.Value * pf.Filament.DiameterMm!.Value * pf.LengthInM.Value
-                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? (double)pf.EstimatedAmountMg.Value
-                            : pf.EstimatedVolumeMl.HasValue && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl.Value * pf.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-                            : pf.EstimatedLengthInM.HasValue && pf.EstimatedLengthInM > 0 && pf.Filament!.DiameterMm.HasValue && pf.Filament.DiameterMm > 0
-                                ? 250.0 * Math.PI * pf.Filament!.MaterialDensityGramPerCubicCm * pf.Filament.DiameterMm!.Value * pf.Filament.DiameterMm!.Value * pf.EstimatedLengthInM.Value
-                            : 0.0)
-                        + f.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)))
-                    : null,
-            })
+                RemainingMg = remainingMg,
+            }, FilamentProfile.RemainingMg))
             .ToListAsync(ct);
 
         var swatches = rows

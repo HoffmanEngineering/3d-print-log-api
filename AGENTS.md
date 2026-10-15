@@ -225,7 +225,7 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   userinfo). The `Spoolman` policy pins `SpoolmanBasic`, so no JWT, API key or dev bypass works
   there, and the secret works nowhere else. Minted only by `InteractiveUserOnly`. Stored as a hash.
 - **Lookups are cached with negative results** (`SpoolmanCredentialCache`), because Moonraker
-  retries a refused socket every 2 s forever. Every path that revokes, rotates or pauses a
+  retries a refused socket every 2 s forever. Every path that revokes, rotates, pauses or deletes a
   connection must evict it. **A secret matching no row is never cached** (#193): those entries
   are bounded only by what a caller sends, and they would evict other users' entries from the
   shared 8 MiB budget. The factory throws to keep it out, as `GetUserIdByApiKey` does. The

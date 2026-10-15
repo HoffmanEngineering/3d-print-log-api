@@ -1,7 +1,10 @@
-﻿using System.Net;
+﻿using System.Data.Common;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Authentication;
 using PrintLogApi.Authentication.Spoolman;
@@ -31,6 +34,9 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
     {
         public RecordingLoggerProvider Logs { get; } = new();
 
+        /// <summary>Fails every command touching the network sightings while armed.</summary>
+        public SightingsFailureInterceptor FailSightings { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
@@ -42,7 +48,50 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
                 ["Logging:LogLevel:Microsoft"] = "Trace",
             }));
             builder.ConfigureLogging(logging => logging.AddProvider(Logs).SetMinimumLevel(LogLevel.Trace));
-            builder.ConfigureServices(services => services.AddSingleton<IStartupFilter>(new SpoolmanProbeStartupFilter()));
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<IStartupFilter>(new SpoolmanProbeStartupFilter());
+                services.ConfigureDbContext<PrintLogContext>(options => options.AddInterceptors(FailSightings));
+            });
+        }
+    }
+
+    /// <summary>
+    /// A database failure on <c>SpoolmanNetworkSightings</c>, the shape a timeout or deadlock in
+    /// the fair-use bookkeeping arrives in. Off unless a test arms it; tests in a class run one
+    /// at a time.
+    /// </summary>
+    public sealed class SightingsFailureInterceptor : DbCommandInterceptor
+    {
+        public bool Armed { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            ThrowIfTargeted(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            ThrowIfTargeted(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<object> result, CancellationToken cancellationToken = default)
+        {
+            ThrowIfTargeted(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void ThrowIfTargeted(DbCommand command)
+        {
+            if (Armed && command.CommandText.Contains("SpoolmanNetworkSightings", StringComparison.Ordinal))
+            {
+                throw new SqliteException("Simulated database failure.", 5); // SQLITE_BUSY
+            }
         }
     }
 
@@ -394,6 +443,32 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
 
         var sighting = await WithDbAsync(db => db.SpoolmanNetworkSightings.SingleAsync(s => s.UserId == user.Id, Ct));
         Assert.DoesNotContain("203.0.113", sighting.NetworkHash);
+    }
+
+    [Fact]
+    public async Task TheHandshake_Succeeds_WhenRecordingTheNetworkFails()
+    {
+        var user = await _support.CreateUserAsync();
+        var connection = await _support.ConnectAsync(user);
+
+        HttpResponseMessage response;
+        factory.FailSightings.Armed = true;
+        try
+        {
+            response = await SendHandshakeAsync(connection.Secret!, IPAddress.Parse("203.0.113.42"));
+        }
+        finally
+        {
+            factory.FailSightings.Armed = false;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(0, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
+        Assert.NotEmpty(factory.Telemetry.Events("SpoolmanFairUse_NetworkRecordFailed"));
+
+        // Not throttled by the failure: the next handshake from the same network records it.
+        Assert.Equal(HttpStatusCode.OK, (await SendHandshakeAsync(connection.Secret!, IPAddress.Parse("203.0.113.42"))).StatusCode);
+        Assert.Equal(1, await WithDbAsync(db => db.SpoolmanNetworkSightings.CountAsync(s => s.UserId == user.Id, Ct)));
     }
 
     [Fact]
