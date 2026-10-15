@@ -494,8 +494,9 @@ public class PrintsController(
     /// already logged. Find the print with `GET /api/Prints/claimable`, then claim it instead of
     /// creating a second one. Sets `externalSource` and `externalId` (same rules as on create),
     /// the connection named by `connectionInstanceId` when it is yours, and `startDate` when the
-    /// print has none. The print keeps its title, notes, usage rows and how it was created. Finish
-    /// it with `POST /api/Prints/{id}/complete`.
+    /// print has none, and `fileHash` (as on create) when the print has none: a hash it already
+    /// has, such as OctoPrint's SHA-1, is kept. The print keeps its title, notes, usage rows and
+    /// how it was created. Finish it with `POST /api/Prints/{id}/complete`.
     ///
     /// Only your own print can be claimed, only while it is Printing (`2`) and not yet linked to a
     /// job. Claiming again with the same pair returns the print unchanged, so retries are safe. A
@@ -506,7 +507,7 @@ public class PrintsController(
     /// <param name="id">The ID of the print.</param>
     /// <param name="claim">The job claiming it.</param>
     /// <response code="200">The claimed print.</response>
-    /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source.</response>
+    /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source, or `fileHash` is malformed.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
     /// <response code="403">Returned when the print is not yours.</response>
     /// <response code="404">Returned when the print does not exist.</response>
@@ -566,7 +567,8 @@ public class PrintsController(
     /// </summary>
     /// <remarks>
     /// Prints that are Printing and not yet linked to a connector's job, newest first. Match one to
-    /// the job by `fileHash` (SHA-1, lowercase hex) or `fileName`, then claim it with
+    /// the job by `fileHash` (lowercase hex: the file's SHA-1 or a connector's file identity, so
+    /// compare it only with hashes from the same source) or `fileName`, then claim it with
     /// `POST /api/Prints/{id}/claim`. `hasSlicerSettings` says whether the print already has its
     /// slicer settings recorded, so a connector can skip sending its own. Usage rows carry the
     /// `slot` each material was fed from, where known.
@@ -911,11 +913,14 @@ public class PrintsController(
     /// connector owns are applied (`status`, the durations, the filament totals and the usage
     /// rows), and only when sent; the title, notes and every other field keep any edits the user
     /// made. A finished print is never moved back to Pending or Printing. `mcp` is reserved.
+    ///
+    /// `fileHash` is optional: 40 hex digits (20 bytes) identifying the G-code file, either its
+    /// SHA-1 or a connector's own identity for it. A replay never changes it.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
-    /// <response code="400">Returned if the new Print is not valid. Inspect Problem Details object for message as to what failed validation.</response>
+    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
