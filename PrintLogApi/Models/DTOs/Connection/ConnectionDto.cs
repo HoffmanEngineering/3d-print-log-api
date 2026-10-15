@@ -25,6 +25,16 @@ public class ConnectionDto
 
     public string? AgentVersion { get; set; }
 
+    /// <summary>
+    /// The newest release of this connection's agent (printlog-bridge for <c>moonraker</c>), as
+    /// <c>X.Y.Z</c>, or null when 3D Print Log doesn't know it. Read from the agent's GitHub tags
+    /// every few hours, so agents learn of an update from their check-in and never call GitHub.
+    /// </summary>
+    public string? LatestAgentVersion { get; set; }
+
+    /// <summary>Whether <see cref="AgentVersion"/> is older than <see cref="LatestAgentVersion"/>.</summary>
+    public bool UpdateAvailable { get; set; }
+
     /// <summary>The printer this connection logs prints for, or null when it is not bound to one.</summary>
     public long? PrinterId { get; set; }
 
