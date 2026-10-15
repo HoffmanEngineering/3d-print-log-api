@@ -2,6 +2,7 @@
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Spoolman;
 
 namespace PrintLogApi.Services;
 
@@ -12,6 +13,8 @@ public class UserDeletionService : IUserDeletionService
     private readonly TelemetryClient _telemetry;
     private readonly IAuth0Service _auth0Service;
     private readonly IBlobStorageService _blobStorageService;
+    private readonly ICacheVersionService _cacheVersionService;
+    private readonly ISpoolmanCredentialCache _spoolmanCredentials;
     private readonly int _deactivationTimeInMinutes;
 
     public UserDeletionService(PrintLogContext context,
@@ -19,13 +22,17 @@ public class UserDeletionService : IUserDeletionService
                                TelemetryClient telemetry,
                                IConfiguration config,
                                IAuth0Service auth0Service,
-                               IBlobStorageService blobStorageService)
+                               IBlobStorageService blobStorageService,
+                               ICacheVersionService cacheVersionService,
+                               ISpoolmanCredentialCache spoolmanCredentials)
     {
         _context = context;
         _logger = logger;
         _telemetry = telemetry;
         _auth0Service = auth0Service;
         _blobStorageService = blobStorageService;
+        _cacheVersionService = cacheVersionService;
+        _spoolmanCredentials = spoolmanCredentials;
 
         // Null-forgiven: an absent PendingUserDeactivationTimeInMinutes is a deployment
         // misconfiguration that already threw here, at service construction.
@@ -338,9 +345,20 @@ public class UserDeletionService : IUserDeletionService
             // Spoolman connections (#175) and their fair-use rows, before Printers for the same
             // reason as Connections below. The two fair-use tables would cascade with the user,
             // but are cleared here so the account's data is gone in one place.
+            var spoolmanSecretHashes = await _context.SpoolmanConnections
+                .Where(c => c.UserId == userId)
+                .Select(c => c.SecretHash)
+                .ToListAsync();
             await _context.SpoolmanConnections
                 .Where(c => c.UserId == userId)
                 .ExecuteDeleteAsync();
+
+            // Evict the secrets (#194), or the credential cache keeps authenticating them for up
+            // to its 1 h TTL. Each ExecuteDeleteAsync here commits on its own (there is no
+            // enclosing transaction), so the rows are gone by now: a request racing the delete
+            // cannot re-cache "valid" after this. Evicting here rather than at the end means a
+            // later step failing still leaves the deleted connections refused.
+            await _spoolmanCredentials.InvalidateAsync(spoolmanSecretHashes);
             await _context.SpoolmanNetworkSightings
                 .Where(s => s.UserId == userId)
                 .ExecuteDeleteAsync();
@@ -492,6 +510,10 @@ public class UserDeletionService : IUserDeletionService
             // Finally, delete the user
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
+
+            // After the last write, so nothing cached on the old version GUID (summaries, the
+            // Spoolman inventory) is served for the deleted account.
+            _cacheVersionService.InvalidateUserCache(userId);
 
             _logger.LogInformation("Successfully deleted all data for user {userId}", userId);
         }

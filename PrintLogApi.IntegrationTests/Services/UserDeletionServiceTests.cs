@@ -4,9 +4,11 @@ using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Models;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Spoolman;
 using Xunit;
 using static PrintLogApi.Models.User;
 
@@ -95,7 +97,9 @@ public class UserDeletionServiceTests
                 })
                 .Build(),
             new TestAuth0Service(),
-            new InMemoryBlobStorageService());
+            new InMemoryBlobStorageService(),
+            new CacheVersionService(new MemoryCache(new MemoryCacheOptions())),
+            new NoOpSpoolmanCredentialCache());
 
         await service.DeleteAllDataForUser(userToDelete);
 
@@ -214,7 +218,19 @@ public class UserDeletionServiceTests
             .AddInMemoryCollection(new Dictionary<string, string?> { ["PendingUserDeactivationTimeInMinutes"] = "1440" })
             .Build(),
         new TestAuth0Service(),
-        new InMemoryBlobStorageService());
+        new InMemoryBlobStorageService(),
+        new CacheVersionService(new MemoryCache(new MemoryCacheOptions())),
+        new NoOpSpoolmanCredentialCache());
+
+    /// <summary>These tests assert on SQL, not on eviction; SpoolmanApiTests covers that end to end.</summary>
+    private sealed class NoOpSpoolmanCredentialCache : ISpoolmanCredentialCache
+    {
+        public Task<SpoolmanCredential> ResolveAsync(string secretHash, CancellationToken ct) => Task.FromResult(SpoolmanCredential.Unknown);
+
+        public Task InvalidateAsync(IEnumerable<string> secretHashes) => Task.CompletedTask;
+
+        public Task InvalidateConnectionsAsync(PrintLogContext context, IEnumerable<Guid> connectionIds) => Task.CompletedTask;
+    }
 
     private static bool IsDeleteFrom(string command, string tableName)
     {
