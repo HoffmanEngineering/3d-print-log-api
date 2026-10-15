@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
@@ -10,7 +12,8 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 
 /// <summary>
 /// The reprint counter (UI #10): <c>GET /api/Prints/{id}/same-file</c> counts and lists the
-/// caller's prints of the same file, matched on <see cref="Print.FileHash"/>.
+/// caller's prints of the same file, matched on <see cref="Print.FileHash"/>: the file's SHA-1
+/// from OctoPrint, or a connector's own file identity, compared only within one user's prints.
 /// </summary>
 public class PrintsControllerSameFileTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
@@ -161,6 +164,49 @@ public class PrintsControllerSameFileTests(CustomWebApplicationFactory factory) 
         Assert.Equal([dated.Id, undatedSecond.Id, undatedFirst.Id], result.Prints!.Select(p => p.Id));
     }
 
+    [Fact]
+    public async Task SameFile_HashlessPrintClaimedWithAHash_StartsCounting()
+    {
+        // The slicer uploader logs a print with no hash; the bridge claims it and sends its file
+        // identity, which puts it in the same count as the bridge's earlier prints of that file.
+        var hash = NewHash();
+        var earlier = await CreatePrintAsync(hash, Day(1));
+        var uploaded = await CreatePrintAsync(null, Day(2), PrintStatus.Printing);
+        Assert.Equal(0, (await GetSameFileAsync(uploaded.Id)).Count);
+
+        var claim = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{uploaded.Id}/claim");
+        claim.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        claim.Content = JsonContent.Create(new ClaimPrintDto
+        {
+            ExternalSource = "moonraker",
+            ExternalId = $"{Guid.NewGuid()}:1",
+            FileHash = Convert.ToHexStringLower(hash),
+        });
+        var claimed = await _httpClient.SendAsync(claim, TestContext.Current.CancellationToken);
+        Assert.True(claimed.IsSuccessStatusCode, await claimed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        var result = await GetSameFileAsync(uploaded.Id);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(earlier.Id, Assert.Single(result.Prints!).Id);
+    }
+
+    [Fact]
+    public void SameFileIndex_IsBuiltOnline()
+    {
+        // Prints is the hottest table; an offline build holds a schema lock on it for the whole
+        // build while the old app version is still serving (AGENTS.md, Deployment).
+        using var context = new PrintLogContext(new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlServer("Server=unused;Database=unused;Trusted_Connection=True;")
+            .Options);
+
+        // The online flag is design-time configuration: the runtime model does not keep it.
+        var index = context.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(Print))!.GetIndexes()
+            .Single(i => i.GetDatabaseName() == "IX_Prints_User_FileHash");
+
+        Assert.True(index.IsCreatedOnline());
+    }
+
     private static readonly DateTimeOffset Epoch = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
     private static DateTimeOffset Day(int n) => Epoch.AddDays(n);
@@ -175,6 +221,8 @@ public class PrintsControllerSameFileTests(CustomWebApplicationFactory factory) 
         long? printerId = null,
         string userOAuthId = IntegrationTestSeeder.TestUserOAuthId)
     {
+        // The hash goes in through REST, as a connector sends it: the SHA-1 OctoPrint reports, or
+        // a connector's own 20-byte file identity (#215).
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, userOAuthId);
         request.Content = JsonContent.Create(new AddPrintDTO
@@ -184,23 +232,12 @@ public class PrintsControllerSameFileTests(CustomWebApplicationFactory factory) 
             Status = status,
             ViewStatus = viewStatus,
             StartDate = startDate,
+            FileHash = hash is null ? null : Convert.ToHexStringLower(hash),
             FilamentUsage = [],
         });
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
-        var created = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(TestContext.Current.CancellationToken))!;
-
-        if (hash != null)
-        {
-            // No REST create takes a hash; OctoPrint's webhook and the bridge set it.
-            using var scope = factory.Services.CreateScope();
-            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var print = await context.Prints.SingleAsync(p => p.Id == created.Id, TestContext.Current.CancellationToken);
-            print.FileHash = hash;
-            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        return created;
+        return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(TestContext.Current.CancellationToken))!;
     }
 
     private async Task<long> CreatePrinterAsync(string userOAuthId)

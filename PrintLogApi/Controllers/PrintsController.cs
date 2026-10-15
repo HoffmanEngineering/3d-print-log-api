@@ -601,8 +601,9 @@ public class PrintsController(
     /// Count and list your other prints of the same file.
     /// </summary>
     /// <remarks>
-    /// Two prints are of the same file when they are both yours and have the same file hash.
-    /// OctoPrint sends the G-code file's SHA-1; prints logged without a hash match nothing.
+    /// Two prints are of the same file when they are both yours and have the same `fileHash`:
+    /// the file's SHA-1 or a connector's file identity, compared only within your own prints.
+    /// Prints logged without one match nothing.
     /// `count` is how many of your prints share the hash, this one included, or 0 when this print
     /// has no hash. `prints` lists the others, newest first, at most `limit` of them. Only the
     /// print's owner can ask; anyone else gets a `404`, public prints included.
