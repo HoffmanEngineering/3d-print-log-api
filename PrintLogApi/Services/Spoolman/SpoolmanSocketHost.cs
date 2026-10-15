@@ -29,7 +29,8 @@ namespace PrintLogApi.Services.Spoolman;
 /// Moonraker's next handshake is then refused from the cache. The tick also stamps
 /// <c>LastSeenAt</c>, so the web app shows a connected printer as recently seen.</para>
 ///
-/// <para><b>Shutdown.</b> Sockets are closed with 1001 (going away) when the host stops. Moonraker
+/// <para><b>Shutdown.</b> Sockets are closed with 1001 (going away) when the host stops, and a
+/// peer that does not acknowledge within a few seconds is aborted so shutdown is not held. Moonraker
 /// reconnects every 2 seconds and holds its usage in memory meanwhile, so a deploy loses nothing.</para>
 ///
 /// <para><b>In-process, single instance.</b> The registry and gauge live in this process, which is
@@ -45,6 +46,9 @@ public sealed class SpoolmanSocketHost(
     ILogger<SpoolmanSocketHost> logger)
 {
     private static readonly byte[] Healthy = Encoding.UTF8.GetBytes("""{"status":"healthy"}""");
+
+    /// <summary>How long a peer has to acknowledge the shutdown close before its socket is aborted.</summary>
+    private static readonly TimeSpan CloseGrace = TimeSpan.FromSeconds(5);
 
     private readonly ConcurrentDictionary<Guid, string> _open = new();
 
@@ -77,18 +81,32 @@ public sealed class SpoolmanSocketHost(
             ["connectionId"] = connectionId.ToString(),
         });
 
+        // The receive must not observe ApplicationStopping (#203). The server's socket is a
+        // ManagedWebSocket, which registers Abort() on the token ReceiveAsync is given, so a
+        // stopping token there aborted the socket before CloseAsync could send 1001 and Moonraker
+        // saw 1006. Instead the stopping registration releases the close below, and the receive
+        // ends when the peer acknowledges it, or when the grace runs out and its token aborts it.
+        using var receive = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var goingAway = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stopping = lifetime.ApplicationStopping.Register(() => goingAway.TrySetResult());
+
         var recheck = RecheckLoopAsync(socket, sendLock, socketId, userId, connectionId, secretHash, stop.Token);
         try
         {
-            await ReceiveLoopAsync(socket, sendLock, stop.Token);
-        }
-        catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
-        {
-            await CloseAsync(socket, sendLock, WebSocketCloseStatus.EndpointUnavailable, "Server restarting");
+            var receiving = ReceiveLoopAsync(socket, sendLock, receive.Token);
+            if (await Task.WhenAny(receiving, goingAway.Task) == goingAway.Task)
+            {
+                // Start the grace before taking sendLock: a Healthy send stuck on a peer that stopped
+                // reading holds the lock, and only cancelling receive frees it.
+                receive.CancelAfter(CloseGrace);
+                await CloseAsync(socket, sendLock, WebSocketCloseStatus.EndpointUnavailable, "Server restarting");
+            }
+
+            await receiving;
         }
         catch (OperationCanceledException)
         {
-            // The client went away; nothing to close.
+            // The client went away, or never acknowledged the shutdown close; nothing more to send.
         }
         catch (WebSocketException)
         {

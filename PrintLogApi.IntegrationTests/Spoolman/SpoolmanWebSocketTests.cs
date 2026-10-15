@@ -1,5 +1,8 @@
 ﻿using System.Net.WebSockets;
 using System.Text;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using PrintLogApi.Services.Spoolman;
 using Xunit;
 
@@ -232,6 +235,37 @@ public class SpoolmanWebSocketShutdownTests
         var client = factory.Server.CreateWebSocketClient();
         client.ConfigureRequest = request => request.Headers.Authorization = SpoolmanTestSupport.Basic(connection.Secret!).ToString();
         using var socket = await client.ConnectAsync(new Uri(factory.Server.BaseAddress, "/spoolman/api/v1/spool"), Ct);
+
+        factory.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+
+        var buffer = new byte[1024];
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var result = await socket.ReceiveAsync(buffer, timeout.Token);
+        Assert.Equal(WebSocketMessageType.Close, result.MessageType);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, result.CloseStatus);
+    }
+
+    /// <summary>
+    /// The same over a real Kestrel socket (#203). TestServer's in-memory websocket does not abort
+    /// when its receive token is cancelled, so the test above passed while production aborted the
+    /// socket on shutdown and Moonraker saw 1006. Kestrel's socket is the framework's
+    /// <c>ManagedWebSocket</c>, which does abort, so only this test can tell the two apart.
+    /// </summary>
+    [Fact]
+    public async Task Stopping_ClosesOpenSockets_AsGoingAway_OverKestrel()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        factory.UseKestrel(0);
+        factory.StartServer();
+        var address = factory.Services.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses
+            .First(a => a.StartsWith("http://", StringComparison.Ordinal));
+        var support = new SpoolmanTestSupport(factory.Services);
+        var user = await support.CreateUserAsync();
+        var connection = await support.ConnectAsync(user);
+        using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", SpoolmanTestSupport.Basic(connection.Secret!).ToString());
+        await socket.ConnectAsync(new Uri(new Uri(address.Replace("http://", "ws://", StringComparison.Ordinal)), "/spoolman/api/v1/spool"), Ct);
 
         factory.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
 
