@@ -27,8 +27,20 @@ public class ClaimPrintDto : IValidatableObject
     /// <summary>When the job started. Applied only when the print has no start date yet.</summary>
     public DateTimeOffset? StartDate { get; set; }
 
+    /// <summary>
+    /// The file's identity, as on create (40 hex digits). Applied only when the print has no
+    /// hash yet, so an OctoPrint SHA-1 already on it is kept.
+    /// </summary>
+    [StringLength(40)]
+    public string? FileHash { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (FileHash is not null && !PrintFileHashes.IsValid(FileHash))
+        {
+            yield return new ValidationResult(PrintFileHashes.ValidationMessage, [nameof(FileHash)]);
+        }
+
         // Same as AddPrintDTO, except that the pair is the whole point of a claim, so it is required.
         if (string.IsNullOrWhiteSpace(ExternalSource) || string.IsNullOrWhiteSpace(ExternalId))
         {

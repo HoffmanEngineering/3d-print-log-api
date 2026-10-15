@@ -21,7 +21,10 @@ public class ClaimablePrintDto
 
     public string? FileName { get; set; }
 
-    /// <summary>The SHA-1 of the G-code file as lowercase hex, when the creator sent one.</summary>
+    /// <summary>
+    /// The file's identity as lowercase hex, when the creator or a claim sent one: the SHA-1 of the
+    /// G-code, or a connector's own identity for the file (see <c>PrintFileHashes</c>).
+    /// </summary>
     public string? FileHash { get; set; }
 
     public DateTimeOffset CreatedDate { get; set; }

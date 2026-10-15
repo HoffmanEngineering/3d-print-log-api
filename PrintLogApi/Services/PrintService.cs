@@ -1734,6 +1734,7 @@ public sealed class PrintService(
         // second matches no row. IX_Prints_User_ExternalSource_ExternalId rejects it instead when a
         // create for the same job committed in between.
         var startDate = dto.StartDate;
+        var fileHash = PrintFileHashes.Parse(dto.FileHash);
         var now = DateTime.UtcNow;
         int updated;
         try
@@ -1748,6 +1749,7 @@ public sealed class PrintService(
                     .SetProperty(p => p.ExternalId, externalId)
                     .SetProperty(p => p.ConnectionId, p => connectionId ?? p.ConnectionId)
                     .SetProperty(p => p.StartDate, p => p.StartDate ?? startDate)
+                    .SetProperty(p => p.FileHash, p => p.FileHash ?? fileHash)
                     .SetProperty(p => p.UpdatedById, userId)
                     // ExecuteUpdate bypasses the context's SaveChanges timestamping.
                     .SetProperty(p => p.UpdatedDate, now));
