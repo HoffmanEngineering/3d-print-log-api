@@ -85,7 +85,7 @@ public class AddPrintDTO : IValidatableObject
     /// own identity for the file that is the same for every job of it and changes when it is
     /// re-sliced (printlog-bridge#40). Your prints with the same hash are prints of the same file.
     /// </summary>
-    [StringLength(40)]
+    // No [StringLength]: PrintFileHashes checks the length too, so a bad hash gets one message.
     public string? FileHash { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

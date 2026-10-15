@@ -31,7 +31,7 @@ public class ClaimPrintDto : IValidatableObject
     /// The file's identity, as on create (40 hex digits). Applied only when the print has no
     /// hash yet, so an OctoPrint SHA-1 already on it is kept.
     /// </summary>
-    [StringLength(40)]
+    // No [StringLength]: PrintFileHashes checks the length too, so a bad hash gets one message.
     public string? FileHash { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

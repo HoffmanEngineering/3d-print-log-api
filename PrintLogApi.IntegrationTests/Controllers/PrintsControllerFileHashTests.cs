@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
 
@@ -64,6 +65,69 @@ public class PrintsControllerFileHashTests(CustomWebApplicationFactory factory) 
         var response = await PostAsync(NewPrint(fileHash: fileHash));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostPrint_ExplicitNullFileHash_StoresNone()
+    {
+        var body = NewPrint();
+        body["fileHash"] = null;
+
+        var created = await ReadAsync(await PostAsync(body));
+
+        Assert.Null((await LoadPrintAsync(created.Id)).FileHash);
+    }
+
+    [Theory]
+    [InlineData("0x00112233445566778899aabbccddeeff00112233")] // 0x and 20 bytes
+    [InlineData("0x112233445566778899aabbccddeeff00112233")] // 0x and 40 characters in all
+    public async Task PostPrint_HexPrefixedFileHash_Returns400(string fileHash)
+    {
+        var response = await PostAsync(NewPrint(fileHash: fileHash));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostPrint_TooLongFileHash_SaysWhatAFileHashIs()
+    {
+        // One rule, one message: not a length limit first and the format after.
+        var response = await PostAsync(NewPrint(fileHash: Convert.ToHexStringLower(Identity) + "00"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(PrintFileHashes.ValidationMessage, problem);
+        Assert.DoesNotContain("length", problem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PostPrint_ReplayedPair_KeepsTheStoredHash()
+    {
+        var body = NewPrint(fileHash: Convert.ToHexStringLower(Identity));
+        body["externalSource"] = "moonraker";
+        body["externalId"] = $"{Guid.NewGuid()}:{Random.Shared.Next(1, 100000)}";
+        var created = await ReadAsync(await PostAsync(body));
+
+        body["fileHash"] = Convert.ToHexStringLower(Enumerable.Repeat((byte)0xCD, 20).ToArray());
+        var replay = await PostAsync(body);
+
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(created.Id, (await ReadAsync(replay)).Id);
+        Assert.Equal(Identity, (await LoadPrintAsync(created.Id)).FileHash);
+    }
+
+    [Fact]
+    public async Task Claim_ReplayedPair_KeepsTheStoredHash()
+    {
+        var created = await ReadAsync(await PostAsync(NewPrint()));
+        var claim = Claim(Convert.ToHexStringLower(Identity));
+        await ReadAsync(await ClaimAsync(created.Id, claim));
+
+        claim["fileHash"] = Convert.ToHexStringLower(Enumerable.Repeat((byte)0xCD, 20).ToArray());
+        var replay = await ClaimAsync(created.Id, claim);
+
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(Identity, (await LoadPrintAsync(created.Id)).FileHash);
     }
 
     [Fact]
