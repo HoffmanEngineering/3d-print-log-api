@@ -13,7 +13,9 @@ public class FileAttachmentService(
 {
     private const string AttachmentContainer = "printattachments";
     private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200MB
-    private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj" };
+    // Model files, and an MP4 video: the print's timelapse, which printlog-bridge attaches from
+    // moonraker-timelapse (printlog-bridge#42).
+    private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj", ".mp4" };
 
     public async Task<GetUploadUrlResponse> GetUploadUrlAsync(long printId, long userId, GetUploadUrlRequest request)
     {
