@@ -122,11 +122,13 @@ public class TagsController(ITagService tagService, TelemetryClient telemetry) :
     /// <summary>Replace the tags on one of your prints.</summary>
     /// <remarks>
     /// Send the complete set: tags left out are removed from the print, and an empty `tagIds`
-    /// removes them all. Duplicates are ignored. At most 20 tags per print.
+    /// removes them all; `tagIds` itself is required. Duplicates are ignored. At most 20 tags
+    /// per print. The print itself is not changed, not even its updated date.
     /// </remarks>
     /// <response code="200">The print's tags, ordered by name.</response>
     /// <response code="400">A tag id is not one of yours, or there are too many.</response>
     /// <response code="404">You have no print with this id.</response>
+    /// <response code="409">Another request changed this print's tags at the same moment. Retry.</response>
     // Lives here rather than on PrintsController: it is a tag operation addressed by print, and
     // the route keeps it where a reader of /api/Prints/{id} expects it.
     [HttpPut("/api/Prints/{printId}/tags")]
@@ -134,6 +136,7 @@ public class TagsController(ITagService tagService, TelemetryClient telemetry) :
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<List<TagDto>>> PutPrintTags(
         long printId, SetPrintTagsDto dto, CancellationToken cancellationToken)
     {
@@ -142,7 +145,8 @@ public class TagsController(ITagService tagService, TelemetryClient telemetry) :
 
         try
         {
-            var tags = await tagService.SetPrintTagsAsync(userId, printId, dto.TagIds ?? [], cancellationToken);
+            // Never null here: SetPrintTagsDto.Validate rejects a missing tagIds with a 400.
+            var tags = await tagService.SetPrintTagsAsync(userId, printId, dto.TagIds!, cancellationToken);
             if (tags == null)
                 return NotFound();
 
@@ -153,5 +157,6 @@ public class TagsController(ITagService tagService, TelemetryClient telemetry) :
             return tags;
         }
         catch (BadRequestException ex) { return BadRequest(ex.Message); }
+        catch (PrintTagsConflictException ex) { return Conflict(ex.Message); }
     }
 }

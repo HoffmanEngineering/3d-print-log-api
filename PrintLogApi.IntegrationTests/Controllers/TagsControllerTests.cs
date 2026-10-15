@@ -329,6 +329,66 @@ public class TagsControllerTests(CustomWebApplicationFactory factory) : IClassFi
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task SetPrintTags_AppliesTheLimitAfterRemovingDuplicates()
+    {
+        var tag = await CreateTag(Unique("Repeated"));
+        var printId = await CreateOwnPrint();
+        var ids = Enumerable.Repeat(tag.Id, Tag.MaxTagsPerPrint + 5).ToArray();
+
+        var response = await Send(HttpMethod.Put, $"/api/Prints/{printId}/tags", new SetPrintTagsDto { TagIds = ids });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"tagIDs_typo\": []}")]
+    [InlineData("{\"tagIds\": null}")]
+    public async Task SetPrintTags_WithoutTagIds_IsRejected_AndKeepsTheTags(string body)
+    {
+        // A missing or misspelled field must not read as "remove every tag".
+        var tag = await CreateTag(Unique("Kept"));
+        var printId = await CreateOwnPrint();
+        await SetPrintTags(printId, tag.Id);
+
+        var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{printId}/tags")
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single((await Summary($"filterByTagIds={tag.Id}")).Items);
+    }
+
+    [Fact]
+    public async Task SetPrintTags_LeavesThePrintItselfAlone()
+    {
+        // Tags are private, so a tag change must not move the print's UpdatedDate (the public
+        // sitemap's lastmod) or rewrite any of its columns.
+        var tag = await CreateTag(Unique("Quiet"));
+        var printId = await CreateOwnPrint(viewStatus: Print.PrintViewStatus.Public);
+        DateTime before;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            before = await context.Prints.Where(p => p.Id == printId).Select(p => p.UpdatedDate)
+                .SingleAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SetPrintTags(printId, tag.Id);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var after = await context.Prints.Where(p => p.Id == printId).Select(p => p.UpdatedDate)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(before, after);
+        }
+    }
+
     // ---- Summary filter and visibility ---------------------------------------------------
 
     [Fact]

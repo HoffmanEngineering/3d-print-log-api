@@ -96,6 +96,9 @@ public class TagService(PrintLogContext context, ICacheVersionService cacheVersi
         if (await context.Tags.AnyAsync(t => t.CreatedById == userId && t.NormalizedName == normalized, ct))
             throw new TagNameConflictException(name);
 
+        // A soft limit: two creates racing at 199 can both pass and leave 201. It bounds the
+        // stats query and the autocomplete, which a tag or two over cannot hurt, so it is not
+        // worth a lock on every create.
         if (await context.Tags.CountAsync(t => t.CreatedById == userId, ct) >= Tag.MaxTagsPerUser)
             throw new BadRequestException($"You can have at most {Tag.MaxTagsPerUser} tags.");
 
@@ -157,15 +160,10 @@ public class TagService(PrintLogContext context, ICacheVersionService cacheVersi
     public async Task<List<TagDto>?> SetPrintTagsAsync(
         long userId, long printId, IEnumerable<Guid> tagIds, CancellationToken ct = default)
     {
+        // The limit applies to distinct ids: a client repeating one id has asked for one tag.
         var wanted = tagIds.Distinct().ToList();
         if (wanted.Count > Tag.MaxTagsPerPrint)
             throw new BadRequestException($"A print can have at most {Tag.MaxTagsPerPrint} tags.");
-
-        var print = await context.Prints
-            .Include(p => p.PrintTags!)
-            .FirstOrDefaultAsync(p => p.Id == printId && p.CreatedById == userId, ct);
-        if (print == null)
-            return null;
 
         var owned = await context.Tags
             .Where(t => t.CreatedById == userId && wanted.Contains(t.Id))
@@ -177,16 +175,59 @@ public class TagService(PrintLogContext context, ICacheVersionService cacheVersi
         if (owned.Count != wanted.Count)
             throw new BadRequestException("One or more tags do not exist.");
 
-        var current = print.PrintTags!;
-        foreach (var link in current.Where(pt => !wanted.Contains(pt.TagId)).ToList())
-            current.Remove(link);
-        foreach (var tagId in wanted.Where(id => current.All(pt => pt.TagId != id)))
-            current.Add(new PrintTag { PrintId = printId, TagId = tagId });
+        bool found;
+        try
+        {
+            // SqlServerRetryingExecutionStrategy forbids a user transaction outside a strategy,
+            // so the whole transaction is the retriable unit.
+            var strategy = context.Database.CreateExecutionStrategy();
+            found = await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await context.Database.BeginTransactionAsync(ct);
 
-        // The print's own UpdatedDate moves too: tags are part of the print as its owner sees it.
-        print.UpdatedById = userId;
-        context.Entry(print).State = EntityState.Modified;
-        await context.SaveChangesAsync(ct);
+                // A no-op UPDATE of the print row, for two things at once. It is the ownership
+                // check (0 rows: no such print of yours). And it holds the row's lock until
+                // commit, so two requests replacing the same print's tags run one after the
+                // other: without it, each could delete the other's old links before either
+                // inserted, leaving the union of both sets, past the per-print limit.
+                //
+                // It writes no value. The print is deliberately NOT loaded and saved: that
+                // rewrote every column from this request's snapshot, reverting whatever a
+                // connector's /complete wrote meanwhile. Nor does UpdatedDate move: tags are
+                // private, and a public print's UpdatedDate is the sitemap's lastmod, which a
+                // change no visitor can see should not touch.
+                var locked = await context.Prints
+                    .Where(p => p.Id == printId && p.CreatedById == userId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(p => p.UpdatedById, p => p.UpdatedById), ct);
+                if (locked == 0)
+                    return false;
+
+                await context.PrintTags
+                    .Where(pt => pt.PrintId == printId && !wanted.Contains(pt.TagId))
+                    .ExecuteDeleteAsync(ct);
+
+                var existing = await context.PrintTags
+                    .Where(pt => pt.PrintId == printId)
+                    .Select(pt => pt.TagId)
+                    .ToListAsync(ct);
+                foreach (var tagId in wanted.Except(existing))
+                    context.PrintTags.Add(new PrintTag { PrintId = printId, TagId = tagId });
+
+                await context.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                return true;
+            });
+        }
+        catch (DbUpdateException ex) when (UniqueConstraintViolation.IsUniqueViolation(ex))
+        {
+            // The row lock makes this unreachable on SQL Server, but a lost race on the primary
+            // key is a conflict to retry, never a 500.
+            context.ChangeTracker.Clear();
+            throw new PrintTagsConflictException(ex);
+        }
+
+        if (!found)
+            return null;
 
         cacheVersionService.InvalidateUserCache(userId);
         return await TagsForPrint(printId, ct);
