@@ -699,8 +699,9 @@ public class PrintsController(
     /// </summary>
     private async Task<ActionResult<PrintDetailDTO>> EditPrint(long id, Func<long, Task<Print>> edit)
     {
-        var existingPrint = await printService.GetPrintById(id);
-        if (existingPrint == null)
+        // Two fields, untracked: the edit loads what it changes itself (#202).
+        var editors = await printService.GetPrintEditors(id);
+        if (editors == null)
         {
             return NotFound();
         }
@@ -711,7 +712,7 @@ public class PrintsController(
             return Unauthorized();
         }
 
-        if (userId != existingPrint.CreatedById && userId != existingPrint.Printer.UserId)
+        if (userId != editors.CreatedById && userId != editors.PrinterOwnerId)
         {
             return Forbid();
         }
@@ -721,7 +722,7 @@ public class PrintsController(
             var updatedPrint = await edit(userId.Value);
 
             // Same reason as PutPrint: the printer's owner can edit a print another user created.
-            InvalidateAffectedUserCaches(userId.Value, existingPrint.CreatedById, existingPrint.Printer.UserId);
+            InvalidateAffectedUserCaches(userId.Value, editors.CreatedById, editors.PrinterOwnerId);
 
             return Ok(mapper.Map<PrintDetailDTO>(updatedPrint));
         }
@@ -910,7 +911,9 @@ public class PrintsController(
     /// creating a duplicate, so retries and backfills are safe. On such a replay only the fields a
     /// connector owns are applied (`status`, the durations, the filament totals and the usage
     /// rows), and only when sent; the title, notes and every other field keep any edits the user
-    /// made. A finished print is never moved back to Pending or Printing. `mcp` is reserved.
+    /// made. A replay with `status` Pending or Printing, or with no `status`, onto a finished print
+    /// changes nothing and returns the print as it is, so a start retried after the finish cannot
+    /// undo it. `mcp` is reserved.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>

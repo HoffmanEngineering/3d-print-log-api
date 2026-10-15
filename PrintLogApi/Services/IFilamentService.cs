@@ -127,8 +127,10 @@ public interface IFilamentService
 
     /// <summary>
     /// Gives a number to each of the user's spools that has none, oldest first. Only a spool the
-    /// previous app version created while the #174 migration ran can be unnumbered, so this is
-    /// one indexed query in the normal case. Call it before resolving or listing by number.
+    /// previous app version created while the #174 migration ran can be unnumbered, so this
+    /// normally finds nothing, but the query scans the user's filaments (no index serves
+    /// <c>SpoolNumber IS NULL</c>). Call it before resolving or listing by number, off any hot
+    /// path: the Spoolman inventory runs it on a cache miss only (#195).
     /// </summary>
     Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default);
     Task<string[]> GetFilamentPurchaseLocations(long userId);

@@ -725,6 +725,33 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         Assert.Equal(PrintStatus.Printing, (await GetDetailAsync(created.Id)).Status);
     }
 
+    [Fact]
+    public async Task Patch_AsPrinterOwnerWhoDidNotCreateThePrint_SucceedsAndInvalidatesTheCreatorsCache()
+    {
+        // The secondary user's print on the test user's printer: the caller owns the printer only.
+        var printId = await InsertPrintAsync(IntegrationTestSeeder.TestPrinterId, IntegrationTestSeeder.SecondaryUserId);
+        var creatorVersionBefore = CacheVersionOf(IntegrationTestSeeder.SecondaryUserId);
+
+        var response = await PatchAsync(printId, new { title = "Renamed by the printer's owner" });
+
+        Assert.Equal("Renamed by the printer's owner", (await ReadAsync(response)).Title);
+        Assert.NotEqual(creatorVersionBefore, CacheVersionOf(IntegrationTestSeeder.SecondaryUserId));
+    }
+
+    [Fact]
+    public async Task Complete_AsCreatorOnAnotherUsersPrinter_SucceedsAndInvalidatesThePrinterOwnersCache()
+    {
+        // The test user's print on the secondary user's printer: the caller created the print only.
+        var foreignPrinterId = await CreatePrinterAsync(IntegrationTestSeeder.SecondaryUserOAuthId);
+        var printId = await InsertPrintAsync(foreignPrinterId, IntegrationTestSeeder.TestUserId);
+        var printerOwnerVersionBefore = CacheVersionOf(IntegrationTestSeeder.SecondaryUserId);
+
+        var response = await CompleteAsync(printId, new CompletePrintDto { Status = PrintStatus.Success });
+
+        Assert.Equal(PrintStatus.Success, (await ReadAsync(response)).Status);
+        Assert.NotEqual(printerOwnerVersionBefore, CacheVersionOf(IntegrationTestSeeder.SecondaryUserId));
+    }
+
     #endregion
 
     #region complete notifications (#166)
@@ -813,6 +840,37 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     #endregion
+
+    /// <summary>
+    /// A Printing print inserted directly, so its creator and its printer's owner can differ,
+    /// which the API never creates.
+    /// </summary>
+    private async Task<long> InsertPrintAsync(long printerId, long creatorId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var now = DateTime.UtcNow;
+        var print = new Print
+        {
+            Title = $"cross-owner {Guid.NewGuid():N}",
+            PrinterId = printerId,
+            Status = PrintStatus.Printing,
+            ViewStatus = PrintViewStatus.Private,
+            CreatedById = creatorId,
+            CreatedDate = now,
+            UpdatedById = creatorId,
+            UpdatedDate = now,
+        };
+        db.Prints.Add(print);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return print.Id;
+    }
+
+    private string CacheVersionOf(long userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<ICacheVersionService>().GetUserCacheVersion(userId);
+    }
 
     private async Task<List<Notification>> NotificationsForPrintAsync(long printId)
     {
