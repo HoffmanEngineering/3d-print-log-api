@@ -9,6 +9,7 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 /// POST/PUT/PATCH/DELETE made with a connector credential, keyed on that credential rather than
 /// on the user. Today the only connector credential is a personal API key; device tokens (#148)
 /// are meant to plug into the same partition.
+/// The connection heartbeat is exempt (#200).
 ///
 /// The suite runs with the budget disabled; these tests re-enable it with a tiny burst and a refill
 /// of one request per minute, so nothing refills while a test runs and the window is predictable.
@@ -76,7 +77,24 @@ public class ConnectorWriteRateLimitTests
             .GetProperty("publicKey").GetString()!;
     }
 
-    /// <summary>A heartbeat: the cheapest write a connector makes, and a deterministic 2xx.</summary>
+    /// <summary>
+    /// A counted write that needs nothing seeded and is a deterministic 2xx. Heartbeats used to
+    /// serve here, but they are exempt from the budget (#200).
+    /// </summary>
+    private static HttpRequestMessage Write()
+        => new(HttpMethod.Post, "/api/Projects")
+        {
+            Content = JsonContent.Create(new { Name = "Connector rate limit project" }),
+        };
+
+    /// <summary>A print write: what a backfill sends, and what the budget exists to bound.</summary>
+    private static HttpRequestMessage PrintWrite()
+        => new(HttpMethod.Post, "/api/Prints")
+        {
+            Content = JsonContent.Create(new { Title = "Backfilled print" }),
+        };
+
+    /// <summary>A connection heartbeat, exempt from the budget (#200).</summary>
     private static HttpRequestMessage Heartbeat(string instanceId)
         => new(HttpMethod.Put, $"/api/Connections/{instanceId}")
         {
@@ -109,7 +127,7 @@ public class ConnectorWriteRateLimitTests
             var responses = new List<HttpResponseMessage>();
             for (var i = 0; i < Burst + 1; i++)
             {
-                responses.Add(await client.SendAsync(WithKey(Heartbeat("bridge-exhaust"), key), TestContext.Current.CancellationToken));
+                responses.Add(await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken));
             }
 
             // Success, not merely "not 429": a mistyped route would 404 or 405 without ever
@@ -137,12 +155,12 @@ public class ConnectorWriteRateLimitTests
 
             for (var i = 0; i < Burst + 1; i++)
             {
-                await client.SendAsync(WithKey(Heartbeat("bridge-first"), first), TestContext.Current.CancellationToken);
+                await client.SendAsync(WithKey(Write(), first), TestContext.Current.CancellationToken);
             }
 
             // Two bridges of one user each have their own budget: a backfill on one must not
-            // stall the heartbeat of another.
-            var other = await client.SendAsync(WithKey(Heartbeat("bridge-second"), second), TestContext.Current.CancellationToken);
+            // stall the writes of another.
+            var other = await client.SendAsync(WithKey(Write(), second), TestContext.Current.CancellationToken);
             Assert.True(other.IsSuccessStatusCode, $"expected 2xx, got {(int)other.StatusCode}");
         }
 
@@ -155,15 +173,42 @@ public class ConnectorWriteRateLimitTests
 
             for (var i = 0; i < Burst + 1; i++)
             {
-                await client.SendAsync(WithKey(Heartbeat("bridge-web"), key), TestContext.Current.CancellationToken);
+                await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken);
             }
 
             // The same user, signed in to the web app, writes well past the connector burst.
             for (var i = 0; i < Burst * 2; i++)
             {
-                var response = await client.SendAsync(AsUser(Heartbeat("bridge-web"), user), TestContext.Current.CancellationToken);
+                var response = await client.SendAsync(AsUser(Write(), user), TestContext.Current.CancellationToken);
                 Assert.True(response.IsSuccessStatusCode, $"expected 2xx, got {(int)response.StatusCode}");
             }
+        }
+
+        [Fact]
+        public async Task Heartbeats_AreExempt_WhileTheKeysPrintWritesAreStillLimited()
+        {
+            var client = factory.CreateClient();
+            var user = AddUser(factory, "auth0|connector-limit-heartbeat");
+            var key = await CreateApiKey(client, user);
+
+            for (var i = 0; i < Burst; i++)
+            {
+                var response = await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken);
+                Assert.True(response.IsSuccessStatusCode, $"expected 2xx, got {(int)response.StatusCode}");
+            }
+
+            // A backfill has drained the key's bucket. Its heartbeats must still land, or three
+            // missed ones mark the bridge stale and the Moonraker notifier starts duplicating its
+            // prints. Several, so a heartbeat that spent a token would run out within the test.
+            for (var i = 0; i < Burst + 1; i++)
+            {
+                var heartbeat = await client.SendAsync(WithKey(Heartbeat("bridge-heartbeat"), key), TestContext.Current.CancellationToken);
+                Assert.True(heartbeat.IsSuccessStatusCode, $"expected 2xx, got {(int)heartbeat.StatusCode}");
+            }
+
+            // The exemption is the heartbeat's alone: the same key's print writes are still held.
+            var print = await client.SendAsync(WithKey(PrintWrite(), key), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.TooManyRequests, print.StatusCode);
         }
 
         [Fact]
@@ -182,7 +227,7 @@ public class ConnectorWriteRateLimitTests
             // Reads spent nothing, so the whole write burst is still there.
             for (var i = 0; i < Burst; i++)
             {
-                var response = await client.SendAsync(WithKey(Heartbeat("bridge-reads"), key), TestContext.Current.CancellationToken);
+                var response = await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken);
                 Assert.True(response.IsSuccessStatusCode, $"expected 2xx, got {(int)response.StatusCode}");
             }
         }
@@ -197,10 +242,10 @@ public class ConnectorWriteRateLimitTests
             var user = AddUser(factory, "auth0|connector-limit-rounding");
             var key = await CreateApiKey(client, user);
 
-            var first = await client.SendAsync(WithKey(Heartbeat("bridge-rounding"), key), TestContext.Current.CancellationToken);
+            var first = await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken);
             Assert.True(first.IsSuccessStatusCode, $"expected 2xx, got {(int)first.StatusCode}");
 
-            var limited = await client.SendAsync(WithKey(Heartbeat("bridge-rounding"), key), TestContext.Current.CancellationToken);
+            var limited = await client.SendAsync(WithKey(Write(), key), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
 
             // 8.57 seconds must be advertised as 9. Truncating to 8 sends a well-behaved client

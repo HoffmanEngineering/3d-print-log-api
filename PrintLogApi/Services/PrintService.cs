@@ -700,6 +700,13 @@ public sealed class PrintService(
         return print;
     }
 
+    public Task<PrintEditors?> GetPrintEditors(long id) =>
+        context.Prints
+            .AsNoTracking()
+            .Where(p => p.Id == id)
+            .Select(p => new PrintEditors(p.CreatedById, p.Printer.UserId))
+            .FirstOrDefaultAsync();
+
     public async Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate)
     {
         // AddPrintDTO.Validate has already rejected half a pair, so either both are set or neither.
@@ -769,13 +776,22 @@ public sealed class PrintService(
     /// </summary>
     private async Task<bool> ApplyConnectorOwnedFields(Print existing, AddPrintDTO replay, long userId)
     {
-        var changed = false;
-
         // A finished print is never reopened: a start call that timed out client-side but landed
-        // can be retried after the finish, and must not put the print back to Printing.
+        // can be retried after the finish, and must not put the print back to Printing. Nor may it
+        // touch anything else: its durations and usage are the start's estimates, and replacing
+        // the finished rows would drop the actual amounts, slots and spool links the finish (or
+        // /complete) recorded, moving the spool's remaining weight back to the estimate (#191).
+        // A finish replayed onto a finished print is not a reopen, and still applies. A replay that
+        // omits status arrives undefined and is not a finish either, so it is treated as a start.
         var reopens = existing.Status is not (PrintStatus.Pending or PrintStatus.Printing)
-            && replay.Status is PrintStatus.Pending or PrintStatus.Printing;
-        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status && !reopens)
+            && (!Enum.IsDefined(replay.Status) || replay.Status is PrintStatus.Pending or PrintStatus.Printing);
+        if (reopens)
+        {
+            return false;
+        }
+
+        var changed = false;
+        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status)
         {
             existing.Status = replay.Status;
             changed = true;
