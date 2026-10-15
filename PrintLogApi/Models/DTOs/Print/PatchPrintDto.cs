@@ -25,8 +25,10 @@ public class PatchPrintDto : IValidatableObject
     /// <summary>The printer this print ran on. Must belong to the caller.</summary>
     public long? PrinterId { get; set; }
 
+    [Range(0, int.MaxValue, ErrorMessage = "{0} cannot be negative.")]
     public int? EstimatedPrintTimeInSeconds { get; set; }
 
+    [Range(0, int.MaxValue, ErrorMessage = "{0} cannot be negative.")]
     public int? PrintTimeInSeconds { get; set; }
 
     [StringLength(50000)]
@@ -52,6 +54,7 @@ public class PatchPrintDto : IValidatableObject
     /// Sending it (an empty list included) also clears the legacy <c>filamentType</c>,
     /// <c>filamentUsageMg</c> and <c>estimatedFilamentUsageMg</c> fields, which the rows supersede.
     /// </summary>
+    [MaxLength(CompletePrintDto.MaxFilamentUsageRows)]
     public ICollection<PutPrintFilamentSummaryDto>? FilamentUsage { get; set; }
 
     /// <summary>
@@ -81,6 +84,15 @@ public class PatchPrintDto : IValidatableObject
             }
         }
 
+        // Checked here rather than with [Range] on the row type, which PUT shares and has never
+        // range-checked (#198).
+        if ((FilamentUsage ?? []).Any(HasNegativeValue))
+        {
+            yield return new ValidationResult(
+                "Usage amounts, lengths, volumes and slots cannot be negative.",
+                [nameof(FilamentUsage)]);
+        }
+
         var set = new (string Field, bool IsSet)[]
         {
             ("startDate", StartDate.HasValue),
@@ -99,4 +111,10 @@ public class PatchPrintDto : IValidatableObject
             }
         }
     }
+
+    private static bool HasNegativeValue(PutPrintFilamentSummaryDto row) =>
+        row.Slot < 0 ||
+        row.AmountMg < 0 || row.EstimatedAmountMg < 0 ||
+        row.LengthInM < 0 || row.EstimatedLengthInM < 0 ||
+        row.VolumeMl < 0 || row.EstimatedVolumeMl < 0;
 }

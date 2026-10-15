@@ -1636,10 +1636,22 @@ public sealed class PrintService(
                 {
                     throw new BadRequestException("endedAt is before the print's start date.");
                 }
-                printTime ??= (int)(endedAt - start).TotalSeconds;
+                var elapsed = (endedAt - start).TotalSeconds;
+                if (printTime is null && elapsed > int.MaxValue)
+                {
+                    // The cast below would saturate rather than throw, storing a nonsense duration.
+                    throw new BadRequestException("endedAt is too far after the print's start date.");
+                }
+                printTime ??= (int)elapsed;
             }
             else if (printTime.HasValue)
             {
+                // An endedAt within printTime of DateTimeOffset.MinValue has no representable
+                // start, and AddSeconds would throw an unhandled 500 (#198).
+                if ((endedAt - DateTimeOffset.MinValue).TotalSeconds < printTime.Value)
+                {
+                    throw new BadRequestException("endedAt is earlier than printTimeInSeconds allows.");
+                }
                 print.StartDate = endedAt.AddSeconds(-printTime.Value);
             }
         }

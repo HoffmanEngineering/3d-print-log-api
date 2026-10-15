@@ -264,6 +264,53 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("printTimeInSeconds")]
+    [InlineData("estimatedPrintTimeInSeconds")]
+    public async Task Patch_NegativeDuration_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new Dictionary<string, object> { [field] = -1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("amountMg")]
+    [InlineData("estimatedAmountMg")]
+    [InlineData("lengthInM")]
+    [InlineData("estimatedLengthInM")]
+    [InlineData("volumeMl")]
+    [InlineData("estimatedVolumeMl")]
+    [InlineData("slot")]
+    public async Task Patch_NegativeUsageValue_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new Dictionary<string, object> { ["amountMg"] = 1_000, [field] = -1 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_MoreUsageRowsThanTheCap_IsBadRequest()
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows + 1)
+                .Select(_ => new { amountMg = 1_000 })
+                .ToArray(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task Put_StillReplacesTheWholePrint()
     {
@@ -651,6 +698,97 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_EndedAtTooCloseToTheMinimumForTheDuration_IsBadRequest()
+    {
+        // Returned 500 before #198: deriving the start date ran off the start of DateTimeOffset.
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, startDate: null);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            EndedAt = DateTimeOffset.MinValue.AddMinutes(10),
+            PrintTimeInSeconds = 3_600,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_EndedAtTooFarAfterTheStartDate_IsBadRequest()
+    {
+        var start = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, startDate: start);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            EndedAt = DateTimeOffset.MaxValue,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null((await GetDetailAsync(created.Id)).PrintTimeInSeconds);
+    }
+
+    [Theory]
+    [InlineData("amountMg")]
+    [InlineData("lengthInM")]
+    [InlineData("volumeMl")]
+    [InlineData("slot")]
+    public async Task Complete_NegativeUsageValue_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        var row = new CompletePrintFilamentUsageDto { AmountMg = 1_000 };
+        switch (field)
+        {
+            case "amountMg": row.AmountMg = -1; break;
+            case "lengthInM": row.LengthInM = -0.5; break;
+            case "volumeMl": row.VolumeMl = -0.5; break;
+            case "slot": row.Slot = -1; break;
+        }
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [row],
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_MoreUsageRowsThanTheCap_IsBadRequest()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows + 1)
+                .Select(_ => new CompletePrintFilamentUsageDto { LengthInM = 1 })
+                .ToList(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty((await GetDetailAsync(created.Id)).FilamentUsage!);
+    }
+
+    [Fact]
+    public async Task Complete_UsageRowsAtTheCap_AreAccepted()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows)
+                .Select(_ => new CompletePrintFilamentUsageDto { LengthInM = 1 })
+                .ToList(),
+        }));
+
+        Assert.Equal(CompletePrintDto.MaxFilamentUsageRows, completed.FilamentUsage!.Count);
     }
 
     [Theory]
