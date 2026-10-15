@@ -1344,8 +1344,10 @@ public class FilamentService(
 
     public async Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default)
     {
-        // The common case is one indexed EXISTS and nothing else: only a spool the previous app
-        // version created while the #174 migration ran can be unnumbered.
+        // Only a spool the previous app version created while the #174 migration ran can be
+        // unnumbered, so this normally finds nothing. It is still not cheap: the only SpoolNumber
+        // index is filtered IS NOT NULL, so IS NULL walks every filament the user owns through
+        // IX_Filaments_CreatedById. Keep it off hot paths (#195).
         var unnumbered = await context.Filaments
             .Where(f => f.CreatedById == userId && f.SpoolNumber == null)
             .OrderBy(f => f.CreatedDate).ThenBy(f => f.Id)

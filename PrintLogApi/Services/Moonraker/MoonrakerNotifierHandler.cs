@@ -57,9 +57,9 @@ public class MoonrakerNotifierHandler(
                     break;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            logger.LogError("An error occurred in the Moonraker Webhook", message);
+            logger.LogError(ex, "An error occurred in the Moonraker Webhook");
             throw;
         }
     }

@@ -38,8 +38,7 @@ public sealed class SpoolmanInventoryService(
     PrintLogContext context,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersion,
-    IFilamentService filaments) : ISpoolmanInventoryService
+    ICacheVersionService cacheVersion) : ISpoolmanInventoryService
 {
     /// <summary>The material category that holds spools of filament.</summary>
     public const string FilamentCategory = "filament";
@@ -52,10 +51,6 @@ public sealed class SpoolmanInventoryService(
 
     public async Task<SpoolmanInventory> GetInventoryAsync(long userId, CancellationToken ct)
     {
-        // Numbered here, outside the cached factory: it writes, and only a spool the previous
-        // app version created during the #174 migration can need it. One indexed query otherwise.
-        await filaments.NumberUnnumberedSpoolsAsync(userId, ct);
-
         var key = $"spoolman_inventory:{userId}:{cacheVersion.GetUserCacheVersion(userId)}";
 
         // CachedComputation's scope and HybridCache's token: see CachedComputation.
@@ -63,9 +58,30 @@ public sealed class SpoolmanInventoryService(
             key,
             (computation, userId),
             static (state, token) => state.computation.RunAsync(
-                (services, innerToken) => LoadAsync(services.GetRequiredService<PrintLogContext>(), state.userId, innerToken),
+                (services, innerToken) => NumberAndLoadAsync(services, state.userId, innerToken),
                 token),
             cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// The cache-miss path. Unnumbered spools are numbered first, so the inventory built straight
+    /// after includes them under their new numbers and <c>/use</c> can resolve them by number.
+    ///
+    /// <para><b>On a miss only (#195).</b> Only a spool the previous app version created while the
+    /// #174 migration ran can be unnumbered, so outside that deploy window the numbering query
+    /// never finds anything, and it is not cheap: <c>SpoolNumber IS NULL</c> cannot use the
+    /// filtered <c>IS NOT NULL</c> index, so it walks every spool the user owns. On every request
+    /// it ran about every 5 s per printing printer, for <c>/use</c>. A straggler is picked up by
+    /// the first miss after it appears; a new instance starts with an empty cache, any write
+    /// bumps the version, and the entry's absolute expiry caps the wait at 15 minutes.</para>
+    ///
+    /// <para>Numbering does not bump the cache version, and must not: this runs inside the factory
+    /// for the key that version names, so a bump here would orphan the entry being built.</para>
+    /// </summary>
+    private static async Task<SpoolmanInventory> NumberAndLoadAsync(IServiceProvider services, long userId, CancellationToken ct)
+    {
+        await services.GetRequiredService<IFilamentService>().NumberUnnumberedSpoolsAsync(userId, ct);
+        return await LoadAsync(services.GetRequiredService<PrintLogContext>(), userId, ct);
     }
 
     private static async Task<SpoolmanInventory> LoadAsync(PrintLogContext db, long userId, CancellationToken ct)

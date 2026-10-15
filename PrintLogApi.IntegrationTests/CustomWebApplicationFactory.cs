@@ -47,6 +47,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     /// </summary>
     public DocsSiteStub DocsSite { get; } = new();
 
+    /// <summary>
+    /// GitHub, where the latest agent release is read from (printlog-bridge#39). Every host gets
+    /// it, so no test reaches api.github.com; unseeded, every read 404s and no connection reports
+    /// a latest version.
+    /// </summary>
+    public DocsSiteStub GitHub { get; } = new();
+
     /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
     public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
 
@@ -166,6 +173,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             // The docs surface fetches the site's Markdown twins. Point it at the stub instead.
             services.AddHttpClient(PrintLogApi.Mcp.Docs.DocsCatalog.HttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => DocsSite.CreateHandler());
+            services.AddHttpClient(PrintLogApi.Services.AgentReleases.AgentReleaseCatalog.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => GitHub.CreateHandler());
 
             // Add test authentication scheme
             services.AddAuthentication(options =>
