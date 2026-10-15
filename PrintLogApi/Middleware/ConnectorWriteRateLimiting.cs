@@ -15,8 +15,14 @@ namespace PrintLogApi.Middleware;
 /// interactive user does, so web app traffic is never affected. Both remain subject to the
 /// ordinary per-user "api" budget, which this runs alongside, not instead of.
 ///
+/// The connection heartbeat (<c>PUT /api/Connections/{id}</c>) is exempt, through
+/// <see cref="ExemptFromConnectorWriteBudgetAttribute"/> (#200). A backfill retrying on
+/// <c>Retry-After</c> takes each token as it refills, so a heartbeat sharing its key's bucket would
+/// find it empty. Three missed heartbeats mark the connection stale, the Moonraker notifier stops
+/// being suppressed, and its prints duplicate the bridge's. The "api" budget still bounds it.
+///
 /// Partitioned on the credential, not the user: two bridges of one user each get their own
-/// budget, so a backfill on one cannot stall the other's heartbeats. Device tokens (#148) join by
+/// budget, so a backfill on one cannot stall the other's writes. Device tokens (#148) join by
 /// adding the same claim.
 ///
 /// It is a token bucket rather than the fixed windows used elsewhere, because the spec asks for a
@@ -58,6 +64,7 @@ public static class ConnectorWriteRateLimiting
                 || burst <= 0
                 || !IsWrite(httpContext.Request.Method)
                 || !(httpContext.Request.Path.StartsWithSegments(ApiPath) || httpContext.Request.Path.StartsWithSegments(SpoolmanApiPath))
+                || httpContext.GetEndpoint()?.Metadata.GetMetadata<ExemptFromConnectorWriteBudgetAttribute>() is not null
                 || ConnectorCredentialClaim.Get(httpContext.User) is not { } credential)
             {
                 return RateLimitPartition.GetNoLimiter("not-connector-write");

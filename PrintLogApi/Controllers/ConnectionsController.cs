@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
+using PrintLogApi.Middleware;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Connection;
 using PrintLogApi.Services;
@@ -82,6 +83,7 @@ public class ConnectionsController(
     /// <response code="201">The connection was registered.</response>
     /// <response code="400">Returned when a field is missing or too long, or the printer is not yours.</response>
     [HttpPut("{instanceId}")]
+    [ExemptFromConnectorWriteBudget]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
