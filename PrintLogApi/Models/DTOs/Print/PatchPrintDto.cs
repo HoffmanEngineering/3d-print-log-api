@@ -86,10 +86,16 @@ public class PatchPrintDto : IValidatableObject
 
         // Checked here rather than with [Range] on the row type, which PUT shares and has never
         // range-checked (#198).
-        if ((FilamentUsage ?? []).Any(HasNegativeValue))
+        var usage = FilamentUsage ?? [];
+        if (usage.Any(u => u is null))
+        {
+            yield return new ValidationResult("filamentUsage cannot contain null rows.", [nameof(FilamentUsage)]);
+        }
+        else if (usage.Any(IsOutOfRange))
         {
             yield return new ValidationResult(
-                "Usage amounts, lengths, volumes and slots cannot be negative.",
+                "Usage amounts, lengths, volumes and slots cannot be negative, lengths cannot exceed "
+                + $"{CompletePrintDto.MaxUsageLengthInM} m and volumes {CompletePrintDto.MaxUsageVolumeMl} ml.",
                 [nameof(FilamentUsage)]);
         }
 
@@ -112,9 +118,11 @@ public class PatchPrintDto : IValidatableObject
         }
     }
 
-    private static bool HasNegativeValue(PutPrintFilamentSummaryDto row) =>
+    private static bool IsOutOfRange(PutPrintFilamentSummaryDto row) =>
         row.Slot < 0 ||
         row.AmountMg < 0 || row.EstimatedAmountMg < 0 ||
-        row.LengthInM < 0 || row.EstimatedLengthInM < 0 ||
-        row.VolumeMl < 0 || row.EstimatedVolumeMl < 0;
+        row.LengthInM is < 0 or > CompletePrintDto.MaxUsageLengthInM ||
+        row.EstimatedLengthInM is < 0 or > CompletePrintDto.MaxUsageLengthInM ||
+        row.VolumeMl is < 0 or > CompletePrintDto.MaxUsageVolumeMl ||
+        row.EstimatedVolumeMl is < 0 or > CompletePrintDto.MaxUsageVolumeMl;
 }

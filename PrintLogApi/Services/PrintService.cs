@@ -1646,13 +1646,17 @@ public sealed class PrintService(
             }
             else if (printTime.HasValue)
             {
-                // An endedAt within printTime of DateTimeOffset.MinValue has no representable
-                // start, and AddSeconds would throw an unhandled 500 (#198).
-                if ((endedAt - DateTimeOffset.MinValue).TotalSeconds < printTime.Value)
+                // Caught rather than pre-checked: AddSeconds range-checks the local clock time as
+                // well as the UTC instant, so a negative offset near DateTimeOffset.MinValue
+                // throws even when the UTC arithmetic fits (#198).
+                try
+                {
+                    print.StartDate = endedAt.AddSeconds(-printTime.Value);
+                }
+                catch (ArgumentOutOfRangeException)
                 {
                     throw new BadRequestException("endedAt is earlier than printTimeInSeconds allows.");
                 }
-                print.StartDate = endedAt.AddSeconds(-printTime.Value);
             }
         }
 
@@ -1956,6 +1960,12 @@ public sealed class PrintService(
     }
 
     /// <summary>
+    /// A derived weight narrowed to the <c>int</c> column. Clamped because an unchecked
+    /// long-to-int cast wraps, storing a huge length as a negative weight (#198).
+    /// </summary>
+    private static int ToIntMg(long mg) => (int)Math.Clamp(mg, int.MinValue, int.MaxValue);
+
+    /// <summary>
     /// When we save the filament usage, we need to ensure that the filament weights, lengths and volume are correctly filled out.
     /// </summary>
     public async Task UpdateFilamentUsageWeights(Print print)
@@ -2006,7 +2016,7 @@ public sealed class PrintService(
                 // reaches DiameterMm.Value and throws.
                 if (pf.LengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
                 {
-                    pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                    pf.AmountMg = ToIntMg(GetAmountMgFromLength(pf.LengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm));
                     pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, diameterMm);
                 }
             }
@@ -2014,7 +2024,7 @@ public sealed class PrintService(
             {
                 if (pf.VolumeMl.HasValue)
                 {
-                    pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+                    pf.AmountMg = ToIntMg(GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm));
 
                     if (hasDiameter && filament.DiameterMm is { } diameterMm)
                     {
@@ -2040,7 +2050,7 @@ public sealed class PrintService(
                 // Same missing diameter test as the actual-measurement Length branch above.
                 if (pf.EstimatedLengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
                 {
-                    pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
+                    pf.EstimatedAmountMg = ToIntMg(GetAmountMgFromLength(pf.EstimatedLengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm));
                     pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, diameterMm);
                 }
             }
@@ -2048,7 +2058,7 @@ public sealed class PrintService(
             {
                 if (pf.EstimatedVolumeMl.HasValue)
                 {
-                    pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
+                    pf.EstimatedAmountMg = ToIntMg(GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm));
 
                     if (hasDiameter && filament.DiameterMm is { } diameterMm)
                     {

@@ -16,6 +16,16 @@ public class CompletePrintDto : IValidatableObject
     /// </summary>
     public const int MaxFilamentUsageRows = 64;
 
+    /// <summary>
+    /// The longest length one usage row may carry, in meters (#198): 100 km, about 300 kg of
+    /// 1.75 mm PLA. The weight derived from it is cast to <c>int</c> milligrams, which wraps
+    /// rather than throws, so an unbounded length stored a nonsense weight.
+    /// </summary>
+    public const double MaxUsageLengthInM = 100_000;
+
+    /// <summary>The largest volume one usage row may carry, in milliliters: 100 L. Same reason as <see cref="MaxUsageLengthInM"/>.</summary>
+    public const double MaxUsageVolumeMl = 100_000;
+
     /// <summary>The final status: Success, Cancelled, Failed or PartialSuccess.</summary>
     public PrintStatus Status { get; set; }
 
@@ -51,6 +61,13 @@ public class CompletePrintDto : IValidatableObject
         }
 
         var usage = FilamentUsage ?? [];
+        if (usage.Any(u => u is null))
+        {
+            // Every check below reads the rows, and so does the merge.
+            yield return new ValidationResult("filamentUsage cannot contain null rows.", [nameof(FilamentUsage)]);
+            yield break;
+        }
+
         var linked = usage.Where(u => u.FilamentId.HasValue).Select(u => u.FilamentId).ToList();
         if (linked.Count != linked.Distinct().Count())
         {
@@ -92,11 +109,11 @@ public class CompletePrintFilamentUsageDto
     public int? AmountMg { get; set; }
 
     /// <summary>The actual length used in meters.</summary>
-    [Range(0d, double.MaxValue, ErrorMessage = "{0} cannot be negative.")]
+    [Range(0d, CompletePrintDto.MaxUsageLengthInM, ErrorMessage = "{0} must be between {1} and {2}.")]
     public double? LengthInM { get; set; }
 
     /// <summary>The actual volume used in milliliters.</summary>
-    [Range(0d, double.MaxValue, ErrorMessage = "{0} cannot be negative.")]
+    [Range(0d, CompletePrintDto.MaxUsageVolumeMl, ErrorMessage = "{0} must be between {1} and {2}.")]
     public double? VolumeMl { get; set; }
 
     /// <summary>
