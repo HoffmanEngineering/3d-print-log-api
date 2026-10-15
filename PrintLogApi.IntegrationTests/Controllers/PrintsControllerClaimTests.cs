@@ -64,6 +64,25 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
     }
 
     [Fact]
+    public async Task Claim_SamePairInADifferentCase_ReplaysThePrint()
+    {
+        // Ids are matched case-insensitively (#204), because SQL Server's default collation already
+        // matches them that way in FindPrintIdByExternalPair. A case-sensitive replay check here
+        // gave such a retry 409 where the same pair on create replayed.
+        var created = await CreatePrintAsync();
+        var externalId = $"Job-{UniqueExternalId()}";
+        await ReadAsync(await ClaimAsync(created.Id, Claim(externalId)));
+
+        var retry = await ClaimAsync(created.Id, Claim(externalId.ToUpperInvariant(), source: "MOONRAKER"));
+
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        var replayed = await ReadAsync(retry);
+        Assert.Equal(created.Id, replayed.Id);
+        // A replay changes nothing, so the stored id keeps the case of the first claim.
+        Assert.Equal(externalId, replayed.ExternalId);
+    }
+
+    [Fact]
     public async Task Claim_SamePairAfterThePrintFinished_StillReturnsThePrint()
     {
         // A claim that timed out client-side but landed can be retried after the job ended.

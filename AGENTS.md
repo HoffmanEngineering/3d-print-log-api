@@ -197,6 +197,12 @@ cached, partly anonymous, and has no `fileHash`.
   provider `DbException`, not `DbUpdateException`.
 - **The same pair replays before the status check**, so a retried claim still succeeds after the
   print finished.
+- **External ids are matched case-insensitively** (#204), and that is the contract, not a bug.
+  `Prints.ExternalId` has no explicit collation, so SQL Server's default `CI_AS` decides the
+  lookups and the unique index. A binary-collation migration was declined: it rebuilds a unique
+  index on `Prints` for collisions no current id format produces. Any in-memory comparison of a
+  pair (the claim replay) uses `OrdinalIgnoreCase` to agree. SQLite compares binary, so the suite
+  cannot see the database half.
 - **Prints carrying an `mcp` pair are never claimable.** That pair is `create_print`'s idempotency
   key, and overwriting it would break that key's replay.
 - **On a single-tool printer (`SlotCount == 1`), `/complete` treats an unlinked row with no slot as
