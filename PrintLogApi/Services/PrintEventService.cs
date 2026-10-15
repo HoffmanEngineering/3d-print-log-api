@@ -105,7 +105,9 @@ public class PrintEventService(
         return new PrintStartedResult(print, WasReplayed: false);
     }
 
-    public async Task<Print?> Finished(PrintFinishedEvent finished)
+    public Task<Print?> Finished(PrintFinishedEvent finished) => Finished(finished, retryIfRaced: true);
+
+    private async Task<Print?> Finished(PrintFinishedEvent finished, bool retryIfRaced)
     {
         var query = context.Prints
             .Where(p => p.CreatedById == finished.UserId && p.Status == PrintStatus.Printing);
@@ -185,6 +187,7 @@ public class PrintEventService(
             await printService.UpdateFilamentUsageWeights(print);
         }
 
+        (Guid FileId, string BlobName)? snapshot = null;
         if (finished.Snapshot is not null)
         {
             var maxImages = await printService.GetMaxImagesPerPrint(finished.UserId);
@@ -195,7 +198,8 @@ public class PrintEventService(
                 var maxDisplayOrder = await context.PrintImages
                     .Where(pi => pi.PrintId == print.Id)
                     .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
-                var fileId = await AddSnapshot(print, finished.Snapshot, finished.UserId, maxDisplayOrder + 1);
+                snapshot = await AddSnapshot(print, finished.Snapshot, finished.UserId, maxDisplayOrder + 1);
+                var fileId = snapshot.Value.FileId;
 
                 // The newest snapshot becomes the default.
                 var otherDefaults = await context.PrintImages
@@ -205,10 +209,30 @@ public class PrintEventService(
             }
         }
 
-        await context.SaveChangesAsync();
+        if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, finished.UserId))
+        {
+            // An overlapping delivery finished this print first (#199). Run again against what it
+            // stored, exactly as a later redelivery would: the print no longer matches, so this
+            // one changes nothing and does not notify a second time.
+            context.ChangeTracker.Clear();
+            // A loss can also be this request's own commit seen through a retried save (see
+            // PrintFinishTransition), so the cache may be stale either way. Invalidating is cheap.
+            cacheVersionService.InvalidateUserCache(finished.UserId);
+            if (snapshot is { } uploaded)
+            {
+                await DeleteOrphanedSnapshot(uploaded.FileId, uploaded.BlobName);
+            }
+            if (retryIfRaced)
+            {
+                return await Finished(finished, retryIfRaced: false);
+            }
+            logger.LogWarning("The matching print was finished by another request.");
+            return null;
+        }
         cacheVersionService.InvalidateUserCache(finished.UserId);
 
-        // Only a Printing print matches above, so this is always the transition to finished.
+        // Only a Printing print matches above, and the save claimed its move out of Printing, so
+        // this is the transition to finished and no other request notifies it.
         await printFinishNotifier.NotifyIfJustFinished(print, PrintStatus.Printing);
 
         return print;
@@ -319,8 +343,11 @@ public class PrintEventService(
         return printId is { } id ? await printService.GetPrintById(id) : null;
     }
 
-    /// <summary>Uploads <paramref name="image"/> and attaches it as the print's default image. Returns the file id.</summary>
-    private async Task<Guid> AddSnapshot(Print print, IFormFile image, long userId, int displayOrder)
+    /// <summary>
+    /// Uploads <paramref name="image"/> and attaches it as the print's default image. Returns the
+    /// file id and the blob name it was uploaded under.
+    /// </summary>
+    private async Task<(Guid FileId, string BlobName)> AddSnapshot(Print print, IFormFile image, long userId, int displayOrder)
     {
         var fileId = Guid.NewGuid();
         var fileName = fileId + Path.GetExtension(image.FileName);
@@ -346,7 +373,29 @@ public class PrintEventService(
             IsDefault = true,
             DisplayOrder = displayOrder,
         });
-        return fileId;
+        return (fileId, fileName);
+    }
+
+    /// <summary>
+    /// Deletes the snapshot a losing finish uploaded, unless its file row was stored after all: a
+    /// commit whose retried save reported a loss did store it, and the image is then live.
+    /// Best effort: a blob left behind costs storage, not correctness, so a failed delete is
+    /// logged and does not fail the event.
+    /// </summary>
+    private async Task DeleteOrphanedSnapshot(Guid fileId, string blobName)
+    {
+        try
+        {
+            if (await context.Files.AnyAsync(f => f.Id == fileId))
+            {
+                return;
+            }
+            await blobStorageService.DeleteBlobAsync(printImageContainerName, blobName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not delete the unreferenced snapshot {BlobName}.", blobName);
+        }
     }
 
     /// <summary>The user's last choice of whether comments are allowed, or false.</summary>

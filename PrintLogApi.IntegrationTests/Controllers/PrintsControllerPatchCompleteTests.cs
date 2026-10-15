@@ -1061,6 +1061,26 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         Assert.Empty(await NotificationsForPrintAsync(created.Id));
     }
 
+    [Fact]
+    public async Task Complete_LosesTheFinishRaceTwice_Returns409()
+    {
+        // Losing twice needs the print re-opened and re-finished between the retry's read and its
+        // save, which no deterministic interleaving reaches cheaply. PrintFinishRaceTests covers
+        // the service's single loss; this pins only how the controller maps the second one.
+        using var racing = _factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+            s.AddTransient<IPrintService>(sp =>
+                AlwaysLosingCompletion.Wrap(ActivatorUtilities.CreateInstance<PrintService>(sp)))));
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{created.Id}/complete");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new CompletePrintDto { Status = PrintStatus.Success });
+        var response = await racing.CreateClient().SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(PrintStatus.Printing, (await GetDetailAsync(created.Id)).Status);
+    }
+
     #endregion
 
     /// <summary>
@@ -1122,6 +1142,29 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
                 or nameof(INotificationService.CreatePrintFailedNotification))
             {
                 throw new InvalidOperationException("Notification store unavailable.");
+            }
+            return targetMethod.Invoke(_inner, args);
+        }
+    }
+
+    /// <summary>A print service whose completions fault as a twice-lost finish race (#199); every other call passes through.</summary>
+    public class AlwaysLosingCompletion : DispatchProxy
+    {
+        private IPrintService _inner = null!;
+
+        public static IPrintService Wrap(IPrintService inner)
+        {
+            var proxy = Create<IPrintService, AlwaysLosingCompletion>();
+            ((AlwaysLosingCompletion)(object)proxy)._inner = inner;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name is nameof(IPrintService.CompletePrint))
+            {
+                return Task.FromException<Print>(
+                    new DbUpdateConcurrencyException("The print changed while it was being completed."));
             }
             return targetMethod.Invoke(_inner, args);
         }
