@@ -355,9 +355,11 @@ public class UserDeletionService : IUserDeletionService
 
             // Evict the secrets (#194), or the credential cache keeps authenticating them for up
             // to its 1 h TTL. Each ExecuteDeleteAsync here commits on its own (there is no
-            // enclosing transaction), so the rows are gone by now: a request racing the delete
-            // cannot re-cache "valid" after this. Evicting here rather than at the end means a
-            // later step failing still leaves the deleted connections refused.
+            // enclosing transaction), so the rows are gone by now and a lookup that starts after
+            // this sees no row. One already in flight (its SELECT ran before the delete, its cache
+            // write lands after this) can still store "valid" until the TTL; every eviction site
+            // has that same window. Evicting here rather than at the end means a later step
+            // failing still leaves the deleted connections refused.
             await _spoolmanCredentials.InvalidateAsync(spoolmanSecretHashes);
             await _context.SpoolmanNetworkSightings
                 .Where(s => s.UserId == userId)
