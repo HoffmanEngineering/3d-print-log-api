@@ -418,7 +418,8 @@ public sealed class PrintService(
         long? currentUserId,
         IReadOnlyCollection<Guid>? projectIds = null,
         DateTimeOffset? fromDate = null,
-        DateTimeOffset? toDate = null)
+        DateTimeOffset? toDate = null,
+        IReadOnlyCollection<Guid>? tagIds = null)
     {
         if (pagingRequest == null)
         {
@@ -481,6 +482,15 @@ public sealed class PrintService(
         if (projectIds != null && projectIds.Count > 0)
         {
             printQuery = printQuery.Where(p => p.ProjectId.HasValue && projectIds.Contains(p.ProjectId.Value));
+        }
+
+        // Any of the tags. Tags are the viewer's own, never the profile owner's: on someone
+        // else's public profile the filter matches nothing, so a tag id cannot be used to learn
+        // which of their prints carry it.
+        if (tagIds != null && tagIds.Count > 0)
+        {
+            printQuery = printQuery.Where(p => p.PrintTags!.Any(pt =>
+                tagIds.Contains(pt.TagId) && pt.Tag.CreatedById == currentUserId));
         }
 
         if (sortRequest != null)
@@ -571,6 +581,14 @@ public sealed class PrintService(
         {
             dto.ExternalSource = null;
             dto.ExternalId = null;
+        }
+
+        // Tags are the creator's too, and for the same reason are filled here, before caching.
+        var ownIds = dtos.Where(d => d.CreatedByUserId == currentUserId).Select(d => d.Id).ToList();
+        var tagsByPrint = await TagService.LoadForPrints(context, ownIds);
+        foreach (var dto in dtos.Where(d => d.CreatedByUserId == currentUserId))
+        {
+            dto.Tags = tagsByPrint.TryGetValue(dto.Id, out var tags) ? tags : [];
         }
 
         // **Restore original sort order**

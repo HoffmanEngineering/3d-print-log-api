@@ -97,7 +97,7 @@ public interface IPrintService
     /// folds any legacy scalar parameters into them so there is a single code path here.
     /// The date range is half-open [fromDate, toDate).
     /// </summary>
-    Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string? searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long>? filterByPrinterIds, IEnumerable<Guid>? filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus>? statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid>? projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null);
+    Task<PagedList<PrintSummaryDTO>> SearchPrintSummary(PagedRequest pagingRequest, string? searchText, SortRequest<PrintSummarySortColumn> sortRequest, IEnumerable<long>? filterByPrinterIds, IEnumerable<Guid>? filterByFilamentIds, IReadOnlyCollection<Print.PrintStatus>? statuses, long? userId, long? currentUserId, IReadOnlyCollection<Guid>? projectIds = null, DateTimeOffset? fromDate = null, DateTimeOffset? toDate = null, IReadOnlyCollection<Guid>? tagIds = null);
     Task<List<PrintFeedSummaryDto>> GetPrintFeedSummary(long? currentUserId, int numberOfRecords, DateTimeOffset fromDateTime);
     Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedAsync(
         int pageNumber,

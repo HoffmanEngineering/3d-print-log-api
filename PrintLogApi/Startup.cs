@@ -187,6 +187,7 @@ public class Startup
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();
         services.AddTransient<IProjectService, ProjectService>();
+        services.AddTransient<ITagService, TagService>();
         services.AddTransient<IFeedbackService, FeedbackService>();
         services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
         services.Configure<Services.Spoolman.SpoolmanOptions>(Configuration.GetSection(Services.Spoolman.SpoolmanOptions.SectionName));
