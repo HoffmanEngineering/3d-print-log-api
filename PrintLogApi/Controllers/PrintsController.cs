@@ -919,11 +919,17 @@ public class PrintsController(
     ///
     /// `fileHash` is optional: 40 hex digits (20 bytes) identifying the G-code file, either its
     /// SHA-1 or a connector's own identity for it. A replay never changes it.
+    ///
+    /// A connector backfilling its printer's history sends `imported: true`. An imported print is a
+    /// record of the past: its `status` must be a finished one, no usage row may name a filament (so
+    /// it never changes a spool's remaining weight), and it leaves the printer's loaded spools as
+    /// they are. When its pair is already used, the existing print is returned with `200` unchanged,
+    /// so a backfill never rewrites a print the connector logged live.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
-    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
+    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`, or an imported print that is not finished or names a filament. Inspect Problem Details object for message as to what failed validation.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]

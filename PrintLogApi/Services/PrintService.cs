@@ -757,7 +757,10 @@ public sealed class PrintService(
             return null;
         }
 
-        if (await ApplyConnectorOwnedFields(existing, print, userId))
+        // An imported print is a backfill from the connector's history. The pair it reached was
+        // logged live (or imported before), and that print's status, durations and spool-linked
+        // usage are better than the history's totals, so the backfill changes nothing.
+        if (print.Imported != true && await ApplyConnectorOwnedFields(existing, print, userId))
         {
             existing.UpdatedById = userId;
             await context.SaveChangesAsync();
@@ -919,8 +922,9 @@ public sealed class PrintService(
 
         // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
         // the slots say what is loaded, and replacing them with one print's spools would unload
-        // every tool the print did not use.
-        if (newPrint.Printer.SlotCount <= 1)
+        // every tool the print did not use. Nor for an imported print: it happened in the past,
+        // names no spool, and would unload the one in the printer today.
+        if (newPrint.Printer.SlotCount <= 1 && print.Imported != true)
         {
             await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
         }
