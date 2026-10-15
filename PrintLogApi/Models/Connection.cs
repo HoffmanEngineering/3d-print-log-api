@@ -64,4 +64,43 @@ public class Connection
 
     /// <summary>When the user dismissed the "remove your notifier" notice, UTC. It never returns.</summary>
     public DateTime? NotifierNoticeDismissedAt { get; set; }
+
+    // The agent's health, as of its last heartbeat (printlog-bridge#37). Each heartbeat replaces
+    // all of it, and an agent that sends none (an older bridge) leaves it null.
+
+    /// <summary>How the agent reaches the printer: <c>local</c> or <c>remote</c>.</summary>
+    [MaxLength(20)]
+    public string? Mode { get; set; }
+
+    [MaxLength(50)]
+    public string? KlipperVersion { get; set; }
+
+    [MaxLength(50)]
+    public string? MoonrakerVersion { get; set; }
+
+    /// <summary>The printer model the slicer wrote in the last job's file, such as <c>InfiMech EX</c>.</summary>
+    [MaxLength(100)]
+    public string? PrinterModel { get; set; }
+
+    /// <summary>Events and pictures waiting in the agent's outbox to be sent.</summary>
+    public int? OutboxDepth { get; set; }
+
+    /// <summary>When the oldest of them was queued, UTC: the heartbeat's time less its age.</summary>
+    public DateTime? OutboxOldestQueuedAt { get; set; }
+
+    /// <summary>The last warning or error the agent logged for this printer, scrubbed by the agent.</summary>
+    [MaxLength(500)]
+    public string? LastError { get; set; }
+
+    /// <summary>When it was logged, UTC.</summary>
+    public DateTime? LastErrorAt { get; set; }
+
+    /// <summary>Warnings and errors logged since the agent's previous heartbeat that got through.</summary>
+    public int? ErrorCount { get; set; }
+
+    /// <summary>Whether a webcam frame is added to each print.</summary>
+    public bool? Snapshots { get; set; }
+
+    /// <summary>Whether each print's slicer settings are sent.</summary>
+    public bool? SlicerSettings { get; set; }
 }
