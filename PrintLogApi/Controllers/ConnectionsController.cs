@@ -6,6 +6,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Connection;
 using PrintLogApi.Services;
+using PrintLogApi.Services.AgentReleases;
 
 namespace PrintLogApi.Controllers;
 
@@ -16,7 +17,11 @@ namespace PrintLogApi.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
-public class ConnectionsController(IConnectionService connectionService, TimeProvider clock, TelemetryClient telemetry) : ControllerBase
+public class ConnectionsController(
+    IConnectionService connectionService,
+    IAgentReleaseCatalog agentReleases,
+    TimeProvider clock,
+    TelemetryClient telemetry) : ControllerBase
 {
     private const int MaxInstanceIdLength = 100;
 
@@ -34,7 +39,12 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
         }
 
         var connections = await connectionService.List(userId, printerId);
-        return Ok(connections.Select(ToDto).ToList());
+        var latest = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var kind in connections.Select(c => c.Kind).Distinct())
+        {
+            latest[kind] = await agentReleases.GetLatestVersionAsync(kind, HttpContext.RequestAborted);
+        }
+        return Ok(connections.Select(c => ToDto(c, latest[c.Kind])).ToList());
     }
 
     /// <summary>Gets one of your connections by the agent's instance id.</summary>
@@ -53,7 +63,7 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
         }
 
         return await connectionService.Get(userId, instanceId) is { } connection
-            ? Ok(ToDto(connection))
+            ? Ok(await ToDtoAsync(connection))
             : NotFound();
     }
 
@@ -63,7 +73,8 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
     /// stable id for one printer (a UUID it stores locally), so a bridge watching three printers
     /// registers three connections. Each call replaces `kind`, `displayName`, `agentVersion` and
     /// `printerId`: send the printer the user chose at pairing every time, because leaving it out
-    /// unbinds the connection.
+    /// unbinds the connection. The response's `latestAgentVersion` and `updateAvailable` tell the
+    /// agent when a newer release of it is out, so it never has to ask anyone else.
     /// </remarks>
     /// <param name="instanceId">The agent's own stable id for the printer, at most 100 characters.</param>
     /// <param name="dto">The connection's details.</param>
@@ -91,13 +102,14 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
         try
         {
             var (connection, created) = await connectionService.Upsert(userId, instanceId, dto);
+            var body = await ToDtoAsync(connection);
             if (!created)
             {
-                return Ok(ToDto(connection));
+                return Ok(body);
             }
 
             telemetry.TrackEvent("ConnectionRegistered", new Dictionary<string, string> { ["Kind"] = connection.Kind });
-            return CreatedAtAction(nameof(GetConnection), new { instanceId = connection.InstanceId }, ToDto(connection));
+            return CreatedAtAction(nameof(GetConnection), new { instanceId = connection.InstanceId }, body);
         }
         catch (UserCannotAccessPrinterException)
         {
@@ -155,7 +167,10 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
     private static DateTimeOffset? Utc(DateTime? value)
         => value is { } v ? new DateTimeOffset(DateTime.SpecifyKind(v, DateTimeKind.Utc)) : null;
 
-    private ConnectionDto ToDto(Connection connection)
+    private async Task<ConnectionDto> ToDtoAsync(Connection connection)
+        => ToDto(connection, await agentReleases.GetLatestVersionAsync(connection.Kind, HttpContext.RequestAborted));
+
+    private ConnectionDto ToDto(Connection connection, string? latestAgentVersion)
     {
         // Stored as UTC, but SQLite hands it back as Unspecified.
         var lastSeen = new DateTimeOffset(DateTime.SpecifyKind(connection.LastSeenAt, DateTimeKind.Utc));
@@ -166,6 +181,8 @@ public class ConnectionsController(IConnectionService connectionService, TimePro
             InstanceId = connection.InstanceId,
             DisplayName = connection.DisplayName,
             AgentVersion = connection.AgentVersion,
+            LatestAgentVersion = latestAgentVersion,
+            UpdateAvailable = AgentVersion.IsOlder(connection.AgentVersion, latestAgentVersion),
             PrinterId = connection.PrinterId,
             CreatedDate = new DateTimeOffset(DateTime.SpecifyKind(connection.CreatedDate, DateTimeKind.Utc)),
             LastSeenAt = lastSeen,

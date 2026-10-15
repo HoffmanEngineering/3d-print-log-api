@@ -262,6 +262,21 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   spools on its printer's open notifier print, and load a spool into slot 0 on a single-slot
   printer). Both are for the connection's own printer only, and still only under `/spoolman`.
 
+## Agent update notice (printlog-bridge#39)
+
+`ConnectionDto.latestAgentVersion` and `updateAvailable` tell a connector, in its own check-in,
+that a newer release is out, so Docker bridges hear about one without calling GitHub themselves.
+`AgentReleaseCatalog` reads the agent repo's `vX.Y.Z` tags (the bridge makes Docker images from
+tags and no GitHub releases, so not `releases/latest`), keyed by connection kind in
+`AgentReleases:Repositories` (`moonraker` → printlog-bridge).
+
+- **Tags are read every `CacheMinutes` (6 h); a failure keeps the last version** and retries after
+  `FailureCacheMinutes` (15), so a GitHub outage never turns each 5-minute heartbeat into a call.
+  Unauthenticated GitHub allows 60 calls an hour per IP; this makes about 4 a day per instance.
+- **Every test host routes the `AgentReleases` client to `CustomWebApplicationFactory.GitHub`**,
+  which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
+  keeps what it reads, so seed it before the host's first connection request.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
