@@ -9,7 +9,8 @@ namespace PrintLogApi.Middleware;
 /// with room for a burst, and answers the excess with <c>429</c> and <c>Retry-After</c>, which the
 /// bridge honours.
 ///
-/// What is counted: every POST, PUT, PATCH and DELETE under <c>/api</c> made by a request carrying
+/// What is counted: every POST, PUT, PATCH and DELETE under <c>/api</c> (and the Spoolman API's
+/// <c>/spoolman/api</c>) made by a request carrying
 /// <see cref="ConnectorCredentialClaim"/>. Reads are not counted, and neither is anything an
 /// interactive user does, so web app traffic is never affected. Both remain subject to the
 /// ordinary per-user "api" budget, which this runs alongside, not instead of.
@@ -37,6 +38,13 @@ public static class ConnectorWriteRateLimiting
     private static readonly PathString ApiPath = new("/api");
 
     /// <summary>
+    /// The Spoolman-compatible API (#176) lives at <c>/spoolman/api/v1</c>, outside <c>/api</c>,
+    /// because Moonraker appends <c>/api/v1</c> to the base URL it is given. Its writes are
+    /// connector writes all the same.
+    /// </summary>
+    private static readonly PathString SpoolmanApiPath = new("/spoolman/api");
+
+    /// <summary>
     /// Builds the limiter. Configuration is read per request, as the other budgets do, so a
     /// factory override in tests applies. <c>PerMinute</c> or <c>Burst</c> of 0 or less disables it.
     /// </summary>
@@ -49,7 +57,7 @@ public static class ConnectorWriteRateLimiting
             if (perMinute <= 0
                 || burst <= 0
                 || !IsWrite(httpContext.Request.Method)
-                || !httpContext.Request.Path.StartsWithSegments(ApiPath)
+                || !(httpContext.Request.Path.StartsWithSegments(ApiPath) || httpContext.Request.Path.StartsWithSegments(SpoolmanApiPath))
                 || ConnectorCredentialClaim.Get(httpContext.User) is not { } credential)
             {
                 return RateLimitPartition.GetNoLimiter("not-connector-write");

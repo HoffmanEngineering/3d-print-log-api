@@ -26,7 +26,8 @@ namespace PrintLogApi.Middleware;
 /// fixed.</para>
 ///
 /// <para><b><c>/mcp</c> is excluded.</b> It has its own error contract, and its 401 must stay
-/// exactly as it is.</para>
+/// exactly as it is. So is <c>/spoolman</c> (#176), whose clients expect Spoolman's own
+/// <c>{"message"}</c> body; <c>SpoolmanAuthentication.UseSpoolmanErrorBodies</c> writes that.</para>
 /// </summary>
 public static class ProblemDetailsStatusCodePages
 {
@@ -42,7 +43,8 @@ public static class ProblemDetailsStatusCodePages
         var configuration = app.ApplicationServices.GetRequiredService<IConfiguration>();
 
         return app.UseWhen(
-            context => !context.Request.Path.StartsWithSegments(McpPath),
+            context => !context.Request.Path.StartsWithSegments(McpPath)
+                && !Authentication.Spoolman.SpoolmanAuthentication.IsSpoolmanPath(context),
             branch => branch.UseStatusCodePages(statusContext =>
             {
                 var httpContext = statusContext.HttpContext;
