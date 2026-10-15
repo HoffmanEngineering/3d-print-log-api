@@ -80,8 +80,21 @@ public class AddPrintDTO : IValidatableObject
     [StringLength(100)]
     public string? ConnectionInstanceId { get; set; }
 
+    /// <summary>
+    /// The file's identity, 40 hex digits (20 bytes): the SHA-1 of the G-code, or a connector's
+    /// own identity for the file that is the same for every job of it and changes when it is
+    /// re-sliced (printlog-bridge#40). Your prints with the same hash are prints of the same file.
+    /// </summary>
+    // No [StringLength]: PrintFileHashes checks the length too, so a bad hash gets one message.
+    public string? FileHash { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (FileHash is not null && !PrintFileHashes.IsValid(FileHash))
+        {
+            yield return new ValidationResult(PrintFileHashes.ValidationMessage, [nameof(FileHash)]);
+        }
+
         if (ExternalSource is null && ExternalId is null)
         {
             yield break;

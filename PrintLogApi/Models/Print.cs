@@ -66,7 +66,9 @@ public class Print : TimestampEntity
     public bool AllowFileDownloads { get; set; }
 
     /// <summary>
-    /// The SHA1 file hash of the gcode file this print was created from.
+    /// The identity of the G-code file this print was created from: OctoPrint's SHA-1 of it, or
+    /// a connector's own 20-byte identity for it (printlog-bridge#40). See
+    /// <see cref="Services.PrintFileHashes"/>. Only comparable between one user's prints.
     /// </summary>
     [MaxLength(20)]
     [MinLength(20)]

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Profiles;
 
@@ -10,7 +11,14 @@ public class PrintProfile : Profile
     public PrintProfile()
     {
         CreateMap<AddPrintDTO, Print>()
-            .ForMember(dest => dest.ProjectId, opt => opt.Ignore());
+            .ForMember(dest => dest.ProjectId, opt => opt.Ignore())
+            // Validated by AddPrintDTO, so a malformed one never gets here. AllowNull, or AutoMapper
+            // maps a missing hash to an empty array, as it does any null collection.
+            .ForMember(dest => dest.FileHash, opt =>
+            {
+                opt.AllowNull();
+                opt.MapFrom(src => PrintFileHashes.Parse(src.FileHash));
+            });
 
         CreateMap<Print, PrintSummaryDTO>()
             .ForMember(dest => dest.DefaultPrintImageId, opt => opt.MapFrom(src => src.Images!
