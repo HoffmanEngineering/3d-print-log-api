@@ -96,8 +96,10 @@ public sealed class SpoolmanSocketHost(
             var receiving = ReceiveLoopAsync(socket, sendLock, receive.Token);
             if (await Task.WhenAny(receiving, goingAway.Task) == goingAway.Task)
             {
-                await CloseAsync(socket, sendLock, WebSocketCloseStatus.EndpointUnavailable, "Server restarting");
+                // Start the grace before taking sendLock: a Healthy send stuck on a peer that stopped
+                // reading holds the lock, and only cancelling receive frees it.
                 receive.CancelAfter(CloseGrace);
+                await CloseAsync(socket, sendLock, WebSocketCloseStatus.EndpointUnavailable, "Server restarting");
             }
 
             await receiving;
