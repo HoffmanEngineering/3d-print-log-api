@@ -105,7 +105,9 @@ public class PrintEventService(
         return new PrintStartedResult(print, WasReplayed: false);
     }
 
-    public async Task<Print?> Finished(PrintFinishedEvent finished)
+    public Task<Print?> Finished(PrintFinishedEvent finished) => Finished(finished, retryIfRaced: true);
+
+    private async Task<Print?> Finished(PrintFinishedEvent finished, bool retryIfRaced)
     {
         var query = context.Prints
             .Where(p => p.CreatedById == finished.UserId && p.Status == PrintStatus.Printing);
@@ -205,10 +207,23 @@ public class PrintEventService(
             }
         }
 
-        await context.SaveChangesAsync();
+        if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, finished.UserId))
+        {
+            // An overlapping delivery finished this print first (#199). Run again against what it
+            // stored, exactly as a later redelivery would: the print no longer matches, so this
+            // one changes nothing and does not notify a second time.
+            context.ChangeTracker.Clear();
+            if (retryIfRaced)
+            {
+                return await Finished(finished, retryIfRaced: false);
+            }
+            logger.LogWarning("The matching print was finished by another request.");
+            return null;
+        }
         cacheVersionService.InvalidateUserCache(finished.UserId);
 
-        // Only a Printing print matches above, so this is always the transition to finished.
+        // Only a Printing print matches above, and the save claimed its move out of Printing, so
+        // this is the transition to finished and no other request notifies it.
         await printFinishNotifier.NotifyIfJustFinished(print, PrintStatus.Printing);
 
         return print;

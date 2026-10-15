@@ -1612,7 +1612,10 @@ public sealed class PrintService(
         return (await GetPrintById(id))!;
     }
 
-    public async Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId)
+    public Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId) =>
+        CompletePrint(id, dto, userId, retryIfRaced: true);
+
+    private async Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId, bool retryIfRaced)
     {
         var print = await context.Prints
             .Include(p => p.FilamentUsage)
@@ -1662,7 +1665,23 @@ public sealed class PrintService(
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
-        await context.SaveChangesAsync();
+        if (CompletePrintDto.IsFinished(previousStatus))
+        {
+            await context.SaveChangesAsync();
+        }
+        else if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, userId))
+        {
+            // An overlapping completion finished the print first (#199), and these tracked rows
+            // predate its usage. Run again against what it stored, as a later retry would: a
+            // replay of an already-finished print, which merges without adding a second row and
+            // does not notify.
+            context.ChangeTracker.Clear();
+            if (retryIfRaced)
+            {
+                return await CompletePrint(id, dto, userId, retryIfRaced: false);
+            }
+            throw new DbUpdateConcurrencyException("The print changed while it was being completed.");
+        }
 
         telemetry.TrackEvent("PrintComplete");
 
