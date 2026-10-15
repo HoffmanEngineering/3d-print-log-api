@@ -853,8 +853,56 @@ titles
             "tiles", resources=["{ApiResource}"], width=100, time_param="UsageTimeRange",
             tiles=tile_settings(palette="green", sort_field="Order", delta=False),
         ),
-    ]
+    ] + spoolman_items()
     return group("usage", items, tab="usage")
+
+
+# Spoolman-compatible API (#173, #178). Sockets are sampled once a minute per tier by
+# SpoolmanSocketSampler (a pre-aggregated metric, so valueMax is the count at the sample);
+# /use reports are the Spoolman_UseMm metric (count = calls, sum = millimetres).
+SPOOLMAN_METRICS = """let apiMetrics = customMetrics
+| where cloud_RoleName == '{ApiRole}';
+"""
+
+
+def spoolman_items() -> list[dict]:
+    return [
+        text("### Spoolman\n"
+             "Klipper printers connected through Moonraker's `[spoolman]` component. "
+             "**Scaling trigger: move the App Service plan to S1 or P0v3 at about 250 open sockets.** "
+             "B1 allows 350 websockets per instance. Scale *up*, not out: socket state, "
+             "`CacheVersionService` and the rate limiters are all in-process.",
+             "spoolman-heading"),
+        query(
+            "spoolman-sockets", "Open Spoolman sockets, by tier",
+            SPOOLMAN_METRICS + """apiMetrics
+| where name == 'Spoolman_OpenSockets'
+| extend Tier = tostring(customDimensions.tier)
+| summarize Sockets = max(valueMax) by bin(timestamp, 1h), Tier
+""",
+            "timechart", resources=["{ApiResource}"], width=50, time_param="UsageTimeRange",
+            chart=chart_settings(y_label="sockets"),
+        ),
+        query(
+            "spoolman-use", "Spoolman /use calls per day",
+            SPOOLMAN_METRICS + """apiMetrics
+| where name == 'Spoolman_UseMm'
+| summarize Calls = sum(valueCount), ['Metres reported'] = round(sum(valueSum) / 1000.0, 1) by bin(timestamp, 1d)
+""",
+            "barchart", resources=["{ApiResource}"], width=50, time_param="UsageTimeRange",
+            chart=chart_settings(y_label="calls"),
+        ),
+        query(
+            "spoolman-top-users", "Top users by Spoolman connections",
+            API_EVENTS + """apiEvents
+| where name == 'Spoolman_SocketOpened' and isnotempty(user_AuthenticatedId)
+| summarize Connections = dcount(tostring(customDimensions.connectionId)), Handshakes = count(),
+    Tier = take_any(tostring(customDimensions.tier)) by User = user_AuthenticatedId
+| top 20 by Connections desc
+""",
+            "table", resources=["{ApiResource}"], width=50, time_param="UsageTimeRange",
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------------------

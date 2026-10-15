@@ -20,6 +20,13 @@ public static class SpoolmanAuthentication
     public const string PrinterIdClaim = "spoolman_printer_id";
     public const string ConnectionIdClaim = "spoolman_connection_id";
 
+    /// <summary>
+    /// <c>HttpContext.Items</c> key for the authenticated secret's hash, which an open socket
+    /// re-resolves on its timer (#178). An item, not a claim: claims are what anything that logs a
+    /// principal would log, and the hash is the lookup value.
+    /// </summary>
+    public const string SecretHashItem = "spoolman_secret_hash";
+
     /// <summary>Where the Spoolman routes live; Moonraker appends <c>/api/v1/...</c> to its <c>server</c>.</summary>
     public static readonly PathString PathPrefix = new("/spoolman");
 

@@ -207,6 +207,35 @@ cached, partly anonymous, and has no `fileHash`.
 - `hasSlicerSettings` is `Slicer != null`. The print stores no link to its `CuraSetting`; `Slicer`
   is set exactly when settings were recorded, and #164 should keep that true.
 
+## Spoolman-compatible API (#173)
+
+Moonraker's `[spoolman]` component can use 3D Print Log as its spool server:
+`server: https://printer-<id>:<secret>@api.3dprintlog.com/spoolman`. Moonraker appends `/api/v1`, so
+the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
+
+- **Credential:** a per-printer `SpoolmanConnection` secret, sent by Moonraker as HTTP Basic (URL
+  userinfo). The `Spoolman` policy pins `SpoolmanBasic`, so no JWT, API key or dev bypass works
+  there, and the secret works nowhere else. Minted only by `InteractiveUserOnly`. Stored as a hash.
+- **Lookups are cached with negative results** (`SpoolmanCredentialCache`), because Moonraker
+  retries a refused socket every 2 s forever. Every path that revokes, rotates or pauses a
+  connection must evict it. The failed-attempt limiter counts only unknown secrets and never
+  refuses a valid one.
+- **Tier:** Free is one *active* connection. A downgrade pauses (never deletes) all but the
+  oldest, from `SubscriptionService`, at the handshake, and on the socket timer.
+- **Bodies are Spoolman's v0.27.0 shapes**, written by `SpoolmanJsonContext` and never by MVC.
+  Errors are `{"message"}`, and the path is excluded from `ProblemDetailsStatusCodePages`.
+  `PUT /spool/{id}/use` is validated and **not persisted** until #171. Writes return 400 until #172.
+- **The inventory is cached on the user's version GUID.** Filament and print writes must bump it,
+  as for the summaries.
+- **Websockets are in-process, on one instance.** `SpoolmanSocketHost` holds them open and sends no
+  events (#172). It re-checks each socket every 5 minutes and closes it when the connection is
+  revoked or paused. Scaling out needs a backplane before #172's events can reach a socket held
+  by another instance, so scale *up* (S1/P0v3 at about 250 sockets; B1 allows 350). App Service
+  must have **Web sockets** switched on.
+- **`moonraker.log` prints the URL with the secret in it**, and users post that log publicly.
+  That is why the credential is narrow and easy to rotate. Never widen what a Spoolman secret
+  can reach.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under

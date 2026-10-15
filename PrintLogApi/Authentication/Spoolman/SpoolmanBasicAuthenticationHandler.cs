@@ -100,6 +100,7 @@ public sealed class SpoolmanBasicAuthenticationHandler(
         }
 
         await StampLastSeenAsync(credential.ConnectionId);
+        Context.Items[SpoolmanAuthentication.SecretHashItem] = hash;
 
         var claims = new List<Claim>
         {
