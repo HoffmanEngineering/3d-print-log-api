@@ -774,9 +774,10 @@ public sealed class PrintService(
         // touch anything else: its durations and usage are the start's estimates, and replacing
         // the finished rows would drop the actual amounts, slots and spool links the finish (or
         // /complete) recorded, moving the spool's remaining weight back to the estimate (#191).
-        // A finish replayed onto a finished print is not a reopen, and still applies.
+        // A finish replayed onto a finished print is not a reopen, and still applies. A replay that
+        // omits status arrives undefined and is not a finish either, so it is treated as a start.
         var reopens = existing.Status is not (PrintStatus.Pending or PrintStatus.Printing)
-            && replay.Status is PrintStatus.Pending or PrintStatus.Printing;
+            && (!Enum.IsDefined(replay.Status) || replay.Status is PrintStatus.Pending or PrintStatus.Printing);
         if (reopens)
         {
             return false;

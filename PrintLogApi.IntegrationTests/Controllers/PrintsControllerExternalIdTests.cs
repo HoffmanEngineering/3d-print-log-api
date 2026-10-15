@@ -204,11 +204,14 @@ public class PrintsControllerExternalIdTests : IClassFixture<CustomWebApplicatio
         Assert.Equal(PrintStatus.Success, detail.Status);
     }
 
-    [Fact]
-    public async Task PostPrint_Replay_StartWithRowsRetriedAfterComplete_KeepsTheActualUsage()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PostPrint_Replay_StartWithRowsRetriedAfterComplete_KeepsTheActualUsage(bool omitStatus)
     {
         // #191: the late start carries its estimate rows, and replacing the completed rows with
         // them would drop the actual amount, the slot and the spool link the completion recorded.
+        // A start that omits status arrives as an undefined status, which is not a finish either.
         var externalId = UniqueExternalId();
         var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId);
         var filament = await CreateFilamentAsync();
@@ -234,6 +237,10 @@ public class PrintsControllerExternalIdTests : IClassFixture<CustomWebApplicatio
 
         var lateStart = Start();
         lateStart.EstimatedPrintTimeInSeconds = 4000;
+        if (omitStatus)
+        {
+            lateStart.Status = default;
+        }
         var replay = await PostAsync(lateStart);
 
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
