@@ -476,11 +476,13 @@ public class PrintsController(
     /// <response code="401">Returned when no user is authenticated.</response>
     /// <response code="403">Returned when the caller may not edit this print.</response>
     /// <response code="404">Returned when the print does not exist.</response>
+    /// <response code="409">Overlapping requests kept finishing the print first. Retrying replays against the finished print.</response>
     [HttpPost("{id}/complete")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<PrintDetailDTO>> CompletePrint(long id, CompletePrintDto completion)
     {
         return await EditPrint(id, userId => printService.CompletePrint(id, completion, userId));
@@ -741,6 +743,11 @@ public class PrintsController(
         catch (DoesNotExistException)
         {
             return NotFound();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // CompletePrint lost the race to finish the print on its retry as well (#199).
+            return Conflict();
         }
     }
 

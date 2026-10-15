@@ -25,6 +25,12 @@ public static class PrintFinishTransition
     /// own beside them. Here the loser's UPDATE waits on the winner's row lock until the winner's
     /// rows are committed, and a failed save rolls the claim back with it. Changes are accepted
     /// only after the commit, so the retrying execution strategy can replay the whole unit.
+    /// <para>
+    /// A false result can also mean this request won: when a commit succeeds but its acknowledgement
+    /// is lost, the strategy retries, the replayed claim sees the print already finished, and the
+    /// outcome reads as a loss. Callers should therefore treat a loss as "the print may have
+    /// changed" (invalidate caches, keep anything a stored row might reference).
+    /// </para>
     /// </remarks>
     public static async Task<bool> SaveIfStillUnfinished(PrintLogContext context, Print print, long userId)
     {

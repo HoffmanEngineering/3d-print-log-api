@@ -205,12 +205,6 @@ cached, partly anonymous, and has no `fileHash`.
   provider `DbException`, not `DbUpdateException`.
 - **The same pair replays before the status check**, so a retried claim still succeeds after the
   print finished.
-- **Finishing is claimed the same way (#199).** `/complete` and `PrintEventService.Finished` save
-  through `PrintFinishTransition`: a conditional `ExecuteUpdate` (still unfinished) and the
-  `SaveChanges` in **one** transaction, so the loser of two overlapping finishes waits for the
-  winner's usage rows, writes nothing, then clears its tracker and reruns as a replay of a
-  finished print (no second notification, row or 500). A claim committed alone would let the
-  loser replay against the winner's status but not yet its rows, and add a duplicate.
 - **Prints carrying an `mcp` pair are never claimable.** That pair is `create_print`'s idempotency
   key, and overwriting it would break that key's replay.
 - **On a single-tool printer (`SlotCount == 1`), `/complete` treats an unlinked row with no slot as
@@ -220,6 +214,11 @@ cached, partly anonymous, and has no `fileHash`.
   to the in-order match.
 - `hasSlicerSettings` is `Slicer != null`. The print stores no link to its `CuraSetting`; `Slicer`
   is set exactly when settings were recorded, and #164 should keep that true.
+- **Finishing is claimed the same way (#199).** `/complete` and `PrintEventService.Finished` save
+  through `PrintFinishTransition`: a conditional `ExecuteUpdate` (still unfinished) and the
+  `SaveChanges` in **one** transaction, so the loser of two overlapping finishes waits for the
+  winner's usage rows, writes nothing, then clears its tracker and reruns as a replay of a
+  finished print (no second notification, row or 500).
 
 ## Spoolman-compatible API (#173)
 
