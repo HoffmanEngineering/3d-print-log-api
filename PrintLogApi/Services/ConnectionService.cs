@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Connection;
 
@@ -9,22 +10,37 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
 {
     public async Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto)
     {
-        if (dto.PrinterId is { } printerId &&
-            !await context.Printers.AnyAsync(p => p.Id == printerId && p.UserId == userId))
-        {
-            throw new UserCannotAccessPrinterException();
-        }
+        await RequirePrinter(userId, dto.PrinterId);
 
         try
         {
             return await UpsertOnce(userId, instanceId, dto);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
+            context.ChangeTracker.Clear();
+
+            // The printer can be deleted between the check above and the save, which fails the
+            // FK on PrinterId (#201). Re-checking turns that into the documented 400, not a 500.
+            await RequirePrinter(userId, dto.PrinterId);
+
+            if (!UniqueConstraintViolation.IsUniqueViolation(ex))
+            {
+                throw;
+            }
+
             // Lost the insert race on (UserId, InstanceId): an agent's first heartbeat retried
             // while the first was still in flight. The row exists now, so take the update path.
-            context.ChangeTracker.Clear();
             return await UpsertOnce(userId, instanceId, dto);
+        }
+    }
+
+    private async Task RequirePrinter(long userId, long? printerId)
+    {
+        if (printerId is { } id &&
+            !await context.Printers.AnyAsync(p => p.Id == id && p.UserId == userId))
+        {
+            throw new UserCannotAccessPrinterException();
         }
     }
 
