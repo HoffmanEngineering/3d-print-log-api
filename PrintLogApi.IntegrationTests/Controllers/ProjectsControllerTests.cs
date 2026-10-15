@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 using PrintLogApi.Services;
@@ -631,5 +632,99 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         // A rejected create must not leave a half-written row behind.
         var page = await GetProjectSummariesAsync(search: name);
         Assert.DoesNotContain(page.Items!, i => i.Name == name);
+    }
+
+    // ---------------------------------------------------------------------
+    // GET public (sitemap enumeration, #18)
+    // ---------------------------------------------------------------------
+
+    private async Task<Guid> CreateProjectWithViewStatusAsync(string name, Project.ProjectViewStatus viewStatus)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+        req.Content = JsonContent.Create(new AddProjectDto
+        {
+            Name = name,
+            Status = Project.ProjectStatus.InProgress,
+            ViewStatus = viewStatus,
+        });
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!.Id;
+    }
+
+    private Task<List<Guid>?> GetPublicProjectIdsAnonymouslyAsync() =>
+        _client.GetFromJsonAsync<List<Guid>>("/api/Projects/public", TestContext.Current.CancellationToken);
+
+    [Fact]
+    public void PubliclyListedViewStatus_IsOneTheDetailRouteServesToNonOwners()
+    {
+        Assert.True(Project.IsViewableByNonOwner(Project.PubliclyListedViewStatus));
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_IsAnonymous_AndIsNotCapturedByTheIdRoute()
+    {
+        // Before #18 "public" was bound as the {id} Guid and failed with 400.
+        var response = await _client.GetAsync("/api/Projects/public", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.StartsWith("[", body);
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_ListsPublicProjects_AndOmitsUnlistedPrivateAndDeletedOnes()
+    {
+        var publicId = await CreateProjectWithViewStatusAsync("Sitemap Public Project", Project.ProjectViewStatus.Public);
+        var unlistedId = await CreateProjectWithViewStatusAsync("Sitemap Unlisted Project", Project.ProjectViewStatus.Unlisted);
+        var privateId = await CreateProjectWithViewStatusAsync("Sitemap Private Project", Project.ProjectViewStatus.Private);
+        var deletedId = await CreateProjectWithViewStatusAsync("Sitemap Deleted Project", Project.ProjectViewStatus.Public);
+        var deleteResp = await _client.SendAsync(
+            AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{deletedId}"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
+
+        var ids = (await GetPublicProjectIdsAnonymouslyAsync())!;
+
+        Assert.Contains(publicId, ids);
+        // Unlisted is reachable anonymously by direct link but is, by definition, not listed —
+        // the same line /api/Prints/public and /api/Users/public draw.
+        Assert.DoesNotContain(unlistedId, ids);
+        Assert.DoesNotContain(privateId, ids);
+        Assert.DoesNotContain(deletedId, ids);
+        Assert.Equal(ids.Count, ids.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_EveryListedId_IsFetchableAnonymously()
+    {
+        await CreateProjectWithViewStatusAsync("Sitemap Fetchable Project", Project.ProjectViewStatus.Public);
+
+        var ids = (await GetPublicProjectIdsAnonymouslyAsync())!;
+
+        Assert.NotEmpty(ids);
+        foreach (var id in ids)
+        {
+            var detail = await _client.GetAsync($"/api/Projects/{id}", TestContext.Current.CancellationToken);
+            Assert.True(detail.StatusCode == HttpStatusCode.OK, $"Listed project {id} returned {(int)detail.StatusCode} anonymously.");
+        }
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_AProjectMadePrivate_DropsOutOfTheList_AndItsDetailIsNoLongerAnonymous()
+    {
+        var id = await CreateProjectWithViewStatusAsync("Sitemap Made Private Project", Project.ProjectViewStatus.Public);
+        Assert.Contains(id, (await GetPublicProjectIdsAnonymouslyAsync())!);
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.Projects
+                .Where(p => p.Id == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.ViewStatus, Project.ProjectViewStatus.Private), TestContext.Current.CancellationToken);
+        }
+
+        Assert.DoesNotContain(id, (await GetPublicProjectIdsAnonymouslyAsync())!);
+        var detail = await _client.GetAsync($"/api/Projects/{id}", TestContext.Current.CancellationToken);
+        Assert.NotEqual(HttpStatusCode.OK, detail.StatusCode);
     }
 }

@@ -37,6 +37,12 @@ public interface IProjectService
 
     Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId, string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate");
     Task<Project?> GetProjectByIdAsync(Guid id);
+
+    /// <summary>
+    /// Ids of every project whose view status is <see cref="Project.PubliclyListedViewStatus"/>,
+    /// ordered by id. Unpaginated: it feeds the sitemap.
+    /// </summary>
+    Task<List<Guid>> GetPublicProjectIdsAsync(CancellationToken cancellationToken = default);
     Task<Project> CreateProjectAsync(AddProjectDto dto, long userId);
     Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId);
     Task DeleteProjectAsync(Guid id, bool deletePrints, long userId);
