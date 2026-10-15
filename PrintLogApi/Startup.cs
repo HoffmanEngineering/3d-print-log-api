@@ -175,6 +175,7 @@ public class Startup
         services.AddTransient<Services.Spoolman.ISpoolmanConnectionService, Services.Spoolman.SpoolmanConnectionService>();
         // Singleton: it holds only HybridCache and CachedComputation, both singletons.
         services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
+        services.AddTransient<Services.Spoolman.ISpoolmanInventoryService, Services.Spoolman.SpoolmanInventoryService>();
         // The wall clock, as a dependency. Every analytics service reads "now" to close an
         // open-ended window (a filter with no ToDate means "up to now"), and a test that has
         // to construct its fixture relative to the real current date can only assert what is
@@ -283,6 +284,29 @@ public class Startup
                 var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: $"mcp-docs:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // The Spoolman API (#177), partitioned by connection rather than by user, so a user's
+            // own REST traffic cannot spend the budget their printers need, and one printer's
+            // retry loop cannot starve another's. Generous: Moonraker reports usage every 5 s
+            // and Mainsail polls /spool, both well inside it. 0 disables, as in tests.
+            options.AddPolicy(Controllers.SpoolmanController.RateLimitPolicy, httpContext =>
+            {
+                var limit = Configuration.GetValue("Spoolman:RateLimitPerMinute", 600);
+                var connection = httpContext.User.FindFirst(SpoolmanAuthentication.ConnectionIdClaim)?.Value;
+                if (limit <= 0 || connection is null)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("spoolman-unlimited");
+                }
+
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"spoolman:{connection}",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         PermitLimit = limit,

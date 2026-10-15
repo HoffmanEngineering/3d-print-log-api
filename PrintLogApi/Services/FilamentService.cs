@@ -1584,6 +1584,10 @@ public class FilamentService(
 
         var filamentId = newFilament.Id;
 
+        // Every cached view of the user's inventory is stale now, the Spoolman one (#177)
+        // included. The MCP paths that call this invalidate again afterwards; that is harmless.
+        cacheVersionService.InvalidateUserCache(userId);
+
         telemetry.TrackEvent("FilamentAdd");
 
         // Null-forgiven: the filament was just persisted, so the re-read always finds it.
@@ -1803,6 +1807,8 @@ public class FilamentService(
             }
         }
 
+        cacheVersionService.InvalidateUserCache(updatedFilament.CreatedById);
+
         telemetry.TrackEvent("FilamentEdit");
 
         return updatedFilament;
@@ -1916,6 +1922,8 @@ public class FilamentService(
         // toward an orphaned blob rather than a row pointing at destroyed bytes.
         foreach (var name in blobNames)
             await blobStorage.DeleteBlobAsync(BlobContainers.FilamentImages, name);
+
+        cacheVersionService.InvalidateUserCache(filament.CreatedById);
 
         telemetry.TrackEvent("FilamentDelete");
 
