@@ -46,7 +46,10 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.ColorHex, src => src.MapFrom(src =>
                 src.Colors != null && src.Colors.Count > 0 ? src.Colors[0] : src.ColorHex));
 
-        CreateMap<FilamentSummaryDto, Filament>();
+        // SpoolNumber is ignored on every inbound map: it is assigned on create and never
+        // settable by a client (#174), so a PUT echoing back a different number is a no-op.
+        CreateMap<FilamentSummaryDto, Filament>()
+            .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore());
 
         CreateMap<AddFilamentDto, Filament>()
             .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))
@@ -65,6 +68,7 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
 
         CreateMap<FilamentDetailDto, Filament>()
+            .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore())
             .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))

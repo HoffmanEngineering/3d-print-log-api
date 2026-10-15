@@ -68,6 +68,15 @@ public class User
     public int AchievementCatalogVersion { get; set; }
 
     /// <summary>
+    /// The highest <see cref="Filament.SpoolNumber"/> ever handed out to this user, deleted spools
+    /// included (#174). The next spool gets this plus one. A high-water mark rather than
+    /// <c>max + 1</c> over the live rows, because spools are hard-deleted: <c>max + 1</c> would
+    /// give the next spool the number of the one just deleted, and an old QR label would then
+    /// open a different spool.
+    /// </summary>
+    public int LastSpoolNumber { get; set; }
+
+    /// <summary>
     /// The account email, lower-cased and trimmed, copied from Auth0 (access-token claims or the
     /// offline backfill). Auth0 remains the source of truth; this copy exists so email can be sent
     /// and segmented without a Management API call per user.

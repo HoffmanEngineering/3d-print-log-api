@@ -11,6 +11,12 @@ public class FilamentSummaryDto
     public Guid Id { get; set; }
 
     /// <summary>
+    /// The user's own number for this spool (1, 2, 3…), which Spoolman clients use as its id.
+    /// Read-only: assigned on create, never reused, and ignored on PUT.
+    /// </summary>
+    public int? SpoolNumber { get; set; }
+
+    /// <summary>
     /// Common name for the roll of filament.
     /// </summary>
     [StringLength(255)]
