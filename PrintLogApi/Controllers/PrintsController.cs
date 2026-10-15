@@ -563,6 +563,46 @@ public class PrintsController(
     }
 
     /// <summary>
+    /// List your prints logged on a printer in a time window.
+    /// </summary>
+    /// <remarks>
+    /// For a connector backfilling a printer's history: before importing a past job, it checks
+    /// whether that job is already logged, by its own `externalSource`/`externalId` or, for a
+    /// print made with a slicer plugin or by hand, by file name and time. A print is in the window
+    /// when its `startDate` is in [`from`, `to`), or, with no start date, when it was created in
+    /// it. Ordered by id; page with `afterId` set to the last id of the page before. Connectors
+    /// can also take this endpoint's presence as the API accepting `imported` prints on
+    /// `POST /api/Prints`: both came in the same release.
+    /// </remarks>
+    /// <param name="printerId">The printer.</param>
+    /// <param name="from">The window's start, inclusive.</param>
+    /// <param name="to">The window's end, exclusive.</param>
+    /// <param name="afterId">Only prints with a greater id: the last id of the previous page.</param>
+    /// <param name="limit">The most prints to return, 1 to 500. Defaults to 100.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">The prints. Empty when there are none, or the printer is not yours.</response>
+    /// <response code="400">Returned when a parameter is missing or `limit` is out of range.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [HttpGet("on-printer")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<List<PrintOnPrinterDto>>> GetPrintsOnPrinter(
+        [FromQuery, BindRequired] long printerId,
+        [FromQuery, BindRequired] DateTimeOffset from,
+        [FromQuery, BindRequired] DateTimeOffset to,
+        [FromQuery] long? afterId,
+        [FromQuery, Range(1, 500)] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        return await printService.GetPrintsOnPrinter(userId, printerId, from, to, afterId, limit, cancellationToken);
+    }
+
+    /// <summary>
     /// List your prints on a printer that a connector could claim.
     /// </summary>
     /// <remarks>
@@ -919,11 +959,18 @@ public class PrintsController(
     ///
     /// `fileHash` is optional: 40 hex digits (20 bytes) identifying the G-code file, either its
     /// SHA-1 or a connector's own identity for it. A replay never changes it.
+    ///
+    /// A connector backfilling its printer's history sends `imported: true`. An imported print is a
+    /// record of the past: its `status` must be a finished one, no usage row may name a filament (so
+    /// it never changes a spool's remaining weight), and it leaves the printer's loaded spools as
+    /// they are. It must carry an external pair. When its pair is already used, the existing print
+    /// is returned with `200` unchanged, so a backfill never rewrites a print the connector logged
+    /// live. `GET /api/Prints/on-printer` finds prints logged without a pair.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
-    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
+    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`, or an imported print with no external pair, not finished, or naming a filament. Inspect Problem Details object for message as to what failed validation.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]

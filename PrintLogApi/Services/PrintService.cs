@@ -757,7 +757,10 @@ public sealed class PrintService(
             return null;
         }
 
-        if (await ApplyConnectorOwnedFields(existing, print, userId))
+        // An imported print is a backfill from the connector's history. The pair it reached was
+        // logged live (or imported before), and that print's status, durations and spool-linked
+        // usage are better than the history's totals, so the backfill changes nothing.
+        if (print.Imported != true && await ApplyConnectorOwnedFields(existing, print, userId))
         {
             existing.UpdatedById = userId;
             await context.SaveChangesAsync();
@@ -919,8 +922,9 @@ public sealed class PrintService(
 
         // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
         // the slots say what is loaded, and replacing them with one print's spools would unload
-        // every tool the print did not use.
-        if (newPrint.Printer.SlotCount <= 1)
+        // every tool the print did not use. Nor for an imported print: it happened in the past,
+        // names no spool, and would unload the one in the printer today.
+        if (newPrint.Printer.SlotCount <= 1 && print.Imported != true)
         {
             await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
         }
@@ -1821,6 +1825,43 @@ public sealed class PrintService(
     private async Task<AddPrintResult> ClaimedResult(long id, bool wasReplayed) =>
         // Null-forgiven: the print was read a moment ago and a claim never deletes it.
         new((await GetPrintById(id))!, wasReplayed);
+
+    public async Task<List<PrintOnPrinterDto>> GetPrintsOnPrinter(
+        long userId, long printerId, DateTimeOffset from, DateTimeOffset to, long? afterId, int limit, CancellationToken ct)
+    {
+        // CreatedDate is a UTC DateTime column, StartDate a DateTimeOffset, so each is compared
+        // in its own type rather than through a coalesce that mixes them.
+        var fromUtc = from.UtcDateTime;
+        var toUtc = to.UtcDateTime;
+        var query = context.Prints
+            .Where(p => p.CreatedById == userId
+                && p.PrinterId == printerId
+                && ((p.StartDate != null && p.StartDate >= from && p.StartDate < to)
+                    || (p.StartDate == null && p.CreatedDate >= fromUtc && p.CreatedDate < toUtc)));
+        if (afterId is { } after)
+        {
+            query = query.Where(p => p.Id > after);
+        }
+
+        var prints = await query
+            .OrderBy(p => p.Id)
+            .Take(limit)
+            .Select(p => new { p.Id, p.Title, p.FileName, p.Status, p.StartDate, p.CreatedDate, p.ExternalSource, p.ExternalId })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return prints.Select(p => new PrintOnPrinterDto
+        {
+            Id = p.Id,
+            Title = p.Title,
+            FileName = p.FileName,
+            Status = p.Status,
+            StartDate = p.StartDate,
+            CreatedDate = DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+            ExternalSource = p.ExternalSource,
+            ExternalId = p.ExternalId,
+        }).ToList();
+    }
 
     public async Task<List<ClaimablePrintDto>> GetClaimablePrints(
         long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct)

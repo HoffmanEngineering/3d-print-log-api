@@ -88,11 +88,48 @@ public class AddPrintDTO : IValidatableObject
     // No [StringLength]: PrintFileHashes checks the length too, so a bad hash gets one message.
     public string? FileHash { get; set; }
 
+    /// <summary>
+    /// The print already happened and is imported from a connector's history (a backfill), so it
+    /// is a record only. It needs an <c>externalSource</c>/<c>externalId</c> pair, its status must be
+    /// a finished one, and no usage row may name a spool:
+    /// historical usage would count against spools added since. Creating it leaves the printer's
+    /// loaded spools as they are. When its <c>externalSource</c>/<c>externalId</c>
+    /// pair is already used, the existing print is returned unchanged, so a backfill never
+    /// rewrites a print the connector logged live. Not stored on the print.
+    /// </summary>
+    public bool? Imported { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (FileHash is not null && !PrintFileHashes.IsValid(FileHash))
         {
             yield return new ValidationResult(PrintFileHashes.ValidationMessage, [nameof(FileHash)]);
+        }
+
+        if (Imported == true)
+        {
+            // The pair is what makes a backfill safe to run twice, and beside the live connector.
+            if (string.IsNullOrWhiteSpace(ExternalSource) || string.IsNullOrWhiteSpace(ExternalId))
+            {
+                yield return new ValidationResult(
+                    "An imported print needs externalSource and externalId, so importing it again finds it.",
+                    [nameof(Imported), nameof(ExternalSource), nameof(ExternalId)]);
+            }
+
+            // Nothing finishes an imported print later: the connector logs live jobs itself.
+            if (!CompletePrintDto.IsFinished(Status))
+            {
+                yield return new ValidationResult(
+                    "An imported print must have a finished status: Success (3), Cancelled (4), Failed (5) or PartialSuccess (6).",
+                    [nameof(Status), nameof(Imported)]);
+            }
+
+            if (FilamentUsage?.Any(row => row?.Filament is { } filament && filament.Id != Guid.Empty) == true)
+            {
+                yield return new ValidationResult(
+                    "An imported print's usage rows may not name a filament: historical usage would count against spools added since.",
+                    [nameof(FilamentUsage), nameof(Imported)]);
+            }
         }
 
         if (ExternalSource is null && ExternalId is null)
