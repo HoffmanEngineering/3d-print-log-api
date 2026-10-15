@@ -472,7 +472,7 @@ public class PrintsController(
     /// <param name="id">The ID of the print.</param>
     /// <param name="completion">How the print ended.</param>
     /// <response code="200">The updated print.</response>
-    /// <response code="400">The body is invalid, `endedAt` is before the start date, or a filament is not the caller's.</response>
+    /// <response code="400">The body is invalid, `endedAt` is before the start date or out of range, or a filament is not the caller's.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
     /// <response code="403">Returned when the caller may not edit this print.</response>
     /// <response code="404">Returned when the print does not exist.</response>
