@@ -86,7 +86,7 @@ public class SpoolmanWebSocketTests(SpoolmanWebSocketTests.Factory factory) : IC
     {
         var user = await _support.CreateUserAsync();
         var connection = await _support.ConnectAsync(user);
-        using var socket = await ConnectAsync(connection.Secret!, "/spoolman/api/v1/spool");
+        using var socket = await OpenAsync(connection.Secret!);
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -103,7 +103,7 @@ public class SpoolmanWebSocketTests(SpoolmanWebSocketTests.Factory factory) : IC
         var user = await _support.CreateUserAsync(pro: true);
         await _support.ConnectAsync(user);
         var newer = await _support.ConnectAsync(user);
-        using var socket = await ConnectAsync(newer.Secret!, "/spoolman/api/v1/spool");
+        using var socket = await OpenAsync(newer.Secret!);
 
         // Lapsed, with nothing applying the tier: the timer's Pro re-check has to notice.
         await _support.SetProAsync(user, false);
@@ -167,6 +167,22 @@ public class SpoolmanWebSocketTests(SpoolmanWebSocketTests.Factory factory) : IC
         var client = factory.Server.CreateWebSocketClient();
         client.ConfigureRequest = request => request.Headers.Authorization = SpoolmanTestSupport.Basic(secret).ToString();
         return await client.ConnectAsync(new Uri(factory.Server.BaseAddress, path), Ct);
+    }
+
+    /// <summary>
+    /// Connects and waits for the server to finish opening the socket, for a test that writes to the
+    /// database next. The handshake returns as soon as the 101 is sent, but the server then runs its
+    /// tier query (<c>SpoolmanSocketHost.TierAsync</c>) before it starts receiving. Every
+    /// <c>DbContext</c> in the test host shares one SQLite connection, which is not safe to use from
+    /// two threads, so a write that overlaps that query fails it and the server drops the socket with
+    /// no close frame. The healthy reply proves the query is done: the receive loop only starts after it.
+    /// </summary>
+    private async Task<WebSocket> OpenAsync(string secret)
+    {
+        var socket = await ConnectAsync(secret, "/spoolman/api/v1/spool");
+        await socket.SendAsync(Encoding.UTF8.GetBytes("ping?"), WebSocketMessageType.Text, true, Ct);
+        Assert.Equal("""{"status":"healthy"}""", await ReceiveTextAsync(socket));
+        return socket;
     }
 
     private static async Task<string> ReceiveTextAsync(WebSocket socket)
