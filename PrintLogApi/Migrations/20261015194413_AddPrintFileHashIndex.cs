@@ -14,7 +14,8 @@ namespace PrintLogApi.Migrations
                 name: "IX_Prints_User_FileHash",
                 table: "Prints",
                 columns: new[] { "CreatedById", "FileHash" },
-                filter: "[FileHash] IS NOT NULL");
+                filter: "[FileHash] IS NOT NULL")
+                .Annotation("SqlServer:Online", true);
         }
 
         /// <inheritdoc />

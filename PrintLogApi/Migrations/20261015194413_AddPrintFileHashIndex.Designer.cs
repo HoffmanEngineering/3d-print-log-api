@@ -12,7 +12,7 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    [Migration("20261015190334_AddPrintFileHashIndex")]
+    [Migration("20261015194413_AddPrintFileHashIndex")]
     partial class AddPrintFileHashIndex
     {
         /// <inheritdoc />
@@ -79,6 +79,9 @@ namespace PrintLogApi.Migrations
                     b.Property<int>("DroppedNotifierEventCount")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ErrorCount")
+                        .HasColumnType("int");
+
                     b.Property<string>("InstanceId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -89,17 +92,52 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("KlipperVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<DateTime?>("LastDroppedNotifierEventAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("LastErrorAt")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Mode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("MoonrakerVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<DateTime?>("NotifierNoticeDismissedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("OutboxDepth")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("OutboxOldestQueuedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<long?>("PrinterId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("PrinterModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool?>("SlicerSettings")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("Snapshots")
+                        .HasColumnType("bit");
 
                     b.Property<long>("UserId")
                         .HasColumnType("bigint");
@@ -1142,7 +1180,8 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("CreatedById", "FileHash")
                         .HasDatabaseName("IX_Prints_User_FileHash")
-                        .HasFilter("[FileHash] IS NOT NULL");
+                        .HasFilter("[FileHash] IS NOT NULL")
+                        .HasAnnotation("SqlServer:Online", true);
 
                     b.HasIndex("CreatedById", "ExternalSource", "ExternalId")
                         .IsUnique()
