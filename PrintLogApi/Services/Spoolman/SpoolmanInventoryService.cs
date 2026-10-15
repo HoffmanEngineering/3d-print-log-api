@@ -67,8 +67,8 @@ public sealed class SpoolmanInventoryService(
     /// never finds anything, and it is not cheap: <c>SpoolNumber IS NULL</c> cannot use the
     /// filtered <c>IS NOT NULL</c> index, so it walks every spool the user owns. On every request
     /// it ran about every 5 s per printing printer, for <c>/use</c>. A straggler is picked up by
-    /// the first miss after it appears; a new instance starts with an empty cache, and any write
-    /// bumps the version.</para>
+    /// the first miss after it appears; a new instance starts with an empty cache, any write
+    /// bumps the version, and the entry's absolute expiry caps the wait at 15 minutes.</para>
     ///
     /// <para>Numbering does not bump the cache version, and must not: this runs inside the factory
     /// for the key that version names, so a bump here would orphan the entry being built.</para>
