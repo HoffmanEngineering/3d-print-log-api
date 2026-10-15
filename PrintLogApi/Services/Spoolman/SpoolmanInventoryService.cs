@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Caching;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Profiles;
 
@@ -25,9 +26,13 @@ public interface ISpoolmanInventoryService
 /// <para><b>Mapping.</b> Spoolman's ids are integers: <c>spool.id</c> and <c>filament.id</c> are both
 /// the spool's <see cref="Filament.SpoolNumber"/> (one entity per spool here, so one filament per
 /// spool), and <c>vendor.id</c> is <see cref="VendorId"/>. Weights are milligrams to grams and
-/// lengths metres to millimetres, using the same remaining and used figures as the web app
-/// (<see cref="FilamentProfile.RemainingMg"/>, <see cref="FilamentProfile.UsedMg"/>). Only the
-/// <c>filament</c> material category is a spool; resin and powder are left out.</para>
+/// lengths metres to millimetres. Remaining is the web app's figure
+/// (<see cref="FilamentProfile.RemainingMg"/>), and used is everything taken off the spool by
+/// prints <i>and</i> adjustments (<see cref="FilamentProfile.ConsumedMg"/>), so
+/// <c>used_weight + remaining_weight = initial_weight</c> holds as Spoolman clients assume. With
+/// prints alone, a weigh-in lowered remaining while used stayed put, and Home Assistant's
+/// Spoolman integration read the drop as a burst of consumption. Only the <c>filament</c>
+/// material category is a spool; resin and powder are left out.</para>
 /// </summary>
 public sealed class SpoolmanInventoryService(
     PrintLogContext context,
@@ -113,39 +118,33 @@ public sealed class SpoolmanInventoryService(
     private static System.Linq.Expressions.Expression<Func<Filament, SourceRow>> BuildProjection()
     {
         // Composes the two shared figures into one projection, so the SQL computes remaining and
-        // used exactly as the detail page does.
-        var f = System.Linq.Expressions.Expression.Parameter(typeof(Filament), "f");
-        var remaining = Replace(FilamentProfile.RemainingMg.Body, FilamentProfile.RemainingMg.Parameters[0], f);
-        var used = Replace(FilamentProfile.UsedMg.Body, FilamentProfile.UsedMg.Parameters[0], f);
-
-        System.Linq.Expressions.Expression<Func<Filament, long?, long, SourceRow>> shape = (x, remainingMg, usedMg) => new SourceRow
-        {
-            Id = x.Id,
-            SpoolNumber = x.SpoolNumber!.Value,
-            DisplayName = x.DisplayName,
-            Brand = x.Brand,
-            MaterialType = x.MaterialType,
-            Density = x.MaterialDensityGramPerCubicCm,
-            DiameterMm = x.DiameterMm,
-            ColorHex = x.ColorHex,
-            Colors = x.Colors,
-            RecommendedTemp = x.RecommendedTemp,
-            RecommendedBedTemp = x.RecommendedBedTemp,
-            IsActive = x.IsActive,
-            StorageLocation = x.StorageLocation,
-            Notes = x.Notes,
-            PurchasePriceValue = x.PurchasePriceValue,
-            CreatedDate = x.CreatedDate,
-            InitialNominalWeightMg = x.InitialNominalWeightMg,
-            SpoolWeightMg = x.SpoolWeightMg,
-            RemainingMg = remainingMg,
-            UsedMg = usedMg,
-        };
-
-        var body = Replace(shape.Body, shape.Parameters[0], f);
-        body = Replace(body, shape.Parameters[1], remaining);
-        body = Replace(body, shape.Parameters[2], used);
-        return System.Linq.Expressions.Expression.Lambda<Func<Filament, SourceRow>>(body, f);
+        // used exactly as the rest of the product does.
+        return ExpressionSplice.With<Filament, long?, long, SourceRow>(
+            (x, remainingMg, consumedMg) => new SourceRow
+            {
+                Id = x.Id,
+                SpoolNumber = x.SpoolNumber!.Value,
+                DisplayName = x.DisplayName,
+                Brand = x.Brand,
+                MaterialType = x.MaterialType,
+                Density = x.MaterialDensityGramPerCubicCm,
+                DiameterMm = x.DiameterMm,
+                ColorHex = x.ColorHex,
+                Colors = x.Colors,
+                RecommendedTemp = x.RecommendedTemp,
+                RecommendedBedTemp = x.RecommendedBedTemp,
+                IsActive = x.IsActive,
+                StorageLocation = x.StorageLocation,
+                Notes = x.Notes,
+                PurchasePriceValue = x.PurchasePriceValue,
+                CreatedDate = x.CreatedDate,
+                InitialNominalWeightMg = x.InitialNominalWeightMg,
+                SpoolWeightMg = x.SpoolWeightMg,
+                RemainingMg = remainingMg,
+                UsedMg = consumedMg,
+            },
+            FilamentProfile.RemainingMg,
+            FilamentProfile.ConsumedMg);
     }
 
     internal static SpoolmanSpool ToSpool(SourceRow row, SpoolmanVendor? vendor, (DateTime First, DateTime Last)? used)
@@ -291,16 +290,5 @@ public sealed class SpoolmanInventoryService(
         public long? SpoolWeightMg { get; init; }
         public long? RemainingMg { get; init; }
         public long UsedMg { get; init; }
-    }
-
-    private static System.Linq.Expressions.Expression Replace(
-        System.Linq.Expressions.Expression body, System.Linq.Expressions.Expression from, System.Linq.Expressions.Expression to) =>
-        new ParameterReplacer(from, to).Visit(body)
-        ?? throw new InvalidOperationException("Rewriting an expression produced nothing.");
-
-    private sealed class ParameterReplacer(System.Linq.Expressions.Expression from, System.Linq.Expressions.Expression to) : System.Linq.Expressions.ExpressionVisitor
-    {
-        public override System.Linq.Expressions.Expression? Visit(System.Linq.Expressions.Expression? node) =>
-            node == from ? to : base.Visit(node);
     }
 }

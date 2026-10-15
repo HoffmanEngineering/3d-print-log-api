@@ -1,9 +1,11 @@
 ﻿using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services;
 
@@ -476,15 +478,6 @@ public class PrinterService(
                         Color = pf.Filament.ColorName,
                         pf.Filament.DiameterMm,
 
-                        // Same remaining-weight expression AutoMapper uses for FilamentSummaryDto:
-                        // initial weight, minus usage (actual, falling back to estimate), plus
-                        // adjustments.
-                        RemainingMg = (pf.Filament.InitialNominalWeightMg ?? 0)
-                            - pf.Filament.PrintFilaments!.Sum(u =>
-                                u.AmountMg.HasValue && u.AmountMg > 0 ? (long)u.AmountMg
-                                : u.EstimatedAmountMg.HasValue && u.EstimatedAmountMg > 0 ? (long)u.EstimatedAmountMg
-                                : 0L)
-                            + pf.Filament.FilamentAdjustments!.Sum(adj => adj.AmountMg),
 
                         pf.LoadedDateTime,
                         pf.Slot,
@@ -502,10 +495,20 @@ public class PrinterService(
             throw McpToolException.NotFound("Printer not found.");
         }
 
+        // Remaining comes from the shared figure get_material_inventory also reports, so the two
+        // tools cannot disagree about a spool. It needs the spool's own usage and adjustments,
+        // which the nested projection above cannot reuse, so it is one more query for at most
+        // MaxLoadedFilaments rows.
+        var loadedIds = row.Loaded.Select(f => f.FilamentId).Distinct().ToList();
+        var remainingById = await context.Filaments.AsNoTracking()
+            .Where(f => loadedIds.Contains(f.Id))
+            .Select(ExpressionSplice.With((Filament f, long? balanceMg) => new { f.Id, BalanceMg = balanceMg }, FilamentProfile.BalanceMg))
+            .ToDictionaryAsync(f => f.Id, f => f.BalanceMg, ct);
+
         var loaded = row.Loaded
             .Select(f => new LoadedFilament(
                 f.FilamentId, f.Name, f.Brand, f.Material, f.Color, f.DiameterMm,
-                McpUnits.MgToGrams(f.RemainingMg), f.LoadedDateTime, f.Slot, f.SlotLabel))
+                McpUnits.MgToGrams(remainingById.GetValueOrDefault(f.FilamentId)), f.LoadedDateTime, f.Slot, f.SlotLabel))
             .ToList();
 
         // Named arguments deliberately: this record has 22 fields, many of them double? or
