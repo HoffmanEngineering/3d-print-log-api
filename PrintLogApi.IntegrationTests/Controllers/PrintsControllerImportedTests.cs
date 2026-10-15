@@ -139,6 +139,50 @@ public class PrintsControllerImportedTests : IClassFixture<CustomWebApplicationF
         Assert.Equal((await ReadAsync(first)).Id, (await ReadAsync(second)).Id);
     }
 
+    [Fact]
+    public async Task PostPrint_ImportedWithoutAnExternalPair_Returns400NamingImported()
+    {
+        // Without a pair, a backfill run twice would import everything twice.
+        var dto = ImportedPrint(IntegrationTestSeeder.TestPrinterId, "unused");
+        dto.ExternalSource = null;
+        dto.ExternalId = null;
+
+        var response = await PostAsync(dto);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("\"Imported\"", body);
+    }
+
+    [Fact]
+    public async Task PostPrint_Imported_ReplayOntoAPrintStillPrinting_LeavesItPrintingAndUnchanged()
+    {
+        // The live connector is still logging that job; it finishes the print itself.
+        var externalId = UniqueExternalId();
+        var printerId = await CreatePrinterAsync();
+        var live = new AddPrintDTO
+        {
+            Title = "benchy.gcode",
+            PrinterId = printerId,
+            Status = PrintStatus.Printing,
+            ViewStatus = PrintViewStatus.Private,
+            EstimatedPrintTimeInSeconds = 3500,
+            ExternalSource = "moonraker",
+            ExternalId = externalId,
+        };
+        var created = await ReadAsync(await PostAsync(live));
+
+        var replay = await PostAsync(ImportedPrint(printerId, externalId));
+
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var detail = await GetDetailAsync(created.Id);
+        Assert.Equal(PrintStatus.Printing, detail.Status);
+        Assert.Null(detail.PrintTimeInSeconds);
+        Assert.Equal(3500, detail.EstimatedPrintTimeInSeconds);
+        Assert.Empty(detail.FilamentUsage!);
+        Assert.Null(detail.Notes);
+    }
+
     /// <summary>A finished job from a printer's history, its total usage on one unlinked row.</summary>
     private static AddPrintDTO ImportedPrint(long printerId, string externalId) => new()
     {

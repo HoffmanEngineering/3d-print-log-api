@@ -90,7 +90,8 @@ public class AddPrintDTO : IValidatableObject
 
     /// <summary>
     /// The print already happened and is imported from a connector's history (a backfill), so it
-    /// is a record only. Its status must be a finished one, and no usage row may name a spool:
+    /// is a record only. It needs an <c>externalSource</c>/<c>externalId</c> pair, its status must be
+    /// a finished one, and no usage row may name a spool:
     /// historical usage would count against spools added since. Creating it leaves the printer's
     /// loaded spools as they are. When its <c>externalSource</c>/<c>externalId</c>
     /// pair is already used, the existing print is returned unchanged, so a backfill never
@@ -107,6 +108,14 @@ public class AddPrintDTO : IValidatableObject
 
         if (Imported == true)
         {
+            // The pair is what makes a backfill safe to run twice, and beside the live connector.
+            if (string.IsNullOrWhiteSpace(ExternalSource) || string.IsNullOrWhiteSpace(ExternalId))
+            {
+                yield return new ValidationResult(
+                    "An imported print needs externalSource and externalId, so importing it again finds it.",
+                    [nameof(Imported), nameof(ExternalSource), nameof(ExternalId)]);
+            }
+
             // Nothing finishes an imported print later: the connector logs live jobs itself.
             if (!CompletePrintDto.IsFinished(Status))
             {
