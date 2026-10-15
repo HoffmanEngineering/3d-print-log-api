@@ -220,8 +220,8 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   retries a refused socket every 2 s forever. Every path that revokes, rotates or pauses a
   connection must evict it. **A secret matching no row is never cached** (#193): those entries
   are bounded only by what a caller sends, and they would evict other users' entries from the
-  shared 8 MiB budget. The factory throws to keep it out, as `GetUserIdByApiKey` does. The failed-attempt limiter counts only unknown secrets and never
-  refuses a valid one.
+  shared 8 MiB budget. The factory throws to keep it out, as `GetUserIdByApiKey` does. The
+  failed-attempt limiter counts only unknown secrets and never refuses a valid one.
 - **Tier:** Free is one *active* connection. A downgrade pauses (never deletes) all but the
   oldest, from `SubscriptionService`, at the handshake, and on the socket timer. A paused
   connection also stops notifier logging (401).
