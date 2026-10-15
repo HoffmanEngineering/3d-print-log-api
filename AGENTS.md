@@ -232,6 +232,10 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   revoked or paused. Scaling out needs a backplane before #172's events can reach a socket held
   by another instance, so scale *up* (S1/P0v3 at about 250 sockets; B1 allows 350). App Service
   must have **Web sockets** switched on.
+- **Spoolman's web UI paths redirect to the web app** (`SpoolmanWebUiController`): Fluidd links
+  "Manage spools" to the bare server URL and its AFC panel to `{server}/spool/show/{id}`. They are
+  anonymous and go to `Email:WebBaseUrl`, so a local test that clicks them needs that pointed at
+  the local UI.
 - **`moonraker.log` prints the URL with the secret in it**, and users post that log publicly.
   That is why the credential is narrow and easy to rotate. Never widen what a Spoolman secret
   can reach.
