@@ -1731,7 +1731,9 @@ public sealed class PrintService(
         }
 
         // Checked before the status: a retried claim must still succeed after the print finished.
-        if (print.ExternalSource == source && print.ExternalId == externalId)
+        // Case-insensitive, to agree with FindPrintIdByExternalPair's SQL (#204). See NormalizeId.
+        if (string.Equals(print.ExternalSource, source, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(print.ExternalId, externalId, StringComparison.OrdinalIgnoreCase))
         {
             return await ClaimedResult(id, wasReplayed: true);
         }

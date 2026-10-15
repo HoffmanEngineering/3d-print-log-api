@@ -68,7 +68,10 @@ public class AddPrintDTO : IValidatableObject
     [StringLength(50)]
     public string? ExternalSource { get; set; }
 
-    /// <summary>The job's identity in <see cref="ExternalSource"/>, unique per user and source.</summary>
+    /// <summary>
+    /// The job's identity in <see cref="ExternalSource"/>, unique per user and source. Matched
+    /// case-insensitively: <c>ABc1</c> replays a print created as <c>abC1</c>.
+    /// </summary>
     [StringLength(200)]
     public string? ExternalId { get; set; }
 

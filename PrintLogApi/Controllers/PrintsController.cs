@@ -289,8 +289,8 @@ public class PrintsController(
     /// </summary>
     /// <remarks>
     /// `source` is the connector (`moonraker`, `octoprint`…) and `id` its job id, the same pair
-    /// sent as `externalSource` and `externalId` when the print was created. Sources are not
-    /// case-sensitive; ids are.
+    /// sent as `externalSource` and `externalId` when the print was created. Neither is
+    /// case-sensitive: `ABc1` finds a print logged as `abC1`.
     /// </remarks>
     /// <param name="source">The connector the print was logged from.</param>
     /// <param name="id">The job's id in that connector.</param>

@@ -13,7 +13,9 @@ public class ClaimPrintDto : IValidatableObject
     [StringLength(50)]
     public string? ExternalSource { get; set; }
 
-    /// <summary>The job's identity in <see cref="ExternalSource"/>.</summary>
+    /// <summary>
+    /// The job's identity in <see cref="ExternalSource"/>. Matched case-insensitively, as on create.
+    /// </summary>
     [StringLength(200)]
     public string? ExternalId { get; set; }
 
