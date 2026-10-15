@@ -422,6 +422,51 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// A spool the old app created during the #174 deploy has no number. Numbering runs on a
+    /// cache miss only (#195), not on every request: a cached read leaves the straggler alone, and
+    /// the next read after a version bump numbers it, lists it, and lets <c>/use</c> resolve it.
+    /// </summary>
+    [Fact]
+    public async Task AnUnnumberedSpool_IsNumberedOnTheNextCacheMiss_NotOnEveryRead()
+    {
+        var (user, secret) = await ConnectedUserAsync();
+        await AddSpoolAsync(user, "Numbered");
+        Assert.Equal(["Numbered"], Names(await JsonAsync(await GetAsync(secret, "/spool")))); // now cached
+
+        var straggler = await WithDbAsync(async db =>
+        {
+            var filament = new Filament
+            {
+                DisplayName = "Created by the old app",
+                MaterialCategoryNickname = "filament",
+                MaterialDensityGramPerCubicCm = 1.24,
+                DiameterMm = 1.75,
+                IsActive = true,
+                CreatedById = user.Id,
+                UpdatedById = user.Id,
+            };
+            db.Filaments.Add(filament);
+            await db.SaveChangesAsync(Ct);
+            return filament.Id;
+        });
+        Task<int?> StrayNumberAsync() => WithDbAsync(db =>
+            db.Filaments.Where(f => f.Id == straggler).Select(f => f.SpoolNumber).SingleAsync(Ct));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(secret, HttpMethod.Put, "/spool/2/use", """{"use_length": 1}""")).StatusCode);
+        Assert.Null(await StrayNumberAsync());
+
+        // The old app's write bumps the old app's in-process version, not this one's; a write
+        // here or a restart is what makes this cache miss.
+        factory.Services.GetRequiredService<ICacheVersionService>().InvalidateUserCache(user.Id);
+
+        Assert.Equal(["Numbered", "Created by the old app"], Names(await JsonAsync(await GetAsync(secret, "/spool"))));
+        Assert.Equal(2, await StrayNumberAsync());
+        var use = await SendAsync(secret, HttpMethod.Put, "/spool/2/use", """{"use_length": 1}""");
+        Assert.Equal(HttpStatusCode.OK, use.StatusCode);
+        Assert.Equal(2, (await JsonAsync(use)).GetProperty("id").GetInt32());
+    }
+
     #endregion
 
     #region The rest of the read surface

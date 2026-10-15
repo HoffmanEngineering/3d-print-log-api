@@ -10,6 +10,22 @@ namespace PrintLogApi.Models.DTOs.Print;
 /// </summary>
 public class CompletePrintDto : IValidatableObject
 {
+    /// <summary>
+    /// The most usage rows one completion or patch may carry (#198). Far above any real tool
+    /// count, and it bounds how many rows one request can add.
+    /// </summary>
+    public const int MaxFilamentUsageRows = 64;
+
+    /// <summary>
+    /// The longest length one usage row may carry, in meters (#198): 100 km, about 300 kg of
+    /// 1.75 mm PLA. The weight derived from it is cast to <c>int</c> milligrams, which wraps
+    /// rather than throws, so an unbounded length stored a nonsense weight.
+    /// </summary>
+    public const double MaxUsageLengthInM = 100_000;
+
+    /// <summary>The largest volume one usage row may carry, in milliliters: 100 L. Same reason as <see cref="MaxUsageLengthInM"/>.</summary>
+    public const double MaxUsageVolumeMl = 100_000;
+
     /// <summary>The final status: Success, Cancelled, Failed or PartialSuccess.</summary>
     public PrintStatus Status { get; set; }
 
@@ -23,6 +39,7 @@ public class CompletePrintDto : IValidatableObject
     /// Actual usage, merged into the print's rows by filament: actual values are set, estimates
     /// and notes are kept. Rows not mentioned here are left as they are.
     /// </summary>
+    [MaxLength(MaxFilamentUsageRows)]
     public ICollection<CompletePrintFilamentUsageDto>? FilamentUsage { get; set; }
 
     /// <summary>The statuses a job can end in.</summary>
@@ -44,6 +61,13 @@ public class CompletePrintDto : IValidatableObject
         }
 
         var usage = FilamentUsage ?? [];
+        if (usage.Any(u => u is null))
+        {
+            // Every check below reads the rows, and so does the merge.
+            yield return new ValidationResult("filamentUsage cannot contain null rows.", [nameof(FilamentUsage)]);
+            yield break;
+        }
+
         var linked = usage.Where(u => u.FilamentId.HasValue).Select(u => u.FilamentId).ToList();
         if (linked.Count != linked.Distinct().Count())
         {
@@ -77,15 +101,19 @@ public class CompletePrintFilamentUsageDto
     /// The printer slot (tool) the material was fed from. A row with no filament is matched to
     /// the print's row for this slot.
     /// </summary>
+    [Range(0, int.MaxValue, ErrorMessage = "{0} cannot be negative.")]
     public int? Slot { get; set; }
 
     /// <summary>The actual weight used in milligrams.</summary>
+    [Range(0, int.MaxValue, ErrorMessage = "{0} cannot be negative.")]
     public int? AmountMg { get; set; }
 
     /// <summary>The actual length used in meters.</summary>
+    [Range(0d, CompletePrintDto.MaxUsageLengthInM, ErrorMessage = "{0} must be between {1} and {2}.")]
     public double? LengthInM { get; set; }
 
     /// <summary>The actual volume used in milliliters.</summary>
+    [Range(0d, CompletePrintDto.MaxUsageVolumeMl, ErrorMessage = "{0} must be between {1} and {2}.")]
     public double? VolumeMl { get; set; }
 
     /// <summary>

@@ -264,6 +264,80 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("printTimeInSeconds")]
+    [InlineData("estimatedPrintTimeInSeconds")]
+    public async Task Patch_NegativeDuration_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new Dictionary<string, object> { [field] = -1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("amountMg")]
+    [InlineData("estimatedAmountMg")]
+    [InlineData("lengthInM")]
+    [InlineData("estimatedLengthInM")]
+    [InlineData("volumeMl")]
+    [InlineData("estimatedVolumeMl")]
+    [InlineData("slot")]
+    public async Task Patch_NegativeUsageValue_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new Dictionary<string, object> { ["amountMg"] = 1_000, [field] = -1 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_MoreUsageRowsThanTheCap_IsBadRequest()
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows + 1)
+                .Select(_ => new { amountMg = 1_000 })
+                .ToArray(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("lengthInM")]
+    [InlineData("estimatedLengthInM")]
+    [InlineData("volumeMl")]
+    [InlineData("estimatedVolumeMl")]
+    public async Task Patch_UsageValueAboveTheCap_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new Dictionary<string, object> { ["amountMg"] = 1_000, [field] = 1e300 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_NullUsageRow_IsBadRequest()
+    {
+        var created = await CreatePrintAsync();
+
+        var response = await PatchAsync(created.Id, new { filamentUsage = new object?[] { null } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task Put_StillReplacesTheWholePrint()
     {
@@ -545,6 +619,27 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     [Fact]
+    public async Task Create_LengthWhoseWeightOverflowsAnInt_StoresAClampedWeight()
+    {
+        // POST has no length bound. 1,000 km of 1.75 mm PLA is ~2.98e9 mg, which the unchecked
+        // long-to-int cast used to wrap to a negative weight (#198).
+        var filament = await CreateFilamentAsync();
+
+        var created = await CreatePrintAsync(usage:
+        [
+            new PrintFilamentSummaryDto
+            {
+                Id = Guid.NewGuid(),
+                Filament = new FilamentSummaryDto { Id = filament.Id },
+                Source = PrintFilament.SourceMeasurement.Length,
+                LengthInM = 1_000_000,
+            },
+        ]);
+
+        Assert.Equal(int.MaxValue, Assert.Single(created.FilamentUsage!).AmountMg);
+    }
+
+    [Fact]
     public async Task Complete_TwiceWithTheSameBody_DeductsInventoryOnce()
     {
         var filament = await CreateFilamentAsync();
@@ -654,6 +749,133 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     [Theory]
+    [InlineData(0)]
+    // The UTC instant minus the duration is representable here, but the local clock time is not,
+    // and AddSeconds checks both.
+    [InlineData(-5)]
+    public async Task Complete_EndedAtTooCloseToTheMinimumForTheDuration_IsBadRequest(int offsetHours)
+    {
+        // Returned 500 before #198: deriving the start date ran off the start of DateTimeOffset.
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, startDate: null);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            EndedAt = new DateTimeOffset(1, 1, 1, 0, 30, 0, TimeSpan.FromHours(offsetHours)),
+            PrintTimeInSeconds = 3_600,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_EndedAtTooFarAfterTheStartDate_IsBadRequest()
+    {
+        var start = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, startDate: start);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            EndedAt = DateTimeOffset.MaxValue,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null((await GetDetailAsync(created.Id)).PrintTimeInSeconds);
+    }
+
+    [Theory]
+    [InlineData("amountMg")]
+    [InlineData("lengthInM")]
+    [InlineData("volumeMl")]
+    [InlineData("slot")]
+    public async Task Complete_NegativeUsageValue_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        var row = new CompletePrintFilamentUsageDto { AmountMg = 1_000 };
+        switch (field)
+        {
+            case "amountMg": row.AmountMg = -1; break;
+            case "lengthInM": row.LengthInM = -0.5; break;
+            case "volumeMl": row.VolumeMl = -0.5; break;
+            case "slot": row.Slot = -1; break;
+        }
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [row],
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("lengthInM")]
+    [InlineData("volumeMl")]
+    public async Task Complete_UsageValueAboveTheCap_IsBadRequest(string field)
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        var row = field == "lengthInM"
+            ? new CompletePrintFilamentUsageDto { LengthInM = 1e300 }
+            : new CompletePrintFilamentUsageDto { VolumeMl = 1e300 };
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [row],
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_NullUsageRow_IsBadRequest()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{created.Id}/complete");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new { status = PrintStatus.Success, filamentUsage = new object?[] { null } });
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_MoreUsageRowsThanTheCap_IsBadRequest()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var response = await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows + 1)
+                .Select(_ => new CompletePrintFilamentUsageDto { LengthInM = 1 })
+                .ToList(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty((await GetDetailAsync(created.Id)).FilamentUsage!);
+    }
+
+    [Fact]
+    public async Task Complete_UsageRowsAtTheCap_AreAccepted()
+    {
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var completed = await ReadAsync(await CompleteAsync(created.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = Enumerable.Range(0, CompletePrintDto.MaxFilamentUsageRows)
+                .Select(_ => new CompletePrintFilamentUsageDto { LengthInM = 1 })
+                .ToList(),
+        }));
+
+        Assert.Equal(CompletePrintDto.MaxFilamentUsageRows, completed.FilamentUsage!.Count);
+    }
+
+    [Theory]
     [InlineData(PrintStatus.Pending)]
     [InlineData(PrintStatus.Printing)]
     [InlineData((PrintStatus)0)]
@@ -723,6 +945,33 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(PrintStatus.Printing, (await GetDetailAsync(created.Id)).Status);
+    }
+
+    [Fact]
+    public async Task Patch_AsPrinterOwnerWhoDidNotCreateThePrint_SucceedsAndInvalidatesTheCreatorsCache()
+    {
+        // The secondary user's print on the test user's printer: the caller owns the printer only.
+        var printId = await InsertPrintAsync(IntegrationTestSeeder.TestPrinterId, IntegrationTestSeeder.SecondaryUserId);
+        var creatorVersionBefore = CacheVersionOf(IntegrationTestSeeder.SecondaryUserId);
+
+        var response = await PatchAsync(printId, new { title = "Renamed by the printer's owner" });
+
+        Assert.Equal("Renamed by the printer's owner", (await ReadAsync(response)).Title);
+        Assert.NotEqual(creatorVersionBefore, CacheVersionOf(IntegrationTestSeeder.SecondaryUserId));
+    }
+
+    [Fact]
+    public async Task Complete_AsCreatorOnAnotherUsersPrinter_SucceedsAndInvalidatesThePrinterOwnersCache()
+    {
+        // The test user's print on the secondary user's printer: the caller created the print only.
+        var foreignPrinterId = await CreatePrinterAsync(IntegrationTestSeeder.SecondaryUserOAuthId);
+        var printId = await InsertPrintAsync(foreignPrinterId, IntegrationTestSeeder.TestUserId);
+        var printerOwnerVersionBefore = CacheVersionOf(IntegrationTestSeeder.SecondaryUserId);
+
+        var response = await CompleteAsync(printId, new CompletePrintDto { Status = PrintStatus.Success });
+
+        Assert.Equal(PrintStatus.Success, (await ReadAsync(response)).Status);
+        Assert.NotEqual(printerOwnerVersionBefore, CacheVersionOf(IntegrationTestSeeder.SecondaryUserId));
     }
 
     #endregion
@@ -813,6 +1062,37 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
     }
 
     #endregion
+
+    /// <summary>
+    /// A Printing print inserted directly, so its creator and its printer's owner can differ,
+    /// which the API never creates.
+    /// </summary>
+    private async Task<long> InsertPrintAsync(long printerId, long creatorId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var now = DateTime.UtcNow;
+        var print = new Print
+        {
+            Title = $"cross-owner {Guid.NewGuid():N}",
+            PrinterId = printerId,
+            Status = PrintStatus.Printing,
+            ViewStatus = PrintViewStatus.Private,
+            CreatedById = creatorId,
+            CreatedDate = now,
+            UpdatedById = creatorId,
+            UpdatedDate = now,
+        };
+        db.Prints.Add(print);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return print.Id;
+    }
+
+    private string CacheVersionOf(long userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<ICacheVersionService>().GetUserCacheVersion(userId);
+    }
 
     private async Task<List<Notification>> NotificationsForPrintAsync(long printId)
     {

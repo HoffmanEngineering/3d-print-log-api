@@ -9,12 +9,22 @@ namespace PrintLogApi.Models;
 /// blocked.
 ///
 /// The network is a keyed hash of its /24 (IPv4) or /48 (IPv6) prefix; no address is stored.
-/// Rows not seen for 30 days are deleted the next time the user's connections are seen.
+/// Rows not seen for 30 days are deleted the next time the user's connections are seen, and no
+/// new network is stored while the user already has <see cref="MaxPerUserPerWeek"/> seen this
+/// week (#197).
 /// </summary>
 public class SpoolmanNetworkSighting
 {
     /// <summary>How long a sighting is kept after it was last seen.</summary>
     public static readonly TimeSpan Retention = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Networks seen in the last 7 days past which a new one is not stored. Ten times the default
+    /// alert threshold (<c>Spoolman:FairUseNetworkThreshold</c>), so detection is unaffected, and
+    /// it bounds the rows one valid secret can add. A threshold configured at or above it raises
+    /// the cap to one past the threshold, so the alert can still fire.
+    /// </summary>
+    public const int MaxPerUserPerWeek = 50;
 
     [Key]
     public long Id { get; set; }
