@@ -106,9 +106,9 @@ public class OctoprintController(
                     break;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            logger.LogError("An error occurred in the Octoprint Webhook", data);
+            logger.LogError(ex, "An error occurred in the Octoprint Webhook");
             throw;
         }
 

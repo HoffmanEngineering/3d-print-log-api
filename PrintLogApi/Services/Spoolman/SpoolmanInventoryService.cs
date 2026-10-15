@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Caching;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Profiles;
 
@@ -25,16 +26,19 @@ public interface ISpoolmanInventoryService
 /// <para><b>Mapping.</b> Spoolman's ids are integers: <c>spool.id</c> and <c>filament.id</c> are both
 /// the spool's <see cref="Filament.SpoolNumber"/> (one entity per spool here, so one filament per
 /// spool), and <c>vendor.id</c> is <see cref="VendorId"/>. Weights are milligrams to grams and
-/// lengths metres to millimetres, using the same remaining and used figures as the web app
-/// (<see cref="FilamentProfile.RemainingMg"/>, <see cref="FilamentProfile.UsedMg"/>). Only the
-/// <c>filament</c> material category is a spool; resin and powder are left out.</para>
+/// lengths metres to millimetres. Remaining is the web app's figure
+/// (<see cref="FilamentProfile.RemainingMg"/>), and used is everything taken off the spool by
+/// prints <i>and</i> adjustments (<see cref="FilamentProfile.ConsumedMg"/>), so
+/// <c>used_weight + remaining_weight = initial_weight</c> holds as Spoolman clients assume. With
+/// prints alone, a weigh-in lowered remaining while used stayed put, and Home Assistant's
+/// Spoolman integration read the drop as a burst of consumption. Only the <c>filament</c>
+/// material category is a spool; resin and powder are left out.</para>
 /// </summary>
 public sealed class SpoolmanInventoryService(
     PrintLogContext context,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersion,
-    IFilamentService filaments) : ISpoolmanInventoryService
+    ICacheVersionService cacheVersion) : ISpoolmanInventoryService
 {
     /// <summary>The material category that holds spools of filament.</summary>
     public const string FilamentCategory = "filament";
@@ -47,10 +51,6 @@ public sealed class SpoolmanInventoryService(
 
     public async Task<SpoolmanInventory> GetInventoryAsync(long userId, CancellationToken ct)
     {
-        // Numbered here, outside the cached factory: it writes, and only a spool the previous
-        // app version created during the #174 migration can need it. One indexed query otherwise.
-        await filaments.NumberUnnumberedSpoolsAsync(userId, ct);
-
         var key = $"spoolman_inventory:{userId}:{cacheVersion.GetUserCacheVersion(userId)}";
 
         // CachedComputation's scope and HybridCache's token: see CachedComputation.
@@ -58,9 +58,30 @@ public sealed class SpoolmanInventoryService(
             key,
             (computation, userId),
             static (state, token) => state.computation.RunAsync(
-                (services, innerToken) => LoadAsync(services.GetRequiredService<PrintLogContext>(), state.userId, innerToken),
+                (services, innerToken) => NumberAndLoadAsync(services, state.userId, innerToken),
                 token),
             cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// The cache-miss path. Unnumbered spools are numbered first, so the inventory built straight
+    /// after includes them under their new numbers and <c>/use</c> can resolve them by number.
+    ///
+    /// <para><b>On a miss only (#195).</b> Only a spool the previous app version created while the
+    /// #174 migration ran can be unnumbered, so outside that deploy window the numbering query
+    /// never finds anything, and it is not cheap: <c>SpoolNumber IS NULL</c> cannot use the
+    /// filtered <c>IS NOT NULL</c> index, so it walks every spool the user owns. On every request
+    /// it ran about every 5 s per printing printer, for <c>/use</c>. A straggler is picked up by
+    /// the first miss after it appears; a new instance starts with an empty cache, any write
+    /// bumps the version, and the entry's absolute expiry caps the wait at 15 minutes.</para>
+    ///
+    /// <para>Numbering does not bump the cache version, and must not: this runs inside the factory
+    /// for the key that version names, so a bump here would orphan the entry being built.</para>
+    /// </summary>
+    private static async Task<SpoolmanInventory> NumberAndLoadAsync(IServiceProvider services, long userId, CancellationToken ct)
+    {
+        await services.GetRequiredService<IFilamentService>().NumberUnnumberedSpoolsAsync(userId, ct);
+        return await LoadAsync(services.GetRequiredService<PrintLogContext>(), userId, ct);
     }
 
     private static async Task<SpoolmanInventory> LoadAsync(PrintLogContext db, long userId, CancellationToken ct)
@@ -113,39 +134,33 @@ public sealed class SpoolmanInventoryService(
     private static System.Linq.Expressions.Expression<Func<Filament, SourceRow>> BuildProjection()
     {
         // Composes the two shared figures into one projection, so the SQL computes remaining and
-        // used exactly as the detail page does.
-        var f = System.Linq.Expressions.Expression.Parameter(typeof(Filament), "f");
-        var remaining = Replace(FilamentProfile.RemainingMg.Body, FilamentProfile.RemainingMg.Parameters[0], f);
-        var used = Replace(FilamentProfile.UsedMg.Body, FilamentProfile.UsedMg.Parameters[0], f);
-
-        System.Linq.Expressions.Expression<Func<Filament, long?, long, SourceRow>> shape = (x, remainingMg, usedMg) => new SourceRow
-        {
-            Id = x.Id,
-            SpoolNumber = x.SpoolNumber!.Value,
-            DisplayName = x.DisplayName,
-            Brand = x.Brand,
-            MaterialType = x.MaterialType,
-            Density = x.MaterialDensityGramPerCubicCm,
-            DiameterMm = x.DiameterMm,
-            ColorHex = x.ColorHex,
-            Colors = x.Colors,
-            RecommendedTemp = x.RecommendedTemp,
-            RecommendedBedTemp = x.RecommendedBedTemp,
-            IsActive = x.IsActive,
-            StorageLocation = x.StorageLocation,
-            Notes = x.Notes,
-            PurchasePriceValue = x.PurchasePriceValue,
-            CreatedDate = x.CreatedDate,
-            InitialNominalWeightMg = x.InitialNominalWeightMg,
-            SpoolWeightMg = x.SpoolWeightMg,
-            RemainingMg = remainingMg,
-            UsedMg = usedMg,
-        };
-
-        var body = Replace(shape.Body, shape.Parameters[0], f);
-        body = Replace(body, shape.Parameters[1], remaining);
-        body = Replace(body, shape.Parameters[2], used);
-        return System.Linq.Expressions.Expression.Lambda<Func<Filament, SourceRow>>(body, f);
+        // used exactly as the rest of the product does.
+        return ExpressionSplice.With<Filament, long?, long, SourceRow>(
+            (x, remainingMg, consumedMg) => new SourceRow
+            {
+                Id = x.Id,
+                SpoolNumber = x.SpoolNumber!.Value,
+                DisplayName = x.DisplayName,
+                Brand = x.Brand,
+                MaterialType = x.MaterialType,
+                Density = x.MaterialDensityGramPerCubicCm,
+                DiameterMm = x.DiameterMm,
+                ColorHex = x.ColorHex,
+                Colors = x.Colors,
+                RecommendedTemp = x.RecommendedTemp,
+                RecommendedBedTemp = x.RecommendedBedTemp,
+                IsActive = x.IsActive,
+                StorageLocation = x.StorageLocation,
+                Notes = x.Notes,
+                PurchasePriceValue = x.PurchasePriceValue,
+                CreatedDate = x.CreatedDate,
+                InitialNominalWeightMg = x.InitialNominalWeightMg,
+                SpoolWeightMg = x.SpoolWeightMg,
+                RemainingMg = remainingMg,
+                UsedMg = consumedMg,
+            },
+            FilamentProfile.RemainingMg,
+            FilamentProfile.ConsumedMg);
     }
 
     internal static SpoolmanSpool ToSpool(SourceRow row, SpoolmanVendor? vendor, (DateTime First, DateTime Last)? used)
@@ -291,16 +306,5 @@ public sealed class SpoolmanInventoryService(
         public long? SpoolWeightMg { get; init; }
         public long? RemainingMg { get; init; }
         public long UsedMg { get; init; }
-    }
-
-    private static System.Linq.Expressions.Expression Replace(
-        System.Linq.Expressions.Expression body, System.Linq.Expressions.Expression from, System.Linq.Expressions.Expression to) =>
-        new ParameterReplacer(from, to).Visit(body)
-        ?? throw new InvalidOperationException("Rewriting an expression produced nothing.");
-
-    private sealed class ParameterReplacer(System.Linq.Expressions.Expression from, System.Linq.Expressions.Expression to) : System.Linq.Expressions.ExpressionVisitor
-    {
-        public override System.Linq.Expressions.Expression? Visit(System.Linq.Expressions.Expression? node) =>
-            node == from ? to : base.Visit(node);
     }
 }

@@ -24,9 +24,9 @@ namespace PrintLogApi.Authentication.Spoolman;
 /// only set one field. Carrying the secret in a header rather than the path keeps it out of every
 /// request URL App Service, App Insights and the metrics ever see.</para>
 ///
-/// <para><b>What it costs.</b> One cached lookup (<see cref="ISpoolmanCredentialCache"/>, negative
-/// results included) and, at most once a minute per connection, a <c>LastSeenAt</c> update. The
-/// handshake does more: it re-applies the user's tier, so a lapsed subscription the billing path
+/// <para><b>What it costs.</b> One cached lookup (<see cref="ISpoolmanCredentialCache"/>, revoked
+/// and paused results included, unknown secrets never cached) and, at most once a minute per
+/// connection, a <c>LastSeenAt</c> update. The handshake does more: it re-applies the user's tier, so a lapsed subscription the billing path
 /// missed still pauses extra printers, and records the network for the fair-use count. Moonraker
 /// sends no usage while its socket is down, so refusing at the handshake also stops a refused
 /// printer's REST traffic. Pro is re-checked for open sockets on a timer (#178), not per request.</para>
@@ -208,9 +208,10 @@ public sealed class SpoolmanBasicAuthenticationHandler(
         if (credential.Status == SpoolmanCredentialStatus.Valid && Context.Connection.RemoteIpAddress is { } address)
         {
             var key = NetworkPrefix + credential.ConnectionId + ":" + SpoolmanNetwork.Prefix(address);
-            if (!memoryCache.TryGetValue(key, out _))
+            // Throttled only once recorded, so a failed record is retried on the next handshake.
+            if (!memoryCache.TryGetValue(key, out _)
+                && await connections.RecordNetworkAsync(credential.UserId, address, Context.RequestAborted))
             {
-                await connections.RecordNetworkAsync(credential.UserId, address, Context.RequestAborted);
                 memoryCache.Set(key, true, new MemoryCacheEntryOptions()
                     .SetSize(CacheBudget.SmallEntryBytes)
                     .SetAbsoluteExpiration(NetworkThrottle));

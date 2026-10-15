@@ -166,8 +166,8 @@ response-size metric, so no byte count is distorted.
 
 ## Connector write budget (#151)
 
-Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`) made with a connector credential get a
-per-credential token bucket on top of the per-user "api" policy: `Api:ConnectorWrites:Burst`
+Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`, except the heartbeat below) made with a
+connector credential get a per-credential token bucket on top of the per-user "api" policy: `Api:ConnectorWrites:Burst`
 (20) to start, refilled at `Api:ConnectorWrites:PerMinute` (60). Either at 0 disables it, which is
 how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting.cs`.
 
@@ -183,6 +183,14 @@ how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting
   existed. `ConnectorWriteRateLimitTests.RetryAfter_RoundsAFractionalWaitUp` pins it.
 - **The limits are in-process**, like every other budget here. More than one App Service instance
   multiplies them.
+- **The heartbeat (`PUT /api/Connections/{id}`) is exempt** (#200), by
+  `[ExemptFromConnectorWriteBudget]` on the action, which the partitioner reads off
+  `GetEndpoint()` (routing runs before the limiter). A backfill on one key retries on `Retry-After`
+  and takes each token as it refills, so a heartbeat sharing that bucket starves: three missed
+  ones mark the bridge stale, the Moonraker notifier stops being suppressed, and its prints
+  duplicate the bridge's. The per-user "api" policy still bounds it. Never put the attribute on a
+  write that changes print data. `[DisableRateLimiting]` would not do: it also drops "api". The
+  same PUT also registers a new connection, so first registration is exempt too.
 
 ## Claiming a print (#165)
 
@@ -218,8 +226,10 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   there, and the secret works nowhere else. Minted only by `InteractiveUserOnly`. Stored as a hash.
 - **Lookups are cached with negative results** (`SpoolmanCredentialCache`), because Moonraker
   retries a refused socket every 2 s forever. Every path that revokes, rotates or pauses a
-  connection must evict it. The failed-attempt limiter counts only unknown secrets and never
-  refuses a valid one.
+  connection must evict it. **A secret matching no row is never cached** (#193): those entries
+  are bounded only by what a caller sends, and they would evict other users' entries from the
+  shared 8 MiB budget. The factory throws to keep it out, as `GetUserIdByApiKey` does. The
+  failed-attempt limiter counts only unknown secrets and never refuses a valid one.
 - **Tier:** Free is one *active* connection. A downgrade pauses (never deletes) all but the
   oldest, from `SubscriptionService`, at the handshake, and on the socket timer. A paused
   connection also stops notifier logging (401).
@@ -261,6 +271,21 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   also logs prints) and persisted `/use` (the secret can charge length to any of the user's
   spools on its printer's open notifier print, and load a spool into slot 0 on a single-slot
   printer). Both are for the connection's own printer only, and still only under `/spoolman`.
+
+## Agent update notice (printlog-bridge#39)
+
+`ConnectionDto.latestAgentVersion` and `updateAvailable` tell a connector, in its own check-in,
+that a newer release is out, so Docker bridges hear about one without calling GitHub themselves.
+`AgentReleaseCatalog` reads the agent repo's `vX.Y.Z` tags (the bridge makes Docker images from
+tags and no GitHub releases, so not `releases/latest`), keyed by connection kind in
+`AgentReleases:Repositories` (`moonraker` → printlog-bridge).
+
+- **Tags are read every `CacheMinutes` (6 h); a failure keeps the last version** and retries after
+  `FailureCacheMinutes` (15), so a GitHub outage never turns each 5-minute heartbeat into a call.
+  Unauthenticated GitHub allows 60 calls an hour per IP; this makes about 4 a day per instance.
+- **Every test host routes the `AgentReleases` client to `CustomWebApplicationFactory.GitHub`**,
+  which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
+  keeps what it reads, so seed it before the host's first connection request.
 
 ## The clock
 

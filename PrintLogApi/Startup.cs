@@ -165,6 +165,21 @@ public class Startup
         services.AddTransient<INotificationService, NotificationService>();
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         services.AddTransient<IConnectionService, ConnectionService>();
+        // The latest agent release a connection's check-in reports (printlog-bridge#39).
+        // Singleton: it holds the versions read from GitHub.
+        services.Configure<Services.AgentReleases.AgentReleaseOptions>(Configuration.GetSection(Services.AgentReleases.AgentReleaseOptions.SectionName));
+        services.AddSingleton<Services.AgentReleases.IAgentReleaseCatalog, Services.AgentReleases.AgentReleaseCatalog>();
+        services.AddHttpClient(Services.AgentReleases.AgentReleaseCatalog.HttpClientName, client =>
+            {
+                // GitHub refuses a request with no User-Agent.
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("3dprintlog-api");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
         services.AddTransient<IPrintEventService, PrintEventService>();
         services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
