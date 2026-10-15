@@ -225,15 +225,56 @@ public sealed class SpoolmanConnectionService(
         return changed;
     }
 
+    /// <summary>
+    /// Best-effort bookkeeping: a database failure here is reported to telemetry and swallowed,
+    /// because the caller is a websocket handshake whose credential is already accepted, and a
+    /// blip in a fair-use count must not cost the printer its socket. Only a cancelled request
+    /// propagates.
+    /// </summary>
     public async Task RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct)
+    {
+        int networks;
+        try
+        {
+            networks = await RecordSightingAsync(userId, address, ct);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            context.ChangeTracker.Clear();
+            telemetry.TrackEvent("SpoolmanFairUse_NetworkRecordFailed");
+            telemetry.TrackException(ex);
+            return;
+        }
+
+        if (networks > _options.FairUseNetworkThreshold)
+        {
+            await AlertBestEffortAsync(userId, SpoolmanFairUseAlert.NetworkCountSignal,
+                $"Spoolman connections from more than {_options.FairUseNetworkThreshold} networks in the last 7 days.");
+        }
+    }
+
+    /// <summary>Records the sighting and returns the user's distinct networks in the last 7 days.</summary>
+    private async Task<int> RecordSightingAsync(long userId, IPAddress address, CancellationToken ct)
     {
         var hash = SpoolmanNetwork.Hash(address, NetworkKey());
         var now = clock.GetUtcNow().UtcDateTime;
+        var weekAgo = now - TimeSpan.FromDays(7);
+
+        var expired = now - SpoolmanNetworkSighting.Retention;
+        await context.SpoolmanNetworkSightings
+            .Where(s => s.UserId == userId && s.LastSeenAt < expired)
+            .ExecuteDeleteAsync(ct);
 
         var seen = await context.SpoolmanNetworkSightings
             .Where(s => s.UserId == userId && s.NetworkHash == hash)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastSeenAt, now), ct);
-        if (seen == 0)
+
+        var networks = await context.SpoolmanNetworkSightings
+            .CountAsync(s => s.UserId == userId && s.LastSeenAt >= weekAgo, ct);
+
+        // At the cap a new network adds no signal (the count is already far past the threshold),
+        // so it is not stored. That bounds what a secret holder hopping networks can insert.
+        if (seen == 0 && networks < SpoolmanNetworkSighting.MaxPerUserPerWeek)
         {
             context.SpoolmanNetworkSightings.Add(new SpoolmanNetworkSighting
             {
@@ -245,6 +286,7 @@ public sealed class SpoolmanConnectionService(
             try
             {
                 await context.SaveChangesAsync(ct);
+                networks++;
             }
             catch (DbUpdateException)
             {
@@ -254,19 +296,7 @@ public sealed class SpoolmanConnectionService(
             }
         }
 
-        var expired = now - SpoolmanNetworkSighting.Retention;
-        await context.SpoolmanNetworkSightings
-            .Where(s => s.UserId == userId && s.LastSeenAt < expired)
-            .ExecuteDeleteAsync(ct);
-
-        var weekAgo = now - TimeSpan.FromDays(7);
-        var networks = await context.SpoolmanNetworkSightings
-            .CountAsync(s => s.UserId == userId && s.LastSeenAt >= weekAgo, ct);
-        if (networks > _options.FairUseNetworkThreshold)
-        {
-            await AlertBestEffortAsync(userId, SpoolmanFairUseAlert.NetworkCountSignal,
-                $"Spoolman connections from more than {_options.FairUseNetworkThreshold} networks in the last 7 days.");
-        }
+        return networks;
     }
 
     private Task<bool> IsProAsync(long userId, CancellationToken ct) =>
@@ -296,7 +326,9 @@ public sealed class SpoolmanConnectionService(
     /// mail outage must not turn into a failed connect.
     ///
     /// The cool-down is claimed before sending, with a conditional update or a unique insert, so
-    /// two requests crossing the threshold together send one email between them.
+    /// two requests crossing the threshold together send one email between them. A failed send
+    /// releases the claim, restoring the previous <c>LastSentAt</c> or deleting the row this call
+    /// inserted, so a mail outage does not silence the signal for a week.
     /// </summary>
     private async Task AlertBestEffortAsync(long userId, string signal, string reason)
     {
@@ -305,22 +337,40 @@ public sealed class SpoolmanConnectionService(
             return;
         }
 
+        // What to undo if the send fails: the claimed row, and its LastSentAt before the claim
+        // (null when this call inserted it).
+        (long Id, DateTime? Previous)? claim = null;
+        var now = clock.GetUtcNow().UtcDateTime;
         try
         {
-            var now = clock.GetUtcNow().UtcDateTime;
             var cutoff = now - SpoolmanFairUseAlert.Cooldown;
 
-            var claimed = await context.SpoolmanFairUseAlerts
-                .Where(a => a.UserId == userId && a.Signal == signal && a.LastSentAt <= cutoff)
-                .ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, now), CancellationToken.None) > 0;
-            if (!claimed)
+            var existing = await context.SpoolmanFairUseAlerts
+                .Where(a => a.UserId == userId && a.Signal == signal)
+                .Select(a => new { a.Id, a.LastSentAt })
+                .SingleOrDefaultAsync(CancellationToken.None);
+            if (existing is not null)
             {
-                if (await context.SpoolmanFairUseAlerts.AnyAsync(a => a.UserId == userId && a.Signal == signal, CancellationToken.None))
+                if (existing.LastSentAt > cutoff)
                 {
                     return; // inside the cool-down
                 }
 
-                context.SpoolmanFairUseAlerts.Add(new SpoolmanFairUseAlert { UserId = userId, Signal = signal, LastSentAt = now });
+                // Conditional on the value just read, so of two requests claiming together only
+                // one matches the row.
+                var claimed = await context.SpoolmanFairUseAlerts
+                    .Where(a => a.Id == existing.Id && a.LastSentAt == existing.LastSentAt)
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, now), CancellationToken.None) > 0;
+                if (!claimed)
+                {
+                    return; // another request claimed it first
+                }
+                claim = (existing.Id, existing.LastSentAt);
+            }
+            else
+            {
+                var alert = new SpoolmanFairUseAlert { UserId = userId, Signal = signal, LastSentAt = now };
+                context.SpoolmanFairUseAlerts.Add(alert);
                 try
                 {
                     await context.SaveChangesAsync(CancellationToken.None);
@@ -330,6 +380,7 @@ public sealed class SpoolmanConnectionService(
                     context.ChangeTracker.Clear();
                     return; // another request claimed it first
                 }
+                claim = (alert.Id, null);
             }
 
             var weekAgo = now - TimeSpan.FromDays(7);
@@ -356,6 +407,35 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
         catch (Exception ex)
         {
             telemetry.TrackEvent("SpoolmanFairUse_AlertFailed", new Dictionary<string, string> { ["signal"] = signal });
+            telemetry.TrackException(ex);
+            if (claim is { } held)
+            {
+                await ReleaseClaimBestEffortAsync(held.Id, held.Previous, now);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Undoes a cool-down claim whose email was never sent. Conditional on the row still holding
+    /// this call's claim, so it can never undo a later one.
+    /// </summary>
+    private async Task ReleaseClaimBestEffortAsync(long alertId, DateTime? previous, DateTime claimedAt)
+    {
+        try
+        {
+            context.ChangeTracker.Clear();
+            var mine = context.SpoolmanFairUseAlerts.Where(a => a.Id == alertId && a.LastSentAt == claimedAt);
+            if (previous is { } restored)
+            {
+                await mine.ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, restored), CancellationToken.None);
+            }
+            else
+            {
+                await mine.ExecuteDeleteAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
             telemetry.TrackException(ex);
         }
     }
