@@ -30,15 +30,15 @@ public class GetMaterialToolTests : IClassFixture<McpDataWebApplicationFactory>
     [Fact]
     public async Task Get_NoNominalCapacity_IsDistinguishedFromEmpty()
     {
-        // InactiveFilamentId has InitialNominalWeightMg = null. RemainingGrams is 0 for BOTH
-        // "empty" and "never tracked", so the flag is the only thing separating them.
+        // InactiveFilamentId has InitialNominalWeightMg = null. An empty spool reports 0 and an
+        // untracked one reports null (#230), and the flag says the same thing.
         using var scope = _factory.Services.CreateScope();
         var detail = await Svc(scope).GetOwnMaterialDetailForMcp(
             IntegrationTestSeeder.TestUserId, McpTestData.InactiveFilamentId, CancellationToken.None);
 
         Assert.False(detail.HasNominalCapacity);
         Assert.Null(detail.InitialCapacityGrams);
-        Assert.Equal(0d, detail.RemainingGrams);
+        Assert.Null(detail.RemainingGrams);
         Assert.False(detail.IsActive);
     }
 

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Linq.Expressions;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using CsvHelper;
@@ -7,6 +8,7 @@ using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Achievements;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -14,6 +16,7 @@ using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
+using PrintLogApi.Profiles;
 using static PrintLogApi.Models.Print;
 using static PrintLogApi.Services.MeasurementUtilities;
 
@@ -27,7 +30,8 @@ public sealed class PrintService(
     IPrinterService printerService,
     INotificationService notificationService,
     ICacheVersionService cacheVersionService,
-    IPrintFinishNotifier printFinishNotifier) : IPrintService
+    IPrintFinishNotifier printFinishNotifier,
+    IPrintStartNotifier printStartNotifier) : IPrintService
 {
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
@@ -219,7 +223,7 @@ public sealed class PrintService(
             .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(p => new
+            .Select(ExpressionSplice.With((Print p, long materialMg, bool materialIsEstimated) => new
             {
                 p.Id,
                 p.Title,
@@ -230,22 +234,18 @@ public sealed class PrintService(
                 PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
                 PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                 p.StartDate,
-                // Canonical material usage: sum of per-filament actual weight, falling back to
-                // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
-                // maintained, so it must not be used. Mirrors PrintProfile / remaining-weight.
-                MaterialMg = p.FilamentUsage!.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
+                // Canonical material usage: the per-filament rows, each resolved by
+                // FilamentProfile.UsageRowMg (PrintMetrics.RowsMgExpr). The scalar
+                // Print.FilamentUsageMg is legacy and not maintained, so it must not be used.
+                // Mirrors PrintProfile / remaining-weight.
+                MaterialMg = materialMg,
                 p.PrintTimeInSeconds,
                 p.EstimatedPrintTimeInSeconds,
                 // Material provenance: true when ANY contributing usage row fell back to its estimate.
-                MaterialIsEstimated = p.FilamentUsage!.Any(pf =>
-                    !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                    && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0),
+                MaterialIsEstimated = materialIsEstimated,
                 ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                 ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
-            })
+            }, PrintMetrics.RowsMgExpr, PrintMetrics.RowsAreEstimatedExpr))
             .ToListAsync(ct);
 
         var items = rows.Select(r =>
@@ -282,7 +282,7 @@ public sealed class PrintService(
     {
         var row = await context.Prints.AsNoTracking()
             .Where(p => p.Id == printId && p.CreatedById == userId)
-            .Select(p => new
+            .SelectWith((p, usageRow) => new
             {
                 p.Id,
                 p.Title,
@@ -292,10 +292,6 @@ public sealed class PrintService(
                 PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
                 PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                 p.StartDate,
-                MaterialMg = p.FilamentUsage!.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
                 p.PrintTimeInSeconds,
                 p.EstimatedPrintTimeInSeconds,
                 p.FileName,
@@ -309,7 +305,7 @@ public sealed class PrintService(
 
                 // Optional navigation => EF emits a LEFT JOIN, so rows with a NULL FilamentId
                 // are preserved. An inner join would silently drop them and the per-material
-                // rows would no longer add up to MaterialMg above.
+                // rows would no longer add up to the material total below.
                 // Not capped in SQL: EF cannot translate Take() inside a nested collection
                 // projection. That is acceptable here because this collection is bounded by one
                 // print's filament rows (a printer's tool/AMS slots — single digits), not by how
@@ -317,39 +313,9 @@ public sealed class PrintService(
                 // data, not a paging mechanism.
                 Usage = p.FilamentUsage!
                     .OrderBy(pf => pf.Id)
-                    .Select(pf => new
-                    {
-                        // Guard on ownership, not merely on non-null: a corrupt row can point at
-                        // ANOTHER user's spool, and returning its brand/material/colour would
-                        // leak their data. The quantity lives on the caller's own PrintFilament
-                        // row, so it is safe to keep.
-                        Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
-                        pf.FilamentId,
-                        // Null-forgiven because this is an EF projection: the null nav is
-                        // handled server-side in SQL and never dereferenced in process. The
-                        // Readable flag above is what gates the values on the read side.
-                        Name = pf.Filament!.DisplayName,
-                        Brand = pf.Filament.Brand,
-                        Material = pf.Filament.MaterialType,
-                        Color = pf.Filament.ColorName,
-
-                        // Identical to MaterialMg above and to McpStatisticsService: a zero or
-                        // NEGATIVE actual falls through to the estimate. `AmountMg ?? Estimated`
-                        // would not, and the sum invariant would break.
-                        Mg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                            : 0,
-                        IsEstimated = !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                            && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0,
-
-                        // The unresolved figures, so a caller can see what was actually recorded
-                        // vs. estimated. Same non-positive-means-unset rule as Mg above.
-                        ActualMg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg : (int?)null,
-                        EstimatedMg = pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg : (int?)null,
-                        pf.Notes,
-                    })
+                    .Select(usageRow)
                     .ToList(),
-            })
+            }, McpUsageRow.For(userId))
             .FirstOrDefaultAsync(ct);
 
         if (row is null)
@@ -367,18 +333,24 @@ public sealed class PrintService(
                 u.Readable ? u.Brand : null,
                 u.Readable ? u.Material : null,
                 u.Readable ? u.Color : null,
-                McpUnits.MgToGrams(u.Mg),
+                McpUnits.MgToGrams(PrintMetrics.Round(u.Mg)),
                 u.IsEstimated,
-                u.ActualMg.HasValue ? McpUnits.MgToGrams(u.ActualMg.Value) : (double?)null,
-                u.EstimatedMg.HasValue ? McpUnits.MgToGrams(u.EstimatedMg.Value) : (double?)null,
+                // Unset (null) rather than 0 when that side recorded nothing usable, as before.
+                u.ActualMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.ActualMg)) : (double?)null,
+                u.EstimatedMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.EstimatedMg)) : (double?)null,
                 u.Notes))
             .ToList();
 
         var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
 
+        // Over ALL rows, which are not capped in SQL, each rounded once the way
+        // PrintMetrics.RowsMgExpr rounds in SQL, so the parts below sum to it and it matches
+        // search_prints and the print list.
+        var materialMg = row.Usage.Sum(u => PrintMetrics.Round(u.Mg));
+
         return new PrintDetailResult(
             row.Id, row.Title!, row.Status.ToString(), row.PrinterId, row.PrinterName,
-            row.StartDate, McpUnits.MgToGrams(row.MaterialMg),
+            row.StartDate, McpUnits.MgToGrams(materialMg),
             // Null, not 0, when nothing was recorded: a 0 would claim a measured zero seconds.
             seconds > 0 ? seconds : (int?)null,
             PrintMetrics.IsEstimated(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds),
@@ -509,24 +481,15 @@ public sealed class PrintService(
             }
             else if (sortRequest.SortColumn == PrintSummarySortColumn.FilamentUsage)
             {
-                // NOTE: This is still problematic - consider computing and storing this value
+                // NOTE: This is still problematic - consider computing and storing this value.
+                // The same per-print figure the list shows as TotalFilamentWeightMg.
                 if (sortRequest.SortDirection == SortDirection.Asc)
                 {
-                    printQuery = printQuery.OrderBy(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                p.AmountMg > 0 ?
-                                                                                                p.AmountMg :
-                                                                                                p.EstimatedAmountMg.HasValue &&
-                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                    printQuery = printQuery.OrderBy(PrintMetrics.RowsMgExpr).ThenByDescending(p => p.CreatedDate);
                 }
                 else
                 {
-                    printQuery = printQuery.OrderByDescending(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                p.AmountMg > 0 ?
-                                                                                                p.AmountMg :
-                                                                                                p.EstimatedAmountMg.HasValue &&
-                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                    printQuery = printQuery.OrderByDescending(PrintMetrics.RowsMgExpr).ThenByDescending(p => p.CreatedDate);
                 }
             }
         }
@@ -757,11 +720,33 @@ public sealed class PrintService(
             return null;
         }
 
+        var previousStatus = existing.Status;
         if (await ApplyConnectorOwnedFields(existing, print, userId))
         {
             existing.UpdatedById = userId;
-            await context.SaveChangesAsync();
-            cacheVersionService.InvalidateUserCache(userId);
+            if (!CompletePrintDto.IsFinished(previousStatus) && CompletePrintDto.IsFinished(existing.Status))
+            {
+                // A replay that finishes the print is a finish like /complete's, so it is claimed
+                // the same way (#199) and notifies exactly once: an overlapping finish that won
+                // the claim has already notified, and this one writes nothing.
+                var claimed = await PrintFinishTransition.SaveIfStillUnfinished(context, existing, userId);
+                cacheVersionService.InvalidateUserCache(userId);
+                if (claimed)
+                {
+                    await printFinishNotifier.NotifyIfJustFinished(existing, previousStatus);
+                }
+                else
+                {
+                    context.ChangeTracker.Clear();
+                }
+            }
+            else
+            {
+                await context.SaveChangesAsync();
+                cacheVersionService.InvalidateUserCache(userId);
+                // A connector that created the print Pending and now reports it running (#235).
+                printStartNotifier.NotifyIfJustStarted(existing, previousStatus);
+            }
         }
 
         // Null-forgiven: the row was read a moment ago and replay never deletes it.
@@ -957,6 +942,7 @@ public sealed class PrintService(
 
         context.Prints.Add(newPrint);
         await context.SaveChangesAsync();
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(newPrint.Id))!;
     }
@@ -1104,6 +1090,7 @@ public sealed class PrintService(
         }
 
         cacheVersionService.InvalidateUserCache(userId);
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
     }
 
@@ -2496,26 +2483,20 @@ public sealed class PrintService(
             .AsNoTracking()
             .ToListAsync();
 
+        // Each row resolved by FilamentProfile.UsageRowMg and rounded once in SQL, then summed
+        // per project, exactly as the project pages total them.
         var projectFilamentTotals = await context.PrintFilament
-            .Join(
-                context.Prints.Where(pr => pr.CreatedById == userId && pr.ProjectId != null),
-                pf => pf.PrintId, pr => pr.Id,
-                (pf, pr) => new { pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
+            .Where(pf => pf.Print.CreatedById == userId && pf.Print.ProjectId != null)
+            .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
             .GroupBy(x => x.ProjectId)
-            .Select(g => new
-            {
-                ProjectId = g.Key,
-                TotalFilamentWeightMg = (long?)g.Sum(x =>
-                    x.AmountMg > 0 ? (long?)x.AmountMg
-                    : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                    : (long?)0) ?? 0L
-            })
+            .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg) })
             .AsNoTracking()
             .ToListAsync();
 
         var projectFilamentLookup = projectFilamentTotals
+            // Non-null by the Where; the row is still needed for the value selector.
             .Where(x => x.ProjectId.HasValue)
-            .ToDictionary(x => x.ProjectId!.Value, x => x.TotalFilamentWeightMg);
+            .ToDictionary(x => x.ProjectId!.Value, x => x.Mg);
 
         // Start only: the feed carries no finish date, so there is no reason to load the
         // duration columns or compute a finish here.
@@ -2560,8 +2541,9 @@ public sealed class PrintService(
         // Joining PrintFilament back to the filtered query would re-run the text search — the
         // most expensive predicate in the request, a scan of the user's prints with a LOB read
         // per row for Notes — a second time to reach the same set of ids. The ids are already
-        // materialized above, and IX_PrintFilament_PrintId includes both amount columns, so
-        // seeking on them covers this query outright.
+        // materialized above, and IX_PrintFilament_PrintId includes every measure, so seeking
+        // on them covers the usage rows. Since #229 each row also joins its spool for density
+        // and diameter, so a row recorded only as a length or volume counts.
         var standalonePrintIds = standalonePrintList.Select(p => p.Id).ToList();
 
         var standaloneFilamentLookup = new Dictionary<long, long>();
@@ -2569,20 +2551,14 @@ public sealed class PrintService(
         {
             var standaloneFilamentTotals = await context.PrintFilament
                 .Where(pf => standalonePrintIds.Contains(pf.PrintId))
-                .GroupBy(pf => pf.PrintId)
-                .Select(g => new
-                {
-                    PrintId = g.Key,
-                    TotalFilamentWeightMg = (long?)g.Sum(x =>
-                        x.AmountMg > 0 ? (long?)x.AmountMg
-                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                        : (long?)0) ?? 0L
-                })
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.PrintId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
+                .GroupBy(x => x.PrintId)
+                .Select(g => new { PrintId = g.Key, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
                 .ToListAsync();
 
             standaloneFilamentLookup = standaloneFilamentTotals
-                .ToDictionary(x => x.PrintId, x => x.TotalFilamentWeightMg);
+                .ToDictionary(x => x.PrintId, x => x.Mg);
         }
 
         var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
@@ -2712,24 +2688,16 @@ public sealed class PrintService(
                 .ToListAsync();
             projectDefaultImageLookup = defaultImageRows.ToDictionary(i => i.ProjectId, i => i.Id);
 
-            var filamentUsageRows = await context.PrintFilament
-                .Join(
-                    context.Prints.Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value)),
-                    pf => pf.PrintId, pr => pr.Id,
-                    (pf, pr) => new { pf.FilamentId, pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
-                .Where(x => x.FilamentId != null)
+            var filamentUsageSums = await context.PrintFilament
+                .Where(pf => pf.FilamentId != null && pf.Print.ProjectId != null && pageProjectGuids.Contains(pf.Print.ProjectId.Value))
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.FilamentId, pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
                 .GroupBy(x => new { x.ProjectId, x.FilamentId })
-                .Select(g => new
-                {
-                    ProjectId = g.Key.ProjectId,
-                    FilamentId = g.Key.FilamentId,
-                    TotalAmountMg = (long?)g.Sum(x =>
-                        x.AmountMg > 0 ? (long?)x.AmountMg
-                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                        : (long?)0) ?? 0L
-                })
+                .Select(g => new { g.Key.ProjectId, g.Key.FilamentId, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
                 .ToListAsync();
+            var filamentUsageRows = filamentUsageSums
+                .Select(r => new { r.ProjectId, r.FilamentId, TotalAmountMg = r.Mg })
+                .ToList();
 
             var uniqueFilamentIds = filamentUsageRows
                 .Select(r => r.FilamentId)
@@ -2902,6 +2870,58 @@ public sealed class PrintService(
         }).Where(item => item != null).Select(item => item!).ToList();
 
         return new PagedList<GroupedFeedItemDto>(pagedItems, total, pageNumber, pageSize);
+    }
+    /// <summary>
+    /// One usage row as get_print reports it, projected in SQL. A named type rather than an
+    /// anonymous one so the projection can be built once, from the shared row rule, and spliced
+    /// into the print query.
+    /// </summary>
+    private sealed class McpUsageRow
+    {
+        public bool Readable { get; init; }
+        public Guid? FilamentId { get; init; }
+        public string? Name { get; init; }
+        public string? Brand { get; init; }
+        public string? Material { get; init; }
+        public string? Color { get; init; }
+        public double Mg { get; init; }
+        public bool IsEstimated { get; init; }
+        public double ActualMg { get; init; }
+        public double EstimatedMg { get; init; }
+        public string? Notes { get; init; }
+
+        public static Expression<Func<PrintFilament, McpUsageRow>> For(long userId) =>
+            ExpressionSplice.With<PrintFilament, double, bool, double, double, McpUsageRow>(
+                (pf, mg, isEstimated, actualMg, estimatedMg) => new McpUsageRow
+                {
+                    // Guard on ownership, not merely on non-null: a corrupt row can point at
+                    // ANOTHER user's spool, and returning its brand/material/colour would leak
+                    // their data. The quantity lives on the caller's own PrintFilament row, so it
+                    // is safe to keep.
+                    Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
+                    FilamentId = pf.FilamentId,
+                    // Null-forgiven because this is an EF projection: the null nav is handled
+                    // server-side in SQL and never dereferenced in process. The Readable flag
+                    // above is what gates the values on the read side.
+                    Name = pf.Filament!.DisplayName,
+                    Brand = pf.Filament.Brand,
+                    Material = pf.Filament.MaterialType,
+                    Color = pf.Filament.ColorName,
+                    // FilamentProfile's row rule, the same one search_prints and every spool
+                    // figure use: a zero or NEGATIVE actual falls through to the estimate, in
+                    // whichever measure each side was recorded.
+                    Mg = mg,
+                    IsEstimated = isEstimated,
+                    // Each side on its own, so a caller can see what was actually recorded vs.
+                    // estimated. Zero means that side recorded nothing usable.
+                    ActualMg = actualMg,
+                    EstimatedMg = estimatedMg,
+                    Notes = pf.Notes,
+                },
+                FilamentProfile.UsageRowMg,
+                FilamentProfile.UsageRowIsEstimated,
+                FilamentProfile.UsageRowActualMg,
+                FilamentProfile.UsageRowEstimatedMg);
     }
 }
 

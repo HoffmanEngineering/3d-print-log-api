@@ -54,10 +54,10 @@ public interface IFilamentService
 
     /// <summary>
     /// Remaining weight (grams) for one of the caller's materials, using the same remaining
-    /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns 0 when the material has no
-    /// nominal weight or does not belong to <paramref name="userId"/>.
+    /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns null when the material has no
+    /// nominal weight (not tracked, #230) or does not belong to <paramref name="userId"/>.
     /// </summary>
-    Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
+    Task<double?> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
 
     /// <summary>
     /// Full detail for ONE of the caller's own materials, via the combined ownership predicate.

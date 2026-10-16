@@ -87,8 +87,9 @@ public class PrintLogWriteTools(
         "omitted; allowFileDownloads defaults to false. 'idempotencyKey' MUST be a stable id for " +
         "this physical print: reusing it with the SAME arguments returns the same print " +
         "(wasReplayed = true); reusing it with DIFFERENT arguments is a conflict. Does NOT change " +
-        "which spools are loaded. Only your own printer/materials/project are accepted; anything " +
-        "else is 'not found'.")]
+        "which spools are loaded. Returns materialRemaining, the grams left on each spool used; " +
+        "its remainingGrams is null for a spool with no starting amount (not tracked). Only your " +
+        "own printer/materials/project are accepted; anything else is 'not found'.")]
     public async Task<CreatePrintResult> CreatePrint(
         [Description("Print title (max 100 chars).")] string title,
         [Description("Your printer id (see list_printers).")] long printerId,
@@ -536,7 +537,9 @@ public class PrintLogWriteTools(
         "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
         "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +
         "cannot go below zero or above the material's original capacity — an out-of-range " +
-        "adjustment is rejected. Returns 'beforeGrams' and 'afterGrams' — the remaining amount is " +
+        "adjustment is rejected. A material with no starting amount has no tracked remaining " +
+        "amount, so it is rejected too: set one with update_material first. Returns " +
+        "'beforeGrams' and 'afterGrams' — the remaining amount is " +
         "always reported in GRAMS, whichever unit you sent the delta in. Foreign materials " +
         "are 'not found'.")]
     public async Task<MaterialWriteResult> AdjustMaterialRemaining(

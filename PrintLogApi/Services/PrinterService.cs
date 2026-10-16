@@ -496,19 +496,19 @@ public class PrinterService(
         }
 
         // Remaining comes from the shared figure get_material_inventory also reports, so the two
-        // tools cannot disagree about a spool. It needs the spool's own usage and adjustments,
-        // which the nested projection above cannot reuse, so it is one more query for at most
-        // MaxLoadedFilaments rows.
+        // tools cannot disagree about a spool, and an untracked spool is null in both (#230). It
+        // needs the spool's own usage and adjustments, which the nested projection above cannot
+        // reuse, so it is one more query for at most MaxLoadedFilaments rows.
         var loadedIds = row.Loaded.Select(f => f.FilamentId).Distinct().ToList();
         var remainingById = await context.Filaments.AsNoTracking()
             .Where(f => loadedIds.Contains(f.Id))
-            .Select(ExpressionSplice.With((Filament f, long? balanceMg) => new { f.Id, BalanceMg = balanceMg }, FilamentProfile.BalanceMg))
-            .ToDictionaryAsync(f => f.Id, f => f.BalanceMg, ct);
+            .Select(ExpressionSplice.With((Filament f, long? remainingMg) => new { f.Id, RemainingMg = remainingMg }, FilamentProfile.RemainingMg))
+            .ToDictionaryAsync(f => f.Id, f => f.RemainingMg, ct);
 
         var loaded = row.Loaded
             .Select(f => new LoadedFilament(
                 f.FilamentId, f.Name, f.Brand, f.Material, f.Color, f.DiameterMm,
-                McpUnits.MgToGrams(remainingById.GetValueOrDefault(f.FilamentId)), f.LoadedDateTime, f.Slot, f.SlotLabel))
+                McpUnits.MgToGramsOrNull(remainingById.GetValueOrDefault(f.FilamentId)), f.LoadedDateTime, f.Slot, f.SlotLabel))
             .ToList();
 
         // Named arguments deliberately: this record has 22 fields, many of them double? or

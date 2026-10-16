@@ -1,5 +1,7 @@
-﻿using AutoMapper;
+﻿using System.Linq.Expressions;
+using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Services;
@@ -8,6 +10,26 @@ namespace PrintLogApi.Profiles;
 
 public class PrintProfile : Profile
 {
+    /// <summary>A print's actual material: each row's actual side, plus the actual "other filament" scalar.</summary>
+    private static readonly Expression<Func<Print, int?>> ActualMaterialMg =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, int?>(
+            (src, row) => src.FilamentUsage!.Sum(pf => (int)Math.Round(row(pf)))
+                + (src.FilamentUsageMg.HasValue && src.FilamentUsageMg > 0 ? src.FilamentUsageMg.Value : 0),
+            FilamentProfile.UsageRowActualMg);
+
+    /// <summary>A print's estimated material: each row's estimated side, plus the estimated "other filament" scalar.</summary>
+    private static readonly Expression<Func<Print, int?>> EstimatedMaterialMg =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, int?>(
+            (src, row) => src.FilamentUsage!.Sum(pf => (int)Math.Round(row(pf)))
+                + (src.EstimatedFilamentUsageMg.HasValue && src.EstimatedFilamentUsageMg > 0 ? src.EstimatedFilamentUsageMg.Value : 0),
+            FilamentProfile.UsageRowEstimatedMg);
+
+    private static readonly Expression<Func<Print, double?>> ActualMaterialG =
+        ExpressionSplice.With<Print, int?, double?>((src, mg) => mg / 1000.0, ActualMaterialMg);
+
+    private static readonly Expression<Func<Print, double?>> EstimatedMaterialG =
+        ExpressionSplice.With<Print, int?, double?>((src, mg) => mg / 1000.0, EstimatedMaterialMg);
+
     public PrintProfile()
     {
         CreateMap<AddPrintDTO, Print>()
@@ -27,18 +49,12 @@ public class PrintProfile : Profile
                                                                     .FirstOrDefault()))
             .ForMember(dest => dest.CreatedByUserId, opt => opt.MapFrom(src => src.CreatedById))
             .ForMember(dest => dest.CommentCount, opt => opt.MapFrom(src => src.Comments!.Select(c => c.Comment).Count()))
-            .ForMember(dest => dest.SumActualFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                                p.AmountMg > 0 ?
-                                                                                                                p.AmountMg : 0)))
-            .ForMember(dest => dest.SumEstimatedFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage!.Sum(p => p.EstimatedAmountMg.HasValue &&
-                                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                                p.EstimatedAmountMg : 0)))
-            .ForMember(dest => dest.TotalFilamentWeightMg, opt => opt.MapFrom(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                                p.AmountMg > 0 ?
-                                                                                                                p.AmountMg :
-                                                                                                                p.EstimatedAmountMg.HasValue &&
-                                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                                p.EstimatedAmountMg : 0)))
+            // Mapped in memory after the query (PrintService loads each row's Filament), so the
+            // shared rule runs as compiled code: each row resolved in whichever measure it
+            // carries. The actual and estimated sums each read only their own side.
+            .ForMember(dest => dest.SumActualFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.ActualRowsMg(src.FilamentUsage)))
+            .ForMember(dest => dest.SumEstimatedFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.EstimatedRowsMg(src.FilamentUsage)))
+            .ForMember(dest => dest.TotalFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.RowsMg(src.FilamentUsage)))
             .ForMember(dest => dest.ProjectId,
                 opt => opt.MapFrom(src => src.ProjectId))
             .ForMember(dest => dest.ProjectName,
@@ -70,39 +86,23 @@ public class PrintProfile : Profile
 
         // The rows and the scalar ADD: the scalar is "other filament", material never
         // attached to a tracked spool (see PrintMetrics.MaterialMgExpr). The actual and
-        // estimated columns stay SEPARATE — consumers resolve between them — so neither
-        // falls back to the other here. Each term is guarded: zero or less means "not
-        // recorded", so a corrupt negative contributes 0 instead of subtracting.
-        // ProjectTo needs its own inline copy; PrintProfileMaterialTests pins it.
+        // estimated columns stay SEPARATE — consumers resolve between them — so each reads only
+        // its own side of FilamentProfile.UsageRowMg. Each term is guarded: zero or less means
+        // "not recorded", so a corrupt negative contributes 0 instead of subtracting.
+        // ProjectTo needs expressions, spliced from the shared rule; PrintProfileMaterialTests
+        // pins the result.
         CreateMap<Print, PrintStatistic>()
-            .ForMember(dest => dest.EstimatedFilamentUsageMg, opt => opt.MapFrom(src =>
-                src.FilamentUsage!.Sum(p => p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0
-                        ? p.EstimatedAmountMg.Value : 0)
-                    + (src.EstimatedFilamentUsageMg.HasValue && src.EstimatedFilamentUsageMg > 0
-                        ? src.EstimatedFilamentUsageMg.Value : 0)))
-            .ForMember(dest => dest.FilamentUsageMg, opt => opt.MapFrom(src =>
-                src.FilamentUsage!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0
-                        ? p.AmountMg.Value : 0)
-                    + (src.FilamentUsageMg.HasValue && src.FilamentUsageMg > 0
-                        ? src.FilamentUsageMg.Value : 0)));
+            .ForMember(dest => dest.EstimatedFilamentUsageMg, opt => opt.MapFrom(EstimatedMaterialMg))
+            .ForMember(dest => dest.FilamentUsageMg, opt => opt.MapFrom(ActualMaterialMg));
 
         CreateMap<Print, PrintDetailReport>()
             .ForMember(dest => dest.PrinterName, opt => opt.MapFrom(src => src.Printer.Name))
             .ForMember(dest => dest.PrinterMake, opt => opt.MapFrom(src => src.Printer.Make))
             .ForMember(dest => dest.PrinterModel, opt => opt.MapFrom(src => src.Printer.Model))
-            // Same guarded rows + guarded "other filament" scalar as PrintStatistic above, so
-            // the CSV export and the stats screen cannot disagree. PrintProfileMaterialTests
-            // pins both copies.
-            .ForMember(dest => dest.EstimatedFilamentUsageG, opt => opt.MapFrom(src =>
-                (src.FilamentUsage!.Sum(p => p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0
-                        ? p.EstimatedAmountMg.Value : 0)
-                    + (src.EstimatedFilamentUsageMg.HasValue && src.EstimatedFilamentUsageMg > 0
-                        ? src.EstimatedFilamentUsageMg.Value : 0)) / 1000.0))
-            .ForMember(dest => dest.FilamentUsageG, opt => opt.MapFrom(src =>
-                (src.FilamentUsage!.Sum(p => p.AmountMg.HasValue && p.AmountMg > 0
-                        ? p.AmountMg.Value : 0)
-                    + (src.FilamentUsageMg.HasValue && src.FilamentUsageMg > 0
-                        ? src.FilamentUsageMg.Value : 0)) / 1000.0))
+            // Same figures as PrintStatistic above, so the CSV export and the stats screen
+            // cannot disagree.
+            .ForMember(dest => dest.EstimatedFilamentUsageG, opt => opt.MapFrom(EstimatedMaterialG))
+            .ForMember(dest => dest.FilamentUsageG, opt => opt.MapFrom(ActualMaterialG))
             // Combine the FilamentTypes with the display names of the filaments, deliminated by ;.
             .ForMember(dest => dest.FilamentType, opt => opt.MapFrom(src => (src.FilamentType + "; " + string.Join("; ", src.FilamentUsage!.Select(f => f.Filament!.DisplayName).ToList())).Trim().Trim(';').Trim()));
 

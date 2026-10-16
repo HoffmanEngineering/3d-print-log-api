@@ -162,6 +162,50 @@ public class UserDeletionServiceTests
     }
 
     [Fact]
+    public async Task DeleteAllDataForUser_DeletesWebhookSubscriptionsExplicitly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(commandInterceptor)
+            .Options;
+
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|webhook-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+        context.WebhookSubscriptions.Add(new WebhookSubscription
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Url = "https://hooks.example.test/api/webhook/x",
+            Events = WebhookEvents.All,
+            Enabled = true,
+            EncryptedSecret = "v1.00000000.AAAA",
+            CreatedDate = DateTime.UtcNow,
+            UpdatedDate = DateTime.UtcNow,
+        });
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        // The FK cascades too; the explicit delete keeps this method the one list of what a user owns.
+        Assert.Contains(commandInterceptor.Commands, command => IsDeleteFrom(command, "WebhookSubscriptions"));
+        Assert.Equal(0, await context.WebhookSubscriptions.CountAsync(ct));
+    }
+
+    [Fact]
     public async Task DeleteAllDataForUser_DeletesFilamentTagsBeforeFilaments()
     {
         var ct = TestContext.Current.CancellationToken;
