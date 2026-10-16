@@ -131,10 +131,10 @@ public class ReaderConfigEndpointTests : IClassFixture<CustomWebApplicationFacto
     {
         var message = Validate(Options(
             Format("snap", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k")),
-            Format("SNAP", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"))));
+            Format("snap", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"))));
 
         Assert.NotNull(message);
-        Assert.Contains("SNAP", message);
+        Assert.Contains("more than once", message);
     }
 
     [Theory]
@@ -196,6 +196,128 @@ public class ReaderConfigEndpointTests : IClassFixture<CustomWebApplicationFacto
 
         Assert.NotNull(message);
         Assert.Contains("sectors", message);
+    }
+
+    [Theory]
+    [InlineData("Upper")]
+    [InlineData("has_underscore")]
+    [InlineData("has space")]
+    [InlineData("caf\u00e9")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void BadIdCharacters_Fail(string id)
+    {
+        var message = Validate(Options(Format(id, "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"))));
+
+        Assert.NotNull(message);
+        Assert.Contains(id, message);
+    }
+
+    [Fact]
+    public void IdOfFiftyCharacters_Passes()
+    {
+        Assert.Null(Validate(Options(
+            Format(new string('a', 50), "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k")))));
+    }
+
+    [Fact]
+    public void MoreThanEightFormats_Fail()
+    {
+        TagReaderFormat[] Make(int n) => [.. Enumerable.Range(0, n)
+            .Select(i => Format($"f{i}", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k")))];
+
+        Assert.Null(Validate(Options(Make(8))));
+        var message = Validate(Options(Make(9)));
+        Assert.NotNull(message);
+        Assert.Contains("8", message);
+    }
+
+    [Theory]
+    [InlineData("saltHex")]
+    [InlineData("labelPrefix")]
+    [InlineData("extra")]
+    public void ParamValueOver256Characters_Fails(string key)
+    {
+        var values = new Dictionary<string, string> { ["saltHex"] = "00", ["labelPrefix"] = "k" };
+        values[key] = key == "saltHex" ? new string('a', 258) : new string('k', 257);
+        var message = Validate(Options(new TagReaderFormat { Id = "acme", Scheme = "hmac-sha256-sector", Params = values }));
+
+        Assert.NotNull(message);
+        Assert.Contains("acme", message);
+        Assert.Contains(key, message);
+    }
+
+    [Fact]
+    public void ParamValueOf256Characters_Passes()
+    {
+        Assert.Null(Validate(Options(
+            Format("acme", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", new string('k', 256))))));
+    }
+
+    [Theory]
+    [InlineData("caf\u00e9")]
+    [InlineData("tab\there")]
+    [InlineData("line\nbreak")]
+    [InlineData("\u007f")]
+    public void LabelPrefix_MustBePrintableAscii(string prefix)
+    {
+        var message = Validate(Options(Format("acme", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", prefix))));
+
+        Assert.NotNull(message);
+        Assert.Contains("acme", message);
+        Assert.Contains("labelPrefix", message);
+    }
+
+    [Fact]
+    public void LabelPrefix_AllowsSpacesAndPunctuation()
+    {
+        Assert.Null(Validate(Options(Format("acme", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "~ label-_ ")))));
+    }
+
+    [Theory]
+    [InlineData(" 16")]
+    [InlineData("+5")]
+    [InlineData("-1")]
+    [InlineData("5 ")]
+    [InlineData("\u0663")]
+    public void Sectors_MustBeDigitsOnly(string sectors)
+    {
+        var message = Validate(Options(
+            Format("acme", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"), ("sectors", sectors))));
+
+        Assert.NotNull(message);
+        Assert.Contains("acme", message);
+        Assert.Contains("sectors", message);
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("16")]
+    [InlineData("05")]
+    public void Sectors_DigitsInRange_Pass(string sectors)
+    {
+        Assert.Null(Validate(Options(
+            Format("acme", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"), ("sectors", sectors)))));
+    }
+
+    [Fact]
+    public void NullParams_FailNamingTheFormat()
+    {
+        var message = Validate(Options(new TagReaderFormat { Id = "acme", Scheme = "hmac-sha256-sector", Params = null }));
+
+        Assert.NotNull(message);
+        Assert.Contains("acme", message);
+        Assert.Contains("Params", message);
+    }
+
+    [Fact]
+    public void InvalidId_FailureNamesTheIndexWhenIdIsBlank()
+    {
+        var message = Validate(Options(
+            Format("ok", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k")),
+            Format(" ", "hmac-sha256-sector", ("saltHex", "00"), ("labelPrefix", "k"))));
+
+        Assert.NotNull(message);
+        Assert.Contains("Formats:1", message);
     }
 
     [Fact]
