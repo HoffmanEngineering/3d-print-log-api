@@ -105,6 +105,83 @@ public class AdjustMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
         Assert.True(isError);
     }
 
+    // create_material refuses a diameter-tracking material without a diameter, or a zero density,
+    // but the web app has saved both, so the tests below set them on the row directly.
+    private async Task SetConversionInputs(Guid id, double density, double? diameterMm)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var material = ctx.Filaments.Single(f => f.Id == id);
+        material.MaterialDensityGramPerCubicCm = density;
+        material.DiameterMm = diameterMm;
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private async Task<int> AdjustmentCount(Guid id)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return ctx.FilamentAdjustments.Count(a => a.FilamentId == id);
+    }
+
+    private static async Task AssertUnconvertible(McpClient client, Guid id, string source, double delta)
+    {
+        var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object?>
+        {
+            ["materialId"] = id,
+            ["source"] = source,
+            ["delta"] = delta,
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsError);
+        var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
+        Assert.Contains("missing the density/diameter needed to convert the adjustment to a weight", text);
+    }
+
+    [Fact]
+    public async Task Adjust_ByLength_WithoutDiameter_IsRejected()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var id = await CreateMaterial(client, "Adjust Length No Diameter Mat");
+        await SetConversionInputs(id, density: 1.24, diameterMm: null);
+
+        await AssertUnconvertible(client, id, "Length", -5000.0);
+        Assert.Equal(0, await AdjustmentCount(id));
+    }
+
+    // Density 0 turns any length into 0 g: the adjustment would be saved and count for nothing.
+    [Fact]
+    public async Task Adjust_ByLength_WithZeroDensity_IsRejected()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var id = await CreateMaterial(client, "Adjust Length Zero Density Mat");
+        await SetConversionInputs(id, density: 0, diameterMm: 1.75);
+
+        await AssertUnconvertible(client, id, "Length", -5000.0);
+        Assert.Equal(0, await AdjustmentCount(id));
+    }
+
+    // Volume to weight needs only the density, so a missing diameter must not block it.
+    [Fact]
+    public async Task Adjust_ByVolume_WithoutDiameter_ConvertsFromDensity()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var id = await CreateMaterial(client, "Adjust Volume No Diameter Mat");
+        await SetConversionInputs(id, density: 1.24, diameterMm: null);
+
+        var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object?>
+        {
+            ["materialId"] = id,
+            ["source"] = "Volume",
+            ["delta"] = -100.0, // ml, 124 g at 1.24 g/cm3
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsError != true);
+        var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
+        using var doc = JsonDocument.Parse(text);
+        Assert.Equal(876.0, doc.RootElement.GetProperty("afterGrams").GetDouble());
+    }
+
     [Fact]
     public async Task Adjust_ForeignMaterial_ReturnsNotFound()
     {
