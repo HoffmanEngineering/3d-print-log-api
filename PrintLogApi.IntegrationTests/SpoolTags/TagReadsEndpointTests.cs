@@ -100,6 +100,39 @@ public class TagReadsEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task AnotherUsersTag_IsUnknown_NeverLinked_SuggestedOrTouched()
+    {
+        var uid = RandomUid();
+        var other = await CreateOtherUserAsync();
+
+        // The reading's brand and color, so any leak through suggestions would show.
+        var probe = await ReadAsync(Fixture("snapmaker-805BEC3E", uid), other);
+        var reading = probe.GetProperty("reading");
+        var owners = await CreateFilamentAsync(
+            reading.GetProperty("brand").GetString(),
+            reading.GetProperty("colors")[0].GetString(),
+            [uid]);
+        var lookalike = await CreateFilamentAsync(
+            reading.GetProperty("brand").GetString(),
+            reading.GetProperty("colors")[0].GetString(),
+            tagUids: null);
+        var before = (await LoadAsync(uid, owners.Id)).Tag;
+
+        var result = await ReadAsync(Fixture("snapmaker-805BEC3E", uid), other);
+
+        Assert.Equal("unknown", result.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("filament").ValueKind);
+        var suggested = result.GetProperty("suggestions").EnumerateArray().Select(s => s.GetProperty("filamentId").GetGuid()).ToList();
+        Assert.DoesNotContain(owners.Id, suggested);
+        Assert.DoesNotContain(lookalike.Id, suggested);
+
+        var after = (await LoadAsync(uid, owners.Id)).Tag;
+        Assert.Equal(before.LastReadAt, after.LastReadAt);
+        Assert.Equal(before.DecodedJson, after.DecodedJson);
+        Assert.Equal(before.Format, after.Format);
+    }
+
+    [Fact]
     public async Task UnrecognizedMemory_IsUnknown_AndStoresOneFailureRow()
     {
         var uid = RandomUid();
@@ -206,16 +239,16 @@ public class TagReadsEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    private Task<HttpResponseMessage> PostAsync(TagReadRequest body)
+    private Task<HttpResponseMessage> PostAsync(TagReadRequest body, string? oauthUserId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(body) };
-        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, oauthUserId ?? IntegrationTestSeeder.TestUserOAuthId);
         return _httpClient.SendAsync(request, Ct);
     }
 
-    private async Task<JsonElement> ReadAsync(TagReadRequest body)
+    private async Task<JsonElement> ReadAsync(TagReadRequest body, string? oauthUserId = null)
     {
-        var response = await PostAsync(body);
+        var response = await PostAsync(body, oauthUserId);
         var text = await response.Content.ReadAsStringAsync(Ct);
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {text}");
         return JsonDocument.Parse(text).RootElement.Clone();
@@ -244,6 +277,16 @@ public class TagReadsEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var response = await _httpClient.SendAsync(request, Ct);
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
         return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(Web, Ct))!;
+    }
+
+    private async Task<string> CreateOtherUserAsync()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = new User { OAuthUserId = $"auth0|tag-reads-other-{Guid.NewGuid():N}", ViewStatus = User.ProfileViewStatus.Public };
+        db.Users.Add(user);
+        await db.SaveChangesAsync(Ct);
+        return user.OAuthUserId;
     }
 
     private async Task<(FilamentTag Tag, Filament Filament)> LoadAsync(string uid, Guid filamentId)
