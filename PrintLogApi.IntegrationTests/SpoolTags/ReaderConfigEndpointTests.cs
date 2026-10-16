@@ -184,4 +184,36 @@ public class ReaderConfigEndpointTests : IClassFixture<CustomWebApplicationFacto
         Assert.NotNull(message);
         Assert.Contains("acme", message);
     }
+
+    [Fact]
+    public void ParamKeys_AreCaseInsensitive_InTheValidator()
+    {
+        Assert.Null(Validate(Options(
+            Format("a", "hmac-sha256-sector", ("SaltHex", "00112233"), ("LABELPREFIX", "k_"), ("Sectors", "5")))));
+
+        var message = Validate(Options(
+            Format("b", "hmac-sha256-sector", ("SaltHex", "00112233"), ("LabelPrefix", "k_"), ("Sectors", "99"))));
+
+        Assert.NotNull(message);
+        Assert.Contains("sectors", message);
+    }
+
+    [Fact]
+    public async Task ParamKeys_AreServedUnderTheirCanonicalNames()
+    {
+        using var factory = _factory.WithWebHostBuilder(b =>
+            b.ConfigureServices(s => s.Configure<TagReaderOptions>(o =>
+            {
+                o.Formats.Clear();
+                o.Formats.Add(Format("acme", "hmac-sha256-sector", ("SALTHEX", "0011"), ("labelprefix", "k_"), ("Sectors", "3")));
+            })));
+
+        var response = await factory.CreateClient().SendAsync(Authed(), Ct);
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
+        var values = body.GetProperty("formats")[0].GetProperty("params");
+        Assert.Equal("0011", values.GetProperty("saltHex").GetString());
+        Assert.Equal("k_", values.GetProperty("labelPrefix").GetString());
+        Assert.Equal("3", values.GetProperty("sectors").GetString());
+    }
 }

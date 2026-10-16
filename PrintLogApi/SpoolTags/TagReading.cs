@@ -17,7 +17,7 @@ public class TagReading
     /// <summary>Six-digit uppercase hex, no leading hash.</summary>
     public List<string> Colors { get; set; } = [];
 
-    /// <summary>0-255.</summary>
+    /// <summary>1-255. 0 is treated as unset (null) by the sanitizer.</summary>
     public int? Alpha { get; set; }
     public double? DiameterMm { get; set; }
     public int? NetWeightG { get; set; }

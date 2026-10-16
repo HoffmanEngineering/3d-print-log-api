@@ -34,7 +34,7 @@ public class FilamentTagsController(IOptions<TagReaderOptions> readerOptions) : 
                 {
                     Id = f.Id,
                     Scheme = f.Scheme,
-                    Params = f.Params is null ? null : new Dictionary<string, string>(f.Params),
+                    Params = f.Params is null ? null : f.NormalizedParams(),
                 })
                 .ToList(),
         };

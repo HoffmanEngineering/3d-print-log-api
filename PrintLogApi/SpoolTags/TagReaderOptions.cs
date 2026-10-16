@@ -18,6 +18,24 @@ public sealed class TagReaderFormat
     public string? Id { get; set; }
     public string? Scheme { get; set; }
     public Dictionary<string, string>? Params { get; set; }
+
+    private static readonly string[] KnownParams = ["saltHex", "infoHex", "labelPrefix", "sectors"];
+
+    /// <summary>
+    /// The params with case-insensitive lookup. Keys that match a known param in any case are
+    /// renamed to its canonical spelling, since the native app reads those names exactly (environment
+    /// variables and some config sources change the case).
+    /// </summary>
+    public Dictionary<string, string> NormalizedParams()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in Params ?? [])
+        {
+            result[KnownParams.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) ?? key] = value;
+        }
+
+        return result;
+    }
 }
 
 /// <summary>Fails startup on a reader config the app could not use, naming the offending format.</summary>
@@ -48,7 +66,7 @@ public sealed class TagReaderOptionsValidator : IValidateOptions<TagReaderOption
                 failures.Add($"TagReader format '{id}' is configured more than once (ids compare case-insensitively).");
             }
 
-            var values = format.Params ?? [];
+            var values = format.NormalizedParams();
             switch (format.Scheme)
             {
                 case HmacSha256Sector:
