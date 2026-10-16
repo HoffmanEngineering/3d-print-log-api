@@ -9,7 +9,52 @@ namespace PrintLogApi.IntegrationTests.Analytics;
 
 /// <summary><see cref="MaterialAdjustmentsAnalyticsTestsBase"/> on the suite's SQLite host.</summary>
 public class MaterialAdjustmentsAnalyticsTests(CustomWebApplicationFactory factory)
-    : MaterialAdjustmentsAnalyticsTestsBase(factory), IClassFixture<CustomWebApplicationFactory>;
+    : MaterialAdjustmentsAnalyticsTestsBase(factory), IClassFixture<CustomWebApplicationFactory>
+{
+    /// <summary>
+    /// Adjustment rows alone over the row cap, with no prints at all: the print coverage has
+    /// nothing to exclude, so the flag is what tells the UI the tab is empty on purpose. Here
+    /// only, not on SQL Server: it writes 20,001 rows.
+    /// </summary>
+    [Fact]
+    public async Task AdjustmentRowsOverTheCap_RaiseTheRowCapFlagWithoutAnyPrints()
+    {
+        long userId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var user = NewUser();
+            db.Users.Add(user);
+            await db.SaveChangesAsync(Ct);
+            userId = user.Id;
+
+            var spool = Spool(userId, "PLA", "Cap", "Red", 1_000_000);
+            db.Filaments.Add(spool);
+            await db.SaveChangesAsync(Ct);
+
+            db.FilamentAdjustments.AddRange(Enumerable.Range(0, AnalyticsService.MaxSeriesRows + 1)
+                .Select(_ => new FilamentAdjustment
+                {
+                    FilamentId = spool.Id,
+                    Source = FilamentAdjustment.SourceMeasurement.Weight,
+                    AmountMg = -1,
+                    CreatedById = userId,
+                    UpdatedById = userId,
+                }));
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var response = await GetAsync(userId, f =>
+        {
+            f.FromDate = null;
+            f.ToDate = null;
+        });
+
+        Assert.True(response.RowCapExceeded);
+        Assert.Empty(response.ByType);
+        Assert.Empty(response.ConsumptionOverTime);
+    }
+}
 
 /// <summary>
 /// <see cref="MaterialAdjustmentsAnalyticsTestsBase"/> against a real SQL Server, on a scratch
@@ -36,7 +81,7 @@ public class MaterialAdjustmentsAnalyticsSqlServerTests(SpoolFiguresSqlServerTes
 /// </summary>
 public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplicationFactory factory)
 {
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>Set by a host that cannot run here (no SQL Server configured), to skip every scenario.</summary>
     protected virtual string? SkipReason => null;
@@ -57,6 +102,7 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
     /// <item>E (NYLON): a zero adjustment on day 4, which says nothing.</item>
     /// <item>Another user's spool: a 999 g loss on day 5.</item>
     /// </list>
+    /// The user's spools were created 30 days before the window.
     /// </summary>
     private async Task<Seeded> SeedAsync()
     {
@@ -80,6 +126,12 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
         var foreign = Spool(stranger.Id, "PLA", "Brand X", "Red", 1_000_000);
         db.Filaments.AddRange(a, b, c, d, e, foreign);
         await db.SaveChangesAsync(Ct);
+
+        // The spools predate everything logged against them, as real ones do. SaveChanges
+        // stamps CreatedDate, so it is moved afterwards.
+        var spoolsCreated = WindowStart.AddDays(-30);
+        await db.Filaments.Where(f => f.CreatedById == user.Id)
+            .ExecuteUpdateAsync(x => x.SetProperty(f => f.CreatedDate, spoolsCreated), Ct);
 
         db.Prints.Add(new Print
         {
@@ -108,6 +160,31 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
         return new Seeded(user.Id, printer.Id, a.Id, b.Id, c.Id, d.Id, e.Id);
     }
 
+    /// <summary>
+    /// An adjustment whose CreatedDate is <see cref="DateTime.MinValue"/>, as #256 leaves rows a
+    /// filament-detail save re-sent without one. <paramref name="updatedDate"/> is what that
+    /// save's UpdatedDate would hold, or MinValue too when the row is beyond recovery.
+    /// </summary>
+    private static async Task AddUndatedAdjustmentAsync(
+        PrintLogContext db, long userId, Guid filamentId, long amountMg, DateTime updatedDate)
+    {
+        var adjustment = new FilamentAdjustment
+        {
+            FilamentId = filamentId,
+            Source = FilamentAdjustment.SourceMeasurement.Weight,
+            AmountMg = amountMg,
+            CreatedById = userId,
+            UpdatedById = userId,
+        };
+        db.FilamentAdjustments.Add(adjustment);
+        await db.SaveChangesAsync(Ct);
+
+        await db.FilamentAdjustments.Where(x => x.Id == adjustment.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.CreatedDate, DateTime.MinValue)
+                .SetProperty(x => x.UpdatedDate, updatedDate), Ct);
+    }
+
     private static async Task AddAdjustmentAsync(PrintLogContext db, long userId, Guid filamentId, long amountMg, int day)
     {
         var adjustment = new FilamentAdjustment
@@ -126,13 +203,13 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.CreatedDate, created), Ct);
     }
 
-    private static User NewUser() => new()
+    protected static User NewUser() => new()
     {
         OAuthUserId = $"auth0|adjustments-{Guid.NewGuid():N}",
         ViewStatus = User.ProfileViewStatus.Private,
     };
 
-    private static Filament Spool(long userId, string type, string brand, string color, long initialMg, string? price = null) => new()
+    protected static Filament Spool(long userId, string type, string brand, string color, long initialMg, string? price = null) => new()
     {
         Id = Guid.NewGuid(),
         DisplayName = $"{brand} {type} {color}",
@@ -151,7 +228,7 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
         Source = Filament.SourceMeasurement.Weight,
     };
 
-    private async Task<MaterialsResponse> GetAsync(long userId, Action<AnalyticsFilter>? configure = null)
+    protected async Task<MaterialsResponse> GetAsync(long userId, Action<AnalyticsFilter>? configure = null)
     {
         var filter = new AnalyticsFilter
         {
@@ -204,22 +281,23 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
 
         var response = await GetAsync(seeded.UserId);
 
-        // Ranked by prints plus adjustments; MaterialMg and PrintCount stay print-only.
-        Assert.Equal(new[] { "PLA", "PETG", "ABS" }, response.ByType.Select(g => g.Key));
+        // Ranked by prints plus adjustments; MaterialMg and PrintCount stay print-only. ABS
+        // (D) had filament added back and nothing printed: no mass, so no group, the same
+        // rule that drops a usage row with no amount.
+        Assert.Equal(new[] { "PLA", "PETG" }, response.ByType.Select(g => g.Key));
         var pla = response.ByType[0];
         Assert.Equal((1, 100_000L, 20_000L), (pla.PrintCount, pla.MaterialMg, pla.AdjustmentMg));
         var petg = response.ByType[1];
         Assert.Equal((0, 0L, 50_000L), (petg.PrintCount, petg.MaterialMg, petg.AdjustmentMg));
-        var abs = response.ByType[2];
-        Assert.Equal((0, 0L, -20_000L), (abs.PrintCount, abs.MaterialMg, abs.AdjustmentMg));
 
-        Assert.Equal(new[] { "Brand X", "Brand Y", "Brand Z" }, response.ByBrand.Select(g => g.Key));
-        Assert.Equal(new[] { "Red", "Blue", "Black" }, response.ByColor.Select(g => g.Key));
+        Assert.Equal(new[] { "Brand X", "Brand Y" }, response.ByBrand.Select(g => g.Key));
+        Assert.Equal(new[] { "Red", "Blue" }, response.ByColor.Select(g => g.Key));
 
-        // The groups and the series account for the same adjustment mass.
+        // Every view accounts for the same adjustment mass: the series' 50 g less D's
+        // dropped -20 g.
         foreach (var groups in new[] { response.ByType, response.ByBrand, response.ByColor })
         {
-            Assert.Equal(response.ConsumptionOverTime.Sum(b => b.AdjustmentMg), groups.Sum(g => g.AdjustmentMg));
+            Assert.Equal(70_000, groups.Sum(g => g.AdjustmentMg));
         }
     }
 
@@ -292,6 +370,10 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
             var gainSpool = response.TopSpools.Single(s => Guid.Parse(s.FilamentId) == gain.Id);
             Assert.Equal(-40_000, gainSpool.AdjustmentMg);
             Assert.Equal(0.0, gainSpool.PercentConsumed);
+
+            // A group with prints stays, even when its adjustments outweigh them.
+            var tpu = response.ByType.Single(g => g.Key == "TPU");
+            Assert.Equal((1, 10_000L, -40_000L), (tpu.PrintCount, tpu.MaterialMg, tpu.AdjustmentMg));
         }
     }
 
@@ -347,5 +429,104 @@ public abstract class MaterialAdjustmentsAnalyticsTestsBase(CustomWebApplication
         // includes it rather than starting at the first print.
         Assert.Equal(50_000 + 70_000, response.ConsumptionOverTime.Sum(b => b.AdjustmentMg));
         Assert.Contains(response.TopSpools, s => Guid.Parse(s.FilamentId) == seeded.C);
+    }
+
+    /// <summary>
+    /// #256 leaves adjustments with CreatedDate = 0001-01-01. Taken at face value, an all-time
+    /// series started there: east of UTC the first bucket's local midnight is before
+    /// DateTime.MinValue and the request threw, and west of UTC it built about 24,000 monthly
+    /// buckets. Such a row is dated by its UpdatedDate instead, in the window filter and the
+    /// bucketing alike.
+    /// </summary>
+    [Theory]
+    [InlineData("UTC")]
+    [InlineData("Australia/Sydney")]
+    [InlineData("America/Los_Angeles")]
+    public async Task AnAdjustmentWithNoCreatedDate_IsDatedByItsUpdatedDate(string timeZone)
+    {
+        Assert.SkipWhen(SkipReason is not null, SkipReason ?? "");
+        var seeded = await SeedAsync();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await AddUndatedAdjustmentAsync(db, seeded.UserId, seeded.A, -5_000, WindowStart.AddDays(8).AddHours(12));
+        }
+
+        var allTime = await GetAsync(seeded.UserId, f =>
+        {
+            f.FromDate = null;
+            f.ToDate = null;
+            f.TimeZone = timeZone;
+        });
+
+        // From C's loss 65 days ago to now, by month: a handful of buckets, not thousands.
+        Assert.InRange(allTime.ConsumptionOverTime.Count, 3, 5);
+        Assert.True(allTime.ConsumptionOverTime[0].LocalStart.Year >= 2000);
+        Assert.Equal(50_000 + 70_000 + 5_000, allTime.ConsumptionOverTime.Sum(b => b.AdjustmentMg));
+
+        // And the ranged view counts it on that day rather than dropping it.
+        var ranged = await GetAsync(seeded.UserId, f => f.TimeZone = timeZone);
+        Assert.Equal(55_000, ranged.ConsumptionOverTime.Sum(b => b.AdjustmentMg));
+        if (timeZone == "UTC")
+        {
+            Assert.Equal(5_000, ranged.ConsumptionOverTime.Single(b => b.LocalStart == Day(8)).AdjustmentMg);
+        }
+    }
+
+    /// <summary>
+    /// When UpdatedDate is no better, the row falls back to its spool's CreatedDate: the
+    /// earliest the adjustment can have been made, and still a real date. B was created 30
+    /// days before the window.
+    /// </summary>
+    [Fact]
+    public async Task AnAdjustmentWithNoUsableDate_IsDatedByItsSpoolsCreation()
+    {
+        Assert.SkipWhen(SkipReason is not null, SkipReason ?? "");
+        var seeded = await SeedAsync();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await AddUndatedAdjustmentAsync(db, seeded.UserId, seeded.B, -7_000, DateTime.MinValue);
+        }
+
+        var ranged = await GetAsync(seeded.UserId, f => f.TimeZone = "Australia/Sydney");
+        Assert.Equal(50_000, ranged.ConsumptionOverTime.Sum(b => b.AdjustmentMg));
+
+        var allTime = await GetAsync(seeded.UserId, f =>
+        {
+            f.FromDate = null;
+            f.ToDate = null;
+            f.TimeZone = "Australia/Sydney";
+            f.Granularity = AnalyticsGranularity.Day;
+        });
+
+        // Daily from the spool's creation, 90 days ago, to today: the row starts the series.
+        Assert.InRange(allTime.ConsumptionOverTime.Count, 89, 92);
+        Assert.Equal(Day(-30), allTime.ConsumptionOverTime[0].LocalStart);
+        Assert.Equal(7_000, allTime.ConsumptionOverTime[0].AdjustmentMg);
+        Assert.Equal(127_000, allTime.ConsumptionOverTime.Sum(b => b.AdjustmentMg));
+    }
+
+    /// <summary>
+    /// Coverage counts prints, so a window holding only adjustments reported "0 of 0" and a
+    /// row-cap overflow there excluded 0 prints, which drops the notice. The response says
+    /// how many adjustments it counted, and whether the cap bit, on its own.
+    /// </summary>
+    [Fact]
+    public async Task AdjustmentsOnly_AreCountedOutsideThePrintCoverage()
+    {
+        Assert.SkipWhen(SkipReason is not null, SkipReason ?? "");
+        var seeded = await SeedAsync();
+
+        var onlyB = await GetAsync(seeded.UserId, f => f.FilamentIds.Add(seeded.B));
+        Assert.Equal(0, onlyB.Coverage.Total);
+        Assert.Equal(1, onlyB.AdjustmentCount);
+        Assert.False(onlyB.RowCapExceeded);
+
+        // A, B, D in the window; C is outside it, E is a zero and another user's is not ours.
+        var everything = await GetAsync(seeded.UserId);
+        Assert.Equal(4, everything.AdjustmentCount);
     }
 }

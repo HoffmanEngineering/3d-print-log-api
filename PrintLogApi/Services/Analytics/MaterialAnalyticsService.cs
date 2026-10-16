@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
@@ -19,7 +20,14 @@ namespace PrintLogApi.Services.Analytics;
 /// <para>Filament adjustments count too (#231), as their own signed "adjustment" figures beside
 /// print consumption: in each series bucket, each group and each top spool. A spool's remaining
 /// weight already subtracts them, so a burn rate without them would divide one population by
-/// another. Coverage still counts prints only.</para>
+/// another. Coverage still counts prints only; the response's AdjustmentCount and
+/// RowCapExceeded speak for adjustments.</para>
+///
+/// <para>A spool filter treats the two differently, on purpose. It keeps prints that used one
+/// of the spools, and those prints bring every usage row they hold, other spools' included, so
+/// a multi-material print still shows its other materials. An adjustment belongs to one spool
+/// and nothing else, so only the named spools' adjustments are counted. Printer, project and
+/// status filters leave adjustments out entirely (<see cref="AdjustmentsApply"/>).</para>
 /// </summary>
 public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvider timeProvider)
     : IMaterialAnalyticsService
@@ -100,14 +108,39 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     private sealed record AdjustmentRow(
         Guid FilamentId, string? Brand, string? MaterialType, string? ColorName,
         IReadOnlyList<string> Colors, int ColorPattern, int FinishType, IReadOnlyList<int> Effects,
-        DateTimeOffset CreatedDate, long ConsumedMg) : ISpoolRow;
+        DateTimeOffset Date, long ConsumedMg) : ISpoolRow;
 
     /// <summary>The columns <see cref="AdjustmentsQuery"/> reads, before the swatch and sign are resolved in memory.</summary>
     public sealed record AdjustmentQueryRow(
         Guid FilamentId, string? Brand, string? MaterialType, string? ColorName,
         List<string>? Colors, string? ColorHex, Enums.ColorPatternType? ColorPattern,
         Enums.FilamentFinishType? FinishType, List<Enums.FilamentEffect>? Effects,
-        DateTime CreatedDate, double AmountMg);
+        DateTime Date, double AmountMg);
+
+    /// <summary>
+    /// Nothing in this product predates it. A timestamp before it is a default value, not a date:
+    /// #256 leaves adjustments with CreatedDate = 0001-01-01 when a filament-detail save re-sends
+    /// them without one.
+    /// </summary>
+    public static readonly DateTime EarliestPlausibleDate = new(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// When an adjustment happened, for filtering and bucketing alike: its CreatedDate, else its
+    /// UpdatedDate, else its spool's CreatedDate.
+    ///
+    /// <para>A CreatedDate lost to #256 cannot be recovered. The save that cleared it also stamped
+    /// UpdatedDate, which is the latest the adjustment can have been made, so it is the best date
+    /// left. If that is no better, the spool's creation is the earliest it can have been made, and
+    /// is still a real date. Either way the row keeps counting, as it does in the spool's remaining
+    /// weight; dropping it would make the tab disagree with the spool page.</para>
+    ///
+    /// <para>One expression, used by the window filter and the projection, so a row is never
+    /// counted in a window but bucketed outside it.</para>
+    /// </summary>
+    public static readonly Expression<Func<FilamentAdjustment, DateTime>> AdjustmentDate = a =>
+        a.CreatedDate >= EarliestPlausibleDate ? a.CreatedDate
+        : a.UpdatedDate >= EarliestPlausibleDate ? a.UpdatedDate
+        : a.Filament.CreatedDate;
 
     /// <summary>
     /// Whether adjustments can belong to this filter at all. An adjustment has a spool and a
@@ -119,8 +152,8 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
 
     /// <summary>
     /// The user's adjustments in the filter's window (#231), on their own spools, restricted to the
-    /// filter's spools when it names any. Half-open [from, to) on CreatedDate, which is a UTC
-    /// <see cref="DateTime"/>. The amount is <see cref="FilamentProfile.AdjustmentAmountMg"/>, the
+    /// filter's spools when it names any. Half-open [from, to) on <see cref="AdjustmentDate"/>, a
+    /// UTC <see cref="DateTime"/>. The amount is <see cref="FilamentProfile.AdjustmentAmountMg"/>, the
     /// same lambda the spool's remaining weight sums. Call only when <see cref="AdjustmentsApply"/>.
     ///
     /// <para>Exposed so its translation can be asserted against SQL Server without a database, like
@@ -135,15 +168,20 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
         {
             var from = filter.FromDate.Value.UtcDateTime;
             var to = filter.ToDate.Value.UtcDateTime;
-            scoped = scoped.Where(a => a.CreatedDate >= from && a.CreatedDate < to);
+            scoped = scoped.Where(ExpressionSplice.With<FilamentAdjustment, DateTime, bool>(
+                (a, date) => date >= from && date < to, AdjustmentDate));
         }
 
+        // Only the named spools' adjustments. Prints work differently: the filter keeps prints
+        // that used one of the spools, and every usage row on those prints comes along, other
+        // spools' included. An adjustment belongs to exactly one spool, so there is no "print"
+        // to bring company with it.
         if (filter.FilamentIds.Count > 0)
             scoped = scoped.Where(a => filter.FilamentIds.Contains(a.FilamentId));
 
         return scoped
-            .OrderBy(a => a.CreatedDate)
-            .SelectWith((a, amount) => new AdjustmentQueryRow(
+            .OrderBy(AdjustmentDate)
+            .SelectWith((a, amount, date) => new AdjustmentQueryRow(
                 a.FilamentId,
                 a.Filament.Brand,
                 a.Filament.MaterialType,
@@ -153,8 +191,8 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                 a.Filament.ColorPattern,
                 a.Filament.FinishType,
                 a.Filament.Effects,
-                a.CreatedDate,
-                amount(a)), FilamentProfile.AdjustmentAmountMg);
+                date(a),
+                amount(a)), FilamentProfile.AdjustmentAmountMg, AdjustmentDate);
     }
 
     public async Task<MaterialsResponse> GetMaterials(long userId, AnalyticsFilter filter, CancellationToken ct)
@@ -165,12 +203,13 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
         // measure its two halves against two different instants.
         var now = timeProvider.GetUtcNow();
 
-        var current = await Compute(userId, filter, now, ct);
+        var current = await Compute(userId, filter, now, includeAdjustments: true, ct);
 
         var previousFilter = PreviousWindow.For(filter, now);
         if (previousFilter is null) return current;
 
-        var previous = await Compute(userId, previousFilter, now, ct);
+        // Only its waste figures are read, and those are prints alone.
+        var previous = await Compute(userId, previousFilter, now, includeAdjustments: false, ct);
 
         // The two waste figures are this tab's scalar tiles. Burn rate and runway are
         // deliberately excluded: both already describe a trailing window, so a delta against
@@ -193,8 +232,11 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     /// what closes the window — it is a parameter rather than a field read so that the two
     /// computations behind one response cannot disagree about when "now" was.
     /// </param>
+    /// <param name="includeAdjustments">
+    /// False for the previous window, whose waste figures are all that is read from it.
+    /// </param>
     private async Task<MaterialsResponse> Compute(
-        long userId, AnalyticsFilter filter, DateTimeOffset now, CancellationToken ct)
+        long userId, AnalyticsFilter filter, DateTimeOffset now, bool includeAdjustments, CancellationToken ct)
     {
         // `now` is the caller's single clock read (see the entry point above). The burn-rate
         // window Runway measures is anchored to the same instant the series ends at, so a
@@ -229,7 +271,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
 
         // Adjustment rows share the row budget with usage rows: both are materialized here.
         var adjustments = Array.Empty<AdjustmentRow>() as IReadOnlyList<AdjustmentRow>;
-        if (AdjustmentsApply(filter))
+        if (includeAdjustments && AdjustmentsApply(filter))
         {
             var budget = AnalyticsService.MaxSeriesRows - stats.UsageRows;
             var loaded = await AdjustmentsQuery(context.FilamentAdjustments.AsNoTracking(), userId, filter)
@@ -249,7 +291,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                     (int)(a.ColorPattern ?? Enums.ColorPatternType.Solid),
                     (int)(a.FinishType ?? Enums.FilamentFinishType.Standard),
                     (a.Effects ?? new List<Enums.FilamentEffect>()).Select(e => (int)e).ToList(),
-                    new DateTimeOffset(DateTime.SpecifyKind(a.CreatedDate, DateTimeKind.Utc)),
+                    new DateTimeOffset(DateTime.SpecifyKind(a.Date, DateTimeKind.Utc)),
                     -(long)Math.Round(a.AmountMg)))
                 // An adjustment of nothing says nothing, like a usage row with no amount below.
                 .Where(a => a.ConsumedMg != 0)
@@ -322,7 +364,9 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
         // material type it would emit buckets under keys the UI has no series for — the UI
         // builds its series from ByType — and every type ranked below the cap would vanish
         // from a stacked chart the user reads as a total.
-        var series = BuildSeries(rows, adjustments, byType, filter, zone, granularity, now);
+        var series = BuildSeries(
+            rows, adjustments, byType, filter, zone, granularity, now,
+            await SeriesFloor(userId, filter, rows, adjustments, ct));
         var spools = await TopSpools(userId, rows, adjustments, costInputs, ct);
         var runway = Runway(spools, rows, adjustments, filter, now);
         var (wasteGrams, wasteCost, currency) = await Waste(userId, scoped, costInputs, coverage, ct);
@@ -330,7 +374,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
         return new MaterialsResponse(
             filter.FromDate, filter.ToDate, filter.TimeZone, granularity.ToString(), currency,
             byType, byBrand, byColor, series, spools, runway,
-            wasteGrams, wasteCost, coverage.Build());
+            wasteGrams, wasteCost, coverage.Build(), adjustments.Count, false);
     }
 
     /// <summary>
@@ -366,10 +410,13 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     /// Top MaxGroups by mass plus an aggregated "Other". Truncating without the rollup would
     /// silently lose mass from a chart the user reads as a total.
     ///
-    /// <para>A group exists for every key with print usage or a non-zero adjustment (#231), so
-    /// a spool only ever weighed in still shows where its filament went. Mass is prints plus
-    /// adjustments, which is what the ranking uses; the two stay separate fields so the chart
-    /// can tell print activity from inventory corrections.</para>
+    /// <para>A group exists for every key with print usage, or with adjustments that net to
+    /// filament removed (#231), so a spool only ever weighed in still shows where its filament
+    /// went. A key with no prints whose adjustments net to zero or to filament added back has no
+    /// mass, and is dropped for the reason a usage row with no amount is: a zero-mass group, or
+    /// a negative slice of "Other". A group with prints stays whatever its adjustments say. Mass
+    /// is prints plus adjustments, which is what the ranking uses; the two stay separate fields
+    /// so the chart can tell print activity from inventory corrections.</para>
     /// </summary>
     private static IReadOnlyList<MaterialGroup> Group(
         IReadOnlyList<UsageRow> rows, IReadOnlyList<AdjustmentRow> adjustments, Func<ISpoolRow, string> key)
@@ -400,6 +447,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                     new SwatchDto(exemplar.Colors, exemplar.ColorPattern, exemplar.FinishType, exemplar.Effects),
                     adjusted.Sum(a => a.ConsumedMg));
             })
+            .Where(g => g.PrintCount > 0 || g.MaterialMg + g.AdjustmentMg > 0)
             .OrderByDescending(g => g.MaterialMg + g.AdjustmentMg).ThenBy(g => g.Key)
             .ToList();
 
@@ -420,6 +468,51 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     }
 
     /// <summary>
+    /// The earliest an all-time series may start (#256): the earliest of the account's creation,
+    /// the first print and the creation of the oldest adjusted spool, never before
+    /// <see cref="EarliestPlausibleDate"/>. Only consulted for an all-time request with
+    /// adjustments, so the extra reads are skipped everywhere else.
+    ///
+    /// <para><see cref="AdjustmentDate"/> already dates every adjustment by something real; this
+    /// is the backstop that keeps a stray timestamp from asking the bucketer for thousands of
+    /// buckets, or for a local midnight before <see cref="DateTime.MinValue"/>, which throws east
+    /// of UTC. The adjusted spools' creation is a candidate because no adjustment can predate
+    /// its spool, so a genuine adjustment is never pulled forward; the account's creation alone
+    /// would not do, since older accounts do not record one.</para>
+    /// </summary>
+    private async Task<DateTimeOffset> SeriesFloor(
+        long userId, AnalyticsFilter filter, IReadOnlyList<UsageRow> rows,
+        IReadOnlyList<AdjustmentRow> adjustments, CancellationToken ct)
+    {
+        var plausible = new DateTimeOffset(EarliestPlausibleDate);
+        if (filter.HasRange || adjustments.Count == 0) return plausible;
+
+        var accountCreated = await context.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.CreatedDate)
+            .FirstOrDefaultAsync(ct);
+        var firstPrint = rows.Where(r => r.StartDate.HasValue).Select(r => (DateTimeOffset?)r.StartDate!.Value).Min();
+        var spoolIds = adjustments.Select(a => a.FilamentId).Distinct().ToList();
+        var firstSpool = await context.Filaments.AsNoTracking()
+            .Where(f => f.CreatedById == userId && spoolIds.Contains(f.Id))
+            .Select(f => (DateTime?)f.CreatedDate)
+            .MinAsync(ct);
+
+        var candidates = new[]
+            {
+                accountCreated,
+                firstPrint,
+                firstSpool is { } spool ? new DateTimeOffset(DateTime.SpecifyKind(spool, DateTimeKind.Utc)) : null,
+            }
+            .OfType<DateTimeOffset>()
+            .ToList();
+        if (candidates.Count == 0) return plausible;
+
+        var floor = candidates.Min();
+        return floor > plausible ? floor : plausible;
+    }
+
+    /// <summary>
     /// Grams per bucket, split by material type — using the SAME keys ByType was truncated
     /// to. A type that was rolled into "Other" for the group chart is rolled into "Other"
     /// here too, so the stacked series conserves mass instead of dropping everything ranked
@@ -428,20 +521,21 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     /// <para>Adjustments (#231) are one separate, signed series per bucket, by CreatedDate,
     /// rather than folded into the per-type figures, so the chart keeps print activity and
     /// inventory corrections apart. An all-time series starts at the earliest print OR
-    /// adjustment.</para>
+    /// adjustment, but never before <paramref name="floor"/>: an adjustment dated earlier is
+    /// counted in the first bucket rather than stretching the chart back to it.</para>
     /// </summary>
     private static IReadOnlyList<MaterialSeriesBucket> BuildSeries(
         IReadOnlyList<UsageRow> rows, IReadOnlyList<AdjustmentRow> adjustments,
         IReadOnlyList<MaterialGroup> byType,
         AnalyticsFilter filter, TimeZoneInfo zone, AnalyticsGranularity granularity,
-        DateTimeOffset now)
+        DateTimeOffset now, DateTimeOffset floor)
     {
         var retained = byType.Select(g => g.Key).ToHashSet();
         var dated = rows.Where(r => r.StartDate.HasValue).ToList();
         if (dated.Count == 0 && adjustments.Count == 0) return Array.Empty<MaterialSeriesBucket>();
 
-        var from = filter.FromDate
-            ?? dated.Select(r => r.StartDate!.Value).Concat(adjustments.Select(a => a.CreatedDate)).Min();
+        var earliest = dated.Select(r => r.StartDate!.Value).Concat(adjustments.Select(a => a.Date)).Min();
+        var from = filter.FromDate ?? (earliest > floor ? earliest : floor);
         var to = filter.ToDate ?? now;
         if (to <= from) return Array.Empty<MaterialSeriesBucket>();
 
@@ -462,7 +556,9 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
 
         foreach (var adjustment in adjustments)
         {
-            var index = TimeBucketer.IndexOf(buckets, adjustment.CreatedDate);
+            // Only an all-time series can hold an adjustment before its start; a ranged one
+            // filtered it out in SQL.
+            var index = TimeBucketer.IndexOf(buckets, adjustment.Date < from ? from : adjustment.Date);
             if (index < 0) continue;
 
             adjusted[buckets[index].Index] += adjustment.ConsumedMg;
@@ -606,7 +702,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
             .Where(r => r.StartDate.HasValue && r.StartDate.Value >= burnFrom && r.StartDate.Value < windowTo)
             .Select(r => (r.FilamentId, Mg: r.UsedMg));
         var adjusted = adjustments
-            .Where(a => a.CreatedDate >= burnFrom && a.CreatedDate < windowTo)
+            .Where(a => a.Date >= burnFrom && a.Date < windowTo)
             .Select(a => (a.FilamentId, Mg: a.ConsumedMg));
         var recent = printed.Concat(adjusted)
             .GroupBy(x => x.FilamentId)
@@ -681,8 +777,8 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
     }
 
     /// <summary>
-    /// The shape returned when the row cap bites. Everything is empty and the coverage record
-    /// says why — an empty tab with no explanation reads as "you have no materials".
+    /// The shape returned when the row cap bites. Everything is empty, and RowCapExceeded and the
+    /// coverage record say why (the coverage alone cannot when the window holds no prints) — an empty tab with no explanation reads as "you have no materials".
     /// </summary>
     private static MaterialsResponse EmptyMaterials(
         AnalyticsFilter filter, AnalyticsGranularity granularity, CostInputs inputs, Coverage coverage) =>
@@ -692,5 +788,5 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
             Array.Empty<MaterialSeriesBucket>(), Array.Empty<SpoolRow>(), Array.Empty<RunwayRow>(),
             new Metric(null, null, coverage),
             new MoneyMetric(null, null, inputs.UserCurrency, coverage),
-            coverage);
+            coverage, 0, true);
 }

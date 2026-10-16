@@ -65,7 +65,7 @@ public class AnalyticsSqlServerTranslationTests
 
     /// <summary>
     /// #231's adjustment rows, with every clause the filter can add: the ownership join through
-    /// the spool, the half-open CreatedDate window and the spool-id list.
+    /// the spool, the half-open window on the adjustment's effective date and the spool-id list.
     /// </summary>
     [Fact]
     public void MaterialAdjustmentRows_TranslateOnSqlServer()
@@ -83,8 +83,13 @@ public class AnalyticsSqlServerTranslationTests
             .ToQueryString();
 
         Assert.Contains("[FilamentAdjustments]", sql);
-        Assert.Contains("[CreatedDate] >=", sql);
-        Assert.Contains("[CreatedDate] <", sql);
         Assert.Contains("[CreatedById]", sql);
+
+        // The window filters on the same fallback date the rows are bucketed by (#256): a CASE
+        // over CreatedDate, UpdatedDate and the spool's CreatedDate, not CreatedDate alone.
+        Assert.Contains("CASE", sql);
+        Assert.Contains("[UpdatedDate]", sql);
+        Assert.Matches(@"END >= @", sql);
+        Assert.Matches(@"END < @", sql);
     }
 }

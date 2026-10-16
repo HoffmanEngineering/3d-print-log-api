@@ -58,6 +58,12 @@ public sealed record RunwayRow(
 // but its IReadOnlyList/IReadOnlyDictionary members are backed by mutable collections, so
 // this asserts a convention - nothing mutates a cached response - not a guarantee the type
 // system enforces. See PagedList<T> for the full rationale.
+/// <summary>
+/// Coverage counts prints. Adjustments (#231) are counted on their own: AdjustmentCount is the
+/// adjustment rows the figures include, and RowCapExceeded says the tab was emptied because
+/// usage and adjustment rows together exceeded the row cap, which the print coverage cannot
+/// say when there are no prints to exclude.
+/// </summary>
 [ImmutableObject(true)]
 public sealed record MaterialsResponse(
     DateTimeOffset? From,
@@ -73,4 +79,6 @@ public sealed record MaterialsResponse(
     IReadOnlyList<RunwayRow> Runway,
     Metric WasteGrams,
     MoneyMetric WasteCost,
-    Coverage Coverage);
+    Coverage Coverage,
+    int AdjustmentCount,
+    bool RowCapExceeded);
