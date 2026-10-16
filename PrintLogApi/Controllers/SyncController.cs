@@ -27,7 +27,7 @@ public class SyncController(
     /// </summary>
     /// <remarks>
     /// Returns an opaque `version` that changes whenever printers, prints, spools, loaded
-    /// filament or settings change. The same value is the response's strong `ETag`; send it back
+    /// filament or settings change. The same value is the response's (weak) `ETag`; send it back
     /// in `If-None-Match` to get a `304 Not Modified` with no body. Poll this about once a minute
     /// and fetch `GET /api/sync/snapshot` only when it changes. A version can also change
     /// without a data change (a server restart), which costs one extra snapshot fetch.
@@ -48,7 +48,7 @@ public class SyncController(
         }
 
         var version = SyncValidators.Version(userId.Value, cacheVersionService.GetUserCacheVersion(userId.Value));
-        if (NotModified(new EntityTagHeaderValue($"\"{version}\"")))
+        if (NotModified(new EntityTagHeaderValue($"\"{version}\"", isWeak: true)))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
@@ -98,7 +98,7 @@ public class SyncController(
         // The clock is read once, here, and threaded down (AGENTS.md, "The clock").
         var now = clock.GetUtcNow();
         var result = await snapshotService.GetAsync(userId.Value, SyncMonth.Containing(now, zone, zoneId), now, HttpContext.RequestAborted);
-        if (NotModified(new EntityTagHeaderValue($"\"{result.ETag}\"")))
+        if (NotModified(new EntityTagHeaderValue($"\"{result.ETag}\"", isWeak: true)))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
@@ -110,6 +110,11 @@ public class SyncController(
     /// Stamps the validator headers and reports whether the request's <c>If-None-Match</c>
     /// already holds this tag.
     /// </summary>
+    /// <remarks>
+    /// Tags are weak (<c>W/</c>): response compression serves the same body as identity, gzip
+    /// and brotli under one tag, and a strong tag promises byte-identical representations.
+    /// <c>If-None-Match</c> uses weak comparison anyway, so 304s are unaffected.
+    /// </remarks>
     private bool NotModified(EntityTagHeaderValue etag)
     {
         var headers = Response.GetTypedHeaders();

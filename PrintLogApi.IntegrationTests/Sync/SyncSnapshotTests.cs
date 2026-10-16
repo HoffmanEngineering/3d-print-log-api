@@ -371,7 +371,8 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
         var first = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot"), Ct);
         var etag = first.Headers.ETag;
         Assert.NotNull(etag);
-        Assert.False(etag.IsWeak);
+        // Weak: response compression serves several encodings of one body under this tag.
+        Assert.True(etag.IsWeak);
         Assert.True(first.Headers.CacheControl?.Private);
 
         var unchanged = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot", etag.Tag), Ct);

@@ -27,7 +27,7 @@ public sealed record SyncMonth(string Key, string ZoneId, DateTimeOffset From, D
     }
 }
 
-/// <summary>A snapshot and the strong entity tag that names its bytes.</summary>
+/// <summary>A snapshot and the entity tag that names its content.</summary>
 public sealed record SyncSnapshotResult(SyncSnapshot Snapshot, string ETag);
 
 public interface ISyncSnapshotService

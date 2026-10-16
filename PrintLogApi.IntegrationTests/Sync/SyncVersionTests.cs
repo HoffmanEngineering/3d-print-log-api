@@ -16,7 +16,7 @@ public class SyncVersionTests(SyncTestFactory factory) : IClassFixture<SyncTestF
     private sealed record VersionBody(string Version);
 
     [Fact]
-    public async Task Version_ReturnsAnOpaqueVersionWithAMatchingStrongETag()
+    public async Task Version_ReturnsAnOpaqueVersionWithAMatchingWeakETag()
     {
         var user = await factory.CreateUserAsync();
 
@@ -28,7 +28,8 @@ public class SyncVersionTests(SyncTestFactory factory) : IClassFixture<SyncTestF
         Assert.Matches("^[0-9a-f]{32}$", body.Version);
         var etag = response.Headers.ETag;
         Assert.NotNull(etag);
-        Assert.False(etag.IsWeak);
+        // Weak: response compression serves several encodings of one body under this tag.
+        Assert.True(etag.IsWeak);
         Assert.Equal($"\"{body.Version}\"", etag.Tag);
         Assert.Contains("no-cache", response.Headers.CacheControl?.ToString());
         Assert.True(response.Headers.CacheControl?.Private);
