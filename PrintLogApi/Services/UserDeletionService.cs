@@ -442,6 +442,12 @@ public class UserDeletionService : IUserDeletionService
                 .Where(t => t.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete this user's catalog SKU votes. The FK cascades too; the explicit delete keeps
+            // this method the one list of what a user owns. The catalog entries stay.
+            await _context.FilamentCatalogSkus
+                .Where(s => s.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete Filaments
             await _context.Filaments
                 .Where(f => f.CreatedById == userId)

@@ -36,5 +36,13 @@ public class FilamentTag
     [MaxLength(50)]
     public string? Format { get; set; }
 
+    /// <summary>The last decoded reading of this tag, as JSON (at most 8 KB).</summary>
+    public string? DecodedJson { get; set; }
+
+    /// <summary>The decoder version that produced <see cref="DecodedJson"/>.</summary>
+    public int? DecoderVersion { get; set; }
+
+    public DateTime? LastReadAt { get; set; }
+
     public DateTime CreatedDate { get; set; }
 }

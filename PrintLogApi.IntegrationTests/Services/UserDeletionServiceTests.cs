@@ -211,6 +211,50 @@ public class UserDeletionServiceTests
     }
 
     [Fact]
+    public async Task DeleteAllDataForUser_RemovesCatalogSkuVotes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlite(connection).Options;
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|sku-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        var other = new User { OAuthUserId = $"auth0|sku-keep-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.AddRange(user, other);
+        context.FilamentCatalogEntries.Add(new FilamentCatalogEntry
+        {
+            Id = "test_pla_black_1000_175_n",
+            Manufacturer = "Test",
+            Name = "Black",
+            Material = "PLA",
+            Density = 1.24,
+            WeightG = 1000,
+            DiameterMm = 1.75,
+            ImportedAt = DateTime.UtcNow,
+        });
+        await context.SaveChangesAsync(ct);
+
+        var now = DateTime.UtcNow;
+        context.FilamentCatalogSkus.AddRange(
+            new FilamentCatalogSku { Format = "snapmaker", Sku = "S1", CatalogEntryId = "test_pla_black_1000_175_n", UserId = user.Id, CreatedAt = now },
+            new FilamentCatalogSku { Format = "snapmaker", Sku = "S1", CatalogEntryId = "test_pla_black_1000_175_n", UserId = other.Id, CreatedAt = now });
+        await context.SaveChangesAsync(ct);
+
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        var remaining = await context.FilamentCatalogSkus.ToListAsync(ct);
+        Assert.Equal(other.Id, Assert.Single(remaining).UserId);
+        Assert.Equal(1, await context.FilamentCatalogEntries.CountAsync(ct));
+    }
+
+    [Fact]
     public async Task DeleteAllDataForUser_InvalidatesTheUsersCacheVersion()
     {
         var ct = TestContext.Current.CancellationToken;

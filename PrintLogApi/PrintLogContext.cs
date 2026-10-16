@@ -33,6 +33,9 @@ public class PrintLogContext : DbContext
     public DbSet<FilamentAdjustment> FilamentAdjustments { get; set; }
 
     public DbSet<FilamentTag> FilamentTags { get; set; } = null!;
+    public DbSet<FilamentCatalogEntry> FilamentCatalogEntries { get; set; } = null!;
+    public DbSet<FilamentCatalogSku> FilamentCatalogSkus { get; set; } = null!;
+    public DbSet<TagReadFailure> TagReadFailures { get; set; } = null!;
 
     public DbSet<MaterialCategory> MaterialCategories { get; set; }
 
@@ -732,6 +735,41 @@ public class PrintLogContext : DbContext
                 .WithMany()
                 .HasForeignKey(t => t.UserId)
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Filament catalog and tag reading. Catalog entries are only ever soft-deleted, so every
+        // reference to one is Restrict.
+        modelBuilder.Entity<FilamentCatalogEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.Manufacturer, e.Material });
+        });
+
+        modelBuilder.Entity<Filament>()
+            .HasOne(f => f.CatalogEntry)
+            .WithMany()
+            .HasForeignKey(f => f.CatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<FilamentCatalogSku>(entity =>
+        {
+            entity.HasIndex(s => new { s.Format, s.Sku, s.UserId }).IsUnique();
+            entity.HasIndex(s => new { s.Format, s.Sku });
+
+            entity.HasOne(s => s.CatalogEntry)
+                .WithMany()
+                .HasForeignKey(s => s.CatalogEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Cascade is the only path from Users to this table, so SQL Server accepts it.
+            entity.HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TagReadFailure>(entity =>
+        {
+            entity.HasIndex(f => f.CreatedAt);
         });
 
         modelBuilder.Entity<FilamentImage>(entity =>
