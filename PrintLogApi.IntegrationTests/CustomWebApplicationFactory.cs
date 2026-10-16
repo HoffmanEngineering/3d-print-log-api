@@ -13,8 +13,11 @@ using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Email.Outbox;
 using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.IntegrationTests.Mcp.Docs;
+using PrintLogApi.IntegrationTests.SpoolTags;
 using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Services;
+using PrintLogApi.SpoolTags;
+using PrintLogApi.SpoolTags.Catalog;
 
 namespace PrintLogApi.IntegrationTests;
 
@@ -53,6 +56,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     /// a latest version.
     /// </summary>
     public DocsSiteStub GitHub { get; } = new();
+
+    /// <summary>
+    /// SpoolmanDB, where the filament catalog is imported from. Every host gets it, so no test
+    /// reaches donkie.github.io; unseeded, every request 404s.
+    /// </summary>
+    public SpoolmanDbStub SpoolmanDb { get; } = new();
 
     /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
     public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
@@ -147,9 +156,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             services.AddSingleton<IEmailSender, RecordingEmailSender>();
 
             // The email workers would tick on their own timers mid-test. Tests drive
-            // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead.
+            // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead. The same goes
+            // for the spool tag maintenance worker.
             foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
-                && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService))).ToList())
+                && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService)
+                    || d.ImplementationType == typeof(SpoolTagMaintenanceService))).ToList())
             {
                 services.Remove(worker);
             }
@@ -173,6 +184,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             // The docs surface fetches the site's Markdown twins. Point it at the stub instead.
             services.AddHttpClient(PrintLogApi.Mcp.Docs.DocsCatalog.HttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => DocsSite.CreateHandler());
+            services.AddHttpClient(SpoolmanDbClient.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => SpoolmanDb.CreateHandler());
             services.AddHttpClient(PrintLogApi.Services.AgentReleases.AgentReleaseCatalog.HttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => GitHub.CreateHandler());
 
