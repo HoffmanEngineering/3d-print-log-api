@@ -410,6 +410,25 @@ public class WebhooksControllerTests(WebhookTestFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task ASuccessfulTest_ClosesAnOpenCircuit()
+    {
+        var user = await factory.CreateUserAsync();
+        var host = $"test-{Guid.NewGuid():N}.example.test";
+        var created = await CreateAsync(user, HookUrl(host));
+        await WithDbAsync(db => db.WebhookSubscriptions.Where(s => s.Id == created.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.ConsecutiveFailures, 5)
+                .SetProperty(x => x.LastDeliveryAt, DateTime.UtcNow), Ct));
+
+        var result = (await (await SendAsync(HttpMethod.Post, $"/api/Webhooks/{created.Id}/test", user))
+            .Content.ReadFromJsonAsync<WebhookTestResultDto>(Ct))!;
+
+        Assert.True(result.Delivered);
+        var stored = await WithDbAsync(db => db.WebhookSubscriptions.AsNoTracking().SingleAsync(s => s.Id == created.Id, Ct));
+        Assert.Equal(0, stored.ConsecutiveFailures);
+    }
+
+    [Fact]
     public async Task Test_ReportsAFailure_WithoutRetrying_OrCountingIt()
     {
         var user = await factory.CreateUserAsync();

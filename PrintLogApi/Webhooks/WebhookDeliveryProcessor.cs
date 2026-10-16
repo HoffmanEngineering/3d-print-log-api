@@ -11,7 +11,8 @@ namespace PrintLogApi.Webhooks;
 /// <summary>
 /// One subscription's delivery of one event: a unit of work on its own, so a slow or dead receiver
 /// holds up only its own deliveries. <see cref="Url"/> and <see cref="EncryptedSecret"/> are the
-/// subscription as it was when the event was fanned out; a retry checks they still hold.
+/// subscription as it was when the event was fanned out; every attempt checks they still hold.
+/// <see cref="Probe"/> marks the one delivery that claimed an open circuit's probe.
 /// </summary>
 public sealed record WebhookDelivery(
     Guid SubscriptionId,
@@ -20,7 +21,8 @@ public sealed record WebhookDelivery(
     string EncryptedSecret,
     WebhookMessage Message,
     int Attempt,
-    int MaxAttempts)
+    int MaxAttempts,
+    bool Probe = false)
 {
     public string Host => new Uri(Url).Host.ToLowerInvariant();
 }
@@ -58,8 +60,14 @@ public sealed class WebhookDeliveryProcessor(
     /// One delivery per enabled subscription of the event's user that selected it, all carrying the
     /// same body. A subscription whose circuit is open (<see cref="WebhookOptions.CircuitBreakerThreshold"/>
     /// failures in a row, the last within <see cref="WebhookOptions.CircuitBreakerCooldown"/>) is
-    /// skipped; once the cooldown has passed it gets a single probe with no retries.
+    /// skipped. Once the cooldown has passed, one event claims a single probe with no retries.
     /// </summary>
+    /// <remarks>
+    /// The probe is claimed with one conditional update that moves <c>LastDeliveryAt</c> to now, so
+    /// two events (or two instances) past the cooldown cannot both probe: the loser sees a fresh
+    /// <c>LastDeliveryAt</c> and skips. The probe's own outcome overwrites it seconds later. A probe
+    /// that never finishes (a restart) leaves the circuit open for one more cooldown.
+    /// </remarks>
     public async Task<IReadOnlyList<WebhookDelivery>> PrepareAsync(WebhookEvent webhookEvent, CancellationToken ct)
     {
         var flag = WebhookEventTypes.ToFlag(webhookEvent.EventType);
@@ -89,18 +97,26 @@ public sealed class WebhookDeliveryProcessor(
         foreach (var subscription in subscriptions)
         {
             var maxAttempts = 1 + _options.EffectiveRetryDelays.Length;
-            if (subscription.ConsecutiveFailures >= _options.CircuitBreakerThreshold)
+            var probe = false;
+            var threshold = _options.CircuitBreakerThreshold;
+            if (subscription.ConsecutiveFailures >= threshold)
             {
-                if (subscription.LastDeliveryAt is { } last && now - last < _options.CircuitBreakerCooldown)
+                var cutoff = now - _options.CircuitBreakerCooldown;
+                var claimed = await context.WebhookSubscriptions
+                    .Where(w => w.Id == subscription.Id && w.ConsecutiveFailures >= threshold
+                        && (w.LastDeliveryAt == null || w.LastDeliveryAt <= cutoff))
+                    .ExecuteUpdateAsync(s => s.SetProperty(w => w.LastDeliveryAt, now), ct);
+                if (claimed == 0)
                 {
                     logger.LogInformation("Webhook {SubscriptionId}: circuit open after {Failures} failures; skipped {EventId}.",
                         subscription.Id, subscription.ConsecutiveFailures, webhookEvent.EventId);
                     continue;
                 }
+                probe = true;
                 maxAttempts = 1;
             }
             deliveries.Add(new WebhookDelivery(subscription.Id, subscription.UserId, subscription.Url,
-                subscription.EncryptedSecret, message, Attempt: 1, maxAttempts));
+                subscription.EncryptedSecret, message, Attempt: 1, maxAttempts, probe));
         }
         return deliveries;
     }
@@ -108,21 +124,27 @@ public sealed class WebhookDeliveryProcessor(
     /// <summary>
     /// Sends one attempt of <paramref name="delivery"/>. Returns the next attempt and how long to
     /// wait first when the receiver may succeed later; otherwise records the outcome and is done.
-    /// A retry first checks that the subscription still exists, is on, and has the URL and secret
-    /// it was fanned out with, and quietly stops when any of that changed.
+    /// Every attempt, the first included, first checks that the subscription still exists, is on,
+    /// and has the URL and secret it was fanned out with, and quietly stops when any of that
+    /// changed: a delivery can wait in the queue long enough for the user to change or delete the
+    /// webhook, or their whole account. It also stops when the subscription's circuit opened
+    /// meanwhile, unless it is that circuit's probe.
     /// </summary>
     public async Task<WebhookAttemptOutcome> AttemptAsync(WebhookDelivery delivery, CancellationToken ct)
     {
-        if (delivery.Attempt > 1)
+        var current = await context.WebhookSubscriptions.AsNoTracking()
+            .Where(w => w.Id == delivery.SubscriptionId)
+            .Select(w => new { w.Enabled, w.Url, w.EncryptedSecret, w.ConsecutiveFailures })
+            .FirstOrDefaultAsync(ct);
+        if (current is null || !current.Enabled || current.Url != delivery.Url || current.EncryptedSecret != delivery.EncryptedSecret)
         {
-            var current = await context.WebhookSubscriptions.AsNoTracking()
-                .Where(w => w.Id == delivery.SubscriptionId)
-                .Select(w => new { w.Enabled, w.Url, w.EncryptedSecret })
-                .FirstOrDefaultAsync(ct);
-            if (current is null || !current.Enabled || current.Url != delivery.Url || current.EncryptedSecret != delivery.EncryptedSecret)
-            {
-                return WebhookAttemptOutcome.Done;
-            }
+            return WebhookAttemptOutcome.Done;
+        }
+        if (!delivery.Probe && current.ConsecutiveFailures >= _options.CircuitBreakerThreshold)
+        {
+            logger.LogInformation("Webhook {SubscriptionId}: circuit opened while {EventId} waited; skipped.",
+                delivery.SubscriptionId, delivery.Message.EventId);
+            return WebhookAttemptOutcome.Done;
         }
 
         string secret;

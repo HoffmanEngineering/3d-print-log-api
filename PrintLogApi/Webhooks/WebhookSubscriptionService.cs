@@ -27,8 +27,9 @@ public interface IWebhookSubscriptionService
     Task<WebhookSubscriptionCreatedDto?> RotateSecretAsync(long userId, Guid id, CancellationToken ct);
 
     /// <summary>
-    /// Sends one <c>webhook.test</c> event now: one attempt, no retries, and no change to the
-    /// subscription's delivery state. Null when not the user's.
+    /// Sends one <c>webhook.test</c> event now: one attempt and no retries. A failure changes
+    /// nothing; a success resets the failure count, which closes an open circuit (it does not turn
+    /// a disabled webhook back on). Null when not the user's.
     /// </summary>
     Task<WebhookTestResultDto?> SendTestAsync(long userId, Guid id, CancellationToken ct);
 }
@@ -210,6 +211,12 @@ public sealed class WebhookSubscriptionService(
 
         var result = await sender.SendAsync(new Uri(row.Url), secret,
             new WebhookMessage(WebhookEventTypes.Test, eventId, body), attempt: 1, ct);
+        if (result.Succeeded && row.ConsecutiveFailures > 0)
+        {
+            // The receiver is answering again: close the circuit now rather than at the next probe.
+            await context.WebhookSubscriptions.Where(w => w.Id == row.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(w => w.ConsecutiveFailures, 0), CancellationToken.None);
+        }
         return new WebhookTestResultDto { Delivered = result.Succeeded, StatusCode = result.StatusCode, Result = result.Result };
     }
 

@@ -676,6 +676,105 @@ public class WebhookDispatchTests : IClassFixture<WebhookTestFactory>
         Assert.Equal(6, (await StoredAsync(a.Subscription.Id)).ConsecutiveFailures);
     }
 
+    [Fact]
+    public async Task AfterTheCooldown_OnlyOneEventProbes()
+    {
+        var a = await ArrangeAsync();
+        Update(a.Subscription.Id, w =>
+        {
+            w.ConsecutiveFailures = 5;
+            w.LastDeliveryAt = DateTime.UtcNow.AddHours(-1);
+        });
+        _factory.Receiver.Respond(a.Host, HttpStatusCode.ServiceUnavailable, HttpStatusCode.ServiceUnavailable);
+
+        await CreatePrintAsync(a, PrintStatus.Printing, "First");
+        await CreatePrintAsync(a, PrintStatus.Printing, "Second");
+        var deliveries = await PrepareQueuedAsync();
+
+        // Both events were prepared before either probe ran: the claim, not the timing, decides.
+        Assert.Single(deliveries);
+        await AttemptAllAsync(deliveries);
+        Assert.Single(_factory.Receiver.Received(a.Host));
+    }
+
+    [Fact]
+    public async Task AFirstAttempt_IsDropped_WhenTheWebhookWasDeletedWhileItWaited()
+    {
+        var a = await ArrangeAsync();
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        var deliveries = await PrepareQueuedAsync();
+        Assert.Single(deliveries);
+
+        var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/Webhooks/{a.Subscription.Id}");
+        delete.Headers.Add(TestAuthHandler.TestUserIdHeader, a.User.OAuthUserId);
+        Assert.True((await _client.SendAsync(delete, Ct)).IsSuccessStatusCode);
+        await AttemptAllAsync(deliveries);
+
+        Assert.Empty(_factory.Receiver.Received(a.Host));
+    }
+
+    [Fact]
+    public async Task NothingIsSent_AfterTheAccountIsDeleted()
+    {
+        var a = await ArrangeAsync();
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        var deliveries = await PrepareQueuedAsync();
+        Assert.Single(deliveries);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == a.User.Id, Ct);
+            await scope.ServiceProvider.GetRequiredService<IUserDeletionService>().DeleteAllDataForUser(user);
+        }
+        await AttemptAllAsync(deliveries);
+
+        Assert.Empty(_factory.Receiver.Received(a.Host));
+    }
+
+    [Fact]
+    public async Task AFirstAttempt_IsSkipped_WhenTheCircuitOpenedWhileItWaited()
+    {
+        var a = await ArrangeAsync();
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        var deliveries = await PrepareQueuedAsync();
+        Update(a.Subscription.Id, w =>
+        {
+            w.ConsecutiveFailures = 3;
+            w.LastDeliveryAt = DateTime.UtcNow;
+        });
+
+        await AttemptAllAsync(deliveries);
+
+        Assert.Empty(_factory.Receiver.Received(a.Host));
+        Assert.Equal(3, (await StoredAsync(a.Subscription.Id)).ConsecutiveFailures);
+    }
+
+    /// <summary>Fans out everything queued, without attempting any of it yet.</summary>
+    private async Task<List<WebhookDelivery>> PrepareQueuedAsync()
+    {
+        var queue = _factory.Services.GetRequiredService<WebhookEventQueue>();
+        var deliveries = new List<WebhookDelivery>();
+        while (queue.Reader.TryRead(out var webhookEvent))
+        {
+            using var scope = _factory.Services.CreateScope();
+            deliveries.AddRange(await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().PrepareAsync(webhookEvent, Ct));
+        }
+        return deliveries;
+    }
+
+    private async Task AttemptAllAsync(IEnumerable<WebhookDelivery> deliveries)
+    {
+        foreach (var first in deliveries)
+        {
+            for (WebhookDelivery? delivery = first; delivery is not null;)
+            {
+                using var scope = _factory.Services.CreateScope();
+                delivery = (await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().AttemptAsync(delivery, Ct)).Next;
+            }
+        }
+    }
+
     private void Update(Guid id, Action<WebhookSubscription> change)
     {
         using var scope = _factory.Services.CreateScope();
