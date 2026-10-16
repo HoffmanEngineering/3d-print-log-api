@@ -108,7 +108,8 @@ public sealed class WebhookSubscriptionService(
         // needed (SQLite under test has neither in the form SQL Server does).
         if (await context.WebhookSubscriptions.CountAsync(w => w.UserId == userId, ct) > limit)
         {
-            await context.WebhookSubscriptions.Where(w => w.Id == row.Id).ExecuteDeleteAsync(ct);
+            // Not the request's token: a client that hangs up now must not leave the extra row.
+            await context.WebhookSubscriptions.Where(w => w.Id == row.Id).ExecuteDeleteAsync(CancellationToken.None);
             throw new WebhookLimitException(limit);
         }
 
@@ -136,20 +137,23 @@ public sealed class WebhookSubscriptionService(
         if (dto.Enabled is { } enabled)
         {
             row.Enabled = enabled;
-            if (enabled)
-            {
-                // Turning it on is the user saying the receiver is fixed: start counting afresh.
-                row.ConsecutiveFailures = 0;
-                row.AutoDisabledAt = null;
-            }
-
-            // Written even when the tracked values look unchanged. An auto-disable can land between
-            // the read above and this save; without forcing the columns, EF would skip them and the
-            // user's "on" would silently lose to it.
+            // Written even when the tracked value looks unchanged. An auto-disable can land between
+            // the read above and this save; without forcing the column, EF would skip it and the
+            // user's choice would silently lose to it.
             var entry = context.Entry(row);
             entry.Property(w => w.Enabled).IsModified = true;
-            entry.Property(w => w.ConsecutiveFailures).IsModified = true;
-            entry.Property(w => w.AutoDisabledAt).IsModified = true;
+            if (enabled)
+            {
+                // Turning it on (even when it already is) is the user saying the receiver is fixed:
+                // start counting afresh, which also closes an open circuit. Forced for the same
+                // reason as Enabled.
+                row.ConsecutiveFailures = 0;
+                row.AutoDisabledAt = null;
+                entry.Property(w => w.ConsecutiveFailures).IsModified = true;
+                entry.Property(w => w.AutoDisabledAt).IsModified = true;
+            }
+            // Turning it off leaves the delivery columns alone, so a failure recorded meanwhile
+            // is kept rather than overwritten with the stale count read above.
         }
         row.UpdatedDate = clock.GetUtcNow().UtcDateTime;
         await context.SaveChangesAsync(ct);

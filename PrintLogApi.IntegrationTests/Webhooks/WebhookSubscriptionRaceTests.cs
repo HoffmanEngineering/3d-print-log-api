@@ -84,6 +84,33 @@ public class WebhookSubscriptionRaceTests(WebhookTestFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task TurningOff_KeepsAFailureCountThatLandedAfterTheRead()
+    {
+        var user = await factory.CreateUserAsync();
+        using var scope = factory.Services.CreateScope();
+        var shared = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var row = Row(user.Id);
+        shared.WebhookSubscriptions.Add(row);
+        await shared.SaveChangesAsync(Ct);
+        shared.ChangeTracker.Clear();
+
+        var failedAt = DateTime.UtcNow;
+        var competitor = new BeforeFirstSave(shared.Database.GetDbConnection(), other =>
+            other.WebhookSubscriptions.Where(w => w.Id == row.Id).ExecuteUpdateAsync(s => s
+                .SetProperty(w => w.ConsecutiveFailures, 2)
+                .SetProperty(w => w.LastDeliveryAt, failedAt), Ct));
+        var service = RacingService(scope, shared, competitor, out var racing);
+        await using var _ = racing;
+
+        await service.UpdateAsync(user.Id, row.Id, new SaveWebhookSubscriptionDto { Url = row.Url, Enabled = false }, Ct);
+
+        Assert.True(competitor.Fired, "the failure never landed, so no race was tested");
+        var stored = await shared.WebhookSubscriptions.AsNoTracking().SingleAsync(w => w.Id == row.Id, Ct);
+        Assert.False(stored.Enabled);
+        Assert.Equal(2, stored.ConsecutiveFailures);
+    }
+
+    [Fact]
     public async Task Toggling_WithTheUrlUnchanged_DoesNotRecheckDns()
     {
         var user = await factory.CreateUserAsync();
