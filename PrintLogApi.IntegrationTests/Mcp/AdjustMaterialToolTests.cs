@@ -182,6 +182,31 @@ public class AdjustMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
         Assert.Equal(876.0, doc.RootElement.GetProperty("afterGrams").GetDouble());
     }
 
+    // A weight needs no density, but deriving its volume from density 0 would divide by zero and
+    // store Infinity, which SQL Server's float column rejects.
+    [Fact]
+    public async Task Adjust_ByWeight_WithZeroDensity_SavesWithoutDerivedVolume()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var id = await CreateMaterial(client, "Adjust Weight Zero Density Mat");
+        await SetConversionInputs(id, density: 0, diameterMm: null);
+
+        var result = await client.CallToolAsync("adjust_material_remaining", new Dictionary<string, object?>
+        {
+            ["materialId"] = id,
+            ["source"] = "Weight",
+            ["delta"] = -200.0,
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsError != true);
+        using var scope = _factory.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var row = ctx.FilamentAdjustments.Single(a => a.FilamentId == id);
+        Assert.Equal(-200_000, row.AmountMg);
+        Assert.Null(row.VolumeMl);
+        Assert.Null(row.LengthInM);
+    }
+
     [Fact]
     public async Task Adjust_ForeignMaterial_ReturnsNotFound()
     {

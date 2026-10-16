@@ -240,21 +240,122 @@ public class FilamentAdjustmentConversionTests : IClassFixture<CustomWebApplicat
         Assert.Equal(1.75, (await GetAsync(filament.Id)).DiameterMm);
     }
 
+    [Fact]
+    public async Task UpdateFilament_LegacyRowResentWithAnInjectedAmount_Returns400()
+    {
+        // Same id, source and length as the stored row, but with a weight the server never
+        // derived. The conversion can't run, so it would keep the client's AmountMg and count it.
+        var filament = await CreateFilamentAsync("Legacy Bad Adjustment Injected 232", diameterMm: null);
+        await InsertLegacyLengthAdjustmentAsync(filament.Id, 10);
+        var stored = Assert.Single((await GetAsync(filament.Id)).FilamentAdjustments!);
+        stored.AmountMg = -30_000;
+
+        var response = await PutAsync(filament, [stored]);
+
+        await AssertUnconvertibleAsync(response);
+        Assert.Null(Assert.Single(await StoredAdjustmentsAsync(filament.Id)).AmountMg);
+    }
+
+    [Fact]
+    public async Task UpdateFilament_LegacyVolumeRowWithoutDiameter_IsConvertedByAnUnrelatedEdit()
+    {
+        // Before #232 a missing diameter skipped Volume rows too, so they were saved uncounted.
+        // Volume needs only the density, so the next save of the spool converts them.
+        var filament = await CreateFilamentAsync("Legacy Volume Row 232", diameterMm: null);
+        await InsertLegacyAdjustmentAsync(filament.Id, FilamentAdjustment.SourceMeasurement.Volume, volumeMl: -100);
+        var stored = Assert.Single((await GetAsync(filament.Id)).FilamentAdjustments!);
+        Assert.Null(stored.AmountMg);
+        filament.DisplayName = "Legacy Volume Row Renamed 232";
+
+        var response = await PutAsync(filament, [stored]);
+
+        await AssertSuccessAsync(response);
+        var reread = await GetAsync(filament.Id);
+        Assert.Equal(-124_000, Assert.Single(reread.FilamentAdjustments!).AmountMg);
+        Assert.Equal(876_000, reread.FilamentRemaining);
+    }
+
     #endregion
+
+    #region Density 0
+
+    // Weight needs no conversion, so a density-0 spool still takes a weight adjustment. Deriving
+    // its volume would divide by zero: Infinity, which SQL Server's float column rejects (500)
+    // and System.Text.Json refuses to write. Nothing is derived instead.
+
+    [Fact]
+    public async Task AddFilament_WeightAdjustmentWithZeroDensity_DerivesNoVolume()
+    {
+        var response = await PostAsync(NewFilament("Zero Density Weight Create 232", diameterMm: null, density: 0,
+            nominalWeightMg: null, adjustments: [WeightAdjustment(Guid.Empty, -50_000)]));
+
+        await AssertSuccessAsync(response);
+        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        var row = Assert.Single(await StoredAdjustmentsAsync(created.Id));
+        Assert.Equal(-50_000, row.AmountMg);
+        Assert.Null(row.VolumeMl);
+        Assert.Null(row.LengthInM);
+    }
+
+    [Fact]
+    public async Task UpdateFilament_WeightAdjustmentWithZeroDensity_DerivesNoVolume()
+    {
+        var filament = await CreateFilamentAsync("Zero Density Weight Update 232", diameterMm: 1.75, density: 0, nominalWeightMg: null);
+
+        var response = await PutAsync(filament, [WeightAdjustment(filament.Id, -50_000)]);
+
+        await AssertSuccessAsync(response);
+        var row = Assert.Single(await StoredAdjustmentsAsync(filament.Id));
+        Assert.Equal(-50_000, row.AmountMg);
+        Assert.Null(row.VolumeMl);
+        Assert.Null(row.LengthInM);
+    }
+
+    [Fact]
+    public async Task AddFilament_NominalWeightWithZeroDensity_DerivesNoVolume()
+    {
+        // The same division in the spool's own capacity.
+        var response = await PostAsync(NewFilament("Zero Density Nominal Weight 232", density: 0));
+
+        await AssertSuccessAsync(response);
+        var created = (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await db.Filaments.AsNoTracking().SingleAsync(f => f.Id == created.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(1_000_000, stored.InitialNominalWeightMg);
+        Assert.Null(stored.InitialNominalVolumeMl);
+        Assert.Null(stored.InitialNominalLengthM);
+    }
+
+    #endregion
+
+    private async Task<List<FilamentAdjustment>> StoredAdjustmentsAsync(Guid filamentId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.FilamentAdjustments.AsNoTracking()
+            .Where(a => a.FilamentId == filamentId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>
     /// Writes the row the REST paths used to save before #232: a Length adjustment whose weight
     /// could not be derived, so AmountMg is null.
     /// </summary>
-    private async Task<Guid> InsertLegacyLengthAdjustmentAsync(Guid filamentId, double lengthInM)
+    private Task<Guid> InsertLegacyLengthAdjustmentAsync(Guid filamentId, double lengthInM) =>
+        InsertLegacyAdjustmentAsync(filamentId, FilamentAdjustment.SourceMeasurement.Length, lengthInM: lengthInM);
+
+    private async Task<Guid> InsertLegacyAdjustmentAsync(
+        Guid filamentId, FilamentAdjustment.SourceMeasurement source, double? lengthInM = null, double? volumeMl = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         var row = new FilamentAdjustment
         {
             FilamentId = filamentId,
-            Source = FilamentAdjustment.SourceMeasurement.Length,
+            Source = source,
             LengthInM = lengthInM,
+            VolumeMl = volumeMl,
             CreatedById = IntegrationTestSeeder.TestUserId,
             UpdatedById = IntegrationTestSeeder.TestUserId,
         };

@@ -1629,7 +1629,8 @@ public class FilamentService(
     /// <summary>
     /// A stored adjustment as it was before this update, to tell an untouched row from an edited one.
     /// </summary>
-    private readonly record struct StoredAdjustment(FilamentAdjustment.SourceMeasurement Source, double? SourceValue, bool WasConvertible);
+    private readonly record struct StoredAdjustment(
+        FilamentAdjustment.SourceMeasurement Source, double? SourceValue, long? AmountMg, bool WasConvertible);
 
     /// <summary>The value the user entered: the field the adjustment's Source names.</summary>
     private static double? SourceValue(FilamentAdjustment adjustment) => adjustment.Source switch
@@ -1643,7 +1644,7 @@ public class FilamentService(
     /// Rejects an adjustment that can't be converted to a weight, as the MCP tool does (#232).
     /// <para>
     /// An adjustment saved before this check, which already couldn't be converted, is let through
-    /// when the request re-sends it unchanged (same id, source and entered value). The web app
+    /// when the request re-sends it unchanged (same id, source, entered value and AmountMg). The web app
     /// re-sends every adjustment on every save, so checking those would make each later edit of
     /// that spool fail, renaming it included, until the user found and deleted the row. It stays
     /// as uncounted as it was, and is converted on the save that supplies the missing density or
@@ -1666,7 +1667,10 @@ public class FilamentService(
                 && stored.TryGetValue(adjustment.Id, out var before)
                 && !before.WasConvertible
                 && before.Source == adjustment.Source
-                && before.SourceValue == SourceValue(adjustment);
+                && before.SourceValue == SourceValue(adjustment)
+                // AmountMg too: the conversion can't run on this row, so it keeps whatever weight
+                // the request carries, and a weight the server never derived would then count.
+                && before.AmountMg == adjustment.AmountMg;
             if (!untouchedLegacyRow)
             {
                 throw new BadRequestException(UnconvertibleAdjustmentMessage);
@@ -1676,7 +1680,10 @@ public class FilamentService(
 
     private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
     {
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0))
+        // > 0, not >= 0: every conversion here divides or multiplies by the density, and 0 turns a
+        // weight's volume into Infinity, which SQL Server's float column rejects. A weight keeps
+        // its AmountMg; RequireConvertibleAdjustments has rejected any new Length or Volume row.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1749,8 +1756,9 @@ public class FilamentService(
 
     private void UpdateFilamentMeasurements(Filament filament)
     {
-
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+        // > 0 for the reason given in UpdateFilamentAdjustmentMeasurements: density 0 would derive
+        // an Infinity volume from a nominal weight.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1848,7 +1856,7 @@ public class FilamentService(
         var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
         var storedAdjustments = existingFilament.FilamentAdjustments!.ToDictionary(
             a => a.Id,
-            a => new StoredAdjustment(a.Source, SourceValue(a), storedConversionInputs.CanConvert(a.Source)));
+            a => new StoredAdjustment(a.Source, SourceValue(a), a.AmountMg, storedConversionInputs.CanConvert(a.Source)));
 
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
 
