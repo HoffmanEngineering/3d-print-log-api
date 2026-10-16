@@ -23,8 +23,9 @@ public class SpoolmanConnectionsController(ISpoolmanConnectionService connection
     /// Connect a printer to Spoolman, or reconnect it with a new secret.
     /// </summary>
     /// <remarks>
-    /// Returns the secret and a ready-to-paste <c>[spoolman]</c> block once; neither can be shown
-    /// again. Reconnecting a printer revokes its previous secret. The Free plan includes one
+    /// Returns the secret and a ready-to-paste block once; neither can be shown again. The block
+    /// holds <c>[spoolman]</c> and, unless the printer has a printlog-bridge connection, a
+    /// <c>[notifier 3d_print_log]</c> that logs its prints. Reconnecting a printer revokes its previous secret. The Free plan includes one
     /// connected printer; connecting a second returns 403 with
     /// <c>code: "spoolman_connection_limit"</c> and the <c>limit</c>.
     /// </remarks>
