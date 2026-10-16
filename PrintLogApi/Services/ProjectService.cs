@@ -339,6 +339,7 @@ public class ProjectService(
             .Include(p => p.Images!)
             .Include(p => p.Prints!)
                 .ThenInclude(pr => pr.FilamentUsage!)
+                    .ThenInclude(pf => pf.Filament)
             .AsSplitQuery()
             .AsNoTracking();
 
@@ -372,6 +373,7 @@ public class ProjectService(
                 .ThenInclude(i => i.File)
             .Include(p => p.Prints!)
                 .ThenInclude(pr => pr.FilamentUsage!)
+                    .ThenInclude(pf => pf.Filament)
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == id);
     }

@@ -10,8 +10,9 @@ namespace PrintLogApi.Profiles;
 public class FilamentProfile : Profile
 {
     /// <summary>
-    /// Milligrams one usage row took off its spool: the actual amount where one was recorded,
-    /// the estimate otherwise, in whichever measure the row carries. PrintService normalizes a
+    /// The actual side of the usage-row rule. A row took <see cref="UsageRowMg"/> milligrams off
+    /// its spool: the actual amount where one was recorded (this expression), the estimate
+    /// otherwise, in whichever measure the row carries. PrintService normalizes a
     /// saved row into all three measures, so AmountMg is usually present, but a row written
     /// around that path (seeded data, an import, a filament with no usable diameter at save time)
     /// carries only what the user entered, and milligrams are the common denominator.
@@ -20,19 +21,43 @@ public class FilamentProfile : Profile
     /// never off the outer spool: SQL Server refuses a correlated aggregate that reads several
     /// outer columns (error 8124, see FilamentSqlServerTranslationTests).</para>
     ///
-    /// <para>This is the one copy of the rule. Every spool figure below is built from it, so
-    /// the web app, the MCP tools, analytics and the Spoolman API cannot disagree.</para>
+    /// <para>Volume and length need the spool's density (and diameter), so a row with no spool
+    /// converts only a weight; its other measures count as not recorded and fall through. The
+    /// <c>p.Filament != null</c> guards say so explicitly, which also keeps the rule safe to
+    /// evaluate in memory over a row whose spool is gone.</para>
+    ///
+    /// <para>This is the one copy of the rule. Every spool figure below, and every per-print
+    /// total (#229, see <see cref="PrintMetrics"/>), is built from it, so the web app, the MCP
+    /// tools, analytics and the Spoolman API cannot disagree.</para>
     /// </summary>
-    public static readonly Expression<Func<PrintFilament, double>> UsageRowMg = p =>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowActualMg = p =>
         p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-        : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-        : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-            ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
-        : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-        : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-        : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-            ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+        : p.VolumeMl.HasValue && p.VolumeMl > 0 && p.Filament != null
+            ? p.VolumeMl.Value * p.Filament.MaterialDensityGramPerCubicCm * 1000.0
+        : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament != null && p.Filament.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+            ? 250.0 * Math.PI * p.Filament.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
         : 0.0;
+
+    /// <summary>The estimated side of <see cref="UsageRowMg"/>: the same conversions, on the estimated measures.</summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowEstimatedMg = p =>
+        p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
+        : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 && p.Filament != null
+            ? p.EstimatedVolumeMl.Value * p.Filament.MaterialDensityGramPerCubicCm * 1000.0
+        : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament != null && p.Filament.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+            ? 250.0 * Math.PI * p.Filament.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+        : 0.0;
+
+    /// <summary>The resolved figure: <see cref="UsageRowActualMg"/> where the row has one, <see cref="UsageRowEstimatedMg"/> otherwise.</summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowMg = ExpressionSplice.With<PrintFilament, double, double, double>(
+        (p, actual, estimated) => actual > 0 ? actual : estimated,
+        UsageRowActualMg,
+        UsageRowEstimatedMg);
+
+    /// <summary>True when <see cref="UsageRowMg"/> fell back to the estimate: no usable actual, and an estimate there is.</summary>
+    public static readonly Expression<Func<PrintFilament, bool>> UsageRowIsEstimated = ExpressionSplice.With<PrintFilament, double, double, bool>(
+        (p, actual, estimated) => !(actual > 0) && estimated > 0,
+        UsageRowActualMg,
+        UsageRowEstimatedMg);
 
     /// <summary>Milligrams the spool's prints took off it, by <see cref="UsageRowMg"/>.</summary>
     private static readonly Expression<Func<Filament, double>> PrintUsageMg =

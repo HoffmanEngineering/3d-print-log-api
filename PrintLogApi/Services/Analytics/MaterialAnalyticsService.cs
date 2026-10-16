@@ -156,7 +156,7 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
             .Where(x => x.pf.FilamentId.HasValue
                 && x.pf.Filament != null
                 && x.pf.Filament.CreatedById == userId)
-            .Select(x => new
+            .SelectWith((x, row) => new
             {
                 PrintId = x.p.Id,
                 // Guarded by the Where above; same expression tree as the x.pf.Filament! on the
@@ -173,21 +173,12 @@ public sealed class MaterialAnalyticsService(PrintLogContext context, TimeProvid
                 x.pf.Filament.Effects,
                 x.p.StartDate,
                 x.p.Status,
-                // Usage folded into milligrams, whatever measure the row was recorded in -
-                // the same fallback order FilamentProfile uses, so analytics and the spool
-                // pages resolve a row identically. PrintService normally fills all three
-                // measures in; a row written around it carries only what the user entered.
-                UsedMg = (long)Math.Round(
-                    x.pf.AmountMg.HasValue && x.pf.AmountMg > 0 ? (double)x.pf.AmountMg.Value
-                    : x.pf.VolumeMl.HasValue && x.pf.VolumeMl > 0 ? x.pf.VolumeMl.Value * x.pf.Filament.MaterialDensityGramPerCubicCm * 1000.0
-                    : x.pf.LengthInM.HasValue && x.pf.LengthInM > 0 && x.pf.Filament.DiameterMm.HasValue && x.pf.Filament.DiameterMm > 0
-                        ? 250.0 * Math.PI * x.pf.Filament.MaterialDensityGramPerCubicCm * x.pf.Filament.DiameterMm.Value * x.pf.Filament.DiameterMm.Value * x.pf.LengthInM.Value
-                    : x.pf.EstimatedAmountMg.HasValue && x.pf.EstimatedAmountMg > 0 ? (double)x.pf.EstimatedAmountMg.Value
-                    : x.pf.EstimatedVolumeMl.HasValue && x.pf.EstimatedVolumeMl > 0 ? x.pf.EstimatedVolumeMl.Value * x.pf.Filament.MaterialDensityGramPerCubicCm * 1000.0
-                    : x.pf.EstimatedLengthInM.HasValue && x.pf.EstimatedLengthInM > 0 && x.pf.Filament.DiameterMm.HasValue && x.pf.Filament.DiameterMm > 0
-                        ? 250.0 * Math.PI * x.pf.Filament.MaterialDensityGramPerCubicCm * x.pf.Filament.DiameterMm.Value * x.pf.Filament.DiameterMm.Value * x.pf.EstimatedLengthInM.Value
-                    : 0.0),
-            })
+                // Usage folded into milligrams, whatever measure the row was recorded in, by
+                // FilamentProfile.UsageRowMg itself, so analytics and the spool pages resolve a
+                // row identically. PrintService normally fills all three measures in; a row
+                // written around it carries only what the user entered.
+                UsedMg = (long)Math.Round(row(x.pf)),
+            }, FilamentProfile.UsageRowMg)
             .ToListAsync(ct))
             .Select(r => new UsageRow(
                 r.PrintId,

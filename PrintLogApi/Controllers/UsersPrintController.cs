@@ -26,33 +26,14 @@ public class UsersPrintsController(PrintLogContext context) : ControllerBase
     public async Task<ActionResult<SinglePrintStat>> GetUsersTotalFilamentUsage(long userId, [FromQuery] DateTimeOffset fromDate, [FromQuery] DateTimeOffset toDate)
     {
         var baseQuery = context.Prints
-            .Include(p => p.FilamentUsage)
             .Where(p => p.CreatedById == userId)
             .Where(p => p.StartDate >= fromDate && p.StartDate <= toDate);
 
-        // Calculate Filament Usage from the PrintFilaments.
-        // The actual was guarded > 0 but the estimate was not, so a corrupt NEGATIVE estimate
-        // subtracted from the total. Both sides are guarded now, matching PrintMetrics.
-        var printFilamentUsage = await baseQuery
-            .SelectMany(p => p.FilamentUsage!.Select(pf => (long)(
-                pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                : 0)))
-            .SumAsync();
-
-        // Usage of the legacy "other" filament scalars, under the SAME rule. This was previously
-        // two queries whose fallback diverged from it in two ways: the estimate branch tested
-        // `!HasValue || == 0`, so a NEGATIVE actual matched neither branch and the print silently
-        // contributed nothing; and the estimate itself was unguarded, so a negative estimate
-        // subtracted from the user's total.
-        var otherFilamentUsage = await baseQuery
-            .Select(p => (long)(
-                p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-                : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-                : 0))
-            .SumAsync();
-
-        var totalFilamentUsage = printFilamentUsage + otherFilamentUsage;
+        // The canonical per-print material: every usage row resolved by FilamentProfile.UsageRowMg
+        // (actual, else estimate, in whichever measure the row carries), plus the legacy "other"
+        // filament scalars, each guarded > 0 so a corrupt negative never subtracts. Rows recorded
+        // only as a length or volume counted as nothing here before #229.
+        var totalFilamentUsage = await baseQuery.SumAsync(PrintMetrics.MaterialMgExpr);
 
         return new SinglePrintStat() { Stat = totalFilamentUsage.ToString() };
     }

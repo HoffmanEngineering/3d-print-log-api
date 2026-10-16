@@ -1,5 +1,7 @@
 ﻿using System.Linq.Expressions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi;
 
@@ -46,30 +48,86 @@ public static class PrintMetrics
 
     /// <summary>
     /// EF-translatable material usage in milligrams. TOP-LEVEL USE ONLY, as with
-    /// DurationSecondsExpr. The per-filament rows (each falling back to its own estimate)
-    /// PLUS the scalar Print.FilamentUsageMg, which records "other filament" — material
-    /// used on the print that was never attached to a tracked spool. The two are disjoint,
-    /// so they add; see UsersPrintController's total-filament-usage action, which has
-    /// always summed them this way. Every term obeys the zero-or-negative rule above, so a
-    /// stored 0 or a negative falls back rather than contributing.
+    /// DurationSecondsExpr, or spliced into a group projection with
+    /// <see cref="ExpressionSplice.SelectWith{TSource, TArgument, TResult}"/> as
+    /// <c>g.Sum(material)</c>. The per-filament rows, each resolved by
+    /// <see cref="FilamentProfile.UsageRowMg"/> (actual, else estimate, in whichever measure the
+    /// row carries), PLUS the scalar Print.FilamentUsageMg, which records "other filament" —
+    /// material used on the print that was never attached to a tracked spool. The two are
+    /// disjoint, so they add. Every term obeys the zero-or-negative rule above, so a stored 0 or
+    /// a negative falls back rather than contributing.
+    ///
+    /// <para>The rows are rounded once per print, so every total built from this one (overview,
+    /// printer and activity analytics, achievements, the MCP summary) agrees to the milligram.</para>
     /// </summary>
-    public static Expression<Func<Print, long>> MaterialMgExpr =>
-        p => p.FilamentUsage!.Sum(pf =>
-                pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                : 0)
-            + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-               : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-               : 0);
+    public static Expression<Func<Print, long>> MaterialMgExpr { get; } =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
+            (p, row) => (long)Math.Round(p.FilamentUsage!.Sum(row))
+                + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
+                   : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
+                   : 0),
+            FilamentProfile.UsageRowMg);
+
+    /// <summary>
+    /// <see cref="MaterialMgExpr"/> counting only the rows a user may see: no linked spool, or
+    /// one they own. `no linked spool OR an owned one`, not `linked AND owned`: an unlinked row
+    /// is legitimate untracked material. For the analytics tabs that read the user's printers.
+    /// </summary>
+    public static Expression<Func<Print, long>> OwnedMaterialMgExpr(long userId) =>
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
+            (p, row) => (long)Math.Round(p.FilamentUsage!
+                    .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
+                    .Sum(row))
+                + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
+                   : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
+                   : 0),
+            FilamentProfile.UsageRowMg);
+
+    /// <summary>
+    /// The print's usage rows alone, resolved by <see cref="FilamentProfile.UsageRowMg"/> and
+    /// rounded: no "other filament" scalar. What the print list, get_print and search_prints
+    /// report as a print's material.
+    /// </summary>
+    public static Expression<Func<Print, long>> RowsMgExpr { get; } =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
+            (p, row) => (long)Math.Round(p.FilamentUsage!.Sum(row)),
+            FilamentProfile.UsageRowMg);
+
+    /// <summary>True when ANY usage row fell back to its estimate (<see cref="FilamentProfile.UsageRowIsEstimated"/>).</summary>
+    public static Expression<Func<Print, bool>> RowsAreEstimatedExpr { get; } =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, bool>, bool>(
+            (p, isEstimated) => p.FilamentUsage!.Any(isEstimated),
+            FilamentProfile.UsageRowIsEstimated);
 
     /// <summary>
     /// True when ANY term contributing to MaterialMgExpr fell back to its estimate —
     /// either a per-filament row or the "other filament" scalar. Top-level use only.
     /// </summary>
-    public static Expression<Func<Print, bool>> MaterialIsEstimatedExpr =>
-        p => p.FilamentUsage!.Any(pf =>
-                !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0)
-            || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
-                && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0);
+    public static Expression<Func<Print, bool>> MaterialIsEstimatedExpr { get; } =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, bool>, bool>(
+            (p, isEstimated) => p.FilamentUsage!.Any(isEstimated)
+                || (!(p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0)
+                    && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0),
+            FilamentProfile.UsageRowIsEstimated);
+
+    private static readonly Func<PrintFilament, double> RowMg = FilamentProfile.UsageRowMg.Compile();
+    private static readonly Func<PrintFilament, double> RowActualMg = FilamentProfile.UsageRowActualMg.Compile();
+    private static readonly Func<PrintFilament, double> RowEstimatedMg = FilamentProfile.UsageRowEstimatedMg.Compile();
+
+    /// <summary>
+    /// <see cref="RowsMgExpr"/> over rows already in memory, for a mapping that runs after the
+    /// query (the print list, projects). Each row's <c>Filament</c> must be loaded for its length
+    /// or volume to convert. Rounds midpoints away from zero, as SQL's ROUND does, so the two
+    /// paths agree. A collection that was not loaded counts as no usage.
+    /// </summary>
+    public static long RowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowMg));
+
+    /// <summary>The actual side of <see cref="RowsMg"/>: each row's <see cref="FilamentProfile.UsageRowActualMg"/>.</summary>
+    public static long ActualRowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowActualMg));
+
+    /// <summary>The estimated side of <see cref="RowsMg"/>: each row's <see cref="FilamentProfile.UsageRowEstimatedMg"/>.</summary>
+    public static long EstimatedRowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowEstimatedMg));
+
+    /// <summary>Milligrams rounded the way SQL Server's ROUND rounds them, for in-memory sums.</summary>
+    public static long Round(double? milligrams) => (long)Math.Round(milligrams ?? 0, MidpointRounding.AwayFromZero);
 }

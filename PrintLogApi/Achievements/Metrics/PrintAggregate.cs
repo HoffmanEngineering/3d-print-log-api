@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
+using PrintLogApi.Profiles;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Achievements.Metrics;
@@ -23,8 +25,8 @@ public sealed record PrintRow(
 /// </summary>
 /// <param name="SuccessMaterialMg">
 /// Canonical material (<see cref="PrintMetrics.MaterialMgExpr"/>) over Success and PartialSuccess
-/// prints: per-filament rows, each falling back to its own estimate, plus the scalar "other
-/// filament".
+/// prints: per-filament rows, each resolved by <c>FilamentProfile.UsageRowMg</c>, plus the scalar
+/// "other filament".
 /// </param>
 /// <param name="PluginSlicers">
 /// Distinct normalized slicers recorded on the user's prints, by a slicer plugin or by a connector's
@@ -62,15 +64,15 @@ public sealed record PrintAggregate(
         var usage = await db.PrintFilament
             .AsNoTracking()
             .Where(pf => pf.Print.CreatedById == userId)
-            .Select(pf => new
+            // Each row resolved in SQL by the shared rule, in whichever measure it carries.
+            .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new
             {
                 pf.PrintId,
                 pf.FilamentId,
-                pf.AmountMg,
-                pf.EstimatedAmountMg,
+                Mg = mg,
                 pf.Print.Status,
                 MaterialType = pf.Filament != null ? pf.Filament.MaterialType : null,
-            })
+            }, FilamentProfile.UsageRowMg))
             .ToListAsync(ct);
 
         // Only a print's owner can attach photos, so the creator index finds them without a
@@ -84,7 +86,11 @@ public sealed record PrintAggregate(
         static bool Successful(PrintStatus s) => s is PrintStatus.Success or PrintStatus.PartialSuccess;
         static long Seconds(PrintRow p) => PrintMetrics.Resolve(p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds);
 
-        var rowMaterial = usage.Where(u => Successful(u.Status)).Sum(u => (long)PrintMetrics.Resolve(u.AmountMg, u.EstimatedAmountMg));
+        // Rounded per print, as PrintMetrics.MaterialMgExpr rounds, so this agrees with it.
+        var rowMaterial = usage
+            .Where(u => Successful(u.Status))
+            .GroupBy(u => u.PrintId)
+            .Sum(g => PrintMetrics.Round(g.Sum(u => u.Mg)));
         var otherMaterial = prints.Where(p => Successful(p.Status)).Sum(p => (long)PrintMetrics.Resolve(p.FilamentUsageMg, p.EstimatedFilamentUsageMg));
 
         // Any print with a recorded slicer, whatever logged it: the slicer is set only by a slicer
