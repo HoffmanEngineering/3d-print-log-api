@@ -74,7 +74,9 @@ public sealed class WebhookSubscriptionService(
     public async Task<WebhookSubscriptionCreatedDto> CreateAsync(long userId, SaveWebhookSubscriptionDto dto, CancellationToken ct)
     {
         RequireConfigured();
-        var (url, events, description) = await Validate(dto, ct);
+        var (checkedUrl, events, description) = await Validate(dto, ct);
+        // Validate returns a URL whenever it checked one, which it always does here.
+        var url = checkedUrl ?? throw new InvalidOperationException("The URL was not checked.");
 
         var limit = await IsProAsync(userId, ct) ? SubscriptionLimits.ProMaxWebhooks : SubscriptionLimits.FreeMaxWebhooks;
         if (await context.WebhookSubscriptions.CountAsync(w => w.UserId == userId, ct) >= limit)
@@ -99,6 +101,17 @@ public sealed class WebhookSubscriptionService(
         context.WebhookSubscriptions.Add(row);
         await context.SaveChangesAsync(ct);
 
+        // Counted again now that this row is committed. Two creates that both passed the check
+        // above have both inserted by the time the later one counts, so it sees one too many and
+        // takes its own row back out. If both count after both inserts, both withdraw and the
+        // user retries; the limit is never exceeded either way, and no lock or isolation level is
+        // needed (SQLite under test has neither in the form SQL Server does).
+        if (await context.WebhookSubscriptions.CountAsync(w => w.UserId == userId, ct) > limit)
+        {
+            await context.WebhookSubscriptions.Where(w => w.Id == row.Id).ExecuteDeleteAsync(ct);
+            throw new WebhookLimitException(limit);
+        }
+
         var created = Map(row, new WebhookSubscriptionCreatedDto());
         created.Secret = secret;
         return created;
@@ -112,20 +125,31 @@ public sealed class WebhookSubscriptionService(
         {
             return null;
         }
-        var (url, events, description) = await Validate(dto, ct);
+        // An unchanged URL is not checked against DNS again, so turning a webhook off (or on)
+        // never fails on a lookup. Delivery checks every connection anyway.
+        var urlUnchanged = string.Equals(dto.Url?.Trim(), row.Url, StringComparison.Ordinal);
+        var (url, events, description) = await Validate(dto, ct, checkUrl: !urlUnchanged);
 
-        row.Url = url;
+        row.Url = url ?? row.Url;
         row.Events = events;
         row.Description = description;
         if (dto.Enabled is { } enabled)
         {
-            if (enabled && !row.Enabled)
+            row.Enabled = enabled;
+            if (enabled)
             {
-                // Turning it back on is the user saying the receiver is fixed: start counting afresh.
+                // Turning it on is the user saying the receiver is fixed: start counting afresh.
                 row.ConsecutiveFailures = 0;
                 row.AutoDisabledAt = null;
             }
-            row.Enabled = enabled;
+
+            // Written even when the tracked values look unchanged. An auto-disable can land between
+            // the read above and this save; without forcing the columns, EF would skip them and the
+            // user's "on" would silently lose to it.
+            var entry = context.Entry(row);
+            entry.Property(w => w.Enabled).IsModified = true;
+            entry.Property(w => w.ConsecutiveFailures).IsModified = true;
+            entry.Property(w => w.AutoDisabledAt).IsModified = true;
         }
         row.UpdatedDate = clock.GetUtcNow().UtcDateTime;
         await context.SaveChangesAsync(ct);
@@ -182,7 +206,8 @@ public sealed class WebhookSubscriptionService(
         }
     }
 
-    private async Task<(string Url, WebhookEvents Events, string? Description)> Validate(SaveWebhookSubscriptionDto dto, CancellationToken ct)
+    private async Task<(string? Url, WebhookEvents Events, string? Description)> Validate(
+        SaveWebhookSubscriptionDto dto, CancellationToken ct, bool checkUrl = true)
     {
         if (!WebhookEventTypes.TryParse(dto.Events, out var events))
         {
@@ -194,6 +219,11 @@ public sealed class WebhookSubscriptionService(
         if (description is { Length: > MaxDescriptionLength })
         {
             throw new WebhookValidationException("invalid_webhook", $"The description must be at most {MaxDescriptionLength} characters.");
+        }
+
+        if (!checkUrl)
+        {
+            return (null, events, description);
         }
 
         var check = await guard.ValidateAsync(dto.Url, ct);
