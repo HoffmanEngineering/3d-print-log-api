@@ -769,6 +769,17 @@ differently from v2, and that alone broke two tests that had been asserting on s
 sibling deletes (`DeleteAllNotifications_*`) or pages past (the summary endpoints default to
 `PageSize = 10`). Both were latent; nothing about v3 made them wrong. Arrange what you assert on.
 
+### Gotcha: inotify limits in containers
+
+In a container with a low inotify limit (Claude Code cloud sessions allow 128 instances), a full
+`dotnet test` fails about 800 tests with `IOException: The configured user limit (128) on the
+number of inotify instances has been reached`. Each test host's JSON configuration source starts
+its own file watcher. It is the environment, not the code. Run the suite with polling watchers:
+
+```bash
+DOTNET_USE_POLLING_FILE_WATCHER=true dotnet test --verbosity quiet
+```
+
 ### Gotcha: testing JWT-protected endpoints against a local signing key
 
 When validating a real `JwtBearer`/`McpBearer` scheme against a locally-issued token (e.g. the
