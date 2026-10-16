@@ -51,6 +51,8 @@
     <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
     <!-- Notifier and OctoPrint webhook bodies in the shape real traffic has (PrintEventPipelineTests). -->
     <None Include="..\tests-fixtures\print-events\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\print-events" />
+    <!-- Raw tag dumps (signature region zeroed) for the spool tag decoders. -->
+    <None Include="..\tests-fixtures\spool-tags\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\spool-tags" />
     <!-- Settings blocks cut from the slicer parser library's fixtures, and the uploader's own
          dry-run note for each (PrintsControllerSlicerSettingsTests). -->
     <None Include="..\tests-fixtures\slicer-settings\*.txt" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\slicer-settings" />
