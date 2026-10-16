@@ -48,7 +48,9 @@ public class SyncController(
         }
 
         var version = SyncValidators.Version(userId.Value, cacheVersionService.GetUserCacheVersion(userId.Value));
-        if (NotModified(new EntityTagHeaderValue($"\"{version}\"", isWeak: true)))
+        var etag = WeakTag(version);
+        StampValidators(etag);
+        if (SyncValidators.IfNoneMatchMatches(Request.GetTypedHeaders(), etag))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
@@ -68,7 +70,7 @@ public class SyncController(
     /// Fetch this when `GET /api/sync/version` changes, and conditionally every few minutes so
     /// connection health (stale after 15 minutes without a heartbeat) stays current.
     /// </remarks>
-    /// <param name="timeZone">IANA (or Windows) time zone the month totals are counted in. Defaults to UTC.</param>
+    /// <param name="timeZone">IANA (or Windows) time zone the month totals are counted in. Defaults to the time zone saved in the user's settings, else UTC. Aliases are read back under one canonical id.</param>
     /// <response code="200">Returned with the snapshot.</response>
     /// <response code="304">Returned when `If-None-Match` matches the current snapshot.</response>
     /// <response code="400">Returned if `timeZone` is not a recognized time zone.</response>
@@ -86,19 +88,23 @@ public class SyncController(
             return Unauthorized();
         }
 
-        var zoneId = string.IsNullOrWhiteSpace(timeZone) ? "UTC" : timeZone.Trim();
-        if (!TimeZoneResolver.TryResolve(zoneId, out var zone))
+        SyncZone? zone = null;
+        if (!string.IsNullOrWhiteSpace(timeZone) && !SyncZone.TryResolve(timeZone, out zone))
         {
             return Problem(
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Unknown time zone",
-                detail: $"timeZone '{zoneId}' is not a recognized time zone identifier.");
+                detail: $"timeZone '{timeZone.Trim()}' is not a recognized time zone identifier.");
         }
 
         // The clock is read once, here, and threaded down (AGENTS.md, "The clock").
         var now = clock.GetUtcNow();
-        var result = await snapshotService.GetAsync(userId.Value, SyncMonth.Containing(now, zone, zoneId), now, HttpContext.RequestAborted);
-        if (NotModified(new EntityTagHeaderValue($"\"{result.ETag}\"", isWeak: true)))
+        var result = await snapshotService.GetAsync(
+            userId.Value, zone, now,
+            etag => SyncValidators.IfNoneMatchMatches(Request.GetTypedHeaders(), WeakTag(etag)),
+            HttpContext.RequestAborted);
+        StampValidators(WeakTag(result.ETag));
+        if (result.Snapshot is null)
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
@@ -107,19 +113,16 @@ public class SyncController(
     }
 
     /// <summary>
-    /// Stamps the validator headers and reports whether the request's <c>If-None-Match</c>
-    /// already holds this tag.
-    /// </summary>
-    /// <remarks>
     /// Tags are weak (<c>W/</c>): response compression serves the same body as identity, gzip
     /// and brotli under one tag, and a strong tag promises byte-identical representations.
     /// <c>If-None-Match</c> uses weak comparison anyway, so 304s are unaffected.
-    /// </remarks>
-    private bool NotModified(EntityTagHeaderValue etag)
+    /// </summary>
+    private static EntityTagHeaderValue WeakTag(string opaque) => new($"\"{opaque}\"", isWeak: true);
+
+    private void StampValidators(EntityTagHeaderValue etag)
     {
         var headers = Response.GetTypedHeaders();
         headers.ETag = etag;
         headers.CacheControl = new CacheControlHeaderValue { Private = true, NoCache = true };
-        return SyncValidators.IfNoneMatchMatches(Request.GetTypedHeaders(), etag);
     }
 }

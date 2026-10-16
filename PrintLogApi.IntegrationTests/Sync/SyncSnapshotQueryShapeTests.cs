@@ -104,8 +104,9 @@ public class SyncSnapshotQueryShapeTests(SyncTestFactory factory) : IClassFixtur
         using (scope)
         await using (db)
         {
-            var month = SyncMonth.Containing(SyncTestFactory.Start, TimeZoneInfo.Utc, "UTC");
-            var snapshot = await SyncSnapshotService.LoadAsync(db, userId, "v", month, Ct);
+            var month = SyncMonth.Containing(SyncTestFactory.Start, SyncZone.Utc);
+            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, Ct);
+            await SyncSnapshotService.LoadTotalsAsync(db, userId, month, Ct);
             Assert.NotEmpty(snapshot.Printers);
             Assert.All(snapshot.Printers, p => Assert.NotNull(p.CurrentPrint));
             Assert.All(snapshot.Printers, p => Assert.NotNull(p.LastFinishedPrint));
@@ -120,6 +121,7 @@ public class SyncSnapshotQueryShapeTests(SyncTestFactory factory) : IClassFixtur
         var one = await MissStatementsAsync(await UserWithAsync(1));
         var four = await MissStatementsAsync(await UserWithAsync(4));
 
+        // Core: printers (with both prints), loaded slots, spools. Totals: count and grams.
         Assert.Equal(5, one);
         Assert.Equal(one, four);
     }

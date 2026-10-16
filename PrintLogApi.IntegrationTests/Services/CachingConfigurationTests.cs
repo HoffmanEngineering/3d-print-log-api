@@ -260,7 +260,7 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
         // test would pass by examining nothing at all.
         Assert.Equal(6, analyticsResponses.Count);
 
-        var cachedTypes = analyticsResponses.Append(typeof(PagedList<>)).Append(typeof(PrintLogApi.Models.DTOs.Sync.SyncSnapshot));
+        var cachedTypes = analyticsResponses.Append(typeof(PagedList<>)).Append(typeof(PrintLogApi.Services.Sync.SyncSnapshotService.CoreEntry));
 
         var unmarked = cachedTypes
             .Where(t => t.GetCustomAttribute<ImmutableObjectAttribute>() is not { Immutable: true })

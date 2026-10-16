@@ -1,22 +1,17 @@
-﻿using System.ComponentModel;
-
-namespace PrintLogApi.Models.DTOs.Sync;
+﻿namespace PrintLogApi.Models.DTOs.Sync;
 
 /// <summary>
 /// Everything a home-automation client renders, in one response (#234). Built server-side only,
 /// so the positional parameters are the contract, and the parameter docs below are the field
-/// rules. AGENTS.md ("Integration polling") has the caching reasoning.
-///
-/// <para><see cref="ImmutableObjectAttribute"/> tells HybridCache it may share the cached instance
-/// (the snapshot minus its connection overlay). Treat anything read out of the cache as read-only;
-/// the overlay is applied to copies with <c>with</c>.</para>
+/// rules. AGENTS.md ("Integration polling") has the caching reasoning. Assembled per request from
+/// cached parts; the printers and spools lists may be shared with the cache, so treat them as
+/// read-only.
 /// </summary>
 /// <param name="SchemaVersion">The shape's version. Additive fields do not change it.</param>
 /// <param name="Version">The same opaque value <c>GET /api/sync/version</c> returns.</param>
 /// <param name="Printers">Every printer the user owns, active and inactive, by name then id.</param>
 /// <param name="Spools">Every material the user owns, all categories, active and archived, by spool number then id.</param>
 /// <param name="Account">Small account totals for the current month.</param>
-[ImmutableObject(true)]
 public sealed record SyncSnapshot(
     int SchemaVersion,
     string Version,
@@ -30,7 +25,12 @@ public sealed record SyncSnapshot(
 
 /// <summary>One printer: one Home Assistant device, keyed on <see cref="Id"/>.</summary>
 /// <param name="Connection">The printer's freshest connector, or null when none is bound to it.</param>
-/// <param name="CurrentPrint">The newest print in the Printing state, or null.</param>
+/// <param name="CurrentPrint">
+/// The newest print in the Printing state, or null. A print stays Printing until its finish
+/// arrives, and one that never does (a Moonraker notifier print whose printer lost power, say)
+/// stays here indefinitely. De-emphasize it when <see cref="Connection"/> is <c>stale</c>, and
+/// treat one long past its estimated end with suspicion.
+/// </param>
 /// <param name="LastFinishedPrint">The newest finished print, or null.</param>
 /// <param name="Loaded">What is in each slot now, in slot order; unslotted spools last.</param>
 public sealed record SyncPrinter(

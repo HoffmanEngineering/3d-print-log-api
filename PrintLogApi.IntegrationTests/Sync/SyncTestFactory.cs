@@ -1,4 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+﻿using System.Collections.Concurrent;
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using PrintLogApi.IntegrationTests.Analytics;
 using PrintLogApi.Models;
 using Xunit;
@@ -16,6 +20,9 @@ public sealed class SyncTestFactory : CustomWebApplicationFactory
 
     public SettableTimeProvider Clock { get; } = new(Start);
 
+    /// <summary>Every statement the app's own context runs, for asserting what a request did not query.</summary>
+    public CommandRecorder Commands { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -23,6 +30,7 @@ public sealed class SyncTestFactory : CustomWebApplicationFactory
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            services.ConfigureDbContext<PrintLogContext>(options => options.AddInterceptors(Commands));
         });
     }
 
@@ -57,4 +65,29 @@ public sealed class SyncTestFactory : CustomWebApplicationFactory
     /// <summary>Bumps the user's cache version, as every write does.</summary>
     public void Invalidate(User user) =>
         Services.GetRequiredService<PrintLogApi.Services.ICacheVersionService>().InvalidateUserCache(user.Id);
+}
+
+/// <summary>Records each statement's text. Start a window with <see cref="Clear"/>.</summary>
+public sealed class CommandRecorder : DbCommandInterceptor
+{
+    private readonly ConcurrentQueue<string> _commands = new();
+
+    public IReadOnlyList<string> Recorded => _commands.ToArray();
+
+    public void Clear() => _commands.Clear();
+
+    public override InterceptionResult<DbDataReader> ReaderExecuting(
+        DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+    {
+        _commands.Enqueue(command.CommandText);
+        return result;
+    }
+
+    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+        CancellationToken cancellationToken = default)
+    {
+        _commands.Enqueue(command.CommandText);
+        return ValueTask.FromResult(result);
+    }
 }

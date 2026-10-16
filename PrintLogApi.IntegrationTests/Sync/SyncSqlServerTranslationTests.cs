@@ -181,7 +181,8 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var snapshot = await SyncSnapshotService.LoadAsync(db, userId, "v", SyncMonth.Containing(now, TimeZoneInfo.Utc, "UTC"), Ct);
+            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, Ct);
+            var totals = await SyncSnapshotService.LoadTotalsAsync(db, userId, SyncMonth.Containing(now, SyncZone.Utc), Ct);
             var connections = await SyncSnapshotService.LoadConnectionsAsync(db, userId, now, Ct);
 
             var printer = Assert.Single(snapshot.Printers);
@@ -192,8 +193,8 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
             // Two prints of 10 m of 1.75 mm PLA at 1.24 g/cm³: about 59.7 g.
             Assert.InRange(spool.UsedGrams, 59, 61);
             Assert.InRange(spool.RemainingGrams!.Value, 939, 941);
-            Assert.Equal(2, snapshot.Account.PrintCount);
-            Assert.InRange(snapshot.Account.Grams, 59, 61);
+            Assert.Equal(2, totals.PrintCount);
+            Assert.InRange(totals.Grams, 59, 61);
             Assert.Equal("online", connections[printerId].Status);
         }
     }

@@ -39,4 +39,15 @@ public static class CacheBudget
     /// megabyte, and were consequently never a compaction candidate.
     /// </summary>
     public const long SmallEntryBytes = 128;
+
+    /// <summary>
+    /// What one sync snapshot core (#234) costs, measured rather than guessed: a heavy but
+    /// realistic account of 300 spools (two colors and a storage location each) and six
+    /// four-slot printers serializes to about 109 KB
+    /// (<c>SyncSnapshotCachingTests.RealisticCore_StaysWellInsideTheBudget</c>). The budget holds
+    /// roughly 75 of those at once, so the core is keyed per user and version only: the month
+    /// totals, which vary by time zone, live in their own entry of about 100 bytes rather than
+    /// multiplying the core per zone.
+    /// </summary>
+    public const long SyncSnapshotCoreBytes = 109_000;
 }

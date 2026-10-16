@@ -1,6 +1,10 @@
-﻿using System.Globalization;
+﻿using System.ComponentModel;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Achievements.Metrics;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
 using PrintLogApi.Extensions;
@@ -11,36 +15,53 @@ using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Services.Sync;
 
-/// <summary>The calendar month the account totals cover, in the caller's zone.</summary>
+/// <summary>The calendar month the account totals cover, in a canonical zone.</summary>
 public sealed record SyncMonth(string Key, string ZoneId, DateTimeOffset From, DateTimeOffset To)
 {
-    /// <summary>The month containing <paramref name="now"/> in <paramref name="zone"/>; <paramref name="zoneId"/> is echoed as given.</summary>
-    public static SyncMonth Containing(DateTimeOffset now, TimeZoneInfo zone, string zoneId)
+    /// <summary>The month containing <paramref name="now"/> in <paramref name="zone"/>.</summary>
+    public static SyncMonth Containing(DateTimeOffset now, SyncZone zone)
     {
-        var local = EmailTimeZones.LocalDate(now, zone);
+        var local = EmailTimeZones.LocalDate(now, zone.Zone);
         var first = new DateOnly(local.Year, local.Month, 1);
         return new SyncMonth(
             first.ToString("yyyy-MM", CultureInfo.InvariantCulture),
-            zoneId,
-            EmailTimeZones.AtLocal(first, 0, zone).ToUniversalTime(),
-            EmailTimeZones.AtLocal(first.AddMonths(1), 0, zone).ToUniversalTime());
+            zone.Id,
+            EmailTimeZones.AtLocal(first, 0, zone.Zone).ToUniversalTime(),
+            EmailTimeZones.AtLocal(first.AddMonths(1), 0, zone.Zone).ToUniversalTime());
     }
 }
 
-/// <summary>A snapshot and the entity tag that names its content.</summary>
-public sealed record SyncSnapshotResult(SyncSnapshot Snapshot, string ETag);
+/// <summary>
+/// The outcome of a snapshot request: the entity tag, and the snapshot unless the caller's
+/// <c>If-None-Match</c> already holds that tag (then <see cref="Snapshot"/> is null).
+/// </summary>
+public sealed record SyncSnapshotResult(SyncSnapshot? Snapshot, string ETag);
 
 public interface ISyncSnapshotService
 {
-    /// <summary>The user's snapshot as of <paramref name="now"/>, for the month <paramref name="month"/>.</summary>
-    Task<SyncSnapshotResult> GetAsync(long userId, SyncMonth month, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// The user's snapshot as of <paramref name="now"/>. <paramref name="zone"/> null means the
+    /// user's saved time zone setting, else UTC. <paramref name="notModified"/> is asked whether
+    /// the caller already holds a tag; when it says yes, the result carries no snapshot and the
+    /// cached core is not touched if it can be avoided.
+    /// </summary>
+    Task<SyncSnapshotResult> GetAsync(long userId, SyncZone? zone, DateTimeOffset now, Func<string, bool> notModified, CancellationToken ct);
 }
 
 /// <summary>
-/// Builds the integration snapshot (#234). Everything but connection health is computed on a miss
-/// and cached in HybridCache on the user's version GUID, zone and month; connection health is read
-/// live on every request, because heartbeats do not bump the version and going stale is the
-/// absence of an event. See AGENTS.md, "Integration polling".
+/// Builds the integration snapshot (#234). See AGENTS.md, "Integration polling". Four cache
+/// entries, all keyed on the user's version GUID so any write replaces them:
+/// <list type="bullet">
+/// <item><b>core</b> (<see cref="CoreKey"/>, 15 min): printers and spools, with a hash of their
+/// serialized form. The expensive part: three statements.</item>
+/// <item><b>core hash</b> (<see cref="HashKey"/>, 1 h): just that hash, so a conditional request
+/// can answer 304 without the core, even after the core expired. Written by the core factory, so
+/// it can outlive the core but never describe a different one.</item>
+/// <item><b>totals</b> (zone and month in the key, 1 h): two small statements.</item>
+/// <item><b>saved zone</b> (1 h): the user's time zone setting; settings writes bump the version.</item>
+/// </list>
+/// Connection health is read live on every request (one statement), because heartbeats do not
+/// bump the version and going stale is the absence of an event.
 /// </summary>
 public sealed class SyncSnapshotService(
     PrintLogContext context,
@@ -48,40 +69,132 @@ public sealed class SyncSnapshotService(
     CachedComputation computation,
     ICacheVersionService cacheVersion) : ISyncSnapshotService
 {
-    private static readonly HybridCacheEntryOptions CacheOptions = new()
+    private static readonly HybridCacheEntryOptions CoreOptions = new()
     {
         Expiration = TimeSpan.FromMinutes(15),
         LocalCacheExpiration = TimeSpan.FromMinutes(15),
     };
 
-    public async Task<SyncSnapshotResult> GetAsync(long userId, SyncMonth month, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// The small entries. An hour bounds how long a change that missed its version bump can hide
+    /// behind a 304: once the hash entry expires, the next request rebuilds the core and hashes
+    /// the new content.
+    /// </summary>
+    private static readonly HybridCacheEntryOptions SmallOptions = new()
+    {
+        Expiration = TimeSpan.FromHours(1),
+        LocalCacheExpiration = TimeSpan.FromHours(1),
+    };
+
+    /// <summary>Reads an entry without creating one (the ClaimsTransformer idiom).</summary>
+    private static readonly HybridCacheEntryOptions PeekOptions = new()
+    {
+        Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite,
+    };
+
+    internal static string CoreKey(long userId, string guid) => $"sync_core:{userId}:{guid}";
+
+    internal static string HashKey(long userId, string guid) => $"sync_core_hash:{userId}:{guid}";
+
+    private static string TotalsKey(long userId, string guid, SyncMonth month) => $"sync_totals:{userId}:{guid}:{month.ZoneId}:{month.Key}";
+
+    private static string ZoneKey(long userId, string guid) => $"sync_zone:{userId}:{guid}";
+
+    public async Task<SyncSnapshotResult> GetAsync(long userId, SyncZone? zone, DateTimeOffset now, Func<string, bool> notModified, CancellationToken ct)
     {
         var guid = cacheVersion.GetUserCacheVersion(userId);
         var version = SyncValidators.Version(userId, guid);
 
-        // The month is in the key so the totals roll over at local midnight on the 1st without a
-        // write. CachedComputation's scope and HybridCache's token: see CachedComputation.
-        var core = await cache.GetOrCreateAsync(
-            $"sync_snapshot:{userId}:{guid}:{month.ZoneId}:{month.Key}",
-            (computation, userId, version, month),
+        zone ??= await SavedZoneAsync(userId, guid, ct);
+        var month = SyncMonth.Containing(now, zone);
+
+        // CachedComputation's scope and HybridCache's token for every factory: see CachedComputation.
+        var totals = await cache.GetOrCreateAsync(
+            TotalsKey(userId, guid, month),
+            (computation, userId, month),
             static (state, token) => state.computation.RunAsync(
-                (services, innerToken) => LoadAsync(services.GetRequiredService<PrintLogContext>(), state.userId, state.version, state.month, innerToken),
+                (services, innerToken) => LoadTotalsAsync(services.GetRequiredService<PrintLogContext>(), state.userId, state.month, innerToken),
                 token),
-            CacheOptions,
+            SmallOptions,
             cancellationToken: ct);
 
         var connections = await LoadConnectionsAsync(context, userId, now, ct);
 
-        // The cached instance is shared; the overlay goes onto copies.
+        // The 304 path: the core's hash alone is enough to name the response.
+        var knownHash = await cache.GetOrCreateAsync<string?>(
+            HashKey(userId, guid), static _ => ValueTask.FromResult<string?>(null), PeekOptions, cancellationToken: ct);
+        if (knownHash is not null)
+        {
+            var known = ETag(version, knownHash, totals, connections);
+            if (notModified(known))
+            {
+                return new SyncSnapshotResult(null, known);
+            }
+        }
+
+        var core = await cache.GetOrCreateAsync(
+            CoreKey(userId, guid),
+            (computation, cache, userId, guid),
+            static (state, token) => state.computation.RunAsync(
+                async (services, innerToken) =>
+                {
+                    var entry = await LoadCoreAsync(services.GetRequiredService<PrintLogContext>(), state.userId, innerToken);
+                    await state.cache.SetAsync(HashKey(state.userId, state.guid), entry.Hash, SmallOptions, cancellationToken: innerToken);
+                    return entry;
+                },
+                token),
+            CoreOptions,
+            cancellationToken: ct);
+
+        var etag = ETag(version, core.Hash, totals, connections);
+        if (notModified(etag))
+        {
+            return new SyncSnapshotResult(null, etag);
+        }
+
+        // The cached core is shared; the overlay goes onto copies.
         var printers = core.Printers
             .Select(p => connections.TryGetValue(p.Id, out var c) ? p with { Connection = c } : p)
             .ToList();
-        var snapshot = core with { Printers = printers };
+        return new SyncSnapshotResult(
+            new SyncSnapshot(SyncSnapshot.CurrentSchemaVersion, version, printers, core.Spools, totals),
+            etag);
+    }
 
-        var etag = SyncValidators.Hash(string.Join('|',
-            new[] { version, month.ZoneId, month.Key }
-                .Concat(printers.Select(p => $"{p.Id}:{p.Connection?.Kind}:{p.Connection?.Status}"))));
-        return new SyncSnapshotResult(snapshot, etag);
+    /// <summary>
+    /// Names the response from what it is built of: the version (it is in the body), the core's
+    /// content hash, the totals and the connection overlay. Content rather than version alone, so
+    /// a change that missed its version bump gets a new tag once the cached hash expires.
+    /// </summary>
+    private static string ETag(string version, string coreHash, SyncAccountTotals totals, Dictionary<long, SyncConnection> connections) =>
+        SyncValidators.Hash(string.Join('|',
+            new[]
+            {
+                version, coreHash, totals.TimeZone, totals.Month,
+                totals.PrintCount.ToString(CultureInfo.InvariantCulture), totals.Grams.ToString("R", CultureInfo.InvariantCulture),
+            }
+            .Concat(connections.OrderBy(c => c.Key).Select(c => $"{c.Key}:{c.Value.Kind}:{c.Value.Status}"))));
+
+    /// <summary>The user's saved time zone setting (the one the monthly recap email uses), canonical, else UTC.</summary>
+    private async Task<SyncZone> SavedZoneAsync(long userId, string guid, CancellationToken ct)
+    {
+        var id = await cache.GetOrCreateAsync(
+            ZoneKey(userId, guid),
+            (computation, userId),
+            static (state, token) => state.computation.RunAsync(
+                async (services, innerToken) =>
+                {
+                    var saved = await services.GetRequiredService<PrintLogContext>().UserSettings
+                        .AsNoTracking()
+                        .Where(s => s.UserId == state.userId && s.UserSettingTypeId == EvaluationContext.TimeZoneSettingTypeId)
+                        .Select(s => s.Value)
+                        .FirstOrDefaultAsync(innerToken);
+                    return SyncZone.TryResolve(saved, out var resolved) ? resolved.Id : SyncZone.Utc.Id;
+                },
+                token),
+            SmallOptions,
+            cancellationToken: ct);
+        return SyncZone.TryResolve(id, out var zone) ? zone : SyncZone.Utc;
     }
 
     /// <summary>
@@ -106,11 +219,26 @@ public sealed class SyncSnapshotService(
             });
     }
 
+    /// <summary>Prints started in <paramref name="month"/> and the grams their usage rows took: two statements.</summary>
+    internal static async Task<SyncAccountTotals> LoadTotalsAsync(PrintLogContext db, long userId, SyncMonth month, CancellationToken ct)
+    {
+        var printCount = await db.Prints
+            .AsNoTracking()
+            .CountAsync(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To, ct);
+        var monthMg = await db.PrintFilament
+            .AsNoTracking()
+            .Where(pf => pf.Print.CreatedById == userId && pf.Print.StartDate >= month.From && pf.Print.StartDate < month.To)
+            .Select(FilamentProfile.UsageRowMg)
+            .SumAsync(ct);
+        return new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg));
+    }
+
     /// <summary>
-    /// The cache-miss path: five statements, however many printers and spools the user has
-    /// (<c>SyncSnapshotQueryShapeTests</c>). The connection overlay is not part of it.
+    /// The expensive part of a miss: printers, loaded slots and spools, three statements however
+    /// many printers and spools the user has (<c>SyncSnapshotQueryShapeTests</c>), plus a hash of
+    /// the result so the response can be named by its content.
     /// </summary>
-    internal static async Task<SyncSnapshot> LoadAsync(PrintLogContext db, long userId, string version, SyncMonth month, CancellationToken ct)
+    internal static async Task<CoreEntry> LoadCoreAsync(PrintLogContext db, long userId, CancellationToken ct)
     {
         var printers = await PrintersQuery(db, userId).ToListAsync(ct);
 
@@ -127,15 +255,6 @@ public sealed class SyncSnapshotService(
             .ThenBy(s => s.Id)
             .ToList();
         var spoolsById = spools.ToDictionary(s => s.Id);
-
-        var printCount = await db.Prints
-            .AsNoTracking()
-            .CountAsync(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To, ct);
-        var monthMg = await db.PrintFilament
-            .AsNoTracking()
-            .Where(pf => pf.Print.CreatedById == userId && pf.Print.StartDate >= month.From && pf.Print.StartDate < month.To)
-            .Select(FilamentProfile.UsageRowMg)
-            .SumAsync(ct);
 
         var loadedByPrinter = loaded
             .Where(l => spoolsById.ContainsKey(l.FilamentId))
@@ -169,13 +288,17 @@ public sealed class SyncSnapshotService(
                 Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : []))
             .ToList();
 
-        return new SyncSnapshot(
-            SyncSnapshot.CurrentSchemaVersion,
-            version,
-            syncPrinters,
-            spools,
-            new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg)));
+        // The body is a pure function of these two lists (ordered above), so their bytes name it.
+        var hash = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { syncPrinters, spools })))[..32];
+        return new CoreEntry(syncPrinters, spools, hash);
     }
+
+    /// <summary>
+    /// The cached core. <see cref="ImmutableObjectAttribute"/> lets HybridCache share the stored
+    /// instance instead of deserializing a copy per hit; treat it as read-only.
+    /// </summary>
+    [ImmutableObject(true)]
+    internal sealed record CoreEntry(IReadOnlyList<SyncPrinter> Printers, IReadOnlyList<SyncSpool> Spools, string Hash);
 
     /// <summary>
     /// The user's printers with their newest Printing print and newest finished print, as two
