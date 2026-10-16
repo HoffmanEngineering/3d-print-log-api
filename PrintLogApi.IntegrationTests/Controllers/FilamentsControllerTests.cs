@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -1179,6 +1180,15 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         var original = Assert.Single(before.FilamentAdjustments!);
         Assert.True(original.CreatedDate.Year > 2000, $"Precondition: CreatedDate was {original.CreatedDate:O}");
 
+        // Backdate UpdatedDate so the restamp is visible however quickly the PUT follows.
+        var backdated = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.FilamentAdjustments.Where(a => a.Id == original.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.UpdatedDate, backdated), TestContext.Current.CancellationToken);
+        }
+
         // Re-send it as the web app does: id and values, no dates. Edit its notes so the row
         // really is modified, and add a second adjustment alongside it.
         var updateDto = ToUpdateDto(before);
@@ -1216,15 +1226,12 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
             var resent = Assert.Single(body.FilamentAdjustments!, a => a.Id == original.Id);
             Assert.Equal(original.CreatedDate, resent.CreatedDate);
             Assert.Equal("Edited notes", resent.Notes);
-            Assert.True(resent.UpdatedDate >= original.UpdatedDate, $"UpdatedDate went back: {resent.UpdatedDate:O}");
+            Assert.True(resent.UpdatedDate >= original.CreatedDate, $"UpdatedDate was not restamped: {resent.UpdatedDate:O}");
 
             var added = Assert.Single(body.FilamentAdjustments!, a => a.Id != original.Id);
             Assert.True(added.CreatedDate >= original.CreatedDate, $"New adjustment's CreatedDate was {added.CreatedDate:O}");
             Assert.True(added.UpdatedDate >= added.CreatedDate, $"New adjustment's UpdatedDate was {added.UpdatedDate:O}");
         }
-
-        var stored = Assert.Single(after.FilamentAdjustments!, a => a.Id == original.Id);
-        Assert.True(stored.UpdatedDate > original.UpdatedDate, $"UpdatedDate was not restamped: {stored.UpdatedDate:O}");
     }
 
     private async Task<FilamentDetailDto> CreateFilamentForAdjustmentsAsync(string displayName)

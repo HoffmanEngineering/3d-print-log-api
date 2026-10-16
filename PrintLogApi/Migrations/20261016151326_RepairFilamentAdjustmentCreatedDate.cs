@@ -21,8 +21,8 @@ namespace PrintLogApi.Migrations
             migrationBuilder.Sql(@"
 UPDATE FilamentAdjustments
 SET CreatedDate = UpdatedDate
-WHERE CreatedDate < '2000-01-01'
-  AND UpdatedDate >= '2000-01-01';");
+WHERE CreatedDate < '20000101'
+  AND UpdatedDate >= '20000101';");
         }
 
         /// <inheritdoc />

@@ -15,7 +15,16 @@ public class TimestampStampingTests(CustomWebApplicationFactory factory) : IClas
     [Fact]
     public async Task Update_OfALoadedEntity_KeepsCreatedDate_AndRestampsUpdatedDate()
     {
-        var (id, created, updated) = await InsertPrintAsync("Loaded timestamp print");
+        var (id, created, _) = await InsertPrintAsync("Loaded timestamp print");
+
+        // Backdate UpdatedDate so the restamp is visible however quickly the update follows.
+        var backdated = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.Prints.Where(p => p.Id == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.UpdatedDate, backdated), TestContext.Current.CancellationToken);
+        }
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -31,7 +40,7 @@ public class TimestampStampingTests(CustomWebApplicationFactory factory) : IClas
         var stored = await ReadPrintAsync(id);
         Assert.Equal("Edited", stored.Title);
         Assert.Equal(created, stored.CreatedDate);
-        Assert.True(stored.UpdatedDate > updated, $"UpdatedDate was not restamped: {stored.UpdatedDate:O}");
+        Assert.True(stored.UpdatedDate >= created, $"UpdatedDate was not restamped: {stored.UpdatedDate:O}");
     }
 
     [Fact]

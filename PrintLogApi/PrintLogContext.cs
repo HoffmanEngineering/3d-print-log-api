@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PrintLogApi.Models;
 
@@ -952,7 +951,7 @@ public class PrintLogContext : DbContext
             .ToList();
 
         // Rows being replaced by another instance with the same key, by entity type and key.
-        Dictionary<(Type, string), DateTime>? replacedCreatedDates = null;
+        Dictionary<EntityRowKey, DateTime>? replacedCreatedDates = null;
 
         foreach (var entityEntry in entries)
         {
@@ -979,12 +978,12 @@ public class PrintLogContext : DbContext
                 // the stored date, and EF writes the column whether or not it is marked
                 // modified. So the stored date goes into both the original and the current
                 // value: clearing IsModified alone would revert to the client's 0001-01-01.
-                replacedCreatedDates ??= entries
+                replacedCreatedDates ??= EntityRowKey.IndexFirst(entries
                     .Where(e => e.State == EntityState.Deleted)
-                    .ToDictionary(KeyOf, e => (DateTime)e.Property(nameof(TimestampEntity.CreatedDate)).OriginalValue!);
+                    .Select(e => (EntityRowKey.Of(e), (DateTime)e.Property(nameof(TimestampEntity.CreatedDate)).OriginalValue!)));
 
                 var createdDate = entityEntry.Property(nameof(TimestampEntity.CreatedDate));
-                if (replacedCreatedDates.TryGetValue(KeyOf(entityEntry), out var stored))
+                if (replacedCreatedDates.TryGetValue(EntityRowKey.Of(entityEntry), out var stored))
                 {
                     createdDate.OriginalValue = stored;
                 }
@@ -994,10 +993,6 @@ public class PrintLogContext : DbContext
                 createdDate.IsModified = false;
             }
         }
-
-        static (Type, string) KeyOf(EntityEntry entry) => (
-            entry.Metadata.ClrType,
-            string.Join('|', entry.Metadata.FindPrimaryKey()!.Properties.Select(p => entry.Property(p.Name).CurrentValue)));
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
