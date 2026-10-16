@@ -284,6 +284,38 @@ public class WebhookDispatchTests : IClassFixture<WebhookTestFactory>
     }
 
     [Fact]
+    public async Task AConnectorReplay_FromPrintingToFinished_SendsFinishedAndNotifies_ExactlyOnce()
+    {
+        var a = await ArrangeAsync(events: ["print.finished"]);
+        var externalId = Guid.NewGuid().ToString("N");
+
+        foreach (var status in new[] { PrintStatus.Printing, PrintStatus.Success, PrintStatus.Success })
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints")
+            {
+                Content = JsonContent.Create(new AddPrintDTO
+                {
+                    Title = "Bridge finish",
+                    PrinterId = a.PrinterId,
+                    Status = status,
+                    ExternalSource = "moonraker",
+                    ExternalId = externalId,
+                    FilamentUsage = [],
+                }),
+            };
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, a.User.OAuthUserId);
+            Assert.True((await _client.SendAsync(request, Ct)).IsSuccessStatusCode);
+        }
+        await _factory.DeliverPendingAsync(Ct);
+
+        var body = Body(Assert.Single(_factory.Receiver.Received(a.Host)));
+        Assert.Equal("print.finished", body.GetProperty("event").GetString());
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        Assert.Equal(1, await db.Notifications.CountAsync(n => n.UserId == a.User.Id && n.Type == NotificationType.PrintCompleted, Ct));
+    }
+
+    [Fact]
     public async Task AConnectorReplay_FromPendingToPrinting_SendsStarted()
     {
         var a = await ArrangeAsync(events: ["print.started"]);

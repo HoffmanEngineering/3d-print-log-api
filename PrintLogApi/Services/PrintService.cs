@@ -762,10 +762,29 @@ public sealed class PrintService(
         if (await ApplyConnectorOwnedFields(existing, print, userId))
         {
             existing.UpdatedById = userId;
-            await context.SaveChangesAsync();
-            cacheVersionService.InvalidateUserCache(userId);
-            // A connector that created the print Pending and now reports it running (#235).
-            printStartNotifier.NotifyIfJustStarted(existing, previousStatus);
+            if (!CompletePrintDto.IsFinished(previousStatus) && CompletePrintDto.IsFinished(existing.Status))
+            {
+                // A replay that finishes the print is a finish like /complete's, so it is claimed
+                // the same way (#199) and notifies exactly once: an overlapping finish that won
+                // the claim has already notified, and this one writes nothing.
+                var claimed = await PrintFinishTransition.SaveIfStillUnfinished(context, existing, userId);
+                cacheVersionService.InvalidateUserCache(userId);
+                if (claimed)
+                {
+                    await printFinishNotifier.NotifyIfJustFinished(existing, previousStatus);
+                }
+                else
+                {
+                    context.ChangeTracker.Clear();
+                }
+            }
+            else
+            {
+                await context.SaveChangesAsync();
+                cacheVersionService.InvalidateUserCache(userId);
+                // A connector that created the print Pending and now reports it running (#235).
+                printStartNotifier.NotifyIfJustStarted(existing, previousStatus);
+            }
         }
 
         // Null-forgiven: the row was read a moment ago and replay never deletes it.
