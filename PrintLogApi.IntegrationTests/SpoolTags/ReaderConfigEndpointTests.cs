@@ -58,7 +58,7 @@ public class ReaderConfigEndpointTests : IClassFixture<CustomWebApplicationFacto
         Assert.Equal("hmac-sha256-sector", format.GetProperty("scheme").GetString());
         var values = format.GetProperty("params");
         Assert.Equal("00112233", values.GetProperty("saltHex").GetString());
-        Assert.Equal("key_a_", values.GetProperty("labelPrefix").GetString());
+        Assert.Equal("label-", values.GetProperty("labelPrefix").GetString());
     }
 
     [Fact]
