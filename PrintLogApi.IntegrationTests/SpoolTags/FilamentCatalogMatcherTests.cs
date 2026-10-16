@@ -139,12 +139,17 @@ public class FilamentCatalogMatcherTests
     {
         await using var host = await HostWithCatalog();
 
-        // About 28 away from the Luminous Blue entry.
-        var match = await Match(host, PolymakerPla("559EDE"));
+        // 4FA0C4 is about 14 from the Luminous Blue entry (419EC2). The weight differs from the
+        // entry's, so only the color term lifts the score above the 0.5 base.
+        var reading = PolymakerPla("4FA0C4");
+        reading.NetWeightG = 750;
+        var match = await Match(host, reading);
+        var closeness = ColorDistance.Closeness(ColorDistance.Rgb("4FA0C4", "419EC2"));
 
         Assert.NotNull(match);
         Assert.Equal(BlueId, match.Id);
         Assert.True(match.Confidence > FilamentCatalogMatcher.MatchThreshold);
+        Assert.Equal(0.5 + (0.3 * closeness), match.Confidence, 6);
         Assert.Equal("Polymaker", match.Manufacturer);
         Assert.Equal(140, match.SpoolWeightG);
         Assert.Equal(match.Name, match.ColorName);
@@ -169,17 +174,22 @@ public class FilamentCatalogMatcherTests
     }
 
     [Fact]
-    public async Task Petg_NeverMatchesAPlaEntry()
+    public async Task Petg_NeverMatchesAPlaEntry_AndPlaNeverMatchesPetg()
     {
         await using var host = await HostWithCatalog();
-        var reading = PolymakerPla();
-        reading.MaterialType = "PETG";
+        const string petgId = "polymaker_petg_polylitepetgblack_1000_175_c";
 
-        // The blue PLA color is an exact hit, so only the material rules it out.
-        var match = await Match(host, reading);
+        // The fixture has a Polymaker PETG entry in black (101820). A PLA reading with that exact
+        // color would score highest on it if the material were not checked.
+        var pla = PolymakerPla("101820");
+        var petg = PolymakerPla("101820");
+        petg.MaterialType = "PETG";
 
-        Assert.NotEqual(BlueId, match?.Id);
-        Assert.NotEqual(SilkBlackId, match?.Id);
+        Assert.NotEqual(petgId, (await Match(host, pla))?.Id);
+        Assert.Equal(petgId, (await Match(host, petg))?.Id);
+        // And the PETG reading never lands on a PLA entry.
+        Assert.NotEqual(BlueId, (await Match(host, petg))?.Id);
+        Assert.NotEqual(SilkBlackId, (await Match(host, petg))?.Id);
     }
 
     [Fact]

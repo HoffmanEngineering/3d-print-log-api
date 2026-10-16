@@ -34,6 +34,7 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
         }
 
         // ToUpper() equality translates on SQLite (binary compare) and SQL Server (CI_AS) alike.
+        // That is ASCII-only on SQLite, which is acceptable for vendor names.
         // Material and diameter are checked in memory on the narrowed set.
         var upper = manufacturer.ToUpperInvariant();
         var candidates = await db.FilamentCatalogEntries.AsNoTracking()
@@ -57,6 +58,7 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
     /// </summary>
     public async Task<string?> TrustedEntryIdAsync(string format, string sku, CancellationToken ct)
     {
+        // Format and SKU compare binary on SQLite and CI_AS on SQL Server; acceptable for numeric SKUs.
         var tallies = await db.FilamentCatalogSkus.AsNoTracking()
             .Where(s => s.Format == format && s.Sku == sku)
             .GroupBy(s => s.CatalogEntryId)
