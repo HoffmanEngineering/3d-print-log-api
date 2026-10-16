@@ -35,6 +35,7 @@ public class TagDecoderRegistryTests
         var result = Registry().Decode("00", TagFixtures.Memory("blank-ev1-0416C55A061F91"));
 
         Assert.Equal(TagDecodeOutcome.Blank, result.Outcome);
+        Assert.Equal("openspool", result.DetectedFormat);
         Assert.Null(result.Reading);
         Assert.Null(result.RedactedData);
     }
@@ -131,6 +132,98 @@ public class TagDecoderRegistryTests
             .Decode("00", TagFixtures.Memory("snapmaker-805BEC3E"));
 
         Assert.Contains("from-decoder", result.Reading!.Warnings);
+    }
+
+    [Fact]
+    public void CanDecodeThatThrows_IsFailedAndStopsThere()
+    {
+        var stub = new StubDecoder("snapmaker") { ProbeThrows = true };
+        var result = new TagDecoderRegistry([stub, new AnycubicAceDecoder()])
+            .Decode("00", TagFixtures.Memory("anycubic-539D1881020001"));
+
+        Assert.Equal(TagDecodeOutcome.Failed, result.Outcome);
+        Assert.Equal("snapmaker", result.DetectedFormat);
+        Assert.StartsWith("InvalidOperationException: ", result.Error);
+        Assert.Equal(new byte[] { 9, 9 }, result.RedactedData);
+    }
+
+    [Fact]
+    public void DecodeAndRedactBothThrow_IsFailedWithNoData()
+    {
+        var stub = new StubDecoder("snapmaker") { DecodeThrows = true, RedactThrows = true };
+        var result = new TagDecoderRegistry([stub]).Decode("00", TagFixtures.Memory("snapmaker-805BEC3E"));
+
+        Assert.Equal(TagDecodeOutcome.Failed, result.Outcome);
+        Assert.Equal("snapmaker", result.DetectedFormat);
+        Assert.Null(result.RedactedData);
+    }
+
+    [Fact]
+    public void NotRecognized_IsUnknownWithTheDecoderRedaction()
+    {
+        var stub = new StubDecoder("snapmaker") { NotRecognized = true };
+        var result = new TagDecoderRegistry([stub]).Decode("00", TagFixtures.Memory("snapmaker-805BEC3E"));
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
+        Assert.Null(result.DetectedFormat);
+        Assert.Equal(new byte[] { 9, 9 }, result.RedactedData);
+    }
+
+    [Fact]
+    public void ThrowOnDecode_DoesNotFallThroughToTheNextDecoder()
+    {
+        var stub = new StubDecoder("snapmaker") { DecodeThrows = true };
+        var result = new TagDecoderRegistry([stub, new SnapmakerDecoder()])
+            .Decode("00", TagFixtures.Memory("snapmaker-805BEC3E"));
+
+        Assert.Equal(TagDecodeOutcome.Failed, result.Outcome);
+        Assert.Equal("snapmaker", result.DetectedFormat);
+        Assert.Equal(new byte[] { 9, 9 }, result.RedactedData);
+    }
+
+    [Fact]
+    public void LongErrorIsNotCutInsideASurrogatePair()
+    {
+        // "InvalidOperationException: " is 27 chars; the emoji pair then straddles index 499/500.
+        var message = new string('x', 499 - 27) + "😀" + "tail";
+        var stub = new StubDecoder("snapmaker") { DecodeThrows = true, Message = message };
+        var result = new TagDecoderRegistry([stub]).Decode("00", TagFixtures.Memory("snapmaker-805BEC3E"));
+
+        Assert.Equal(499, result.Error!.Length);
+        Assert.False(char.IsHighSurrogate(result.Error[^1]));
+    }
+
+    private sealed class StubDecoder(string format) : ITagDecoder
+    {
+        public bool ProbeThrows { get; init; }
+        public bool DecodeThrows { get; init; }
+        public bool RedactThrows { get; init; }
+        public bool NotRecognized { get; init; }
+        public string Message { get; init; } = "boom";
+
+        public string Format => format;
+
+        public int Version => 1;
+
+        public bool CanDecode(TagMemory memory)
+        {
+            return ProbeThrows ? throw new InvalidOperationException(Message) : true;
+        }
+
+        public TagReading Decode(string uid, TagMemory memory)
+        {
+            if (NotRecognized)
+            {
+                throw new TagNotRecognizedException();
+            }
+
+            return DecodeThrows ? throw new InvalidOperationException(Message) : new TagReading();
+        }
+
+        public byte[] Redact(TagMemory memory)
+        {
+            return RedactThrows ? throw new InvalidOperationException("no") : [9, 9];
+        }
     }
 
     private sealed class ThrowingDecoder(bool canDecodeAll = false) : ITagDecoder

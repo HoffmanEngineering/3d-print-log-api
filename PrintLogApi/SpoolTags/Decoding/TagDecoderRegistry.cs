@@ -61,12 +61,28 @@ public sealed class TagDecoderRegistry
             return new TagDecodeResult(TagDecodeOutcome.Partial, null, null, PartialReadWarning, null);
         }
 
-        var decoder = _decoders.FirstOrDefault(d => d.CanDecode(memory));
-        if (decoder is null)
+        foreach (var candidate in _decoders)
         {
-            return new TagDecodeResult(TagDecodeOutcome.Unknown, null, null, null, (byte[])memory.Data.Clone());
+            try
+            {
+                if (!candidate.CanDecode(memory))
+                {
+                    continue;
+                }
+
+                return Run(candidate, uid, memory);
+            }
+            catch (Exception ex)
+            {
+                return Failed(candidate, memory, ex);
+            }
         }
 
+        return new TagDecodeResult(TagDecodeOutcome.Unknown, null, null, null, (byte[])memory.Data.Clone());
+    }
+
+    private static TagDecodeResult Run(ITagDecoder decoder, string uid, TagMemory memory)
+    {
         try
         {
             var reading = decoder.Decode(uid, memory);
@@ -78,17 +94,49 @@ public sealed class TagDecoderRegistry
         }
         catch (TagNotRecognizedException)
         {
-            return new TagDecodeResult(TagDecodeOutcome.Unknown, null, null, null, decoder.Redact(memory));
+            return new TagDecodeResult(TagDecodeOutcome.Unknown, null, null, null, SafeRedact(decoder, memory));
         }
         catch (Exception ex)
         {
-            var error = $"{ex.GetType().Name}: {ex.Message}";
-            if (error.Length > MaxErrorLength)
-            {
-                error = error[..MaxErrorLength];
-            }
+            return Failed(decoder, memory, ex);
+        }
+    }
 
-            return new TagDecodeResult(TagDecodeOutcome.Failed, null, decoder.Format, error, decoder.Redact(memory));
+    private static TagDecodeResult Failed(ITagDecoder decoder, TagMemory memory, Exception ex)
+    {
+        var error = $"{ex.GetType().Name}: {ex.Message}";
+        if (error.Length > MaxErrorLength)
+        {
+            // Do not split a surrogate pair.
+            var cut = char.IsHighSurrogate(error[MaxErrorLength - 1]) ? MaxErrorLength - 1 : MaxErrorLength;
+            error = error[..cut];
+        }
+
+        return new TagDecodeResult(TagDecodeOutcome.Failed, null, SafeFormat(decoder), error, SafeRedact(decoder, memory));
+    }
+
+    private static string? SafeFormat(ITagDecoder decoder)
+    {
+        try
+        {
+            return decoder.Format;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // A decoder that cannot redact its own data gets nothing stored: never keep unredacted bytes.
+    private static byte[]? SafeRedact(ITagDecoder decoder, TagMemory memory)
+    {
+        try
+        {
+            return decoder.Redact(memory);
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 
