@@ -12,6 +12,7 @@ public static class SpoolTagServiceCollectionExtensions
 
         services.AddHttpClient<SpoolmanDbClient>(SpoolmanDbClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddScoped<FilamentCatalogImporter>();
+        services.AddScoped<Matching.FilamentCatalogMatcher>();
         services.AddHostedService<SpoolTagMaintenanceService>();
 
         services.AddSingleton<ITagDecoder, SnapmakerDecoder>();
