@@ -13,6 +13,12 @@ namespace PrintLogApi.IntegrationTests.Webhooks;
 /// guarded primary handler is really in place, and a delivery leaks neither its URL path (into
 /// telemetry or logs) nor trace headers (to the receiver).
 /// </summary>
+/// <remarks>
+/// Not parallel: the telemetry half reads what the real Application Insights dependency module
+/// records, and with other test hosts running at the same time the outbound request's dependency
+/// never reached this host's channel (seen in the full suite, never alone).
+/// </remarks>
+[Collection(NonParallelWebhookWiring.Name)]
 public class WebhookWiringTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -96,6 +102,12 @@ public class WebhookWiringTests
         Assert.DoesNotContain("SECRET", dependency.Name);
         Assert.DoesNotContain(factory.Logs.Messages, m => m.Contains("SECRET", StringComparison.Ordinal));
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class NonParallelWebhookWiring
+{
+    public const string Name = "Webhook wiring (not parallel)";
 }
 
 public sealed class CapturingLoggerProvider : ILoggerProvider
