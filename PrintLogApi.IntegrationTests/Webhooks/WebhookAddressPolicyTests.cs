@@ -75,6 +75,12 @@ public class WebhookAddressPolicyTests
     [InlineData("2001:db8::1")] // documentation
     [InlineData("100::1")] // discard
     [InlineData("fec0::1")] // deprecated site-local
+    [InlineData("168.63.129.16")] // Azure wire server and DNS
+    [InlineData("::2")] // ::/8, reserved
+    [InlineData("::ffff:0:0:1")] // ::ffff:0:0:0/96, SIIT
+    [InlineData("::ffff:0:a00:1")]
+    [InlineData("100:0:0:1::1")] // 100::/8, beyond the discard /64
+    [InlineData("1ff::1")]
     public void ForbiddenAddresses_AreForbidden(string address)
     {
         Assert.Equal(WebhookAddressClass.Forbidden, WebhookAddressPolicy.Classify(IPAddress.Parse(address)));

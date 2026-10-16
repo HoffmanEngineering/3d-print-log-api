@@ -36,6 +36,7 @@ public static class WebhookAddressPolicy
     private static readonly (IPNetwork Network, WebhookAddressClass Class)[] V4Ranges =
     [
         (IPNetwork.Parse("169.254.169.254/32"), WebhookAddressClass.Forbidden), // cloud metadata
+        (IPNetwork.Parse("168.63.129.16/32"), WebhookAddressClass.Forbidden), // Azure wire server (platform DNS, health, agent)
         (IPNetwork.Parse("0.0.0.0/8"), WebhookAddressClass.Forbidden), // "this network", unspecified
         (IPNetwork.Parse("10.0.0.0/8"), WebhookAddressClass.Private),
         (IPNetwork.Parse("100.64.0.0/10"), WebhookAddressClass.Private), // CGNAT
@@ -57,10 +58,10 @@ public static class WebhookAddressPolicy
     [
         (IPNetwork.Parse("::1/128"), WebhookAddressClass.Private), // loopback
         (IPNetwork.Parse("::/128"), WebhookAddressClass.Forbidden), // unspecified
-        (IPNetwork.Parse("::/96"), WebhookAddressClass.Forbidden), // IPv4-compatible (deprecated)
+        (IPNetwork.Parse("::/8"), WebhookAddressClass.Forbidden), // reserved: IPv4-compatible, ::ffff:0:0:0/96 (SIIT) and the rest
         (IPNetwork.Parse("64:ff9b::/96"), WebhookAddressClass.Forbidden), // NAT64
         (IPNetwork.Parse("64:ff9b:1::/48"), WebhookAddressClass.Forbidden), // local-use NAT64
-        (IPNetwork.Parse("100::/64"), WebhookAddressClass.Forbidden), // discard
+        (IPNetwork.Parse("100::/8"), WebhookAddressClass.Forbidden), // reserved, including the discard /64
         (IPNetwork.Parse("2001::/32"), WebhookAddressClass.Forbidden), // Teredo
         (IPNetwork.Parse("2001:db8::/32"), WebhookAddressClass.Forbidden), // documentation
         (IPNetwork.Parse("2002::/16"), WebhookAddressClass.Forbidden), // 6to4
