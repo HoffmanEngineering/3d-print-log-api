@@ -356,6 +356,41 @@ public class WebhooksControllerTests(WebhookTestFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Test_IsLimitedToFiveAMinute()
+    {
+        var user = await factory.CreateUserAsync();
+        var created = await CreateAsync(user, HookUrl($"rate-{Guid.NewGuid():N}.example.test"));
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            statuses.Add((await SendAsync(HttpMethod.Post, $"/api/Webhooks/{created.Id}/test", user)).StatusCode);
+        }
+
+        Assert.All(statuses.Take(5), s => Assert.Equal(HttpStatusCode.OK, s));
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[5]);
+    }
+
+    [Fact]
+    public async Task Writes_AreLimitedToTwentyAMinute()
+    {
+        var user = await factory.CreateUserAsync();
+        var created = await CreateAsync(user);
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 20; i++)
+        {
+            statuses.Add((await SendAsync(HttpMethod.Put, $"/api/Webhooks/{created.Id}", user, new { url = created.Url, description = $"n{i}" })).StatusCode);
+        }
+
+        // The create spent one of the twenty.
+        Assert.All(statuses.Take(19), s => Assert.Equal(HttpStatusCode.OK, s));
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[19]);
+        // Reads are not part of that budget.
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Get, "/api/Webhooks", user)).StatusCode);
+    }
+
+    [Fact]
     public async Task Test_WithAnUndecryptableSecret_SaysSo_InsteadOfFailing()
     {
         var user = await factory.CreateUserAsync();

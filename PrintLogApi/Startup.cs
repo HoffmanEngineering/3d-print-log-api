@@ -348,6 +348,12 @@ public class Startup
                     });
             });
 
+            // Webhooks (#235): the test endpoint and the writes make the server resolve and call
+            // hosts the caller chose, so each has a small per-user budget of its own. An endpoint
+            // with one of these does not also get "api" (see the MapControllers convention).
+            AddWebhookPolicy(options, Controllers.WebhooksController.TestRateLimitPolicy, "Webhooks:TestRateLimitPerMinute", 5);
+            AddWebhookPolicy(options, Controllers.WebhooksController.WriteRateLimitPolicy, "Webhooks:WriteRateLimitPerMinute", 20);
+
             // Per-caller rate limiting for the REST controllers. Two separate budgets, because
             // the two populations behave nothing alike:
             //
@@ -420,6 +426,29 @@ public class Startup
                         QueueLimit = 0,
                     });
             });
+        });
+    }
+
+    /// <summary>A fixed one-minute window per user; 0 or less disables it.</summary>
+    private void AddWebhookPolicy(Microsoft.AspNetCore.RateLimiting.RateLimiterOptions options, string policy, string setting, int defaultPerMinute)
+    {
+        options.AddPolicy(policy, httpContext =>
+        {
+            var limit = Configuration.GetValue(setting, defaultPerMinute);
+            var userId = httpContext.User.GetUserId();
+            if (limit <= 0 || userId is null)
+            {
+                return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter($"{policy}-unlimited");
+            }
+
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: $"{policy}:{userId.Value}",
+                _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = limit,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                });
         });
     }
 
