@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -1164,6 +1165,110 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         Assert.NotNull(filament);
         Assert.Equal(800000, filament.FilamentRemaining);
     }
+
+    /// <summary>
+    /// #256: the web app re-sends a spool's existing adjustments with their id but no
+    /// createdDate on every save. The original CreatedDate must survive that, UpdatedDate must
+    /// be stamped, and an adjustment added in the same save must get its own CreatedDate.
+    /// </summary>
+    [Fact]
+    public async Task PutFilament_ResentAdjustmentWithoutCreatedDate_KeepsItsCreatedDate()
+    {
+        var created = await CreateFilamentForAdjustmentsAsync("Adjustment CreatedDate Filament");
+        await AddWeightAdjustmentAsync(created, -100000);
+        var before = await GetFilamentDetailAsync(created.Id);
+        var original = Assert.Single(before.FilamentAdjustments!);
+        Assert.True(original.CreatedDate.Year > 2000, $"Precondition: CreatedDate was {original.CreatedDate:O}");
+
+        // Backdate UpdatedDate so the restamp is visible however quickly the PUT follows.
+        var backdated = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.FilamentAdjustments.Where(a => a.Id == original.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.UpdatedDate, backdated), TestContext.Current.CancellationToken);
+        }
+
+        // Re-send it as the web app does: id and values, no dates. Edit its notes so the row
+        // really is modified, and add a second adjustment alongside it.
+        var updateDto = ToUpdateDto(before);
+        updateDto.FilamentAdjustments = new List<FilamentAdjustmentDto>
+        {
+            new FilamentAdjustmentDto
+            {
+                Id = original.Id,
+                FilamentId = created.Id,
+                Source = FilamentAdjustment.SourceMeasurement.Weight,
+                AmountMg = original.AmountMg,
+                Notes = "Edited notes",
+            },
+            new FilamentAdjustmentDto
+            {
+                FilamentId = created.Id,
+                Source = FilamentAdjustment.SourceMeasurement.Weight,
+                AmountMg = -50000,
+                Notes = "Second adjustment",
+            },
+        };
+        var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{created.Id}");
+        putRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        putRequest.Content = JsonContent.Create(updateDto);
+        var putResponse = await _httpClient.SendAsync(putRequest, TestContext.Current.CancellationToken);
+        Assert.True(putResponse.IsSuccessStatusCode, $"PUT failed: {putResponse.StatusCode}");
+        var putBody = (await putResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+
+        var after = await GetFilamentDetailAsync(created.Id);
+
+        // The PUT response is mapped from the in-memory entity, the GET from the database: both
+        // must carry the original date.
+        foreach (var body in new[] { putBody, after })
+        {
+            var resent = Assert.Single(body.FilamentAdjustments!, a => a.Id == original.Id);
+            Assert.Equal(original.CreatedDate, resent.CreatedDate);
+            Assert.Equal("Edited notes", resent.Notes);
+            Assert.True(resent.UpdatedDate >= original.CreatedDate, $"UpdatedDate was not restamped: {resent.UpdatedDate:O}");
+
+            var added = Assert.Single(body.FilamentAdjustments!, a => a.Id != original.Id);
+            Assert.True(added.CreatedDate >= original.CreatedDate, $"New adjustment's CreatedDate was {added.CreatedDate:O}");
+            Assert.True(added.UpdatedDate >= added.CreatedDate, $"New adjustment's UpdatedDate was {added.UpdatedDate:O}");
+        }
+    }
+
+    private async Task<FilamentDetailDto> CreateFilamentForAdjustmentsAsync(string displayName)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(new AddFilamentDto
+        {
+            DisplayName = displayName,
+            Brand = "Test Brand",
+            MaterialType = "PLA",
+            ColorName = "Red",
+            ColorHex = "FF0000",
+            DiameterMm = 1.75,
+            InitialNominalWeightMg = 1000000,
+            MaterialDensityGramPerCubicCm = 1.24,
+            IsActive = true
+        });
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    private static FilamentDetailDto ToUpdateDto(FilamentDetailDto filament) => new()
+    {
+        Id = filament.Id,
+        DisplayName = filament.DisplayName,
+        Brand = filament.Brand,
+        MaterialType = filament.MaterialType,
+        MaterialCategoryNickname = filament.MaterialCategoryNickname,
+        ColorName = filament.ColorName,
+        ColorHex = filament.ColorHex,
+        DiameterMm = filament.DiameterMm,
+        InitialNominalWeightMg = filament.InitialNominalWeightMg,
+        MaterialDensityGramPerCubicCm = filament.MaterialDensityGramPerCubicCm,
+        IsActive = filament.IsActive,
+    };
 
     [Fact]
     public async Task GetFilamentById_FilamentRemaining_SubtractsPrintUsage()
