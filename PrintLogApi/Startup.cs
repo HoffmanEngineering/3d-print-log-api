@@ -224,11 +224,12 @@ public class Startup
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddApplicationInsightsTelemetry();
-        // No correlation headers (Request-Context, Request-Id, traceparent) on outbound calls.
-        // Webhook receivers (#235) are third parties, and the SDK cannot be told which hosts those
-        // are: their URLs are user data. Nothing this API calls is another instrumented service of
-        // ours, so the headers bought nothing anywhere else either. Dependency telemetry itself is
-        // unaffected.
+        // The SDK stops adding its own correlation headers (Request-Context, and Request-Id where it
+        // would) to outbound calls. Webhook receivers (#235) are third parties, and the SDK cannot
+        // be told which hosts those are: their URLs are user data. This is process-wide, but narrow:
+        // the runtime still adds traceparent to every other HttpClient's calls; only the webhook
+        // client drops that too, through the no-output propagator on its handler
+        // (WebhookHttpHandlerFactory). Dependency telemetry itself is unaffected.
         services.ConfigureTelemetryModule<Microsoft.ApplicationInsights.DependencyCollector.DependencyTrackingTelemetryModule>(
             (module, _) => module.SetComponentCorrelationHttpHeaders = false);
         // Who and how, on every item; then drop the rows that only ever say "still polling".

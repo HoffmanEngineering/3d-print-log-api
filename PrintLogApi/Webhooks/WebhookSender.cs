@@ -45,6 +45,12 @@ public sealed class WebhookSender(
     public const string EventIdHeader = "X-PrintLog-Event-Id";
     public const string AttemptHeader = "X-PrintLog-Delivery-Attempt";
 
+    /// <summary>
+    /// Set on every delivery request, as a second signal besides <see cref="EventHeader"/> for
+    /// <c>WebhookTelemetryRedactionInitializer</c>. It never goes on the wire.
+    /// </summary>
+    public static readonly HttpRequestOptionsKey<bool> DeliveryOption = new("PrintLog.WebhookDelivery");
+
     private readonly WebhookOptions _options = options.Value;
 
     public async Task<WebhookAttemptResult> SendAsync(Uri url, string secret, WebhookMessage message, int attempt, CancellationToken ct)
@@ -67,6 +73,7 @@ public sealed class WebhookSender(
             using var request = new HttpRequestMessage(HttpMethod.Post, url);
             request.Content = new ByteArrayContent(message.Body);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            request.Options.Set(DeliveryOption, true);
             request.Headers.Add(EventHeader, message.EventType);
             request.Headers.Add(EventIdHeader, message.EventId);
             request.Headers.Add(AttemptHeader, attempt.ToString(System.Globalization.CultureInfo.InvariantCulture));

@@ -9,8 +9,9 @@ namespace PrintLogApi.Telemetry;
 /// Cuts webhook deliveries (#235) down to <c>scheme://host:port/</c> in dependency telemetry. The
 /// SDK records every outbound HttpClient call with its full URL, and a webhook URL's path can be
 /// the receiver's secret: a Home Assistant webhook id is the only thing that authenticates a call
-/// to it. A delivery is recognized by the <see cref="WebhookSender.EventHeader"/> header on the
-/// request the SDK attaches to the telemetry item, so no other dependency is touched.
+/// to it. A delivery is recognized on the request the SDK attaches to the telemetry item, by the
+/// <see cref="WebhookSender.DeliveryOption"/> option or the <see cref="WebhookSender.EventHeader"/>
+/// header (either is enough), so no other dependency is touched.
 /// </summary>
 public sealed class WebhookTelemetryRedactionInitializer : ITelemetryInitializer
 {
@@ -42,6 +43,11 @@ public sealed class WebhookTelemetryRedactionInitializer : ITelemetryInitializer
             request = fromResponse;
         }
 
-        return request is { RequestUri: not null } && request.Headers.Contains(WebhookSender.EventHeader) ? request : null;
+        return request is { RequestUri: not null } && IsDelivery(request) ? request : null;
     }
+
+    // Either signal is enough: the option the sender sets, or the event header.
+    private static bool IsDelivery(HttpRequestMessage request) =>
+        (request.Options.TryGetValue(WebhookSender.DeliveryOption, out var marked) && marked)
+        || request.Headers.Contains(WebhookSender.EventHeader);
 }

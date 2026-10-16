@@ -57,9 +57,10 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
     private static readonly TimeSpan PerAddressConnectTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Ports below 1024 a webhook may use: the web ports and Home Assistant's default. Every port
-    /// from 1024 up is allowed except the Fetch standard's "bad ports" (services a browser refuses
-    /// to talk HTTP to), which keeps the endpoint from being a scanner for SSH, SMTP and the like.
+    /// The only ports below 1024 a webhook may use: the web ports. Every port from 1024 up is
+    /// allowed (Home Assistant's default 8123 among them) except the Fetch standard's "bad ports"
+    /// (services a browser refuses to talk HTTP to), which keeps the endpoint from being a scanner
+    /// for SSH, SMTP and the like.
     /// </summary>
     private static readonly HashSet<int> AllowedLowPorts = [80, 443];
 

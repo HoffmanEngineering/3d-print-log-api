@@ -48,6 +48,22 @@ public class WebhookTelemetryRedactionTests
     }
 
     [Fact]
+    public void ADeliveryMarkedOnlyByItsRequestOption_IsRedactedToo()
+    {
+        // The header is one signal; the option the sender sets is the other, so a delivery is
+        // still recognized if a handler ever strips or renames the header.
+        var request = new HttpRequestMessage(HttpMethod.Post, Url);
+        request.Options.Set(WebhookSender.DeliveryOption, true);
+        var dependency = new DependencyTelemetry { Type = "Http", Name = "POST /api/webhook/SECRET-HOOK-ID", Data = Url };
+        dependency.SetOperationDetail("HttpRequest", request);
+
+        Initializer.Initialize(dependency);
+
+        Assert.Equal("https://abc123.ui.nabu.casa:8443/", dependency.Data);
+        Assert.DoesNotContain("SECRET", dependency.Name);
+    }
+
+    [Fact]
     public void ADeliveryKnownOnlyByItsResponse_IsRedactedToo()
     {
         var dependency = Delivery("HttpResponse");

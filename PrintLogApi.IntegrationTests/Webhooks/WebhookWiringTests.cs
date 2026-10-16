@@ -50,6 +50,7 @@ public class WebhookWiringTests
             builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Logging:LogLevel:Default"] = "Trace",
+                ["Webhooks:Timeout"] = "00:00:01",
             }));
             builder.ConfigureLogging(logging => logging.AddProvider(Logs));
             builder.ConfigureServices(services =>
@@ -119,6 +120,60 @@ public class WebhookWiringTests
         Assert.DoesNotContain("SECRET", dependency.Data);
         Assert.DoesNotContain("SECRET", dependency.Name);
         Assert.DoesNotContain(factory.Logs.Messages, m => m.Contains("SECRET", StringComparison.Ordinal));
+        AssertNoSecretInAnyTelemetry(factory);
+    }
+
+    [Fact]
+    public async Task ARefusedPort_KeepsItsPathOutOfTelemetryAndLogs()
+    {
+        await using var factory = new LoopbackWiringFactory();
+        var sender = factory.Services.GetRequiredService<WebhookSender>();
+        factory.Telemetry.Clear();
+
+        var result = await sender.SendAsync(new Uri("http://127.0.0.1:25/api/webhook/SECRET-HOOK-ID"), "whsec_wiring",
+            new WebhookMessage("webhook.test", "evt_refused", Encoding.UTF8.GetBytes("{}")), attempt: 1, Ct);
+
+        Assert.Equal(WebhookDeliveryResults.BlockedAddress, result.Result);
+        Assert.Contains(factory.Telemetry.Items.OfType<DependencyTelemetry>(), d => d.Success == false);
+        Assert.DoesNotContain(factory.Logs.Messages, m => m.Contains("SECRET", StringComparison.Ordinal));
+        AssertNoSecretInAnyTelemetry(factory);
+    }
+
+    [Fact]
+    public async Task ATimeout_KeepsItsPathOutOfTelemetryAndLogs()
+    {
+        await using var factory = new LoopbackWiringFactory();
+        // Accepts connections (the OS completes them) and never answers.
+        var silent = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        silent.Start();
+        try
+        {
+            var port = ((System.Net.IPEndPoint)silent.LocalEndpoint).Port;
+            var sender = factory.Services.GetRequiredService<WebhookSender>();
+            factory.Telemetry.Clear();
+
+            var result = await sender.SendAsync(new Uri($"http://127.0.0.1:{port}/api/webhook/SECRET-HOOK-ID"), "whsec_wiring",
+                new WebhookMessage("webhook.test", "evt_timeout", Encoding.UTF8.GetBytes("{}")), attempt: 1, Ct);
+
+            Assert.Equal(WebhookDeliveryResults.Timeout, result.Result);
+            Assert.Contains(factory.Telemetry.Items.OfType<DependencyTelemetry>(), d => d.Target?.Contains("127.0.0.1") == true);
+            Assert.DoesNotContain(factory.Logs.Messages, m => m.Contains("SECRET", StringComparison.Ordinal));
+            AssertNoSecretInAnyTelemetry(factory);
+        }
+        finally
+        {
+            silent.Stop();
+        }
+    }
+
+    /// <summary>Every recorded item, serialized as it would be sent, carries no part of the URL path.</summary>
+    private static void AssertNoSecretInAnyTelemetry(LoopbackWiringFactory factory)
+    {
+        var items = factory.Telemetry.Items.ToList();
+        var sent = Encoding.UTF8.GetString(
+            Microsoft.ApplicationInsights.Extensibility.Implementation.JsonSerializer.Serialize(items, compress: false));
+        Assert.DoesNotContain("SECRET", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/webhook", sent, StringComparison.Ordinal);
     }
 }
 
