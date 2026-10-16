@@ -12,7 +12,9 @@ public class SlicerNamesTests : IClassFixture<CustomWebApplicationFactory>
 
     public SlicerNamesTests(CustomWebApplicationFactory factory) => _factory = factory;
 
-    // Wire values are the uploader parsers' SlicerName strings (Slic3rPostProcessingUploader).
+    // Wire values are the uploader parsers' SlicerName strings (Slic3rPostProcessingUploader), and
+    // for connectors the slicer Moonraker's metadata names when the parser library does not
+    // recognize the header (a Snapmaker U1 sends "SnapmakerOrca").
     [Theory]
     [InlineData(null, "cura")]
     [InlineData("", "cura")]
@@ -22,7 +24,9 @@ public class SlicerNamesTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData("AnycubicSlicerNext", "anycubic")]
     [InlineData("FLSunSlicer", "flsun")]
     [InlineData("orcaslicer", "orcaslicer")]
-    [InlineData("Snapmaker Orca", "other")]
+    [InlineData("SnapmakerOrca", "orcaslicer")]
+    [InlineData("snapmakerorca", "orcaslicer")]
+    [InlineData("Snapmaker Orca", "orcaslicer")]
     [InlineData("ElegooSlicer", "other")]
     public void Normalize_MapsUploaderWireValues(string? wire, string expected)
     {
