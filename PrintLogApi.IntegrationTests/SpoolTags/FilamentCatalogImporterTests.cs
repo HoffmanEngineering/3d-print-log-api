@@ -186,6 +186,93 @@ public class FilamentCatalogImporterTests
     }
 
     [Fact]
+    public async Task ACaseOnlyIdChange_UpdatesNothingAndRemovesNothing()
+    {
+        await using var host = new CatalogTestHost();
+        host.Stub.Serve(Json(Sample()), null);
+        await Import(host);
+        var next = Sample();
+        var entry = next.Single(n => n!["id"]!.GetValue<string>() == BlueId)!;
+        entry["id"] = BlueId.ToUpperInvariant();
+        host.Stub.Serve(Json(next), null);
+
+        var result = await Import(host);
+
+        Assert.Equal(new CatalogImportResult(0, 0, 0, false), result);
+        var rows = await Rows(host);
+        Assert.Equal(6, rows.Count);
+        Assert.Null(rows.Single(r => r.Id == BlueId).RemovedAt);
+    }
+
+    [Fact]
+    public async Task IdsDifferingOnlyInCaseInTheFeed_KeepTheFirst()
+    {
+        await using var host = new CatalogTestHost();
+        var feed = Sample();
+        var duplicate = JsonNode.Parse(feed[0]!.ToJsonString())!;
+        duplicate["id"] = feed[0]!["id"]!.GetValue<string>().ToUpperInvariant();
+        duplicate["name"] = "Second";
+        feed.Add(duplicate);
+        host.Stub.Serve(Json(feed), null);
+
+        var result = await Import(host);
+
+        Assert.Equal(new CatalogImportResult(6, 0, 0, false), result);
+        Assert.DoesNotContain(await Rows(host), r => r.Name == "Second");
+    }
+
+    private static JsonArray Bulk(int count)
+    {
+        var array = new JsonArray();
+        for (var i = 0; i < count; i++)
+        {
+            var entry = JsonNode.Parse(Sample()[0]!.ToJsonString())!;
+            entry["id"] = $"bulk_{i}";
+            array.Add(entry);
+        }
+        return array;
+    }
+
+    [Fact]
+    public async Task ImportThatWouldRemoveOverHalfTheLiveRows_IsRefused_AndTheETagStays()
+    {
+        await using var host = new CatalogTestHost();
+        host.Stub.Serve(Json(Bulk(12)), "\"one\"");
+        await Import(host);
+        var fewer = Bulk(5);
+        host.Stub.Serve(Json(fewer), "\"two\"");
+
+        await Assert.ThrowsAsync<CatalogFetchException>(() => Import(host));
+
+        Assert.All(await Rows(host), r => Assert.Null(r.RemovedAt));
+        host.Stub.Serve(Json(fewer), "\"two\"");
+        await Assert.ThrowsAsync<CatalogFetchException>(() => Import(host));
+        Assert.Equal("\"one\"", host.Stub.IfNoneMatch.Last());
+    }
+
+    [Fact]
+    public async Task ImportThatRemovesExactlyHalf_IsAllowed()
+    {
+        await using var host = new CatalogTestHost();
+        host.Stub.Serve(Json(Bulk(12)), null);
+        await Import(host);
+        host.Stub.Serve(Json(Bulk(6)), null);
+
+        var result = await Import(host);
+
+        Assert.Equal(6, result.Removed);
+    }
+
+    [Fact]
+    public async Task ATimedOutRequest_ThrowsCatalogFetchException()
+    {
+        await using var host = new CatalogTestHost();
+        host.Stub.ServeTimeout();
+
+        await Assert.ThrowsAsync<CatalogFetchException>(() => Import(host));
+    }
+
+    [Fact]
     public async Task AnEmptyFeed_IsRefused_SoItCannotRemoveTheWholeCatalog()
     {
         await using var host = new CatalogTestHost();

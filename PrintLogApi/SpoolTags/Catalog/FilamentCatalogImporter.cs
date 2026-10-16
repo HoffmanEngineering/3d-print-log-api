@@ -16,6 +16,7 @@ public sealed class FilamentCatalogImporter(
     TimeProvider timeProvider,
     ILogger<FilamentCatalogImporter> logger)
 {
+    private const int MinLiveRowsForRemovalGuard = 10;
     private const string LockResource = "SpoolTags.CatalogImport";
 
     // The last ETag this process saw. Losing it (a restart) costs one full download.
@@ -70,14 +71,19 @@ public sealed class FilamentCatalogImporter(
             return new CatalogImportResult(0, 0, 0, true);
         }
 
-        var incoming = new Dictionary<string, FilamentCatalogEntry>(StringComparer.Ordinal);
+        // Ids compare the way SQL Server's default collation does (case-insensitive), or a
+        // case-only change would add one row and remove another, breaking the primary key.
+        var incoming = new Dictionary<string, FilamentCatalogEntry>(StringComparer.OrdinalIgnoreCase);
         var now = timeProvider.GetUtcNow().UtcDateTime;
         foreach (var entry in fetch.Entries ?? [])
         {
             var mapped = Map(entry, now);
             if (mapped != null)
             {
-                incoming.TryAdd(mapped.Id, mapped);
+                if (!incoming.TryAdd(mapped.Id, mapped))
+                {
+                    logger.LogWarning("The SpoolmanDB catalog lists {Id} more than once (ids differing only in case); keeping the first.", mapped.Id);
+                }
             }
         }
 
@@ -87,8 +93,15 @@ public sealed class FilamentCatalogImporter(
             throw new CatalogFetchException("The SpoolmanDB catalog held no usable entries.");
         }
 
-        var existing = await context.FilamentCatalogEntries.ToDictionaryAsync(e => e.Id, StringComparer.Ordinal, ct);
+        var existing = await context.FilamentCatalogEntries.ToDictionaryAsync(e => e.Id, StringComparer.OrdinalIgnoreCase, ct);
         int added = 0, updated = 0, removed = 0;
+
+        var live = existing.Values.Count(r => r.RemovedAt == null);
+        var gone = existing.Values.Where(r => r.RemovedAt == null && !incoming.ContainsKey(r.Id)).ToList();
+        if (live >= MinLiveRowsForRemovalGuard && gone.Count * 2 > live)
+        {
+            throw new CatalogFetchException($"The SpoolmanDB catalog would remove {gone.Count} of {live} live entries; refusing the import.");
+        }
 
         foreach (var (id, fresh) in incoming)
         {
@@ -106,13 +119,10 @@ public sealed class FilamentCatalogImporter(
             }
         }
 
-        foreach (var (id, row) in existing)
+        foreach (var row in gone)
         {
-            if (row.RemovedAt == null && !incoming.ContainsKey(id))
-            {
-                row.RemovedAt = now;
-                removed++;
-            }
+            row.RemovedAt = now;
+            removed++;
         }
 
         await context.SaveChangesAsync(ct);

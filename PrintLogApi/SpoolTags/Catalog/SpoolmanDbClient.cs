@@ -69,6 +69,10 @@ public sealed class SpoolmanDbClient(HttpClient http, IOptions<SpoolTagOptions> 
         {
             throw new CatalogFetchException("The SpoolmanDB request failed.", ex);
         }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new CatalogFetchException("The SpoolmanDB request timed out.", ex);
+        }
 
         using (response)
         {

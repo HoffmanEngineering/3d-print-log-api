@@ -45,6 +45,9 @@ public sealed class SpoolmanDbStub
         };
     }
 
+    /// <summary>Fails the request the way HttpClient does when its timeout elapses.</summary>
+    public void ServeTimeout() => _responder = _ => throw new TaskCanceledException("The request timed out.");
+
     public void ServeStatus(HttpStatusCode status) => _responder = _ => new HttpResponseMessage(status);
 
     internal HttpResponseMessage Respond(HttpRequestMessage request)
