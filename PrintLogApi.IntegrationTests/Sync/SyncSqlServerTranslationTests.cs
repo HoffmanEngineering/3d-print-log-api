@@ -25,16 +25,43 @@ public class SyncSqlServerTranslationTests
         using var db = SqlServerContext();
         var sql = SyncSnapshotService.SpoolsQuery(db, 42).ToQueryString();
 
-        var start = sql.IndexOf("SUM(CASE", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"No usage aggregate found in the projection:\n{sql}");
-        var end = sql.IndexOf("END)", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Usage aggregate is not closed as expected:\n{sql}");
-        var aggregate = sql[start..end];
+        // Every SUM, not only the first: the projection holds one per shared figure (remaining
+        // and consumed each sum the usage rows and the adjustments), and an outer reference in
+        // any of them is the 8124 shape.
+        var aggregates = new List<string>();
+        for (var start = sql.IndexOf("SUM(", StringComparison.Ordinal); start >= 0; start = sql.IndexOf("SUM(", start + 4, StringComparison.Ordinal))
+        {
+            aggregates.Add(Balanced(sql, start + 3));
+        }
 
-        // [f] is the outer filament. Anything of its inside the SUM is the 8124 shape.
-        Assert.DoesNotContain("[f].", aggregate);
-        Assert.Contains("MaterialDensityGramPerCubicCm", aggregate);
-        Assert.Contains("DiameterMm", aggregate);
+        Assert.True(aggregates.Count >= 4, $"Expected the usage and adjustment sums of both figures:\n{sql}");
+        foreach (var aggregate in aggregates)
+        {
+            // [f] is the outer filament. Anything of its inside a SUM is the 8124 shape.
+            Assert.DoesNotContain("[f].", aggregate);
+        }
+
+        // And the usage sums still convert, from the subquery's own join.
+        var usage = aggregates.Where(a => a.Contains("CASE", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(usage);
+        Assert.All(usage, a => Assert.Contains("MaterialDensityGramPerCubicCm", a));
+        Assert.All(usage, a => Assert.Contains("DiameterMm", a));
+    }
+
+    /// <summary>The parenthesized text starting at <paramref name="open"/>, nested parentheses included.</summary>
+    private static string Balanced(string text, int open)
+    {
+        var depth = 0;
+        for (var i = open; i < text.Length; i++)
+        {
+            depth += text[i] switch { '(' => 1, ')' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return text[open..(i + 1)];
+            }
+        }
+
+        throw new InvalidOperationException($"Unbalanced aggregate at {open}:\n{text}");
     }
 
     /// <summary>
