@@ -35,7 +35,7 @@ public interface IWebhookSubscriptionService
 
 public sealed class WebhooksUnavailableException() : Exception("Webhooks are not configured on this server.");
 
-/// <param name="Code"><c>invalid_webhook_url</c>, <c>blocked_webhook_address</c> or <c>invalid_webhook</c>.</param>
+/// <param name="code"><c>invalid_webhook_url</c>, <c>blocked_webhook_address</c> or <c>invalid_webhook</c>.</param>
 public sealed class WebhookValidationException(string code, string message) : Exception(message)
 {
     public string Code { get; } = code;
