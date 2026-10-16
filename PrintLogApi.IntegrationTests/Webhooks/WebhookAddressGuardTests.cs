@@ -52,12 +52,44 @@ public class WebhookAddressGuardTests
     }
 
     [Fact]
-    public async Task Validate_RejectsAHostThatDoesNotResolve()
+    public async Task Validate_AHostThatDoesNotResolve_LooksTheSameAsABlockedOne()
     {
-        var result = await Guard(Resolver()).ValidateAsync("https://nowhere.example.test/x", Ct);
+        // One answer for both, so the endpoint does not tell a caller what the server's DNS sees.
+        var unresolved = await Guard(Resolver()).ValidateAsync("https://nowhere.example.test/x", Ct);
+        var blocked = await Guard(Resolver()).ValidateAsync("https://metadata.example.test/x", Ct);
 
-        Assert.Equal(WebhookUrlStatus.Invalid, result.Status);
-        Assert.Contains("resolve", result.Error);
+        Assert.Equal(WebhookUrlStatus.Blocked, unresolved.Status);
+        Assert.Equal(blocked.Status, unresolved.Status);
+        Assert.Equal(blocked.Error, unresolved.Error);
+    }
+
+    [Theory]
+    [InlineData(22)]
+    [InlineData(25)]
+    [InlineData(110)]
+    [InlineData(1)]
+    [InlineData(1023)]
+    [InlineData(2049)] // NFS, on the Fetch bad-ports list
+    [InlineData(5060)] // SIP
+    [InlineData(6667)] // IRC
+    [InlineData(10080)]
+    public async Task Validate_BlocksPortsOutsideTheRule(int port)
+    {
+        var result = await Guard(Resolver()).ValidateAsync($"http://hooks.example.test:{port}/x", Ct);
+
+        Assert.Equal(WebhookUrlStatus.Blocked, result.Status);
+    }
+
+    [Theory]
+    [InlineData("http://hooks.example.test/x")]
+    [InlineData("https://hooks.example.test/x")]
+    [InlineData("http://hooks.example.test:8123/x")]
+    [InlineData("http://hooks.example.test:1024/x")]
+    [InlineData("https://hooks.example.test:8443/x")]
+    [InlineData("http://hooks.example.test:49152/x")]
+    public async Task Validate_AllowsTheWebPorts_HomeAssistant_AndUnprivilegedPorts(string url)
+    {
+        Assert.Equal(WebhookUrlStatus.Ok, (await Guard(Resolver()).ValidateAsync(url, Ct)).Status);
     }
 
     [Theory]
@@ -168,6 +200,16 @@ public class WebhookAddressGuardTests
         using var response = await client.GetAsync($"http://two.local.test:{server.Port}/", Ct);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Connect_RefusesABadPort_BeforeConnecting()
+    {
+        using var client = Client(Guard(Resolver()));
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("http://hooks.example.test:25/", Ct));
+
+        Assert.IsType<WebhookAddressBlockedException>(ex.InnerException);
     }
 
     [Fact]

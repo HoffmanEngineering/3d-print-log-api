@@ -43,6 +43,36 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
 {
     public const int MaxUrlLength = 2048;
 
+    /// <summary>
+    /// The one answer for a host that is internal <i>or</i> does not resolve, so the endpoint never
+    /// tells a caller what this server's DNS can see.
+    /// </summary>
+    public const string UnreachableHostMessage =
+        "The URL's host cannot be used: it does not resolve, or it points to a private or reserved network address.";
+
+    /// <summary>
+    /// How long one resolved address gets to accept the connection before the next is tried, so a
+    /// host whose first answer is a blackhole still gets a chance on its second.
+    /// </summary>
+    private static readonly TimeSpan PerAddressConnectTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Ports below 1024 a webhook may use: the web ports and Home Assistant's default. Every port
+    /// from 1024 up is allowed except the Fetch standard's "bad ports" (services a browser refuses
+    /// to talk HTTP to), which keeps the endpoint from being a scanner for SSH, SMTP and the like.
+    /// </summary>
+    private static readonly HashSet<int> AllowedLowPorts = [80, 443];
+
+    private static readonly HashSet<int> BadPorts =
+    [
+        1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566,
+        6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+    ];
+
+    /// <summary>True when a webhook may connect to <paramref name="port"/>.</summary>
+    public static bool IsAllowedPort(int port) =>
+        AllowedLowPorts.Contains(port) || (port is >= 1024 and <= 65535 && !BadPorts.Contains(port));
+
     /// <summary>Whether private addresses are let through: <c>AllowPrivateAddresses</c> in Development only.</summary>
     public bool AllowPrivateAddresses { get; } = allowPrivateAddresses;
 
@@ -69,6 +99,11 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
             return WebhookUrlCheck.Invalid("The URL must not contain a user name or password.");
         }
 
+        if (!IsAllowedPort(uri.Port))
+        {
+            return WebhookUrlCheck.Blocked("Webhooks can use ports 80, 443 and 1024 and up, except a few reserved ones.");
+        }
+
         IPAddress[] addresses;
         try
         {
@@ -76,18 +111,14 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
         }
         catch (SocketException)
         {
-            return WebhookUrlCheck.Invalid($"The host {uri.IdnHost} could not be resolved.");
-        }
-        if (addresses.Length == 0)
-        {
-            return WebhookUrlCheck.Invalid($"The host {uri.IdnHost} could not be resolved.");
+            return WebhookUrlCheck.Blocked(UnreachableHostMessage);
         }
 
         // Stricter than connect time, which only skips a bad answer: a host with any internal answer
         // is refused outright, so the user hears about it now rather than through failed deliveries.
-        if (addresses.Any(a => !WebhookAddressPolicy.IsAllowed(a, AllowPrivateAddresses)))
+        if (addresses.Length == 0 || addresses.Any(a => !WebhookAddressPolicy.IsAllowed(a, AllowPrivateAddresses)))
         {
-            return WebhookUrlCheck.Blocked("The URL points to a private or reserved network address, which webhooks cannot reach.");
+            return WebhookUrlCheck.Blocked(UnreachableHostMessage);
         }
 
         return new WebhookUrlCheck(WebhookUrlStatus.Ok, uri, null);
@@ -101,6 +132,11 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
     /// </summary>
     public async Task<Stream> ConnectAsync(string host, int port, CancellationToken ct)
     {
+        if (!IsAllowedPort(port))
+        {
+            throw new WebhookAddressBlockedException("Webhooks cannot use this port.");
+        }
+
         var addresses = await Resolve(host, ct);
         var allowed = addresses.Where(a => WebhookAddressPolicy.IsAllowed(a, AllowPrivateAddresses)).ToList();
         if (allowed.Count == 0)
@@ -112,12 +148,18 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
         foreach (var address in allowed)
         {
             var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            using var perAddress = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            if (allowed.Count > 1)
+            {
+                perAddress.CancelAfter(PerAddressConnectTimeout);
+            }
             try
             {
-                await socket.ConnectAsync(new IPEndPoint(address, port), ct);
+                await socket.ConnectAsync(new IPEndPoint(address, port), perAddress.Token);
                 return new NetworkStream(socket, ownsSocket: true);
             }
-            catch (Exception ex) when (ex is SocketException)
+            catch (Exception ex) when (ex is SocketException
+                || (ex is OperationCanceledException && !ct.IsCancellationRequested))
             {
                 socket.Dispose();
                 last = ex;
