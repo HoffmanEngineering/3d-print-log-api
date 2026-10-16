@@ -1,7 +1,9 @@
 ﻿using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Enums;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using Xunit;
@@ -289,6 +291,81 @@ public class FilamentTagsTests : IClassFixture<CustomWebApplicationFactory>
 
     #region Helpers
 
+
+    /// <summary>
+    /// The web app's "link this tag" (the NFC picker) loads the spool and PUTs the same JSON back
+    /// with one UID appended, as its adjustment and favorite updates already do. Only the API can
+    /// show what an update recomputes or drops, so this pins that every other field survives.
+    /// </summary>
+    [Fact]
+    public async Task AddingTagViaGetThenPut_LeavesEveryOtherFieldUnchanged()
+    {
+        var created = await ReadAsync<FilamentDetailDto>(await SendAsync(HttpMethod.Post, "/api/Filaments", new AddFilamentDto
+        {
+            DisplayName = $"Round trip {Guid.NewGuid():N}",
+            Brand = "Test Brand",
+            MaterialType = "PLA",
+            ColorName = "Sunset",
+            ColorHex = "FF8800",
+            ColorPattern = ColorPatternType.Gradient,
+            Colors = ["FF8800", "8800FF"],
+            FinishType = FilamentFinishType.Silk,
+            Effects = [FilamentEffect.Sparkle],
+            DiameterMm = 1.75,
+            InitialNominalWeightMg = 1_000_000,
+            SpoolWeightMg = 250_000,
+            MaterialDensityGramPerCubicCm = 1.24,
+            RecommendedTemp = 210,
+            PurchasePriceValue = "19.99",
+            PurchasePriceCurrency = "USD",
+            StorageLocation = "Shelf B",
+            Notes = "Keep dry",
+            IsActive = true,
+            IsFavorite = true,
+            FilamentAdjustments = [new FilamentAdjustmentDto { AmountMg = -50_000, Notes = "Purge" }],
+            TagUids = [RandomUid()],
+        }));
+        var url = $"/api/Filaments/{created.Id}";
+
+        var before = await GetJsonAsync(url);
+        var body = before.DeepClone().AsObject();
+        var added = RandomUid();
+        body["tagUids"]!.AsArray().Add(added);
+        var put = await SendRawJsonAsync(HttpMethod.Put, url, body.ToJsonString());
+        Assert.True(put.IsSuccessStatusCode, await put.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var after = await GetJsonAsync(url);
+
+        Assert.Contains(added, after["tagUids"]!.AsArray().Select(n => n!.GetValue<string>()));
+        // A PUT rewrites the adjustment rows, so their audit timestamps move along with the
+        // spool's own. That is true of the existing adjustment and favorite updates too.
+        foreach (var node in new[] { before, after })
+        {
+            node.Remove("tagUids");
+            node.Remove("updatedDate");
+            foreach (var adjustment in node["filamentAdjustments"]!.AsArray())
+            {
+                adjustment!.AsObject().Remove("updatedDate");
+            }
+        }
+        Assert.True(JsonNode.DeepEquals(before, after), $"before: {before}\nafter:  {after}");
+    }
+
+    private async Task<JsonObject> GetJsonAsync(string url)
+    {
+        var response = await SendAsync(HttpMethod.Get, url);
+        response.EnsureSuccessStatusCode();
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!.AsObject();
+    }
+
+    private async Task<HttpResponseMessage> SendRawJsonAsync(HttpMethod method, string url, string json)
+    {
+        var request = new HttpRequestMessage(method, url)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+    }
     private static string RandomUid() => Convert.ToHexString(RandomNumberGenerator.GetBytes(7));
 
     private static string WithColons(string uid) => string.Join(':', uid.Chunk(2).Select(c => new string(c)));
