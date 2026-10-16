@@ -34,6 +34,7 @@ using PrintLogApi.Services.Push;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
+using PrintLogApi.Webhooks;
 using Prometheus;
 
 namespace PrintLogApi;
@@ -238,6 +239,7 @@ public class Startup
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
         services.AddEmail(Configuration);
+        services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
             options.Host = Configuration["ExternalProviders:Smtp:Host"];
