@@ -268,6 +268,11 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   Removing the connection in the web app deletes the row, so the next connect includes the
   notifier again. The response shape does not change; the UI looks for `[notifier` in
   `configBlock`.
+- **A Snapmaker U1 gets `[spoolman]` alone too**, bridge or not (Make contains "snapmaker",
+  Model matches `\bu1\b`, the web app's rule). Its stock Moonraker ships without `apprise`, so
+  `[notifier]` fails to load ("failed plugins: notifier", seen on firmware 2.0.0). Some vendor
+  builds (older Creality Sonic Pads) lack it too, but nothing identifies them, so they keep the
+  block and the docs cover the error.
 - **Finishing a notifier print replaces its usage rows** with the accumulated `SpoolmanUsages`
   (`PrintEventService.Finished`): clamped at 0, deleted spools skipped, and when every reported
   spool is deleted it falls back to the notifier's own total. Rows carry no fabricated estimate: a

@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Security;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,8 @@ public interface ISpoolmanConnectionService
     /// <summary>
     /// Makes the printer's Spoolman connection, revoking the one it had, and returns the secret
     /// once with the block to paste: <c>[spoolman]</c>, plus the <c>[notifier 3d_print_log]</c>
-    /// unless the printer has a printlog-bridge connection. Null when the printer is not the
+    /// unless the printer has a printlog-bridge connection or is a Snapmaker U1 (its Moonraker
+    /// can't load the notifier). Null when the printer is not the
     /// user's. Throws
     /// <see cref="SpoolmanConnectionLimitException"/> when Free's one connection is taken by
     /// another printer.
@@ -56,7 +58,7 @@ public interface ISpoolmanConnectionService
 /// <para><b>"Is Pro"</b> is the direct query on <c>Subscriptions</c> used everywhere else (see
 /// <c>PrinterService.GetMaxImagesPerPrinter</c>), not a helper, so there is one definition.</para>
 /// </summary>
-public sealed class SpoolmanConnectionService(
+public sealed partial class SpoolmanConnectionService(
     PrintLogContext context,
     IOptions<SpoolmanOptions> options,
     IOptions<EmailOptions> emailOptions,
@@ -80,7 +82,7 @@ public sealed class SpoolmanConnectionService(
     {
         var printer = await context.Printers
             .Where(p => p.Id == printerId && p.UserId == userId)
-            .Select(p => new { p.Id, p.Name })
+            .Select(p => new { p.Id, p.Name, p.Make, p.Model })
             .SingleOrDefaultAsync(ct);
         if (printer is null)
         {
@@ -151,7 +153,9 @@ public sealed class SpoolmanConnectionService(
             Secret = secret,
             ServerUrl = serverUrl,
             ConfigBlock = ConfigBlock(serverUrl,
-                await HasBridgeAsync(userId, printer.Id, ct) ? null : NotifierUrl(requestOrigin, printer.Id, secret)),
+                IsSnapmakerU1(printer.Make, printer.Model) || await HasBridgeAsync(userId, printer.Id, ct)
+                    ? null
+                    : NotifierUrl(requestOrigin, printer.Id, secret)),
         };
         Fill(created, connection, printer.Name);
         return created;
@@ -486,6 +490,20 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
     private Task<bool> HasBridgeAsync(long userId, long printerId, CancellationToken ct) =>
         context.Connections.AnyAsync(c =>
             c.UserId == userId && c.PrinterId == printerId && c.Kind == Connection.MoonrakerKind, ct);
+
+    /// <summary>
+    /// Whether the printer is a Snapmaker U1, by the same rule as the web app's Spoolman panel.
+    /// The U1's stock Moonraker ships without <c>apprise</c>, so a <c>[notifier]</c> section fails
+    /// to load ("failed plugins: notifier") and logs nothing: the U1 logs prints with
+    /// printlog-bridge instead.
+    /// </summary>
+    private static bool IsSnapmakerU1(string? make, string? model) =>
+        make?.Contains("snapmaker", StringComparison.OrdinalIgnoreCase) == true
+        && model is not null
+        && U1Model().IsMatch(model);
+
+    [GeneratedRegex(@"\bu1\b", RegexOptions.IgnoreCase)]
+    private static partial Regex U1Model();
 
     /// <summary>
     /// The <c>moonraker.conf</c> text to paste: <c>[spoolman]</c>, plus the

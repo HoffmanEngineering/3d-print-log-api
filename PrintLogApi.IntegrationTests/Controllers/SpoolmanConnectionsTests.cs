@@ -201,6 +201,40 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
     }
 
+    [Theory]
+    [InlineData("Snapmaker", "U1")]
+    [InlineData("snapmaker", "Snapmaker U1")]
+    [InlineData("Snapmaker ", "u1 ")]
+    public async Task ConfigBlock_ForASnapmakerU1_LeavesOutTheNotifier(string make, string model)
+    {
+        // The U1's stock Moonraker has no apprise, so a [notifier] section fails to load and
+        // Moonraker shows "failed plugins: notifier". The U1 logs prints with printlog-bridge.
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: make, model: model);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Equal(
+            ServerOnlyBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman"),
+            created.ConfigBlock);
+    }
+
+    [Theory]
+    [InlineData("Snapmaker", "J1")]
+    [InlineData("Snapmaker", "U10")]
+    [InlineData("Bambu Lab", "U1")]
+    [InlineData(null, "U1")]
+    [InlineData("Snapmaker", null)]
+    public async Task ConfigBlock_KeepsTheNotifier_ForPrintersThatAreNotAU1(string? make, string? model)
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: make, model: model);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
+    }
+
     [Fact]
     public async Task ConfigBlock_IgnoresAnotherUsersBridgeOnTheSamePrinterId()
     {
@@ -786,11 +820,11 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         });
     }
 
-    private async Task<long> CreatePrinterAsync(User user, string? name = null)
+    private async Task<long> CreatePrinterAsync(User user, string? name = null, string? make = null, string? model = null)
     {
         return await WithDbAsync(async db =>
         {
-            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM" };
+            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM", Make = make, Model = model };
             db.Printers.Add(printer);
             await db.SaveChangesAsync(Ct);
             return printer.Id;
