@@ -311,6 +311,30 @@ tags and no GitHub releases, so not `releases/latest`), keyed by connection kind
   which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
   keeps what it reads, so seed it before the host's first connection request.
 
+## Integration polling (#234)
+
+`GET /api/sync/version` and `GET /api/sync/snapshot` (`SyncController`) are what the Home
+Assistant integration (#236) polls. The field rules are on the response records in
+`Models/DTOs/Sync/SyncSnapshot.cs` and in the OpenAPI document.
+
+- **`/version` reads no data.** It is a hash of the user id and the `ICacheVersionService` GUID, so
+  a write that forgets to bump the version is invisible to integrations, as it is to the
+  summaries. It changes spuriously on a restart or another instance; clients only refetch once.
+- **Connection health is never cached.** Heartbeats do not bump the version (and must not: one per
+  printer every 5 minutes would flush every cache the user has), and going stale is the absence
+  of an event. So the snapshot's core is cached on the version, zone and month, and each request
+  overlays `connection` from one live query. The body carries no `lastSeenAt`, so an unchanged
+  status keeps the `ETag` and the 304.
+- **The month is in the cache key** (`sync_snapshot:{user}:{guid}:{zone}:{yyyy-MM}`), so the
+  account totals roll over without a write.
+- **`remainingGrams` is null for an untracked spool**, pending #230; never `BalanceMg`'s negative
+  figure. Changing it is a contract change for the integration.
+- **The miss is five statements, whatever the printer count** (`SyncSnapshotQueryShapeTests`).
+  The current and last print per printer are correlated `FirstOrDefault`s that EF turns into
+  `ROW_NUMBER()` joins, one statement.
+- `schemaVersion` versions the shape. Adding a field is fine; renaming, removing or changing a
+  meaning needs a new version and the integration's agreement.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
@@ -643,7 +667,8 @@ same repo installs the plugin.
 ## JSON serialization
 
 `PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume
-responses: the two cached summary lists and the six analytics tabs. It is **partial by design** and
+responses: the two cached summary lists, the six analytics tabs and the two sync responses (#234).
+It is **partial by design** and
 is `Insert`ed at position 0 of `JsonSerializerOptions.TypeInfoResolverChain`, with ASP.NET Core's
 `DefaultJsonTypeInfoResolver` still behind it. Assigning `TypeInfoResolver` instead would drop that
 fallback, and the failure surfaces on some unrelated endpoint rather than at the edit.
