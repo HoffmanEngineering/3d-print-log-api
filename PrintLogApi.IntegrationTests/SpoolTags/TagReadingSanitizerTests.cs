@@ -363,4 +363,25 @@ public class TagReadingSanitizerTests
             Assert.Contains(warning, result.Warnings);
         }
     }
+
+    [Fact]
+    public void Sanitize_CapsWarningsAtTwentyOfFiftyCharsEach()
+    {
+        var input = new TagReading { Warnings = Enumerable.Range(0, 500).Select(n => $"w{n}-" + new string('x', 200)).ToList() };
+
+        var result = TagReadingSanitizer.Sanitize(input);
+
+        Assert.Equal(20, result.Warnings.Count);
+        Assert.All(result.Warnings, w => Assert.True(w.Length <= 50));
+    }
+
+    [Fact]
+    public void Sanitize_DedupesWarningsThatCollideAfterTruncation()
+    {
+        var input = new TagReading { Warnings = [new string('a', 80) + "1", new string('a', 80) + "2", "other"] };
+
+        var result = TagReadingSanitizer.Sanitize(input);
+
+        Assert.Equal([new string('a', 50), "other"], result.Warnings);
+    }
 }

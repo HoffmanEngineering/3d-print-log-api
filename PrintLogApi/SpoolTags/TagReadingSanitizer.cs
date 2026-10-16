@@ -20,6 +20,8 @@ public static partial class TagReadingSanitizer
     private const int MaxText = 255;
     private const int MaxSku = 64;
     private const int MaxFormat = 50;
+    private const int MaxWarnings = 20;
+    private const int MaxWarningLength = 50;
     private const double DiameterTolerance = 0.01;
 
     private static readonly double[] Diameters = [1.75, 2.85, 3.0];
@@ -29,10 +31,10 @@ public static partial class TagReadingSanitizer
 
     public static TagReading Sanitize(TagReading r)
     {
-        var warnings = new List<string>();
+        var warnings = new Warnings();
         foreach (var w in r.Warnings ?? [])
         {
-            AddWarning(warnings, w);
+            warnings.Add(w);
         }
 
         return new TagReading
@@ -60,7 +62,7 @@ public static partial class TagReadingSanitizer
             Sku = Text(r.Sku, MaxSku),
             ManufacturedOn = r.ManufacturedOn,
             Extras = Extras(r.Extras),
-            Warnings = warnings,
+            Warnings = warnings.Items,
         };
     }
 
@@ -69,7 +71,7 @@ public static partial class TagReadingSanitizer
         return value is null or 0 ? null : value;
     }
 
-    private static int? Ranged(int? value, int max, string warning, List<string> warnings)
+    private static int? Ranged(int? value, int max, string warning, Warnings warnings)
     {
         if (value is null or 0)
         {
@@ -78,14 +80,14 @@ public static partial class TagReadingSanitizer
 
         if (value < 0 || value > max)
         {
-            AddWarning(warnings, warning);
+            warnings.Add(warning);
             return null;
         }
 
         return value;
     }
 
-    private static double? Diameter(double? value, List<string> warnings)
+    private static double? Diameter(double? value, Warnings warnings)
     {
         if (value is null || value == 0)
         {
@@ -100,16 +102,8 @@ public static partial class TagReadingSanitizer
             }
         }
 
-        AddWarning(warnings, "diameter-unsupported");
+        warnings.Add("diameter-unsupported");
         return null;
-    }
-
-    private static void AddWarning(List<string> warnings, string? warning)
-    {
-        if (!string.IsNullOrWhiteSpace(warning) && !warnings.Contains(warning))
-        {
-            warnings.Add(warning);
-        }
     }
 
     private static string? Text(string? value, int max)
@@ -160,5 +154,27 @@ public static partial class TagReadingSanitizer
         }
 
         return result;
+    }
+
+    /// <summary>At most <see cref="MaxWarnings"/> distinct warnings, each cut to <see cref="MaxWarningLength"/> characters.</summary>
+    private sealed class Warnings
+    {
+        private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+
+        public List<string> Items { get; } = [];
+
+        public void Add(string? warning)
+        {
+            if (Items.Count >= MaxWarnings || string.IsNullOrWhiteSpace(warning))
+            {
+                return;
+            }
+
+            var text = warning.Length > MaxWarningLength ? warning[..MaxWarningLength] : warning;
+            if (_seen.Add(text))
+            {
+                Items.Add(text);
+            }
+        }
     }
 }

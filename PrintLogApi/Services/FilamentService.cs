@@ -1407,6 +1407,16 @@ public class FilamentService(
         throw new InvalidOperationException($"User {userId} does not exist, so no spool number can be reserved.");
     }
 
+    private const int MaxTagReadingsPerRequest = 10;
+
+    private static void ThrowIfTooManyTagReadings(ICollection<TagReadingInputDto>? readings)
+    {
+        if (readings is { Count: > MaxTagReadingsPerRequest })
+        {
+            throw new BadRequestException($"A request can carry at most {MaxTagReadingsPerRequest} tag readings.");
+        }
+    }
+
     private static BadRequestException InvalidTagUid(string? uid) =>
         new($"'{uid}' is not a tag UID. Expected hex bytes, such as 04:A2:3F:11.");
 
@@ -1616,6 +1626,7 @@ public class FilamentService(
     {
         // Before anything else, so an invalid or taken tag rejects the whole create (#147).
         var tagUids = NormalizeTagUids(filament.TagUids ?? []);
+        ThrowIfTooManyTagReadings(filament.TagReadings);
         await ThrowIfTagsHeldElsewhere(userId, null, tagUids);
 
         // Only a create sets the catalog entry. Removed entries are soft-deleted, so they are unknown here.
@@ -1839,6 +1850,7 @@ public class FilamentService(
         // Null keeps the tags (#147): clients that predate them send the whole filament without
         // the field, and must not wipe tags another client added.
         var tagUids = dto.TagUids is null ? null : NormalizeTagUids(dto.TagUids);
+        ThrowIfTooManyTagReadings(dto.TagReadings);
 
         var existingFilament = await GetFilamentById(id);
 

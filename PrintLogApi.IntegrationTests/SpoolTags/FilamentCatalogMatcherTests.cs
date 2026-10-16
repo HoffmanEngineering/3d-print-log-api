@@ -254,6 +254,75 @@ public class FilamentCatalogMatcherTests
     }
 
     [Fact]
+    public async Task SameBrandMaterialSubtypeAndWeight_ButFarColor_DoesNotMatch()
+    {
+        await using var host = await HostWithCatalog();
+        await using (var scope = host.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.FilamentCatalogEntries.Add(new FilamentCatalogEntry
+            {
+                Id = "farco_pla_matteblue",
+                Manufacturer = "Farco",
+                Name = "Matte Blue",
+                Material = "PLA",
+                WeightG = 1000,
+                DiameterMm = 1.75,
+                ColorHex = "0000FF",
+                ImportedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+        var reading = new TagReading
+        {
+            Manufacturer = "Farco",
+            MaterialType = "PLA",
+            MaterialSubtype = "Matte",
+            NetWeightG = 1000,
+            Colors = ["FF0000"],
+        };
+
+        Assert.Null(await Match(host, reading));
+
+        // The same reading in the entry's own color still matches.
+        reading.Colors = ["0000FF"];
+        Assert.Equal("farco_pla_matteblue", (await Match(host, reading))?.Id);
+    }
+
+    [Fact]
+    public async Task MultiColorReading_ComparesItsFirstColorToTheEntry()
+    {
+        await using var host = await HostWithCatalog();
+        await using (var scope = host.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.FilamentCatalogEntries.Add(new FilamentCatalogEntry
+            {
+                Id = "farco_pla_duo",
+                Manufacturer = "Farco",
+                Name = "Duo Matte",
+                Material = "PLA",
+                WeightG = 1000,
+                DiameterMm = 1.75,
+                ColorHex = "FF0000",
+                ColorHexesJson = "[\"FF0000\",\"0000FF\"]",
+                ImportedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+        var reading = new TagReading
+        {
+            Manufacturer = "Farco",
+            MaterialType = "PLA",
+            MaterialSubtype = "Matte",
+            NetWeightG = 1000,
+            Colors = ["FF0000", "0000FF"],
+        };
+
+        Assert.Equal("farco_pla_duo", (await Match(host, reading))?.Id);
+    }
+
+    [Fact]
     public async Task Ties_AreBrokenByIdOrdinal()
     {
         await using var host = await HostWithCatalog();

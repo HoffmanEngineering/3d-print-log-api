@@ -227,6 +227,38 @@ public class FilamentTagReadingsTests : IClassFixture<CustomWebApplicationFactor
         Assert.Equal(entryId, (await GetAsync(created.Id)).CatalogEntryId);
     }
 
+    private static List<TagReadingInputDto> Readings(int count) =>
+        Enumerable.Range(0, count)
+            .Select(_ => new TagReadingInputDto { Uid = Convert.ToHexString(RandomNumberGenerator.GetBytes(7)), Reading = new TagReading() })
+            .ToList();
+
+    [Fact]
+    public async Task Create_WithMoreThanTenReadings_Returns400NamingTheLimit()
+    {
+        var response = await PostAsync(null, Readings(11));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("10", await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Put_WithMoreThanTenReadings_Returns400()
+    {
+        var created = await CreateAsync(null, null);
+
+        var response = await PutAsync(created.Id, [], Readings(11));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_WithTenReadings_IsAccepted()
+    {
+        var response = await PostAsync(null, Readings(10));
+
+        Assert.True(response.IsSuccessStatusCode);
+    }
+
     [Fact]
     public async Task Create_WithAnUnknownCatalogEntry_Returns400()
     {

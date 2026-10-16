@@ -44,6 +44,7 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
         return candidates
             .Where(e => MaterialKey.Normalize(e.Material) == materialKey)
             .Where(e => reading.DiameterMm is not { } d || Math.Abs(e.DiameterMm - d) <= DiameterToleranceMm)
+            .Where(e => !ColorTooFar(reading, e))
             .Select(e => (Entry: e, Score: Score(reading, e)))
             .Where(x => x.Score >= MatchThreshold)
             .OrderByDescending(x => x.Score)
@@ -87,6 +88,10 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
             .Where(s => s.Format == format && s.Sku == sku)
             .GroupBy(s => s.CatalogEntryId)
             .Select(g => new SkuTally(g.Key, g.Count(), g.Select(s => s.UserId).Distinct().Count()));
+
+    // With a color on both sides, a far one rules the entry out whatever else agrees (the bridge's COLOR_TOLERANCE).
+    private static bool ColorTooFar(TagReading reading, FilamentCatalogEntry entry) =>
+        ColorDistance.Rgb(reading.Colors.FirstOrDefault(), entry.ColorHex) > ColorDistance.Tolerance;
 
     private static double Score(TagReading reading, FilamentCatalogEntry entry)
     {

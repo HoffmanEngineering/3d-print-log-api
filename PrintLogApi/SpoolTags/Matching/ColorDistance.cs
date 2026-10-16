@@ -4,6 +4,9 @@ namespace PrintLogApi.SpoolTags.Matching;
 
 public static class ColorDistance
 {
+    /// <summary>The bridge's <c>COLOR_TOLERANCE</c>: farther than this is a different color.</summary>
+    public const double Tolerance = 100;
+
     /// <summary>Euclidean RGB distance (0-441), or null when either color is missing or not six hex digits.</summary>
     public static double? Rgb(string? a, string? b)
     {
@@ -19,7 +22,7 @@ public static class ColorDistance
 
     /// <summary>1 at distance 0, falling to 0 at the bridge's tolerance of 100. 0 when there is no distance.</summary>
     public static double Closeness(double? distance) =>
-        distance is { } d ? Math.Max(0, 1 - (d / 100)) : 0;
+        distance is { } d ? Math.Max(0, 1 - (d / Tolerance)) : 0;
 
     private static bool TryParse(string? hex, out (int R, int G, int B) rgb)
     {
