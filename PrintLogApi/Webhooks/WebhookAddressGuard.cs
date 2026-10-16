@@ -188,7 +188,11 @@ public sealed class WebhookAddressGuard(IWebhookHostResolver resolver, bool allo
 /// <summary>The primary handler for webhook deliveries (#235).</summary>
 public static class WebhookHttpHandlerFactory
 {
-    public static SocketsHttpHandler Create(WebhookAddressGuard guard, TimeSpan connectTimeout) => new()
+    /// <param name="maxConnectionsPerServer">
+    /// At least <see cref="WebhookOptions.MaxInFlightPerHost"/>: a smaller pool would be a second,
+    /// hidden host cap, where hung requests to a shared host hold every connection.
+    /// </param>
+    public static SocketsHttpHandler Create(WebhookAddressGuard guard, TimeSpan connectTimeout, int maxConnectionsPerServer = 16) => new()
     {
         ConnectCallback = (context, ct) => new ValueTask<Stream>(guard.ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, ct)),
         ConnectTimeout = connectTimeout,
@@ -199,7 +203,7 @@ public static class WebhookHttpHandlerFactory
         UseCookies = false,
         AutomaticDecompression = System.Net.DecompressionMethods.None,
         MaxResponseHeadersLength = 16, // KB
-        MaxConnectionsPerServer = 4,
+        MaxConnectionsPerServer = maxConnectionsPerServer,
         PooledConnectionLifetime = TimeSpan.FromMinutes(2),
         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
         // Receivers are third parties: no traceparent, tracestate, baggage or Request-Id, which

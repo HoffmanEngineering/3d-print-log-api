@@ -40,9 +40,12 @@ public static class WebhookServiceCollectionExtensions
                 client.Timeout = options.Timeout + TimeSpan.FromSeconds(1);
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("3dprintlog-webhooks/1");
             })
-            .ConfigurePrimaryHttpMessageHandler(sp => WebhookHttpHandlerFactory.Create(
-                sp.GetRequiredService<WebhookAddressGuard>(),
-                sp.GetRequiredService<IOptions<WebhookOptions>>().Value.Timeout))
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<WebhookOptions>>().Value;
+                return WebhookHttpHandlerFactory.Create(
+                    sp.GetRequiredService<WebhookAddressGuard>(), options.Timeout, options.MaxInFlightPerHost);
+            })
             // The factory's logging handlers write the full request URI at Information, and a
             // webhook URL's path can be the receiver's secret. WebhookSender logs the host instead.
             .RemoveAllLoggers();

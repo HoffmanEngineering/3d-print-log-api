@@ -45,8 +45,8 @@ public sealed class WebhookOptions
     public int QueueCapacity { get; set; } = 1000;
 
     /// <summary>
-    /// Deliveries (one event to one subscription) waiting for a worker, retries included, before
-    /// new ones are dropped.
+    /// Deliveries (one event to one subscription) held at once, whether waiting, in flight or
+    /// between retries, before new ones are dropped (and recorded as <c>dropped</c>).
     /// </summary>
     public int DeliveryQueueCapacity { get; set; } = 10_000;
 
@@ -54,12 +54,24 @@ public sealed class WebhookOptions
     public int MaxConcurrentDeliveries { get; set; } = 32;
 
     /// <summary>
-    /// Attempts in flight at once for one user, and to one host. These are what keep one user's
-    /// dead receiver, or an outage at a shared host such as Nabu Casa, from taking every worker.
+    /// Attempts in flight at once for one user (each subscription has at most one, since its
+    /// deliveries go in order). Keeps one user's dead receivers from taking every worker.
     /// </summary>
     public int MaxInFlightPerUser { get; set; } = 2;
 
-    public int MaxInFlightPerHost { get; set; } = 2;
+    /// <summary>
+    /// Attempts in flight at once to one host. Deliberately well above
+    /// <see cref="MaxInFlightPerUser"/>: every Home Assistant Cloud user posts to hooks.nabu.casa, so
+    /// a cap near the user cap would let a couple of users' hung instances hold the host for all of
+    /// them. It still keeps an outage at one host from taking every worker.
+    /// </summary>
+    public int MaxInFlightPerHost { get; set; } = 16;
+
+    /// <summary>
+    /// How long an eligible delivery may wait for a free slot under the caps before it is dropped
+    /// (and recorded as <c>dropped</c>).
+    /// </summary>
+    public TimeSpan MaxDeliveryWait { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// Failures in a row after which a subscription's circuit opens: while the last failure is
@@ -94,6 +106,7 @@ public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
         if (options.DeliveryQueueCapacity <= 0) failures.Add($"{nameof(WebhookOptions.DeliveryQueueCapacity)} must be positive.");
         if (options.MaxInFlightPerUser <= 0) failures.Add($"{nameof(WebhookOptions.MaxInFlightPerUser)} must be positive.");
         if (options.MaxInFlightPerHost <= 0) failures.Add($"{nameof(WebhookOptions.MaxInFlightPerHost)} must be positive.");
+        if (options.MaxDeliveryWait <= TimeSpan.Zero) failures.Add($"{nameof(WebhookOptions.MaxDeliveryWait)} must be positive.");
         if (options.CircuitBreakerThreshold <= 0) failures.Add($"{nameof(WebhookOptions.CircuitBreakerThreshold)} must be positive.");
         if (options.CircuitBreakerCooldown < TimeSpan.Zero) failures.Add($"{nameof(WebhookOptions.CircuitBreakerCooldown)} must not be negative.");
 

@@ -19,6 +19,9 @@ public static class WebhookDeliveryResults
 
     /// <summary>The stored secret cannot be decrypted with the configured keys; rotate it.</summary>
     public const string SecretUnavailable = "secret_unavailable";
+
+    /// <summary>Never attempted: the delivery queue was full, or it waited too long for capacity.</summary>
+    public const string Dropped = "dropped";
 }
 
 public sealed record WebhookAttemptResult(string Result, int? StatusCode, bool Retryable)

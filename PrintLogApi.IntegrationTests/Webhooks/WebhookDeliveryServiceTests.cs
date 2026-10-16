@@ -26,6 +26,9 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
     /// </summary>
     public sealed class Factory : WebhookTestFactory
     {
+        /// <summary>Extra settings for a host of its own; read when the host first starts.</summary>
+        public IReadOnlyDictionary<string, string?>? Settings { get; init; }
+
         private readonly string _path = Path.Combine(Path.GetTempPath(), $"printlog-webhooks-{Guid.NewGuid():N}.db");
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -34,7 +37,15 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
             builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Webhooks:Timeout"] = "00:00:04",
+                // Real waits between retries (the base factory skips them), so order can be seen.
+                ["Webhooks:RetryDelays:0"] = "00:00:01",
+                ["Webhooks:RetryDelays:1"] = "00:00:01",
+                ["Webhooks:RetryDelays:2"] = "00:00:01",
             }));
+            if (Settings is { } settings)
+            {
+                builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(settings));
+            }
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<DbContextOptions<PrintLogContext>>();
@@ -63,31 +74,66 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
 
     private readonly HttpClient _client = factory.CreateClient();
 
-    private async Task<(User User, long PrinterId, string Host)> SubscribeAsync(string prefix)
+    private Task<(User User, long PrinterId, string Host)> SubscribeAsync(string prefix) =>
+        SubscribeAsync(factory, _client, prefix);
+
+    /// <summary>A user (Pro, so several webhooks fit) with a printer and one webhook.</summary>
+    private static async Task<(User User, long PrinterId, string Host)> SubscribeAsync(
+        Factory host, HttpClient client, string prefix, string path = "/api/webhook/x", string[]? events = null, User? user = null)
     {
-        var user = await factory.CreateUserAsync();
-        var printerId = await factory.CreatePrinterAsync(user);
-        var host = $"{prefix}-{Guid.NewGuid():N}.example.test";
-        var subscribe = new HttpRequestMessage(HttpMethod.Post, "/api/Webhooks")
-        {
-            Content = JsonContent.Create(new { url = $"https://{host}/api/webhook/x", events = new[] { "print.started" } }),
-        };
-        subscribe.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
-        Assert.Equal(HttpStatusCode.Created, (await _client.SendAsync(subscribe, Ct)).StatusCode);
-        return (user, printerId, host);
+        user ??= await host.CreateUserAsync(pro: true);
+        var printerId = await host.CreatePrinterAsync(user);
+        var target = prefix.Contains('.') ? prefix : $"{prefix}-{Guid.NewGuid():N}.example.test";
+        await SubscribeUrlAsync(client, user, $"https://{target}{path}", events ?? ["print.started"]);
+        return (user, printerId, target);
     }
 
-    private async Task StartPrintAsync((User User, long PrinterId, string Host) a)
+    private static async Task<Guid> SubscribeUrlAsync(HttpClient client, User user, string url, string[] events)
+    {
+        var subscribe = new HttpRequestMessage(HttpMethod.Post, "/api/Webhooks") { Content = JsonContent.Create(new { url, events }) };
+        subscribe.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
+        var response = await client.SendAsync(subscribe, Ct);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<PrintLogApi.Models.DTOs.Webhook.WebhookSubscriptionCreatedDto>(Ct))!.Id;
+    }
+
+    private Task<long> StartPrintAsync((User User, long PrinterId, string Host) a) => StartPrintAsync(_client, a);
+
+    private static async Task<long> StartPrintAsync(HttpClient client, (User User, long PrinterId, string Host) a)
     {
         var create = new HttpRequestMessage(HttpMethod.Post, "/api/Prints")
         {
             Content = JsonContent.Create(new AddPrintDTO { Title = "Background", PrinterId = a.PrinterId, Status = PrintStatus.Printing, FilamentUsage = [] }),
         };
         create.Headers.Add(TestAuthHandler.TestUserIdHeader, a.User.OAuthUserId);
-        Assert.True((await _client.SendAsync(create, Ct)).IsSuccessStatusCode);
+        var response = await client.SendAsync(create, Ct);
+        Assert.True(response.IsSuccessStatusCode);
+        return (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(Ct))!.Id;
     }
 
-    private async Task<bool> WaitUntil(Func<bool> condition, TimeSpan within)
+    private static async Task FinishPrintAsync(HttpClient client, User user, long printId)
+    {
+        var complete = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{printId}/complete")
+        {
+            Content = JsonContent.Create(new CompletePrintDto { Status = PrintStatus.Success, PrintTimeInSeconds = 60, FilamentUsage = [] }),
+        };
+        complete.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
+        Assert.True((await client.SendAsync(complete, Ct)).IsSuccessStatusCode);
+    }
+
+    private static WebhookSubscription? Stored(Factory host, Guid id)
+    {
+        using var scope = host.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<PrintLogContext>().WebhookSubscriptions.AsNoTracking().FirstOrDefault(w => w.Id == id);
+    }
+
+    private static WebhookSubscription? StoredFor(Factory host, long userId)
+    {
+        using var scope = host.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<PrintLogContext>().WebhookSubscriptions.AsNoTracking().FirstOrDefault(w => w.UserId == userId);
+    }
+
+    private static async Task<bool> WaitUntil(Func<bool> condition, TimeSpan within)
     {
         var deadline = Stopwatch.StartNew();
         while (!condition() && deadline.Elapsed < within)
@@ -148,6 +194,93 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
         // Well inside one blackholed attempt's timeout (4 s here), so it did not wait for a slot.
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"took {clock.Elapsed}");
         Assert.InRange(factory.Receiver.MaxInFlight(stuck.Host), 1, 2);
+    }
+
+    [Fact]
+    public async Task BlackholedUsers_OnASharedHost_DoNotStarveAHealthyUserOnIt()
+    {
+        // Every Home Assistant Cloud user posts to the same host. Two users' hung instances must
+        // not use up that host's share, or every other user there waits out their timeouts.
+        var shared = $"hooks-{Guid.NewGuid():N}.example.test";
+        foreach (var name in new[] { "stuck-a", "stuck-b" })
+        {
+            var stuck = await SubscribeAsync(factory, _client, shared, $"/{name}");
+            factory.Receiver.HangUrl($"https://{shared}/{name}");
+            for (var i = 0; i < 3; i++)
+            {
+                await StartPrintAsync(stuck);
+            }
+        }
+        Assert.True(await WaitUntil(() => factory.Receiver.Received(shared).Count >= 2, TimeSpan.FromSeconds(10)));
+
+        var healthy = await SubscribeAsync(factory, _client, shared, "/healthy");
+        var clock = Stopwatch.StartNew();
+        await StartPrintAsync(healthy);
+
+        Assert.True(await WaitUntil(() => factory.Receiver.Received(shared).Any(r => r.Url.AbsolutePath == "/healthy"), TimeSpan.FromSeconds(10)));
+        // Well inside one hung attempt's timeout (4 s here).
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"took {clock.Elapsed}");
+    }
+
+    [Fact]
+    public async Task ASubscription_GetsItsEventsInOrder_EvenWhenTheFirstIsRetried()
+    {
+        var a = await SubscribeAsync(factory, _client, "order", events: ["print.started", "print.finished"]);
+        factory.Receiver.Respond(a.Host, HttpStatusCode.ServiceUnavailable);
+
+        var printId = await StartPrintAsync(a);
+        await FinishPrintAsync(_client, a.User, printId);
+
+        Assert.True(await WaitUntil(() => factory.Receiver.Received(a.Host).Count == 3, TimeSpan.FromSeconds(15)));
+        Assert.Equal(
+            ["print.started", "print.started", "print.finished"],
+            factory.Receiver.Received(a.Host).Select(r => r.Headers["X-PrintLog-Event"]).ToArray());
+    }
+
+    [Fact]
+    public async Task ADeliveryOverTheQueueCapacity_IsRecordedAsDropped()
+    {
+        await using var host = new Factory { Settings = new Dictionary<string, string?> { ["Webhooks:DeliveryQueueCapacity"] = "1" } };
+        var client = host.CreateClient();
+        var a = await SubscribeAsync(host, client, "full");
+        host.Receiver.Hang(a.Host);
+
+        await StartPrintAsync(client, a);
+        Assert.True(await WaitUntil(() => host.Receiver.Received(a.Host).Count == 1, TimeSpan.FromSeconds(10)));
+        await StartPrintAsync(client, a);
+
+        Assert.True(await WaitUntil(() => StoredFor(host, a.User.Id)?.LastDeliveryResult == "dropped", TimeSpan.FromSeconds(3)),
+            $"stored: {StoredFor(host, a.User.Id)?.LastDeliveryResult}");
+        Assert.Equal(1, StoredFor(host, a.User.Id)!.ConsecutiveFailures);
+    }
+
+    [Fact]
+    public async Task ADeliveryThatWaitedTooLongForCapacity_IsRecordedAsDropped()
+    {
+        await using var host = new Factory
+        {
+            Settings = new Dictionary<string, string?>
+            {
+                ["Webhooks:MaxInFlightPerUser"] = "1",
+                ["Webhooks:MaxDeliveryWait"] = "00:00:01",
+                ["Webhooks:Timeout"] = "00:00:02",
+            }
+        };
+        var client = host.CreateClient();
+        // The user's one slot goes to the hung start; the finish, for another webhook, has to wait.
+        var stuck = await SubscribeAsync(host, client, "slow", events: ["print.started"]);
+        host.Receiver.Hang(stuck.Host);
+        var waitingHost = $"waiting-{Guid.NewGuid():N}.example.test";
+        var waitingId = await SubscribeUrlAsync(client, stuck.User, $"https://{waitingHost}/api/webhook/x", ["print.finished"]);
+
+        var printId = await StartPrintAsync(client, stuck);
+        Assert.True(await WaitUntil(() => host.Receiver.Received(stuck.Host).Count == 1, TimeSpan.FromSeconds(10)));
+        await FinishPrintAsync(client, stuck.User, printId);
+
+        Assert.True(await WaitUntil(() => Stored(host, waitingId)?.LastDeliveryResult is not null, TimeSpan.FromSeconds(10)));
+        Assert.Equal("dropped", Stored(host, waitingId)!.LastDeliveryResult);
+        Assert.Equal(1, Stored(host, waitingId)!.ConsecutiveFailures);
+        Assert.Empty(host.Receiver.Received(waitingHost));
     }
 
     [Fact]

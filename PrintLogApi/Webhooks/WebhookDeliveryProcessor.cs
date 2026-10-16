@@ -172,6 +172,13 @@ public sealed class WebhookDeliveryProcessor(
         return WebhookAttemptOutcome.Done;
     }
 
+    /// <summary>
+    /// Records that the scheduler dropped <paramref name="delivery"/> without attempting it. It
+    /// counts as a failure, like any delivery the receiver never got.
+    /// </summary>
+    public Task RecordDroppedAsync(WebhookDelivery delivery, CancellationToken ct) =>
+        Record(delivery, new WebhookAttemptResult(WebhookDeliveryResults.Dropped, null, Retryable: false), ct);
+
     private async Task Record(WebhookDelivery delivery, WebhookAttemptResult result, CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;

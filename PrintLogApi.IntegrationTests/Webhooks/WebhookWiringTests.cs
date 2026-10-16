@@ -74,6 +74,24 @@ public class WebhookWiringTests
     }
 
     [Fact]
+    public async Task TheHandler_AllowsAsManyConnectionsToAHost_AsTheSchedulerDoes()
+    {
+        // A tighter pool would be a second, hidden host cap: hung requests to a shared host
+        // (Nabu Casa) would hold every connection and queue everyone else inside the handler.
+        await using var factory = new ProductionWiringFactory();
+        HttpMessageHandler? handler = factory.Services.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(WebhookSender.HttpClientName);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler;
+        }
+
+        var sockets = Assert.IsType<SocketsHttpHandler>(handler);
+        var options = factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOptions>>().Value;
+        Assert.True(sockets.MaxConnectionsPerServer >= options.MaxInFlightPerHost,
+            $"{sockets.MaxConnectionsPerServer} connections for {options.MaxInFlightPerHost} attempts");
+    }
+
+    [Fact]
     public async Task ADelivery_SendsNoTraceHeaders_AndKeepsItsPathOutOfTelemetryAndLogs()
     {
         await using var factory = new LoopbackWiringFactory();

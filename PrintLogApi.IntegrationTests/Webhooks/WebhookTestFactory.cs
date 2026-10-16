@@ -135,6 +135,7 @@ public sealed class RecordingWebhookReceiver : HttpMessageHandler
     private readonly ConcurrentDictionary<string, Func<CancellationToken, Task<HttpResponseMessage>>> _defaults = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ReceivedWebhook>> _received = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, int[]> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _hungUrls = new(StringComparer.OrdinalIgnoreCase);
 
     private static HttpResponseMessage Status(HttpStatusCode status) => new(status) { Content = new StringContent("response body") };
 
@@ -163,6 +164,12 @@ public sealed class RecordingWebhookReceiver : HttpMessageHandler
         await Task.Delay(Timeout.Infinite, ct);
         return Status(HttpStatusCode.OK);
     };
+
+    /// <summary>
+    /// Every request to exactly <paramref name="url"/> waits until the sender gives up, while other
+    /// paths on the same host answer normally (users sharing one host, such as Nabu Casa).
+    /// </summary>
+    public void HangUrl(string url) => _hungUrls[url] = true;
 
     /// <summary>Every request to <paramref name="host"/> takes <paramref name="delay"/>, then succeeds.</summary>
     public void Delay(string host, TimeSpan delay) => _defaults[host] = async ct =>
@@ -194,6 +201,10 @@ public sealed class RecordingWebhookReceiver : HttpMessageHandler
         while (now > (max = Volatile.Read(ref counts[1])) && Interlocked.CompareExchange(ref counts[1], now, max) != max) { }
         try
         {
+            if (_hungUrls.ContainsKey(request.RequestUri.AbsoluteUri))
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
             if (_scripts.TryGetValue(host, out var script) && script.TryDequeue(out var next))
             {
                 return await next(cancellationToken);
