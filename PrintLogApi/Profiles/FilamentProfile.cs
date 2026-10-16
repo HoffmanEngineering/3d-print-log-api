@@ -64,13 +64,26 @@ public class FilamentProfile : Profile
         ExpressionSplice.Inline<Filament, Func<PrintFilament, double>, double>((f, row) => f.PrintFilaments!.Sum(row), UsageRowMg);
 
     /// <summary>
-    /// Milligrams taken off the spool by prints and by adjustments together: print usage less the
-    /// net adjustment. An adjustment is signed (negative removes filament, positive adds it back)
-    /// and is normalized into AmountMg when saved, whatever measure it was entered in.
+    /// One adjustment's signed milligrams, as the spool sees it: negative removes filament, positive
+    /// adds it back. An adjustment is normalized into AmountMg when saved, whatever measure it was
+    /// entered in, so a row without one counts as nothing. The consumption an adjustment represents
+    /// is the negation of this (Materials analytics, #231).
     /// </summary>
-    private static readonly Expression<Func<Filament, double>> ConsumedMgExact = ExpressionSplice.With<Filament, double, double>(
-        (f, prints) => prints - f.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)),
-        PrintUsageMg);
+    public static readonly Expression<Func<FilamentAdjustment, double>> AdjustmentAmountMg =
+        adj => (double)(adj.AmountMg ?? 0);
+
+    /// <summary>The spool's net adjustment, by <see cref="AdjustmentAmountMg"/>.</summary>
+    private static readonly Expression<Func<Filament, double>> NetAdjustmentMg =
+        ExpressionSplice.Inline<Filament, Func<FilamentAdjustment, double>, double>((f, adjustment) => f.FilamentAdjustments!.Sum(adjustment), AdjustmentAmountMg);
+
+    /// <summary>
+    /// Milligrams taken off the spool by prints and by adjustments together: print usage less the
+    /// net adjustment (<see cref="AdjustmentAmountMg"/>).
+    /// </summary>
+    private static readonly Expression<Func<Filament, double>> ConsumedMgExact = ExpressionSplice.With<Filament, double, double, double>(
+        (f, prints, adjustments) => prints - adjustments,
+        PrintUsageMg,
+        NetAdjustmentMg);
 
     /// <summary>
     /// Remaining milligrams: the nominal weight less <see cref="ConsumedMg"/>, or null for a spool
