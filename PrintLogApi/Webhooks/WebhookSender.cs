@@ -16,6 +16,9 @@ public static class WebhookDeliveryResults
     public const string Timeout = "timeout";
     public const string ConnectionFailed = "connection_failed";
     public const string BlockedAddress = "blocked_address";
+
+    /// <summary>The stored secret cannot be decrypted with the configured keys; rotate it.</summary>
+    public const string SecretUnavailable = "secret_unavailable";
 }
 
 public sealed record WebhookAttemptResult(string Result, int? StatusCode, bool Retryable)

@@ -9,13 +9,38 @@ using PrintLogApi.Services;
 namespace PrintLogApi.Webhooks;
 
 /// <summary>
-/// Delivers one queued event to every enabled subscription of its user that selected it (#235).
+/// One subscription's delivery of one event: a unit of work on its own, so a slow or dead receiver
+/// holds up only its own deliveries. <see cref="Url"/> and <see cref="EncryptedSecret"/> are the
+/// subscription as it was when the event was fanned out; a retry checks they still hold.
+/// </summary>
+public sealed record WebhookDelivery(
+    Guid SubscriptionId,
+    long UserId,
+    string Url,
+    string EncryptedSecret,
+    WebhookMessage Message,
+    int Attempt,
+    int MaxAttempts)
+{
+    public string Host => new Uri(Url).Host.ToLowerInvariant();
+}
+
+/// <summary>What an attempt left to do: <see cref="Next"/> after <see cref="Delay"/>, or nothing.</summary>
+public sealed record WebhookAttemptOutcome(WebhookDelivery? Next, TimeSpan Delay)
+{
+    public static readonly WebhookAttemptOutcome Done = new(null, TimeSpan.Zero);
+}
+
+/// <summary>
+/// Turns a queued event into deliveries and runs single attempts of them (#235). The scheduling
+/// (concurrency, per-user and per-host caps, waiting out a retry without holding a slot) is
+/// <see cref="WebhookDeliveryService"/>'s.
 /// </summary>
 /// <remarks>
 /// The body is built once, from the print loaded by id <b>and</b> owner, so a webhook can only ever
-/// carry its own user's data. Each subscription then gets up to <c>1 + RetryDelays.Length</c>
-/// attempts. The outcome is written with single-statement updates, so two events finishing at once
-/// cannot lose a failure, and only the update that actually turns a subscription off notifies.
+/// carry its own user's data. The outcome is written with single-statement updates, so two events
+/// finishing at once cannot lose a failure, and only the update that actually turns a subscription
+/// off notifies.
 /// </remarks>
 public sealed class WebhookDeliveryProcessor(
     PrintLogContext context,
@@ -29,75 +54,106 @@ public sealed class WebhookDeliveryProcessor(
 {
     private readonly WebhookOptions _options = options.Value;
 
-    public async Task ProcessAsync(WebhookEvent webhookEvent, CancellationToken ct)
+    /// <summary>
+    /// One delivery per enabled subscription of the event's user that selected it, all carrying the
+    /// same body. A subscription whose circuit is open (<see cref="WebhookOptions.CircuitBreakerThreshold"/>
+    /// failures in a row, the last within <see cref="WebhookOptions.CircuitBreakerCooldown"/>) is
+    /// skipped; once the cooldown has passed it gets a single probe with no retries.
+    /// </summary>
+    public async Task<IReadOnlyList<WebhookDelivery>> PrepareAsync(WebhookEvent webhookEvent, CancellationToken ct)
     {
-        if (!protector.IsConfigured)
+        var flag = WebhookEventTypes.ToFlag(webhookEvent.EventType);
+        if (!protector.IsConfigured || flag == WebhookEvents.None)
         {
-            return;
+            return [];
         }
 
-        var flag = WebhookEventTypes.ToFlag(webhookEvent.EventType);
         var subscriptions = await context.WebhookSubscriptions.AsNoTracking()
             .Where(w => w.UserId == webhookEvent.UserId && w.Enabled && (w.Events & flag) == flag)
             .ToListAsync(ct);
-        if (flag == WebhookEvents.None || subscriptions.Count == 0)
+        if (subscriptions.Count == 0)
         {
-            return;
+            return [];
         }
 
         var body = await BuildBody(webhookEvent, ct);
         if (body is null)
         {
             // Deleted before it could be delivered; there is nothing left to describe.
-            return;
+            return [];
         }
         var message = new WebhookMessage(webhookEvent.EventType, webhookEvent.EventId, body);
 
+        var now = clock.GetUtcNow().UtcDateTime;
+        var deliveries = new List<WebhookDelivery>();
         foreach (var subscription in subscriptions)
         {
-            await Deliver(subscription, message, ct);
+            var maxAttempts = 1 + _options.EffectiveRetryDelays.Length;
+            if (subscription.ConsecutiveFailures >= _options.CircuitBreakerThreshold)
+            {
+                if (subscription.LastDeliveryAt is { } last && now - last < _options.CircuitBreakerCooldown)
+                {
+                    logger.LogInformation("Webhook {SubscriptionId}: circuit open after {Failures} failures; skipped {EventId}.",
+                        subscription.Id, subscription.ConsecutiveFailures, webhookEvent.EventId);
+                    continue;
+                }
+                maxAttempts = 1;
+            }
+            deliveries.Add(new WebhookDelivery(subscription.Id, subscription.UserId, subscription.Url,
+                subscription.EncryptedSecret, message, Attempt: 1, maxAttempts));
         }
+        return deliveries;
     }
 
-    private async Task Deliver(WebhookSubscription subscription, WebhookMessage message, CancellationToken ct)
+    /// <summary>
+    /// Sends one attempt of <paramref name="delivery"/>. Returns the next attempt and how long to
+    /// wait first when the receiver may succeed later; otherwise records the outcome and is done.
+    /// A retry first checks that the subscription still exists, is on, and has the URL and secret
+    /// it was fanned out with, and quietly stops when any of that changed.
+    /// </summary>
+    public async Task<WebhookAttemptOutcome> AttemptAsync(WebhookDelivery delivery, CancellationToken ct)
     {
+        if (delivery.Attempt > 1)
+        {
+            var current = await context.WebhookSubscriptions.AsNoTracking()
+                .Where(w => w.Id == delivery.SubscriptionId)
+                .Select(w => new { w.Enabled, w.Url, w.EncryptedSecret })
+                .FirstOrDefaultAsync(ct);
+            if (current is null || !current.Enabled || current.Url != delivery.Url || current.EncryptedSecret != delivery.EncryptedSecret)
+            {
+                return WebhookAttemptOutcome.Done;
+            }
+        }
+
         string secret;
         try
         {
-            secret = protector.Unprotect(subscription.Id, subscription.EncryptedSecret);
+            secret = protector.Unprotect(delivery.SubscriptionId, delivery.EncryptedSecret);
         }
         catch (CryptographicException)
         {
-            // Its key was removed from configuration. Rotating the secret recovers it.
-            logger.LogWarning("Webhook {SubscriptionId}: the secret cannot be decrypted with the configured keys.", subscription.Id);
-            return;
+            // Its key was removed from configuration. Recorded so the owner sees why; rotating the
+            // secret recovers it.
+            logger.LogWarning("Webhook {SubscriptionId}: the secret cannot be decrypted with the configured keys.", delivery.SubscriptionId);
+            await Record(delivery, new WebhookAttemptResult(WebhookDeliveryResults.SecretUnavailable, null, Retryable: false), ct);
+            return WebhookAttemptOutcome.Done;
         }
 
-        var url = new Uri(subscription.Url);
-        WebhookAttemptResult result;
-        var attempt = 1;
-        while (true)
+        var result = await sender.SendAsync(new Uri(delivery.Url), secret, delivery.Message, delivery.Attempt, ct);
+        if (!result.Succeeded && result.Retryable && delivery.Attempt < delivery.MaxAttempts)
         {
-            result = await sender.SendAsync(url, secret, message, attempt, ct);
-            if (result.Succeeded || !result.Retryable || attempt > _options.EffectiveRetryDelays.Length)
-            {
-                break;
-            }
-            var delay = _options.EffectiveRetryDelays[attempt - 1];
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, clock, ct);
-            }
-            attempt++;
+            var delay = _options.EffectiveRetryDelays[Math.Min(delivery.Attempt, _options.EffectiveRetryDelays.Length) - 1];
+            return new WebhookAttemptOutcome(delivery with { Attempt = delivery.Attempt + 1 }, delay);
         }
 
-        await Record(subscription, url.Host, result, ct);
+        await Record(delivery, result, ct);
+        return WebhookAttemptOutcome.Done;
     }
 
-    private async Task Record(WebhookSubscription subscription, string host, WebhookAttemptResult result, CancellationToken ct)
+    private async Task Record(WebhookDelivery delivery, WebhookAttemptResult result, CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;
-        var rows = context.WebhookSubscriptions.Where(w => w.Id == subscription.Id);
+        var rows = context.WebhookSubscriptions.Where(w => w.Id == delivery.SubscriptionId);
 
         if (result.Succeeded)
         {
@@ -126,13 +182,14 @@ public sealed class WebhookDeliveryProcessor(
             return;
         }
 
+        var host = delivery.Host;
         logger.LogWarning("Webhook {SubscriptionId} to {Host} was turned off after {Failures} failed deliveries in a row.",
-            subscription.Id, host, max);
+            delivery.SubscriptionId, host, max);
         try
         {
             // The host only: a Home Assistant webhook URL's path is its secret.
             await notificationService.CreateNotification(
-                subscription.UserId,
+                delivery.UserId,
                 NotificationType.SystemAnnouncement,
                 "Webhook turned off",
                 $"Your webhook to {host} was turned off after {max} failed deliveries in a row. Check that it is reachable, then turn it back on.",
@@ -140,7 +197,7 @@ public sealed class WebhookDeliveryProcessor(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Could not notify the owner of webhook {SubscriptionId} that it was turned off.", subscription.Id);
+            logger.LogError(ex, "Could not notify the owner of webhook {SubscriptionId} that it was turned off.", delivery.SubscriptionId);
         }
     }
 

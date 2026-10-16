@@ -474,8 +474,10 @@ public class UserDeletionService : IUserDeletionService
                 .Where(o => o.UserId == userId)
                 .ExecuteDeleteAsync();
 
-            // Delete webhook subscriptions (#235). The FK cascades too. An event already queued
-            // finds no subscription when it is delivered, so nothing is sent after this.
+            // Delete webhook subscriptions (#235). The FK cascades too. An event not yet fanned out
+            // finds no subscription, and a delivery already under way re-reads its row before each
+            // retry and stops. An attempt already on the wire can still complete; nothing starts
+            // after it.
             await _context.WebhookSubscriptions
                 .Where(w => w.UserId == userId)
                 .ExecuteDeleteAsync();

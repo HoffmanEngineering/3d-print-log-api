@@ -356,6 +356,25 @@ public class WebhooksControllerTests(WebhookTestFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Test_WithAnUndecryptableSecret_SaysSo_InsteadOfFailing()
+    {
+        var user = await factory.CreateUserAsync();
+        var host = $"test-{Guid.NewGuid():N}.example.test";
+        var created = await CreateAsync(user, HookUrl(host));
+        var foreign = factory.Services.GetRequiredService<WebhookSecretProtector>().Protect(Guid.NewGuid(), "whsec_other");
+        await WithDbAsync(db => db.WebhookSubscriptions.Where(s => s.Id == created.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.EncryptedSecret, foreign), Ct));
+
+        var response = await SendAsync(HttpMethod.Post, $"/api/Webhooks/{created.Id}/test", user);
+        var result = (await response.Content.ReadFromJsonAsync<WebhookTestResultDto>(Ct))!;
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(result.Delivered);
+        Assert.Equal("secret_unavailable", result.Result);
+        Assert.Empty(factory.Receiver.Received(host));
+    }
+
+    [Fact]
     public async Task Test_ReportsAFailure_WithoutRetrying_OrCountingIt()
     {
         var user = await factory.CreateUserAsync();

@@ -46,15 +46,32 @@ public class WebhookTestFactory : CustomWebApplicationFactory
         });
     }
 
-    /// <summary>Delivers every queued event, in order, the way the background worker would.</summary>
+    /// <summary>
+    /// Delivers every queued event, in order, the way the background worker would: each
+    /// subscription's delivery runs attempt by attempt until it is done, with the retry waits
+    /// skipped.
+    /// </summary>
     public async Task<int> DeliverPendingAsync(CancellationToken ct)
     {
         var queue = Services.GetRequiredService<WebhookEventQueue>();
         var delivered = 0;
         while (queue.Reader.TryRead(out var webhookEvent))
         {
-            using var scope = Services.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().ProcessAsync(webhookEvent, ct);
+            IReadOnlyList<WebhookDelivery> deliveries;
+            using (var scope = Services.CreateScope())
+            {
+                deliveries = await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().PrepareAsync(webhookEvent, ct);
+            }
+            foreach (var first in deliveries)
+            {
+                WebhookDelivery? delivery = first;
+                while (delivery is not null)
+                {
+                    using var scope = Services.CreateScope();
+                    var outcome = await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().AttemptAsync(delivery, ct);
+                    delivery = outcome.Next;
+                }
+            }
             delivered++;
         }
         return delivered;
@@ -109,34 +126,59 @@ public class WebhookTestFactory : CustomWebApplicationFactory
 
 /// <summary>
 /// Stands in for the receiving end. Requests are recorded per host, and each host answers from its
-/// own script (200 when the script is empty), so tests that use their own host never see each
-/// other's deliveries.
+/// own script (then its default, 200 unless changed), so tests that use their own host never see
+/// each other's deliveries. It also counts requests in flight per host.
 /// </summary>
 public sealed class RecordingWebhookReceiver : HttpMessageHandler
 {
-    private readonly ConcurrentDictionary<string, ConcurrentQueue<Func<HttpResponseMessage>>> _scripts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<Func<CancellationToken, Task<HttpResponseMessage>>>> _scripts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Func<CancellationToken, Task<HttpResponseMessage>>> _defaults = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ReceivedWebhook>> _received = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int[]> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+
+    private static HttpResponseMessage Status(HttpStatusCode status) => new(status) { Content = new StringContent("response body") };
 
     public void Respond(string host, params HttpStatusCode[] statuses)
     {
-        var script = _scripts.GetOrAdd(host, _ => new());
         foreach (var status in statuses)
         {
-            script.Enqueue(() => new HttpResponseMessage(status) { Content = new StringContent("response body") });
+            Script(host, _ => Task.FromResult(Status(status)));
         }
     }
+
+    /// <summary>Answers the next request with whatever <paramref name="respond"/> does.</summary>
+    public void Respond(string host, Func<HttpResponseMessage> respond) => Script(host, _ => Task.FromResult(respond()));
 
     public void Fail(string host, int times, Func<Exception> exception)
     {
-        var script = _scripts.GetOrAdd(host, _ => new());
         for (var i = 0; i < times; i++)
         {
-            script.Enqueue(() => throw exception());
+            Script(host, _ => throw exception());
         }
     }
 
+    /// <summary>Every request to <paramref name="host"/> waits until the sender gives up.</summary>
+    public void Hang(string host) => _defaults[host] = async ct =>
+    {
+        await Task.Delay(Timeout.Infinite, ct);
+        return Status(HttpStatusCode.OK);
+    };
+
+    /// <summary>Every request to <paramref name="host"/> takes <paramref name="delay"/>, then succeeds.</summary>
+    public void Delay(string host, TimeSpan delay) => _defaults[host] = async ct =>
+    {
+        await Task.Delay(delay, ct);
+        return Status(HttpStatusCode.OK);
+    };
+
     public IReadOnlyList<ReceivedWebhook> Received(string host) =>
         _received.TryGetValue(host, out var queue) ? queue.ToList() : [];
+
+    /// <summary>The most requests to <paramref name="host"/> that were in flight at once.</summary>
+    public int MaxInFlight(string host) => _inFlight.TryGetValue(host, out var counts) ? Volatile.Read(ref counts[1]) : 0;
+
+    private void Script(string host, Func<CancellationToken, Task<HttpResponseMessage>> respond) =>
+        _scripts.GetOrAdd(host, _ => new()).Enqueue(respond);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -146,11 +188,26 @@ public sealed class RecordingWebhookReceiver : HttpMessageHandler
             .ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
         _received.GetOrAdd(host, _ => new()).Enqueue(new ReceivedWebhook(request.Method, request.RequestUri, headers, body));
 
-        if (_scripts.TryGetValue(host, out var script) && script.TryDequeue(out var next))
+        var counts = _inFlight.GetOrAdd(host, _ => new int[2]);
+        var now = Interlocked.Increment(ref counts[0]);
+        int max;
+        while (now > (max = Volatile.Read(ref counts[1])) && Interlocked.CompareExchange(ref counts[1], now, max) != max) { }
+        try
         {
-            return next();
+            if (_scripts.TryGetValue(host, out var script) && script.TryDequeue(out var next))
+            {
+                return await next(cancellationToken);
+            }
+            if (_defaults.TryGetValue(host, out var fallback))
+            {
+                return await fallback(cancellationToken);
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok", Encoding.UTF8) };
         }
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok", Encoding.UTF8) };
+        finally
+        {
+            Interlocked.Decrement(ref counts[0]);
+        }
     }
 }
 

@@ -577,53 +577,124 @@ public class WebhookDispatchTests : IClassFixture<WebhookTestFactory>
         Assert.Empty(_factory.Receiver.Received(a.Host));
     }
 
-    #endregion
-}
-
-/// <summary>The background worker really drains the queue when the host runs it.</summary>
-public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory factory) : IClassFixture<WebhookDeliveryServiceTests.Factory>
-{
-    /// <summary>The webhook host, with its background worker put back.</summary>
-    public sealed class Factory : WebhookTestFactory
+    [Fact]
+    public async Task AnUndecryptableSecret_IsRecorded_AndNothingIsSent()
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            base.ConfigureWebHost(builder);
-            builder.ConfigureServices(services => services.AddHostedService<WebhookDeliveryService>());
-        }
+        var a = await ArrangeAsync();
+        await CorruptSecretAsync(a.Subscription.Id);
+
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        Assert.Empty(_factory.Receiver.Received(a.Host));
+        var stored = await StoredAsync(a.Subscription.Id);
+        Assert.Equal("secret_unavailable", stored.LastDeliveryResult);
+        Assert.Equal(1, stored.ConsecutiveFailures);
     }
 
     [Fact]
-    public async Task AQueuedEvent_IsDeliveredInTheBackground()
+    public async Task ARetry_Stops_WhenTheWebhookWasTurnedOffMeanwhile()
     {
-        var ct = TestContext.Current.CancellationToken;
-        var client = factory.CreateClient();
-        var user = await factory.CreateUserAsync();
-        var printerId = await factory.CreatePrinterAsync(user);
-        var host = $"bg-{Guid.NewGuid():N}.example.test";
-
-        var subscribe = new HttpRequestMessage(HttpMethod.Post, "/api/Webhooks")
+        var a = await ArrangeAsync();
+        _factory.Receiver.Respond(a.Host, () =>
         {
-            Content = JsonContent.Create(new { url = $"https://{host}/api/webhook/x" }),
-        };
-        subscribe.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
-        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(subscribe, ct)).StatusCode);
+            Update(a.Subscription.Id, w => w.Enabled = false);
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
 
-        var create = new HttpRequestMessage(HttpMethod.Post, "/api/Prints")
-        {
-            Content = JsonContent.Create(new AddPrintDTO { Title = "Background", PrinterId = printerId, Status = PrintStatus.Printing, FilamentUsage = [] }),
-        };
-        create.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
-        Assert.True((await client.SendAsync(create, ct)).IsSuccessStatusCode);
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
 
-        var deadline = DateTime.UtcNow.AddSeconds(15);
-        while (factory.Receiver.Received(host).Count == 0 && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(50, ct);
-        }
-
-        Assert.Single(factory.Receiver.Received(host));
+        Assert.Single(_factory.Receiver.Received(a.Host));
     }
+
+    [Fact]
+    public async Task ARetry_Stops_WhenTheUrlChangedMeanwhile()
+    {
+        var a = await ArrangeAsync();
+        _factory.Receiver.Respond(a.Host, () =>
+        {
+            Update(a.Subscription.Id, w => w.Url = "https://elsewhere.example.test/api/webhook/new");
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        Assert.Single(_factory.Receiver.Received(a.Host));
+        Assert.Empty(_factory.Receiver.Received("elsewhere.example.test"));
+    }
+
+    [Fact]
+    public async Task ARetry_Stops_WhenTheSecretWasRotatedMeanwhile()
+    {
+        var a = await ArrangeAsync();
+        _factory.Receiver.Respond(a.Host, () =>
+        {
+            Update(a.Subscription.Id, w => w.EncryptedSecret = "v1.rotated.AAAA");
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        Assert.Single(_factory.Receiver.Received(a.Host));
+    }
+
+    [Fact]
+    public async Task AnOpenCircuit_SkipsTheDelivery_UntilTheCooldownPasses()
+    {
+        var a = await ArrangeAsync();
+        Update(a.Subscription.Id, w =>
+        {
+            w.ConsecutiveFailures = 5;
+            w.LastDeliveryAt = DateTime.UtcNow;
+        });
+
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        Assert.Empty(_factory.Receiver.Received(a.Host));
+        Assert.Equal(5, (await StoredAsync(a.Subscription.Id)).ConsecutiveFailures);
+    }
+
+    [Fact]
+    public async Task AfterTheCooldown_OneProbeIsSent_WithoutRetries()
+    {
+        var a = await ArrangeAsync();
+        Update(a.Subscription.Id, w =>
+        {
+            w.ConsecutiveFailures = 5;
+            w.LastDeliveryAt = DateTime.UtcNow.AddHours(-1);
+        });
+        _factory.Receiver.Respond(a.Host, HttpStatusCode.ServiceUnavailable, HttpStatusCode.ServiceUnavailable);
+
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        Assert.Single(_factory.Receiver.Received(a.Host));
+        Assert.Equal(6, (await StoredAsync(a.Subscription.Id)).ConsecutiveFailures);
+    }
+
+    private void Update(Guid id, Action<WebhookSubscription> change)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var row = db.WebhookSubscriptions.Single(w => w.Id == id);
+        change(row);
+        db.SaveChanges();
+    }
+
+    private Task CorruptSecretAsync(Guid id)
+    {
+        // A value encrypted for another row: well formed, but it cannot be decrypted for this one.
+        var protector = _factory.Services.GetRequiredService<WebhookSecretProtector>();
+        var foreign = protector.Protect(Guid.NewGuid(), "whsec_other");
+        Update(id, w => w.EncryptedSecret = foreign);
+        return Task.CompletedTask;
+    }
+
+    #endregion
 }
 
 /// <summary>Private addresses open only in Development, whatever the setting says elsewhere.</summary>

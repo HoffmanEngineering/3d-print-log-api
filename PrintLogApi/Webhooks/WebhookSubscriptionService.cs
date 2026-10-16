@@ -193,7 +193,18 @@ public sealed class WebhookSubscriptionService(
             new WebhookTestEventData("This is a test event from 3D Print Log.", row.Id));
         var body = JsonSerializer.SerializeToUtf8Bytes(payload, WebhookJsonContext.Default.WebhookPayloadWebhookTestEventData);
 
-        var result = await sender.SendAsync(new Uri(row.Url), protector.Unprotect(row.Id, row.EncryptedSecret),
+        string secret;
+        try
+        {
+            secret = protector.Unprotect(row.Id, row.EncryptedSecret);
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // The key that encrypted it is gone. Said plainly, so the user knows to rotate it.
+            return new WebhookTestResultDto { Delivered = false, StatusCode = null, Result = WebhookDeliveryResults.SecretUnavailable };
+        }
+
+        var result = await sender.SendAsync(new Uri(row.Url), secret,
             new WebhookMessage(WebhookEventTypes.Test, eventId, body), attempt: 1, ct);
         return new WebhookTestResultDto { Delivered = result.Succeeded, StatusCode = result.StatusCode, Result = result.Result };
     }

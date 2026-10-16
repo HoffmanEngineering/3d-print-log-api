@@ -44,8 +44,31 @@ public sealed class WebhookOptions
     /// <summary>Events waiting for delivery before new ones are dropped.</summary>
     public int QueueCapacity { get; set; } = 1000;
 
-    /// <summary>Events delivered at the same time.</summary>
-    public int MaxConcurrentDeliveries { get; set; } = 8;
+    /// <summary>
+    /// Deliveries (one event to one subscription) waiting for a worker, retries included, before
+    /// new ones are dropped.
+    /// </summary>
+    public int DeliveryQueueCapacity { get; set; } = 10_000;
+
+    /// <summary>Delivery attempts in flight at once across all users. Async I/O, so cheap.</summary>
+    public int MaxConcurrentDeliveries { get; set; } = 32;
+
+    /// <summary>
+    /// Attempts in flight at once for one user, and to one host. These are what keep one user's
+    /// dead receiver, or an outage at a shared host such as Nabu Casa, from taking every worker.
+    /// </summary>
+    public int MaxInFlightPerUser { get; set; } = 2;
+
+    public int MaxInFlightPerHost { get; set; } = 2;
+
+    /// <summary>
+    /// Failures in a row after which a subscription's circuit opens: while the last failure is
+    /// younger than <see cref="CircuitBreakerCooldown"/>, its deliveries are skipped outright, and
+    /// after that each gets one probe with no retries until one succeeds.
+    /// </summary>
+    public int CircuitBreakerThreshold { get; set; } = 3;
+
+    public TimeSpan CircuitBreakerCooldown { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
@@ -68,6 +91,11 @@ public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
         if (options.MaxResponseBytes < 0) failures.Add($"{nameof(WebhookOptions.MaxResponseBytes)} must not be negative.");
         if (options.QueueCapacity <= 0) failures.Add($"{nameof(WebhookOptions.QueueCapacity)} must be positive.");
         if (options.MaxConcurrentDeliveries <= 0) failures.Add($"{nameof(WebhookOptions.MaxConcurrentDeliveries)} must be positive.");
+        if (options.DeliveryQueueCapacity <= 0) failures.Add($"{nameof(WebhookOptions.DeliveryQueueCapacity)} must be positive.");
+        if (options.MaxInFlightPerUser <= 0) failures.Add($"{nameof(WebhookOptions.MaxInFlightPerUser)} must be positive.");
+        if (options.MaxInFlightPerHost <= 0) failures.Add($"{nameof(WebhookOptions.MaxInFlightPerHost)} must be positive.");
+        if (options.CircuitBreakerThreshold <= 0) failures.Add($"{nameof(WebhookOptions.CircuitBreakerThreshold)} must be positive.");
+        if (options.CircuitBreakerCooldown < TimeSpan.Zero) failures.Add($"{nameof(WebhookOptions.CircuitBreakerCooldown)} must not be negative.");
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
