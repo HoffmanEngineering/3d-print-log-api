@@ -86,11 +86,8 @@ public sealed record PrintAggregate(
         static bool Successful(PrintStatus s) => s is PrintStatus.Success or PrintStatus.PartialSuccess;
         static long Seconds(PrintRow p) => PrintMetrics.Resolve(p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds);
 
-        // Rounded per print, as PrintMetrics.MaterialMgExpr rounds, so this agrees with it.
-        var rowMaterial = usage
-            .Where(u => Successful(u.Status))
-            .GroupBy(u => u.PrintId)
-            .Sum(g => PrintMetrics.Round(g.Sum(u => u.Mg)));
+        // Each row rounded once, as PrintMetrics.MaterialMgExpr rounds, so this agrees with it.
+        var rowMaterial = usage.Where(u => Successful(u.Status)).Sum(u => PrintMetrics.Round(u.Mg));
         var otherMaterial = prints.Where(p => Successful(p.Status)).Sum(p => (long)PrintMetrics.Resolve(p.FilamentUsageMg, p.EstimatedFilamentUsageMg));
 
         // Any print with a recorded slicer, whatever logged it: the slicer is set only by a slicer

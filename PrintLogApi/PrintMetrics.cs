@@ -57,12 +57,15 @@ public static class PrintMetrics
     /// disjoint, so they add. Every term obeys the zero-or-negative rule above, so a stored 0 or
     /// a negative falls back rather than contributing.
     ///
-    /// <para>The rows are rounded once per print, so every total built from this one (overview,
-    /// printer and activity analytics, achievements, the MCP summary) agrees to the milligram.</para>
+    /// <para>Each row is rounded to the milligram once and the rounded rows are added, so a
+    /// print's parts always sum to its total (get_print's MaterialUsage invariant) and every total
+    /// built from this rule (overview, printer and activity analytics, achievements, the MCP
+    /// summary, the print list, projects) agrees to the milligram. SQL's ROUND rounds midpoints
+    /// away from zero; <see cref="Round"/> does the same in memory.</para>
     /// </summary>
     public static Expression<Func<Print, long>> MaterialMgExpr { get; } =
         ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
-            (p, row) => (long)Math.Round(p.FilamentUsage!.Sum(row))
+            (p, row) => p.FilamentUsage!.Sum(pf => (long)Math.Round(row(pf)))
                 + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
                    : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
                    : 0),
@@ -75,22 +78,22 @@ public static class PrintMetrics
     /// </summary>
     public static Expression<Func<Print, long>> OwnedMaterialMgExpr(long userId) =>
         ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
-            (p, row) => (long)Math.Round(p.FilamentUsage!
+            (p, row) => p.FilamentUsage!
                     .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
-                    .Sum(row))
+                    .Sum(pf => (long)Math.Round(row(pf)))
                 + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
                    : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
                    : 0),
             FilamentProfile.UsageRowMg);
 
     /// <summary>
-    /// The print's usage rows alone, resolved by <see cref="FilamentProfile.UsageRowMg"/> and
-    /// rounded: no "other filament" scalar. What the print list, get_print and search_prints
+    /// The print's usage rows alone, each resolved by <see cref="FilamentProfile.UsageRowMg"/>
+    /// and rounded, then added: no "other filament" scalar. What the print list, get_print and search_prints
     /// report as a print's material.
     /// </summary>
     public static Expression<Func<Print, long>> RowsMgExpr { get; } =
         ExpressionSplice.Inline<Print, Func<PrintFilament, double>, long>(
-            (p, row) => (long)Math.Round(p.FilamentUsage!.Sum(row)),
+            (p, row) => p.FilamentUsage!.Sum(pf => (long)Math.Round(row(pf))),
             FilamentProfile.UsageRowMg);
 
     /// <summary>True when ANY usage row fell back to its estimate (<see cref="FilamentProfile.UsageRowIsEstimated"/>).</summary>
@@ -120,13 +123,13 @@ public static class PrintMetrics
     /// or volume to convert. Rounds midpoints away from zero, as SQL's ROUND does, so the two
     /// paths agree. A collection that was not loaded counts as no usage.
     /// </summary>
-    public static long RowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowMg));
+    public static long RowsMg(IEnumerable<PrintFilament>? rows) => rows?.Sum(r => Round(RowMg(r))) ?? 0;
 
     /// <summary>The actual side of <see cref="RowsMg"/>: each row's <see cref="FilamentProfile.UsageRowActualMg"/>.</summary>
-    public static long ActualRowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowActualMg));
+    public static long ActualRowsMg(IEnumerable<PrintFilament>? rows) => rows?.Sum(r => Round(RowActualMg(r))) ?? 0;
 
     /// <summary>The estimated side of <see cref="RowsMg"/>: each row's <see cref="FilamentProfile.UsageRowEstimatedMg"/>.</summary>
-    public static long EstimatedRowsMg(IEnumerable<PrintFilament>? rows) => Round(rows?.Sum(RowEstimatedMg));
+    public static long EstimatedRowsMg(IEnumerable<PrintFilament>? rows) => rows?.Sum(r => Round(RowEstimatedMg(r))) ?? 0;
 
     /// <summary>Milligrams rounded the way SQL Server's ROUND rounds them, for in-memory sums.</summary>
     public static long Round(double? milligrams) => (long)Math.Round(milligrams ?? 0, MidpointRounding.AwayFromZero);

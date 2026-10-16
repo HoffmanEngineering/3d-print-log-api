@@ -13,14 +13,14 @@ public class PrintProfile : Profile
     /// <summary>A print's actual material: each row's actual side, plus the actual "other filament" scalar.</summary>
     private static readonly Expression<Func<Print, int?>> ActualMaterialMg =
         ExpressionSplice.Inline<Print, Func<PrintFilament, double>, int?>(
-            (src, row) => (int)Math.Round(src.FilamentUsage!.Sum(row))
+            (src, row) => src.FilamentUsage!.Sum(pf => (int)Math.Round(row(pf)))
                 + (src.FilamentUsageMg.HasValue && src.FilamentUsageMg > 0 ? src.FilamentUsageMg.Value : 0),
             FilamentProfile.UsageRowActualMg);
 
     /// <summary>A print's estimated material: each row's estimated side, plus the estimated "other filament" scalar.</summary>
     private static readonly Expression<Func<Print, int?>> EstimatedMaterialMg =
         ExpressionSplice.Inline<Print, Func<PrintFilament, double>, int?>(
-            (src, row) => (int)Math.Round(src.FilamentUsage!.Sum(row))
+            (src, row) => src.FilamentUsage!.Sum(pf => (int)Math.Round(row(pf)))
                 + (src.EstimatedFilamentUsageMg.HasValue && src.EstimatedFilamentUsageMg > 0 ? src.EstimatedFilamentUsageMg.Value : 0),
             FilamentProfile.UsageRowEstimatedMg);
 

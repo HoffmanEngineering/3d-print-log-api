@@ -342,9 +342,10 @@ public sealed class PrintService(
 
         var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
 
-        // Over ALL rows, which are not capped in SQL, and rounded the way PrintMetrics.RowsMgExpr
-        // rounds in SQL, so this matches search_prints and the print list.
-        var materialMg = PrintMetrics.Round(row.Usage.Sum(u => u.Mg));
+        // Over ALL rows, which are not capped in SQL, each rounded once the way
+        // PrintMetrics.RowsMgExpr rounds in SQL, so the parts below sum to it and it matches
+        // search_prints and the print list.
+        var materialMg = row.Usage.Sum(u => PrintMetrics.Round(u.Mg));
 
         return new PrintDetailResult(
             row.Id, row.Title!, row.Status.ToString(), row.PrinterId, row.PrinterName,
@@ -2457,21 +2458,20 @@ public sealed class PrintService(
             .AsNoTracking()
             .ToListAsync();
 
-        // Summed per print in SQL, each row resolved by FilamentProfile.UsageRowMg, then rounded
-        // per print and added up per project here, exactly as the project pages total them.
-        var projectPrintTotals = await context.PrintFilament
+        // Each row resolved by FilamentProfile.UsageRowMg and rounded once in SQL, then summed
+        // per project, exactly as the project pages total them.
+        var projectFilamentTotals = await context.PrintFilament
             .Where(pf => pf.Print.CreatedById == userId && pf.Print.ProjectId != null)
-            .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.Print.ProjectId, pf.PrintId, Mg = mg }, FilamentProfile.UsageRowMg))
-            .GroupBy(x => new { x.ProjectId, x.PrintId })
-            .Select(g => new { g.Key.ProjectId, Mg = g.Sum(x => x.Mg) })
+            .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
+            .GroupBy(x => x.ProjectId)
+            .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg) })
             .AsNoTracking()
             .ToListAsync();
 
-        var projectFilamentLookup = projectPrintTotals
+        var projectFilamentLookup = projectFilamentTotals
             // Non-null by the Where; the row is still needed for the value selector.
             .Where(x => x.ProjectId.HasValue)
-            .GroupBy(x => x.ProjectId!.Value)
-            .ToDictionary(g => g.Key, g => g.Sum(x => PrintMetrics.Round(x.Mg)));
+            .ToDictionary(x => x.ProjectId!.Value, x => x.Mg);
 
         // Start only: the feed carries no finish date, so there is no reason to load the
         // duration columns or compute a finish here.
@@ -2526,14 +2526,14 @@ public sealed class PrintService(
         {
             var standaloneFilamentTotals = await context.PrintFilament
                 .Where(pf => standalonePrintIds.Contains(pf.PrintId))
-                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.PrintId, Mg = mg }, FilamentProfile.UsageRowMg))
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.PrintId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
                 .GroupBy(x => x.PrintId)
                 .Select(g => new { PrintId = g.Key, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
                 .ToListAsync();
 
             standaloneFilamentLookup = standaloneFilamentTotals
-                .ToDictionary(x => x.PrintId, x => PrintMetrics.Round(x.Mg));
+                .ToDictionary(x => x.PrintId, x => x.Mg);
         }
 
         var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
@@ -2665,13 +2665,13 @@ public sealed class PrintService(
 
             var filamentUsageSums = await context.PrintFilament
                 .Where(pf => pf.FilamentId != null && pf.Print.ProjectId != null && pageProjectGuids.Contains(pf.Print.ProjectId.Value))
-                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.FilamentId, pf.Print.ProjectId, Mg = mg }, FilamentProfile.UsageRowMg))
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.FilamentId, pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
                 .GroupBy(x => new { x.ProjectId, x.FilamentId })
                 .Select(g => new { g.Key.ProjectId, g.Key.FilamentId, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
                 .ToListAsync();
             var filamentUsageRows = filamentUsageSums
-                .Select(r => new { r.ProjectId, r.FilamentId, TotalAmountMg = PrintMetrics.Round(r.Mg) })
+                .Select(r => new { r.ProjectId, r.FilamentId, TotalAmountMg = r.Mg })
                 .ToList();
 
             var uniqueFilamentIds = filamentUsageRows
