@@ -14,6 +14,7 @@ public static class SpoolTagServiceCollectionExtensions
         services.AddScoped<FilamentCatalogImporter>();
         services.AddScoped<Matching.FilamentCatalogMatcher>();
         services.AddScoped<Matching.TagSuggestionRanker>();
+        services.AddScoped<TagReadService>();
         services.AddHostedService<SpoolTagMaintenanceService>();
 
         services.AddSingleton<ITagDecoder, SnapmakerDecoder>();

@@ -8,8 +8,10 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.SpoolTags;
 
 namespace PrintLogApi.Controllers;
 
@@ -25,6 +27,7 @@ public class FilamentsController(
     IFilamentImageService filamentImageService,
     PrintLogContext context,
     IBlobStorageService blobStorageService,
+    TagReadService tagReadService,
     TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
@@ -131,6 +134,44 @@ public class FilamentsController(
         var dto = mapper.Map<FilamentDetailDto>(filament);
         await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
         return dto;
+    }
+
+    /// <summary>
+    /// Resolve a raw RFID or NFC tag read to one of the current user's spools.
+    /// </summary>
+    /// <remarks>
+    /// Send the tag's UID and, when the reader could dump it, its memory. A UID the user has
+    /// linked answers `linked` with the spool, and refreshes what the app stored from the tag.
+    /// Any other tag answers `unknown`: the decoded `reading` (null for a blank or unrecognized
+    /// tag), the closest `catalogMatch`, and the user's own materials that fit it as `suggestions`.
+    /// A `hint` of `hold-still` means the read was incomplete and worth repeating. Unrecognized
+    /// dumps are kept for 90 days, without any account data, so new formats can be added.
+    /// </remarks>
+    /// <param name="request">The tag UID, the NFC technologies it reported, and its memory.</param>
+    /// <response code="200">The tag resolved to a spool, or to a reading with suggestions.</response>
+    /// <response code="400">The UID is not hex bytes, or the memory is malformed.</response>
+    /// <response code="413">The request body is over 16 KB.</response>
+    [HttpPost("tag-reads")]
+    [RequestSizeLimit(16_384)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<TagReadResponse>> ResolveTagRead([FromBody] TagReadRequest request)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return await tagReadService.ResolveAsync(userId.Value, request, HttpContext.RequestAborted);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     /// <summary>
