@@ -11,7 +11,7 @@ namespace PrintLogApi.Achievements;
 /// </summary>
 public static class AchievementCatalog
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>Tier names, lowest first. A family with N thresholds uses the first N.</summary>
     public static readonly IReadOnlyList<string> TierNames =
@@ -110,6 +110,9 @@ public static class AchievementCatalog
         new("mcp", Integrations, "robot", "Robot Co-Pilot",
             "Log a print by asking your AI assistant.", "Your AI assistant logged a print for you.",
             [1], PrintAdded, "source.mcp"),
+        new("tag-linked", Integrations, "nfc-tag", "Tag, You're It",
+            "Link an RFID or NFC tag to one of your spools.", "You linked a tag to a spool.",
+            [1], TagChanged, "tags.count"),
 
         // Community and care (tiered)
         new("public-prints", Community, "globe", "Show and Tell",
