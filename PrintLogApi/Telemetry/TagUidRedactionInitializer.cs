@@ -20,13 +20,15 @@ public sealed partial class TagUidRedactionInitializer : ITelemetryInitializer
         if (telemetry is RequestTelemetry request
             && request.Url?.AbsolutePath.Contains("/by-tag/", StringComparison.OrdinalIgnoreCase) == true)
         {
-            request.Url = new Uri(Redact(request.Url.ToString()));
+            // AbsoluteUri keeps escapes; ToString would turn %20 into a space.
+            request.Url = new Uri(Redact(request.Url.AbsoluteUri));
             request.Name = Redact(request.Name);
         }
     }
 
     private static string Redact(string? value) => value is null ? "" : ByTagSegment().Replace(value, "$1" + Redacted);
 
-    [GeneratedRegex("(/by-tag/)[^/?#\\s]+", RegexOptions.IgnoreCase)]
+    // Up to the next path, query or fragment delimiter only: a UID may carry spaces as separators.
+    [GeneratedRegex("(/by-tag/)[^/?#]+", RegexOptions.IgnoreCase)]
     private static partial Regex ByTagSegment();
 }
