@@ -50,6 +50,19 @@ public class WebhookSigningTests
     }
 
     [Fact]
+    public void TheKeyId_IsDerivedWithItsOwnHkdfInfo_NotAPlainHashOfTheKey()
+    {
+        var key = Convert.FromBase64String(KeyA);
+        var expected = Convert.ToHexStringLower(HKDF.DeriveKey(
+            HashAlgorithmName.SHA256, key, 4, salt: null, info: Encoding.UTF8.GetBytes("3dprintlog webhook key id v1")));
+
+        var stored = Protector(KeyA).Protect(Guid.NewGuid(), "whsec_id");
+
+        Assert.Equal(expected, stored.Split('.')[1]);
+        Assert.NotEqual(Convert.ToHexStringLower(SHA256.HashData(key).AsSpan(0, 4)), stored.Split('.')[1]);
+    }
+
+    [Fact]
     public void Protect_UsesAFreshNonceEachTime()
     {
         var protector = Protector(KeyA);

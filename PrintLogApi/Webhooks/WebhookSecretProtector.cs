@@ -15,7 +15,8 @@ namespace PrintLogApi.Webhooks;
 /// keys from configuration, the first one current, every one accepted. Each key is stretched with
 /// HKDF into an AES-256-GCM key. The subscription id is the associated data, so a ciphertext copied
 /// onto another row does not decrypt. Stored as <c>v1.&lt;key id&gt;.&lt;base64(nonce|ciphertext|tag)&gt;</c>,
-/// where the key id (the first 4 bytes of the key's SHA-256) picks the key without trying them all.
+/// where the key id (4 bytes from HKDF with its own info, so it reveals nothing about the encryption
+/// key) picks the key without trying them all.
 /// </remarks>
 public sealed class WebhookSecretProtector
 {
@@ -24,6 +25,7 @@ public sealed class WebhookSecretProtector
     private const int NonceBytes = 12;
     private const int TagBytes = 16;
     private static readonly byte[] HkdfInfo = Encoding.UTF8.GetBytes("3dprintlog webhook secret v1");
+    private static readonly byte[] KeyIdInfo = Encoding.UTF8.GetBytes("3dprintlog webhook key id v1");
 
     private readonly (string Id, byte[] Key)[] _keys;
 
@@ -32,7 +34,7 @@ public sealed class WebhookSecretProtector
         _keys = options.Value.SecretEncryptionKeys
             .Select(k => WebhookOptionsValidator.TryDecode(k, out var bytes) ? bytes : null)
             .OfType<byte[]>()
-            .Select(k => (Convert.ToHexStringLower(SHA256.HashData(k).AsSpan(0, 4)),
+            .Select(k => (Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, k, 4, salt: null, info: KeyIdInfo)),
                 HKDF.DeriveKey(HashAlgorithmName.SHA256, k, 32, salt: null, info: HkdfInfo)))
             .ToArray();
     }
