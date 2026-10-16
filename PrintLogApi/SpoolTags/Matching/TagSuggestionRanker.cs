@@ -2,6 +2,16 @@
 
 namespace PrintLogApi.SpoolTags.Matching;
 
+internal sealed record RankCandidate(
+    Guid Id,
+    string? Brand,
+    string? MaterialType,
+    List<string>? Colors,
+    string? ColorHex,
+    long? InitialNominalWeightMg,
+    bool HasTags,
+    DateTime UpdatedDate);
+
 public sealed record TagSuggestion(Guid FilamentId, double Score, IReadOnlyList<string> Reasons);
 
 /// <summary>Scores a user's own materials against a tag reading, for a tag that is not linked yet.</summary>
@@ -19,20 +29,7 @@ public sealed class TagSuggestionRanker(PrintLogContext db)
         }
 
         // Colors goes through a value conversion, so it is projected whole and read in memory.
-        var candidates = await db.Filaments.AsNoTracking()
-            .Where(f => f.CreatedById == userId && f.IsActive)
-            .Select(f => new
-            {
-                f.Id,
-                f.Brand,
-                f.MaterialType,
-                f.Colors,
-                f.ColorHex,
-                f.InitialNominalWeightMg,
-                HasTags = f.Tags.Any(),
-                f.UpdatedDate,
-            })
-            .ToListAsync(ct);
+        var candidates = await CandidatesQuery(db, userId).ToListAsync(ct);
 
         var brands = new[] { reading.Brand, reading.Manufacturer }
             .Where(b => !string.IsNullOrWhiteSpace(b))
@@ -78,6 +75,20 @@ public sealed class TagSuggestionRanker(PrintLogContext db)
             .Select(x => new TagSuggestion(x.Id, x.Score, x.Reasons))
             .ToList();
     }
+
+    // Kept as a named query so a test can compile it through the SQL Server provider.
+    internal static IQueryable<RankCandidate> CandidatesQuery(PrintLogContext db, long userId) =>
+        db.Filaments.AsNoTracking()
+            .Where(f => f.CreatedById == userId && f.IsActive)
+            .Select(f => new RankCandidate(
+                f.Id,
+                f.Brand,
+                f.MaterialType,
+                f.Colors,
+                f.ColorHex,
+                f.InitialNominalWeightMg,
+                f.Tags.Any(),
+                f.UpdatedDate));
 
     /// <summary>Prefix match in either direction, so PLA and PLA+ agree.</summary>
     private static bool SameMaterial(string a, string b) =>

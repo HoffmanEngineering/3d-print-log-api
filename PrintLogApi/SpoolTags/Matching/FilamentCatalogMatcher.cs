@@ -3,6 +3,8 @@ using PrintLogApi.Models;
 
 namespace PrintLogApi.SpoolTags.Matching;
 
+internal sealed record SkuTally(string EntryId, int Votes, int Users);
+
 public sealed record CatalogMatch(string Id, double Confidence, int? SpoolWeightG, string? ColorName, string Name, string Manufacturer);
 
 /// <summary>Finds the catalog entry a tag reading describes: a trusted SKU first, then a scored match.</summary>
@@ -37,9 +39,7 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
         // That is ASCII-only on SQLite, which is acceptable for vendor names.
         // Material and diameter are checked in memory on the narrowed set.
         var upper = manufacturer.ToUpperInvariant();
-        var candidates = await db.FilamentCatalogEntries.AsNoTracking()
-            .Where(e => e.RemovedAt == null && e.Manufacturer.ToUpper() == upper)
-            .ToListAsync(ct);
+        var candidates = await CandidatesQuery(db, upper).ToListAsync(ct);
 
         return candidates
             .Where(e => MaterialKey.Normalize(e.Material) == materialKey)
@@ -59,11 +59,7 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
     public async Task<string?> TrustedEntryIdAsync(string format, string sku, CancellationToken ct)
     {
         // Format and SKU compare binary on SQLite and CI_AS on SQL Server; acceptable for numeric SKUs.
-        var tallies = await db.FilamentCatalogSkus.AsNoTracking()
-            .Where(s => s.Format == format && s.Sku == sku)
-            .GroupBy(s => s.CatalogEntryId)
-            .Select(g => new { EntryId = g.Key, Votes = g.Count(), Users = g.Select(s => s.UserId).Distinct().Count() })
-            .ToListAsync(ct);
+        var tallies = await TallyQuery(db, format, sku).ToListAsync(ct);
 
         var ranked = tallies.OrderByDescending(t => t.Votes).ToList();
         if (ranked.Count == 0)
@@ -80,6 +76,17 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
             .AnyAsync(e => e.Id == top.EntryId && e.RemovedAt == null, ct);
         return live ? top.EntryId : null;
     }
+
+    // Kept as named queries so a test can compile them through the SQL Server provider.
+    internal static IQueryable<FilamentCatalogEntry> CandidatesQuery(PrintLogContext db, string upperManufacturer) =>
+        db.FilamentCatalogEntries.AsNoTracking()
+            .Where(e => e.RemovedAt == null && e.Manufacturer.ToUpper() == upperManufacturer);
+
+    internal static IQueryable<SkuTally> TallyQuery(PrintLogContext db, string format, string sku) =>
+        db.FilamentCatalogSkus.AsNoTracking()
+            .Where(s => s.Format == format && s.Sku == sku)
+            .GroupBy(s => s.CatalogEntryId)
+            .Select(g => new SkuTally(g.Key, g.Count(), g.Select(s => s.UserId).Distinct().Count()));
 
     private static double Score(TagReading reading, FilamentCatalogEntry entry)
     {
