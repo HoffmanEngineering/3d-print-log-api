@@ -173,11 +173,22 @@ public sealed class WebhookDeliveryProcessor(
     }
 
     /// <summary>
-    /// Records that the scheduler dropped <paramref name="delivery"/> without attempting it. It
-    /// counts as a failure, like any delivery the receiver never got.
+    /// Records that the scheduler dropped a delivery to <paramref name="subscriptionId"/> at
+    /// <paramref name="droppedAt"/> without attempting it, so the owner can see it.
     /// </summary>
-    public Task RecordDroppedAsync(WebhookDelivery delivery, CancellationToken ct) =>
-        Record(delivery, new WebhookAttemptResult(WebhookDeliveryResults.Dropped, null, Retryable: false), ct);
+    /// <remarks>
+    /// Only the last-delivery columns change. A drop is our capacity running out, not the receiver
+    /// failing, so it never counts toward the circuit or auto-disable (which would turn off a
+    /// healthy webhook with a notice blaming its receiver). The write is conditional on nothing
+    /// newer being recorded, so a drop written late never hides a later success or failure.
+    /// </remarks>
+    public Task RecordDroppedAsync(Guid subscriptionId, DateTime droppedAt, CancellationToken ct) =>
+        context.WebhookSubscriptions
+            .Where(w => w.Id == subscriptionId && (w.LastDeliveryAt == null || w.LastDeliveryAt <= droppedAt))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(w => w.LastDeliveryAt, droppedAt)
+                .SetProperty(w => w.LastStatusCode, (int?)null)
+                .SetProperty(w => w.LastDeliveryResult, WebhookDeliveryResults.Dropped), ct);
 
     private async Task Record(WebhookDelivery delivery, WebhookAttemptResult result, CancellationToken ct)
     {

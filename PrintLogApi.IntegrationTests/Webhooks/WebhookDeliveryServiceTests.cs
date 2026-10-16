@@ -29,6 +29,9 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
         /// <summary>Extra settings for a host of its own; read when the host first starts.</summary>
         public IReadOnlyDictionary<string, string?>? Settings { get; init; }
 
+        /// <summary>Extra EF interceptors for a host of its own.</summary>
+        public IInterceptor[] Interceptors { get; init; } = [];
+
         private readonly string _path = Path.Combine(Path.GetTempPath(), $"printlog-webhooks-{Guid.NewGuid():N}.db");
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -53,6 +56,7 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
                 {
                     options.UseSqlite($"Data Source={_path};Default Timeout=30");
                     options.AddAchievementInterceptors(sp);
+                    options.AddInterceptors(Interceptors);
                     options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
                 });
                 services.AddHostedService<WebhookDeliveryService>();
@@ -251,7 +255,8 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
 
         Assert.True(await WaitUntil(() => StoredFor(host, a.User.Id)?.LastDeliveryResult == "dropped", TimeSpan.FromSeconds(3)),
             $"stored: {StoredFor(host, a.User.Id)?.LastDeliveryResult}");
-        Assert.Equal(1, StoredFor(host, a.User.Id)!.ConsecutiveFailures);
+        // Our capacity ran out, not the receiver: no failure is counted.
+        Assert.Equal(0, StoredFor(host, a.User.Id)!.ConsecutiveFailures);
     }
 
     [Fact]
@@ -279,8 +284,109 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
 
         Assert.True(await WaitUntil(() => Stored(host, waitingId)?.LastDeliveryResult is not null, TimeSpan.FromSeconds(10)));
         Assert.Equal("dropped", Stored(host, waitingId)!.LastDeliveryResult);
-        Assert.Equal(1, Stored(host, waitingId)!.ConsecutiveFailures);
+        Assert.Equal(0, Stored(host, waitingId)!.ConsecutiveFailures);
         Assert.Empty(host.Receiver.Received(waitingHost));
+    }
+
+    /// <summary>One user with a hung webhook holding the only slot, and nine more webhooks.</summary>
+    private static async Task<(User User, long PrinterId, string Host)> NineDropsAsync(Factory host, HttpClient client)
+    {
+        var a = await SubscribeAsync(host, client, "holder");
+        host.Receiver.Hang(a.Host);
+        for (var i = 0; i < 9; i++)
+        {
+            await SubscribeUrlAsync(client, a.User, $"https://dropped-{i}-{Guid.NewGuid():N}.example.test/x", ["print.started"]);
+        }
+        return a;
+    }
+
+    [Fact]
+    public async Task ManyDropsAtOnce_AreRecordedOneWriteAtATime()
+    {
+        var writes = new DropWrites(TimeSpan.FromMilliseconds(100));
+        await using var host = new Factory
+        {
+            Settings = new Dictionary<string, string?> { ["Webhooks:DeliveryQueueCapacity"] = "1" },
+            Interceptors = [writes],
+        };
+        var client = host.CreateClient();
+        var a = await NineDropsAsync(host, client);
+
+        // One event, ten webhooks: one takes the only slot and nine are dropped in the same pass.
+        await StartPrintAsync(client, a);
+
+        Assert.True(await WaitUntil(() => writes.Completed == 9, TimeSpan.FromSeconds(10)), $"{writes.Completed} written");
+        Assert.Equal(1, writes.MaxConcurrent);
+    }
+
+    [Fact]
+    public async Task Stopping_EndsTheDropRecorder_WithNoWriteLeftRunning()
+    {
+        var writes = new DropWrites(TimeSpan.FromSeconds(5));
+        await using var host = new Factory
+        {
+            Settings = new Dictionary<string, string?> { ["Webhooks:DeliveryQueueCapacity"] = "1" },
+            Interceptors = [writes],
+        };
+        var client = host.CreateClient();
+        var a = await NineDropsAsync(host, client);
+        await StartPrintAsync(client, a);
+        Assert.True(await WaitUntil(() => writes.Started >= 1, TimeSpan.FromSeconds(10)));
+
+        var worker = host.Services.GetServices<IHostedService>().OfType<WebhookDeliveryService>().Single();
+        var clock = Stopwatch.StartNew();
+        await worker.StopAsync(Ct);
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"took {clock.Elapsed}");
+        Assert.Equal(0, writes.InFlight);
+        var started = writes.Started;
+        await Task.Delay(300, Ct);
+        Assert.Equal(started, writes.Started);
+    }
+
+    /// <summary>
+    /// Counts the drop writes (the UPDATE that sets "dropped") and how many run at once, each held
+    /// for <paramref name="hold"/> so overlapping ones would show.
+    /// </summary>
+    private sealed class DropWrites(TimeSpan hold) : DbCommandInterceptor
+    {
+        private int _inFlight;
+        private int _max;
+        private int _started;
+        private int _completed;
+
+        public int InFlight => Volatile.Read(ref _inFlight);
+
+        public int MaxConcurrent => Volatile.Read(ref _max);
+
+        public int Started => Volatile.Read(ref _started);
+
+        public int Completed => Volatile.Read(ref _completed);
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!command.CommandText.Contains("WebhookSubscriptions", StringComparison.Ordinal)
+                || !(command.CommandText.Contains("dropped", StringComparison.Ordinal)
+                    || command.Parameters.Cast<System.Data.Common.DbParameter>().Any(p => Equals(p.Value, "dropped"))))
+            {
+                return result;
+            }
+            Interlocked.Increment(ref _started);
+            var now = Interlocked.Increment(ref _inFlight);
+            int max;
+            while (now > (max = Volatile.Read(ref _max)) && Interlocked.CompareExchange(ref _max, now, max) != max) { }
+            try
+            {
+                await Task.Delay(hold, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+            Interlocked.Increment(ref _completed);
+            return result;
+        }
     }
 
     [Fact]

@@ -325,7 +325,10 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
   user and 16 per host. **Keep the host cap well above the user cap**: every Home Assistant Cloud
   user posts to hooks.nabu.casa. The handler's connection pool follows the host cap. Capacity waits
   are per-key lists drained on release, not polling; a delivery that waits past `MaxDeliveryWait`,
-  or finds the queue full, is recorded as `dropped` (a failure). Every attempt re-reads the
+  or finds the queue full, is recorded as `dropped`. **A drop is not a failure**: it is our
+  capacity, so it never touches `ConsecutiveFailures`, the circuit or auto-disable, and its write is
+  conditional on nothing newer being recorded. Drop writes go through one recorder loop (one at a
+  time, coalesced per subscription), never one task per drop. Every attempt re-reads the
   subscription first. A circuit opens after 3 failures; one event claims the probe after the
   cooldown with a conditional update on `LastDeliveryAt`, and a successful test event closes it. A
   restart loses what is queued. Tests deliver synchronously through

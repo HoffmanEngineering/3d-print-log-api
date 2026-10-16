@@ -750,6 +750,45 @@ public class WebhookDispatchTests : IClassFixture<WebhookTestFactory>
         Assert.Equal(3, (await StoredAsync(a.Subscription.Id)).ConsecutiveFailures);
     }
 
+    [Fact]
+    public async Task Drops_AreNotReceiverFailures_AndLeaveTheCircuitClosed()
+    {
+        // A drop is our own capacity running out; it must not trip the circuit or turn off a
+        // healthy subscriber's webhook with a notice blaming their receiver.
+        var a = await ArrangeAsync();
+        for (var i = 0; i < 3; i++)
+        {
+            await RecordDroppedAsync(a.Subscription.Id, DateTime.UtcNow);
+        }
+
+        var stored = await StoredAsync(a.Subscription.Id);
+        Assert.Equal("dropped", stored.LastDeliveryResult);
+        Assert.Equal(0, stored.ConsecutiveFailures);
+        Assert.True(stored.Enabled);
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        var delivery = Assert.Single(await PrepareQueuedAsync());
+        Assert.False(delivery.Probe);
+    }
+
+    [Fact]
+    public async Task ALateDrop_NeverOverwritesANewerOutcome()
+    {
+        var a = await ArrangeAsync();
+        var droppedAt = DateTime.UtcNow;
+        await CreatePrintAsync(a, PrintStatus.Printing);
+        await _factory.DeliverPendingAsync(Ct);
+
+        await RecordDroppedAsync(a.Subscription.Id, droppedAt.AddSeconds(-1));
+
+        Assert.Equal("success", (await StoredAsync(a.Subscription.Id)).LastDeliveryResult);
+    }
+
+    private async Task RecordDroppedAsync(Guid subscriptionId, DateTime droppedAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().RecordDroppedAsync(subscriptionId, droppedAt, Ct);
+    }
+
     /// <summary>Fans out everything queued, without attempting any of it yet.</summary>
     private async Task<List<WebhookDelivery>> PrepareQueuedAsync()
     {

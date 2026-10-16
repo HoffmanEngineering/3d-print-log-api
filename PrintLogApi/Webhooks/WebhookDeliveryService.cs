@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Options;
+﻿using System.Collections.Concurrent;
+using System.Threading.Channels;
+using Microsoft.Extensions.Options;
 
 namespace PrintLogApi.Webhooks;
 
@@ -28,8 +30,11 @@ namespace PrintLogApi.Webhooks;
 /// held (waiting, in flight or between retries); past that a new one is dropped.</item>
 /// </list>
 /// <para>
-/// A dropped delivery is recorded on its subscription as <c>dropped</c> and counts as a failure, so
-/// the owner can see it. Everything is in process: stopping cancels attempts in flight and forgets
+/// A dropped delivery is recorded on its subscription as <c>dropped</c> so the owner can see it,
+/// without counting as a failure (it is our capacity, not their receiver). Those writes go through
+/// one recorder loop, one at a time and coalesced per subscription, so a burst of drops under
+/// overload costs one write per subscription instead of a scope and a connection per drop.
+/// Everything is in process: stopping cancels attempts in flight, ends the recorder, and forgets
 /// what is waiting.
 /// </para>
 /// </remarks>
@@ -56,6 +61,12 @@ public sealed class WebhookDeliveryService(
 
     private CancellationToken _stoppingToken;
 
+    // Drops waiting to be recorded: the latest drop time per subscription, and a signal for each
+    // subscription that became pending. The channel holds at most one entry per subscription with
+    // a pending drop, so it is bounded by the number of subscriptions, not by the number of drops.
+    private readonly ConcurrentDictionary<Guid, DateTime> _pendingDrops = new();
+    private readonly Channel<Guid> _dropSignals = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions { SingleReader = true });
+
     /// <summary>A delivery that is eligible but over a cap, and since when it has been eligible.</summary>
     private sealed record Waiting(WebhookDelivery Delivery, DateTimeOffset Since);
 
@@ -70,6 +81,7 @@ public sealed class WebhookDeliveryService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
+        var recorder = RecordDrops(stoppingToken);
         try
         {
             await foreach (var webhookEvent in events.Reader.ReadAllAsync(stoppingToken))
@@ -90,6 +102,8 @@ public sealed class WebhookDeliveryService(
             }
         }
         await _drained.Task;
+        _dropSignals.Writer.TryComplete();
+        await recorder;
     }
 
     private async Task FanOut(WebhookEvent webhookEvent, CancellationToken stoppingToken)
@@ -242,7 +256,7 @@ public sealed class WebhookDeliveryService(
         {
             logger.LogWarning("Webhook {SubscriptionId}: dropped {EventId} because {Reason}.",
                 delivery.SubscriptionId, delivery.Message.EventId, reason);
-            _ = RecordDropped(delivery);
+            QueueDropRecord(delivery.SubscriptionId);
         }
     }
 
@@ -325,20 +339,49 @@ public sealed class WebhookDeliveryService(
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
-    private async Task RecordDropped(WebhookDelivery delivery)
+    /// <summary>Hands a drop to the recorder, merging it with one already waiting for the subscription.</summary>
+    private void QueueDropRecord(Guid subscriptionId)
+    {
+        var at = clock.GetUtcNow().UtcDateTime;
+        var added = false;
+        _pendingDrops.AddOrUpdate(subscriptionId,
+            _ => { added = true; return at; },
+            (_, earlier) => at > earlier ? at : earlier);
+        if (added)
+        {
+            _dropSignals.Writer.TryWrite(subscriptionId);
+        }
+    }
+
+    /// <summary>The one loop that writes drops: one write at a time, the latest drop per subscription.</summary>
+    private async Task RecordDrops(CancellationToken stoppingToken)
     {
         try
         {
-            using var scope = scopeFactory.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>().RecordDroppedAsync(delivery, _stoppingToken);
+            await foreach (var subscriptionId in _dropSignals.Reader.ReadAllAsync(stoppingToken))
+            {
+                if (!_pendingDrops.TryRemove(subscriptionId, out var droppedAt))
+                {
+                    continue;
+                }
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    await scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>()
+                        .RecordDroppedAsync(subscriptionId, droppedAt, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Could not record a dropped delivery to webhook {SubscriptionId}.", subscriptionId);
+                }
+            }
         }
-        catch (OperationCanceledException) when (_stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Could not record the dropped delivery of {EventId} to webhook {SubscriptionId}.",
-                delivery.Message.EventId, delivery.SubscriptionId);
         }
     }
 }
