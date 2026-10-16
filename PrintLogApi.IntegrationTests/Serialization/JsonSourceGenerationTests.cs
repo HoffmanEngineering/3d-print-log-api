@@ -8,6 +8,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Models.DTOs.Sync;
 using PrintLogApi.Serialization;
 using Xunit;
 
@@ -109,6 +110,9 @@ public class JsonSourceGenerationTests : IClassFixture<Mcp.McpDataWebApplication
         { typeof(AccuracyResponse), "/api/analytics/accuracy?timeZone=UTC" },
         { typeof(PagedList<PrintSummaryDTO>), "/api/prints/summary?pageNumber=1&pageSize=25" },
         { typeof(PagedList<PrinterSummarySimpleDto>), "/api/printers/summary?pageNumber=1&pageSize=25" },
+        // Polled by integrations (#234): the version every minute, the snapshot on change.
+        { typeof(SyncVersionResponse), "/api/sync/version" },
+        { typeof(SyncSnapshot), "/api/sync/snapshot" },
     };
 
     /// <summary>

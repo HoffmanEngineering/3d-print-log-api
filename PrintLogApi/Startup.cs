@@ -196,6 +196,7 @@ public class Startup
         // Singleton: it holds only HybridCache and CachedComputation, both singletons.
         services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
         services.AddTransient<Services.Spoolman.ISpoolmanInventoryService, Services.Spoolman.SpoolmanInventoryService>();
+        services.AddTransient<Services.Sync.ISyncSnapshotService, Services.Sync.SyncSnapshotService>();
         services.AddTransient<Services.Spoolman.ISpoolmanUsageRecorder, Services.Spoolman.SpoolmanUsageRecorder>();
         // Singleton: it is the registry of this process's open sockets (#178).
         services.AddSingleton<Services.Spoolman.SpoolmanSocketHost>();

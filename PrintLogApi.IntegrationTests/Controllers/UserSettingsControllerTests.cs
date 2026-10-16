@@ -618,7 +618,9 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
     [Theory]
     [InlineData(15, "Push_PrintCompleted")]
     [InlineData(16, "Push_PrintFailed")]
-    public async Task PushNotificationSettingTypes_AreSeeded(int id, string expectedName)
+    [InlineData(27, "ReleaseNotes_LastShownVersion")]
+    [InlineData(28, "ReleaseNotes_LastViewedVersion")]
+    public async Task SettingTypes_AreSeeded(int id, string expectedName)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();

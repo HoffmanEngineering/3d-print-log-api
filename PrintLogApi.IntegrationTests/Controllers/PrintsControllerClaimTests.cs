@@ -428,7 +428,7 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
     {
         var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId);
         var old = await CreatePrintAsync(printerId: printerId);
-        await UpdatePrintAsync(old.Id, p => p.CreatedDate = DateTime.UtcNow.AddHours(-3));
+        await BackdatePrintAsync(old.Id, DateTime.UtcNow.AddHours(-3));
         var recent = await CreatePrintAsync(printerId: printerId);
         var after = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddHours(-1).ToString("O"));
 
@@ -442,7 +442,7 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
     {
         var printerId = await CreatePrinterAsync(IntegrationTestSeeder.TestUserOAuthId);
         var older = await CreatePrintAsync(printerId: printerId);
-        await UpdatePrintAsync(older.Id, p => p.CreatedDate = DateTime.UtcNow.AddMinutes(-10));
+        await BackdatePrintAsync(older.Id, DateTime.UtcNow.AddMinutes(-10));
         var newer = await CreatePrintAsync(printerId: printerId);
 
         var all = await GetClaimableAsync($"printerId={printerId}");
@@ -558,15 +558,26 @@ public class PrintsControllerClaimTests(CustomWebApplicationFactory factory) : I
         return await ReadAsync(await _httpClient.SendAsync(request, TestContext.Current.CancellationToken));
     }
 
-    /// <summary>Sets what no endpoint writes directly: provenance, the file hash, a backdated creation.</summary>
+    /// <summary>Sets what no endpoint writes directly: provenance, the file hash.</summary>
     private async Task UpdatePrintAsync(long id, Action<Print> update)
     {
         using var scope = factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         var print = await context.Prints.SingleAsync(p => p.Id == id, TestContext.Current.CancellationToken);
         update(print);
-        // SaveChanges stamps CreatedDate on insert only, so a backdated value survives this update.
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Backdates a print's creation. SaveChanges never lets an update change CreatedDate (#256),
+    /// so this bypasses the change tracker.
+    /// </summary>
+    private async Task BackdatePrintAsync(long id, DateTime createdUtc)
+    {
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        await context.Prints.Where(p => p.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.CreatedDate, createdUtc), TestContext.Current.CancellationToken);
     }
 
     private async Task<Print> LoadPrintAsync(long id)

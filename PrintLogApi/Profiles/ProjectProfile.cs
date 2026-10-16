@@ -32,13 +32,10 @@ public class ProjectProfile : Profile
                     p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0)))
+            // In memory (see ResolveDates below), so the shared per-print rule runs as compiled
+            // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
-                opt => opt.MapFrom(src => src.Prints!
-                    .SelectMany(p => p.FilamentUsage!)
-                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
-                        ? (long)pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
-                            ? (long)pf.EstimatedAmountMg.Value : 0L)))
+                opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
             .ForMember(dest => dest.DefaultImageId,
                 opt => opt.MapFrom(src => src.Images!
                     .Where(i => i.IsDefault)
@@ -71,13 +68,10 @@ public class ProjectProfile : Profile
                     p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0)))
+            // In memory (see ResolveDates below), so the shared per-print rule runs as compiled
+            // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
-                opt => opt.MapFrom(src => src.Prints!
-                    .SelectMany(p => p.FilamentUsage!)
-                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
-                        ? (long)pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
-                            ? (long)pf.EstimatedAmountMg.Value : 0L)))
+                opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
             .ForMember(dest => dest.Images,
                 opt => opt.MapFrom(src => src.Images!.OrderBy(i => i.DisplayOrder)))
             // Resolved in AfterMap, not MapFrom: the rules live in ProjectDateResolver and
@@ -89,6 +83,13 @@ public class ProjectProfile : Profile
         CreateMap<ProjectImage, ProjectImageDto>()
             .ForMember(dest => dest.Url, opt => opt.Ignore()); // URL resolved at request time
     }
+
+    /// <summary>
+    /// Each print's usage rows resolved and rounded by <see cref="PrintMetrics.RowsMg"/>, summed.
+    /// Zero when the prints were not loaded.
+    /// </summary>
+    private static long TotalFilamentWeightMg(Project project) =>
+        project.Prints?.Sum(p => PrintMetrics.RowsMg(p.FilamentUsage)) ?? 0L;
 
     /// <summary>
     /// The single resolution site for all four REST project read paths. Every project path
