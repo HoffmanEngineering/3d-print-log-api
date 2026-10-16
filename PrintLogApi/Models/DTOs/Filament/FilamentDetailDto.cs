@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Enums;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Services;
 using static PrintLogApi.Models.Filament;
 
@@ -196,6 +197,23 @@ public class FilamentDetailDto
     /// already on another of the user's spools is a 409 naming that spool.
     /// </summary>
     public List<string>? TagUids { get; set; }
+
+    /// <summary>
+    /// Decoded tag readings to keep with the spool's tags, matched to <c>TagUids</c> by UID. A
+    /// reading for a UID that is not in <c>TagUids</c> is ignored. When a spool is updated, a
+    /// tag's stored reading is replaced only when a new one is sent for it.
+    /// </summary>
+    public List<TagReadingInputDto>? TagReadings { get; set; }
+
+    /// <summary>
+    /// Response-only: the spool's tags with their last decoded reading, ordered by UID. Inbound
+    /// it is ignored. A reading whose stored JSON cannot be read comes back null.
+    /// </summary>
+    public List<FilamentTagDetailDto>? TagDetails { get; set; }
+
+    /// <summary>The catalog entry the spool was created from. Response-only: a PUT never changes it.</summary>
+    public string? CatalogEntryId { get; set; }
+
 
     /// <summary>
     /// Response-only, populated by <c>FilamentService.HydrateDetailImageUrlsAsync</c>.
