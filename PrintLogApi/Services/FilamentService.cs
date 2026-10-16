@@ -949,6 +949,12 @@ public class FilamentService(
                 "usage twice.");
         }
 
+        // The same check the web app's create and update paths make (#232).
+        if (!AdjustmentConversionInputs.Of(material).CanConvert((FilamentAdjustment.SourceMeasurement)(int)source))
+        {
+            throw McpToolException.InvalidArguments(UnconvertibleAdjustmentMessage);
+        }
+
         // Record the adjustment in the caller's source unit; the existing helper derives the rest,
         // including AmountMg — the weight the remaining calculation actually sums.
         var adjustment = new FilamentAdjustment
@@ -972,12 +978,6 @@ public class FilamentService(
                 break;
         }
         UpdateFilamentAdjustmentMeasurements(adjustment, material);
-
-        if (adjustment.AmountMg is null)
-        {
-            throw McpToolException.InvalidArguments(
-                "This material is missing the density/diameter needed to convert the adjustment to a weight.");
-        }
 
         var deltaGrams = McpUnits.MgToGrams(adjustment.AmountMg);
         // Tracked (checked above), so remaining has a value.
@@ -1585,6 +1585,8 @@ public class FilamentService(
 
         UpdateFilamentMeasurements(newFilament);
 
+        RequireConvertibleAdjustments(newFilament);
+
         foreach (var adjustment in newFilament.FilamentAdjustments!)
         {
             adjustment.CreatedById = userId;
@@ -1617,9 +1619,92 @@ public class FilamentService(
         return (await GetFilamentById(filamentId))!;
     }
 
+    private const string UnconvertibleAdjustmentMessage =
+        "This material is missing the density/diameter needed to convert the adjustment to a weight.";
+
+    /// <summary>
+    /// What converting an adjustment to AmountMg depends on. Remaining-weight figures sum
+    /// adjustments by AmountMg alone, so one that can't be converted would be saved and then
+    /// silently count for nothing (#232). The MCP tool and the web app's create and update
+    /// paths all ask <see cref="CanConvert"/> before saving one.
+    /// </summary>
+    private readonly record struct AdjustmentConversionInputs(double Density, double? DiameterMm, bool HasDiameter)
+    {
+        public static AdjustmentConversionInputs Of(Filament filament) =>
+            new(filament.MaterialDensityGramPerCubicCm, filament.DiameterMm, filament.MaterialCategory.HasDiameter);
+
+        /// <summary>
+        /// Decided from the material, never from the converted row: UpdateFilamentAdjustmentMeasurements
+        /// leaves a client-sent AmountMg in place when it can't convert, and a density of 0 converts
+        /// any length or volume to 0 mg, which is a number but not a usable one.
+        /// </summary>
+        public bool CanConvert(FilamentAdjustment.SourceMeasurement source) => source switch
+        {
+            FilamentAdjustment.SourceMeasurement.Length => Density > 0 && HasDiameter && DiameterMm > 0,
+            FilamentAdjustment.SourceMeasurement.Volume => Density > 0,
+            // Weight, and anything the conversion itself treats as weight: AmountMg is the input.
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// A stored adjustment as it was before this update, to tell an untouched row from an edited one.
+    /// </summary>
+    private readonly record struct StoredAdjustment(
+        FilamentAdjustment.SourceMeasurement Source, double? SourceValue, long? AmountMg, bool WasConvertible);
+
+    /// <summary>The value the user entered: the field the adjustment's Source names.</summary>
+    private static double? SourceValue(FilamentAdjustment adjustment) => adjustment.Source switch
+    {
+        FilamentAdjustment.SourceMeasurement.Length => adjustment.LengthInM,
+        FilamentAdjustment.SourceMeasurement.Volume => adjustment.VolumeMl,
+        _ => adjustment.AmountMg,
+    };
+
+    /// <summary>
+    /// Rejects an adjustment that can't be converted to a weight, as the MCP tool does (#232).
+    /// <para>
+    /// An adjustment saved before this check, which already couldn't be converted, is let through
+    /// when the request re-sends it unchanged (same id, source, entered value and AmountMg). The web app
+    /// re-sends every adjustment on every save, so checking those would make each later edit of
+    /// that spool fail, renaming it included, until the user found and deleted the row. It stays
+    /// as uncounted as it was, and is converted on the save that supplies the missing density or
+    /// diameter. A stored row that DID convert is checked like a new one, so clearing the diameter
+    /// or switching to a category without one can't quietly stop it counting.
+    /// </para>
+    /// </summary>
+    private static void RequireConvertibleAdjustments(
+        Filament filament, IReadOnlyDictionary<Guid, StoredAdjustment>? stored = null)
+    {
+        var inputs = AdjustmentConversionInputs.Of(filament);
+        foreach (var adjustment in filament.FilamentAdjustments ?? [])
+        {
+            if (inputs.CanConvert(adjustment.Source))
+            {
+                continue;
+            }
+
+            var untouchedLegacyRow = stored != null
+                && stored.TryGetValue(adjustment.Id, out var before)
+                && !before.WasConvertible
+                && before.Source == adjustment.Source
+                && before.SourceValue == SourceValue(adjustment)
+                // AmountMg too: the conversion can't run on this row, so it keeps whatever weight
+                // the request carries, and a weight the server never derived would then count.
+                && before.AmountMg == adjustment.AmountMg;
+            if (!untouchedLegacyRow)
+            {
+                throw new BadRequestException(UnconvertibleAdjustmentMessage);
+            }
+        }
+    }
+
     private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
     {
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+        // > 0, not >= 0: every conversion here divides or multiplies by the density, and 0 turns a
+        // weight's volume into Infinity, which SQL Server's float column rejects. A weight keeps
+        // its AmountMg; RequireConvertibleAdjustments has rejected any new Length or Volume row.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1627,6 +1712,16 @@ public class FilamentService(
 
         if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Length)
         {
+            if (filament.MaterialCategory.HasDiameter && !(filament.DiameterMm >= 0))
+            {
+                // A length needs the diameter this category tracks. Left as it came, which is
+                // what this method has always done here; RequireConvertibleAdjustments has
+                // already rejected any such row a request adds or edits (#232). Only the Length
+                // branch needs a diameter for AmountMg: the Volume and Weight branches below
+                // convert from the density alone and skip only the length.
+                return;
+            }
+
             if (adjustment.LengthInM.HasValue)
             {
                 // The diameter test is what the Volume and Weight branches below already do.
@@ -1682,8 +1777,9 @@ public class FilamentService(
 
     private void UpdateFilamentMeasurements(Filament filament)
     {
-
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+        // > 0 for the reason given in UpdateFilamentAdjustmentMeasurements: density 0 would derive
+        // an Infinity volume from a nominal weight.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1777,6 +1873,12 @@ public class FilamentService(
             await ThrowIfTagsHeldElsewhere(existingFilament.CreatedById, existingFilament.Id, tagUids);
         }
 
+        // Taken before the map, which replaces the adjustment list with the request's (#232).
+        var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
+        var storedAdjustments = existingFilament.FilamentAdjustments!.ToDictionary(
+            a => a.Id,
+            a => new StoredAdjustment(a.Source, SourceValue(a), a.AmountMg, storedConversionInputs.CanConvert(a.Source)));
+
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
 
         if (tagUids is not null)
@@ -1799,6 +1901,18 @@ public class FilamentService(
         updatedFilament.MaterialCategory = materialCategory;
 
         UpdateFilamentMeasurements(updatedFilament);
+
+        try
+        {
+            RequireConvertibleAdjustments(updatedFilament, storedAdjustments);
+        }
+        catch (BadRequestException)
+        {
+            // The map has already dirtied the tracked filament. Nothing else saves in this
+            // request, but a rejected edit should leave nothing behind for one that did.
+            context.ChangeTracker.Clear();
+            throw;
+        }
 
         foreach (var adjustment in updatedFilament.FilamentAdjustments!)
         {

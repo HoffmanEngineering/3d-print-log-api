@@ -41,6 +41,28 @@ public static class ExpressionSplice
     }
 
     /// <summary>
+    /// <see cref="With{TSource, TValue, TResult}"/> for four figures, filling the second through
+    /// fifth parameters of <paramref name="shape"/>.
+    /// </summary>
+    public static Expression<Func<TSource, TResult>> With<TSource, T1, T2, T3, T4, TResult>(
+        Expression<Func<TSource, T1, T2, T3, T4, TResult>> shape,
+        Expression<Func<TSource, T1>> first,
+        Expression<Func<TSource, T2>> second,
+        Expression<Func<TSource, T3>> third,
+        Expression<Func<TSource, T4>> fourth)
+    {
+        var source = shape.Parameters[0];
+        var body = shape.Body;
+        LambdaExpression[] figures = [first, second, third, fourth];
+        for (var i = 0; i < figures.Length; i++)
+        {
+            body = Replace(body, shape.Parameters[i + 1], Replace(figures[i].Body, figures[i].Parameters[0], source));
+        }
+
+        return Expression.Lambda<Func<TSource, TResult>>(body, source);
+    }
+
+    /// <summary>
     /// <paramref name="shape"/> with its second parameter replaced by <paramref name="argument"/>
     /// itself, for a placeholder that stands for a lambda: <c>(f, row) =&gt; f.Rows.Sum(row)</c>
     /// with <c>r =&gt; r.Mg</c> becomes <c>f =&gt; f.Rows.Sum(r =&gt; r.Mg)</c>.
@@ -51,7 +73,50 @@ public static class ExpressionSplice
         where TArgument : Delegate =>
         Expression.Lambda<Func<TSource, TResult>>(Replace(shape.Body, shape.Parameters[1], argument), shape.Parameters[0]);
 
-    /// <summary>Replaces every occurrence of <paramref name="from"/> in <paramref name="body"/>.</summary>
+    /// <summary>
+    /// <see cref="Inline{TSource, TArgument, TResult}"/> for two lambda placeholders, filling the
+    /// second and third parameters of <paramref name="shape"/>.
+    /// </summary>
+    public static Expression<Func<TSource, TResult>> Inline<TSource, TArgument1, TArgument2, TResult>(
+        Expression<Func<TSource, TArgument1, TArgument2, TResult>> shape,
+        Expression<TArgument1> first,
+        Expression<TArgument2> second)
+        where TArgument1 : Delegate
+        where TArgument2 : Delegate
+    {
+        var body = Replace(shape.Body, shape.Parameters[1], first);
+        return Expression.Lambda<Func<TSource, TResult>>(Replace(body, shape.Parameters[2], second), shape.Parameters[0]);
+    }
+
+    /// <summary>
+    /// <c>source.Select(Inline(shape, argument))</c>, for a source whose element type cannot be
+    /// named: a grouping keyed by an anonymous type, or an anonymous row. The query supplies the
+    /// type, so <c>.GroupBy(...).SelectWith((g, row) =&gt; new { Mg = g.Sum(row) }, UsageRowMg)</c>
+    /// compiles where spelling out <see cref="Inline{TSource, TArgument, TResult}"/> could not.
+    /// </summary>
+    public static IQueryable<TResult> SelectWith<TSource, TArgument, TResult>(
+        this IQueryable<TSource> source,
+        Expression<Func<TSource, TArgument, TResult>> shape,
+        Expression<TArgument> argument)
+        where TArgument : Delegate =>
+        source.Select(Inline(shape, argument));
+
+    /// <summary><see cref="SelectWith{TSource, TArgument, TResult}"/> for two lambda placeholders.</summary>
+    public static IQueryable<TResult> SelectWith<TSource, TArgument1, TArgument2, TResult>(
+        this IQueryable<TSource> source,
+        Expression<Func<TSource, TArgument1, TArgument2, TResult>> shape,
+        Expression<TArgument1> first,
+        Expression<TArgument2> second)
+        where TArgument1 : Delegate
+        where TArgument2 : Delegate =>
+        source.Select(Inline(shape, first, second));
+
+    /// <summary>
+    /// Replaces every occurrence of <paramref name="from"/> in <paramref name="body"/>. Where
+    /// <paramref name="from"/> is a placeholder the shape calls (<c>row(x.Usage)</c>) and
+    /// <paramref name="to"/> is a lambda, the call is replaced by the lambda's body applied to
+    /// the arguments, since EF cannot translate an invoked lambda.
+    /// </summary>
     public static Expression Replace(Expression body, Expression from, Expression to) =>
         new Replacer(from, to).Visit(body)
         ?? throw new InvalidOperationException("Rewriting an expression produced nothing.");
@@ -59,5 +124,21 @@ public static class ExpressionSplice
     private sealed class Replacer(Expression from, Expression to) : ExpressionVisitor
     {
         public override Expression? Visit(Expression? node) => node == from ? to : base.Visit(node);
+
+        protected override Expression VisitInvocation(InvocationExpression node)
+        {
+            if (node.Expression != from || to is not LambdaExpression lambda)
+            {
+                return base.VisitInvocation(node);
+            }
+
+            var applied = lambda.Body;
+            for (var i = 0; i < lambda.Parameters.Count; i++)
+            {
+                applied = Replace(applied, lambda.Parameters[i], Visit(node.Arguments[i])!);
+            }
+
+            return applied;
+        }
     }
 }

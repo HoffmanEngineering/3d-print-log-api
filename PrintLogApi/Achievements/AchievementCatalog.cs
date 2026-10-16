@@ -51,7 +51,9 @@ public static class AchievementCatalog
             [24, 100, 250, 500, 1000, 2500], PrintChanged, "prints.hours"),
         new("material-used", Milestones, "scale", "Plastic Fantastic",
             "Use {n} kg of material across your prints.", "You've printed {n} kg of material.",
-            [1, 5, 10, 25, 50, 100], PrintChanged, "prints.materialKg"),
+            // FilamentChanged too: a spool's density or diameter decides what its length and
+            // volume rows weigh (#229).
+            [1, 5, 10, 25, 50, 100], PrintChanged | FilamentChanged, "prints.materialKg"),
         new("longest-print", Milestones, "timer", "Marathon",
             "Successfully finish a single print that ran {n} hours.", "You finished a {n}-hour print.",
             [8, 24, 48, 72], PrintChanged, "prints.longestHours"),

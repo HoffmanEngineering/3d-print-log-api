@@ -1,7 +1,9 @@
 ﻿using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services.Analytics;
 
@@ -227,14 +229,14 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
         // as a final deterministic backstop. Both tie-breakers must be projected, or the
         // ordering silently degrades to "lowest id wins", which is not the specified rule.
-        // The sums are inlined rather than using PrintMetrics.*Expr because g.Sum takes a
-        // Func, not an Expression (PrintMetrics.cs:31-38).
+        // Duration is inlined because g.Sum takes a Func, not an Expression. Material is the
+        // shared PrintMetrics.MaterialMgExpr, spliced in as that Func by SelectWith.
         // Owner-scoped before the group: this projection reads printer NAME, make and model,
         // so an unowned reference here would surface another user's machine on the tile.
         var topPrinter = await scoped
             .Where(p => p.Printer.UserId == userId)
             .GroupBy(p => new { p.PrinterId, p.Printer.Name, p.Printer.Make, p.Printer.Model })
-            .Select(g => new
+            .SelectWith((g, material) => new
             {
                 g.Key.PrinterId,
                 g.Key.Name,
@@ -245,15 +247,8 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
                     p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
                     : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
                     : 0),
-                MaterialMg = g.Sum(p =>
-                    p.FilamentUsage!.Sum(pf =>
-                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                        : 0)
-                    + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-                       : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-                       : 0)),
-            })
+                MaterialMg = g.Sum(material),
+            }, PrintMetrics.MaterialMgExpr)
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.DurationSeconds)
             .ThenByDescending(x => x.MaterialMg)
@@ -270,17 +265,14 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
             // rank here, so `linked AND owned` is the right predicate in this one place.
             .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
             .GroupBy(pf => new { pf.FilamentId, pf.Filament!.DisplayName, pf.Filament.MaterialType })
-            .Select(g => new
+            .SelectWith((g, row) => new
             {
                 g.Key.FilamentId,
                 g.Key.DisplayName,
                 g.Key.MaterialType,
                 Count = g.Count(),
-                MaterialMg = g.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
-            })
+                MaterialMg = g.Sum(row),
+            }, FilamentProfile.UsageRowMg)
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.MaterialMg)
             .ThenBy(x => x.FilamentId)

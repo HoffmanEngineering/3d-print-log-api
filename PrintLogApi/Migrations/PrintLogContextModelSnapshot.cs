@@ -2499,6 +2499,18 @@ namespace PrintLogApi.Migrations
                             Id = 26,
                             Description = "When the user dismissed the in-app email notice (ISO 8601).",
                             Name = "Email_NoticeSeenAt"
+                        },
+                        new
+                        {
+                            Id = 27,
+                            Description = "The newest web app version whose release notes the What's New dialog has shown the user.",
+                            Name = "ReleaseNotes_LastShownVersion"
+                        },
+                        new
+                        {
+                            Id = 28,
+                            Description = "The web app version that was current when the user last opened the release notes page.",
+                            Name = "ReleaseNotes_LastViewedVersion"
                         });
                 });
 
