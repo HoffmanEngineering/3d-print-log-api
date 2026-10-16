@@ -942,7 +942,11 @@ public class FilamentService(
         {
             throw McpToolException.InvalidArguments(
                 "This material has no starting amount, so its remaining amount is not tracked. " +
-                "Set one with update_material(materialId, source, initialAmount) first.");
+                "Set initialAmount with update_material to the spool's ORIGINAL size. If you only " +
+                "know what is on it now, set initialAmount to any original size, then call " +
+                "get_material and adjust_material_remaining by the difference: logged usage is " +
+                "subtracted from initialAmount, so setting it to the current amount counts that " +
+                "usage twice.");
         }
 
         // Record the adjustment in the caller's source unit; the existing helper derives the rest,
@@ -1037,9 +1041,12 @@ public class FilamentService(
         long userId, string? material, string? color, double? requiredGrams, CancellationToken ct)
     {
         // Untracked spools are left out (#230): their remaining is null, and counting one as 0 or
-        // as anything else would make an availability answer up.
+        // as anything else would make an availability answer up. Filtered on the column, not on
+        // the projected FilamentRemaining, so SQL Server does not evaluate the correlated usage
+        // sums in the WHERE as well as the SELECT. The two agree: remaining is null exactly when
+        // InitialNominalWeightMg is.
         var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false)
-            .Where(f => f.FilamentRemaining != null);
+            .Where(f => f.InitialNominalWeightMg != null);
 
         // Order by remaining weight so that if the candidate set is truncated, the spools most
         // likely to satisfy the requirement are the ones that survive.

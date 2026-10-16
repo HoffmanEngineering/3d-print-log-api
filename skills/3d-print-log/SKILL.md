@@ -126,7 +126,11 @@ used material that no logged print accounts for.
   `get_material` before retrying.
 - Changing the size of a spool (a new starting amount) is `update_material(materialId, source, initialAmount)`,
   not an adjustment. A spool with no starting amount (`hasNominalCapacity` false, `remainingGrams`
-  null) can't be adjusted until it has one.
+  null) can't be adjusted until it has one. `initialAmount` is the spool's original size, and logged
+  usage is subtracted from it. If the user only knows what is on the spool now ("I weighed it, 600 g
+  left"), set `initialAmount` to the original size (ask, or use the nominal size such as 1000 g),
+  then read `get_material` and `adjust_material_remaining` by the difference. Setting `initialAmount`
+  to 600 would subtract the logged usage again.
 
 ## Printer statistics and summaries
 
