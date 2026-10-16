@@ -9,6 +9,7 @@ public class PrintEventService(
     PrintLogContext context,
     IPrintService printService,
     IPrintFinishNotifier printFinishNotifier,
+    IPrintStartNotifier printStartNotifier,
     IBlobStorageService blobStorageService,
     ICacheVersionService cacheVersionService,
     TimeProvider clock,
@@ -102,6 +103,7 @@ public class PrintEventService(
         // Saving straight through the context skips the invalidation the controllers do, so the
         // cached print summary and analytics would keep serving pre-print figures.
         cacheVersionService.InvalidateUserCache(started.UserId);
+        printStartNotifier.NotifyIfJustStarted(print, previousStatus: null);
         return new PrintStartedResult(print, WasReplayed: false);
     }
 

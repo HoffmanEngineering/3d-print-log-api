@@ -34,6 +34,7 @@ using PrintLogApi.Services.Push;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
+using PrintLogApi.Webhooks;
 using Prometheus;
 
 namespace PrintLogApi;
@@ -183,6 +184,7 @@ public class Startup
         services.AddTransient<IPrintEventService, PrintEventService>();
         services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
+        services.AddTransient<IPrintStartNotifier, PrintStartNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();
@@ -223,10 +225,19 @@ public class Startup
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddApplicationInsightsTelemetry();
+        // The SDK stops adding its own correlation headers (Request-Context, and Request-Id where it
+        // would) to outbound calls. Webhook receivers (#235) are third parties, and the SDK cannot
+        // be told which hosts those are: their URLs are user data. This is process-wide, but narrow:
+        // the runtime still adds traceparent to every other HttpClient's calls; only the webhook
+        // client drops that too, through the no-output propagator on its handler
+        // (WebhookHttpHandlerFactory). Dependency telemetry itself is unaffected.
+        services.ConfigureTelemetryModule<Microsoft.ApplicationInsights.DependencyCollector.DependencyTrackingTelemetryModule>(
+            (module, _) => module.SetComponentCorrelationHttpHeaders = false);
         // Who and how, on every item; then drop the rows that only ever say "still polling".
         // See each type's remarks for the numbers behind them.
         services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
         services.AddSingleton<ITelemetryInitializer, EmailTokenRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, WebhookTelemetryRedactionInitializer>();
         services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
         if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
         {
@@ -239,6 +250,7 @@ public class Startup
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
         services.AddEmail(Configuration);
+        services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
             options.Host = Configuration["ExternalProviders:Smtp:Host"];
@@ -338,6 +350,12 @@ public class Startup
                     });
             });
 
+            // Webhooks (#235): the test endpoint and the writes make the server resolve and call
+            // hosts the caller chose, so each has a small per-user budget of its own. An endpoint
+            // with one of these does not also get "api" (see the MapControllers convention).
+            AddWebhookPolicy(options, Controllers.WebhooksController.TestRateLimitPolicy, "Webhooks:TestRateLimitPerMinute", 5);
+            AddWebhookPolicy(options, Controllers.WebhooksController.WriteRateLimitPolicy, "Webhooks:WriteRateLimitPerMinute", 20);
+
             // Per-caller rate limiting for the REST controllers. Two separate budgets, because
             // the two populations behave nothing alike:
             //
@@ -410,6 +428,29 @@ public class Startup
                         QueueLimit = 0,
                     });
             });
+        });
+    }
+
+    /// <summary>A fixed one-minute window per user; 0 or less disables it.</summary>
+    private void AddWebhookPolicy(Microsoft.AspNetCore.RateLimiting.RateLimiterOptions options, string policy, string setting, int defaultPerMinute)
+    {
+        options.AddPolicy(policy, httpContext =>
+        {
+            var limit = Configuration.GetValue(setting, defaultPerMinute);
+            var userId = httpContext.User.GetUserId();
+            if (limit <= 0 || userId is null)
+            {
+                return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter($"{policy}-unlimited");
+            }
+
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: $"{policy}:{userId.Value}",
+                _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = limit,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                });
         });
     }
 

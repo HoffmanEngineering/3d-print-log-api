@@ -66,6 +66,7 @@ public class PrintLogContext : DbContext
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
     public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
     public DbSet<SpoolmanUsage> SpoolmanUsages { get; set; }
+    public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -501,6 +502,17 @@ public class PrintLogContext : DbContext
             .WithMany()
             .HasForeignKey(c => c.PrinterId)
             .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Webhook subscriptions (#235). Users is the only cascade path into this table, so SQL
+        // Server's multiple-cascade-path rule (1785) does not apply.
+        modelBuilder.Entity<WebhookSubscription>()
+            .HasIndex(w => new { w.UserId, w.CreatedDate });
+
+        modelBuilder.Entity<WebhookSubscription>()
+            .HasOne(w => w.User)
+            .WithMany()
+            .HasForeignKey(w => w.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<SpoolmanNetworkSighting>()
             .HasIndex(s => new { s.UserId, s.NetworkHash })
