@@ -1,0 +1,120 @@
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text;
+using Microsoft.ApplicationInsights.DataContracts;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using PrintLogApi.Webhooks;
+using Xunit;
+
+namespace PrintLogApi.IntegrationTests.Webhooks;
+
+/// <summary>
+/// The production registration of the webhook HTTP client (#235), with nothing overridden: the
+/// guarded primary handler is really in place, and a delivery leaks neither its URL path (into
+/// telemetry or logs) nor trace headers (to the receiver).
+/// </summary>
+public class WebhookWiringTests
+{
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>A host with a key and the production handler; private addresses stay blocked.</summary>
+    public class ProductionWiringFactory : CustomWebApplicationFactory
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Webhooks:SecretEncryptionKeys:0"] = WebhookTestFactory.TestKey,
+            }));
+        }
+    }
+
+    /// <summary>
+    /// The production handler, built from a guard that admits loopback, so a delivery can complete
+    /// against a local server and its telemetry, logs and headers can be inspected.
+    /// </summary>
+    public sealed class LoopbackWiringFactory : ProductionWiringFactory
+    {
+        public CapturingLoggerProvider Logs { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Logging:LogLevel:Default"] = "Trace",
+            }));
+            builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<WebhookAddressGuard>();
+                services.AddSingleton(sp => new WebhookAddressGuard(sp.GetRequiredService<IWebhookHostResolver>(), allowPrivateAddresses: true));
+            });
+        }
+    }
+
+    [Fact]
+    public async Task TheRegisteredClient_RefusesLoopback()
+    {
+        await using var factory = new ProductionWiringFactory();
+        await using var server = new LoopbackHttpServer(LoopbackHttpServer.Ok());
+        var client = factory.Services.GetRequiredService<IHttpClientFactory>().CreateClient(WebhookSender.HttpClientName);
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync($"http://127.0.0.1:{server.Port}/", Ct));
+
+        Assert.IsType<WebhookAddressBlockedException>(ex.InnerException);
+        Assert.Equal(0, server.Connections);
+    }
+
+    [Fact]
+    public async Task ADelivery_SendsNoTraceHeaders_AndKeepsItsPathOutOfTelemetryAndLogs()
+    {
+        await using var factory = new LoopbackWiringFactory();
+        await using var server = new LoopbackHttpServer(LoopbackHttpServer.Ok());
+        var sender = factory.Services.GetRequiredService<WebhookSender>();
+        var url = new Uri($"http://127.0.0.1:{server.Port}/api/webhook/SECRET-HOOK-ID");
+        factory.Telemetry.Clear();
+
+        WebhookAttemptResult result;
+        using (var activity = new Activity("test-request").SetIdFormat(ActivityIdFormat.W3C).Start())
+        {
+            result = await sender.SendAsync(url, "whsec_wiring",
+                new WebhookMessage("webhook.test", "evt_wiring", Encoding.UTF8.GetBytes("{}")), attempt: 1, Ct);
+        }
+
+        Assert.True(result.Succeeded, result.Result);
+        var head = Assert.Single(server.Requests);
+        Assert.DoesNotContain("traceparent", head, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tracestate", head, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Request-Id", head, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Request-Context", head, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("baggage", head, StringComparison.OrdinalIgnoreCase);
+
+        var dependency = Assert.Single(factory.Telemetry.Items.OfType<DependencyTelemetry>(), d => d.Target?.Contains("127.0.0.1") == true);
+        Assert.DoesNotContain("SECRET", dependency.Data);
+        Assert.DoesNotContain("SECRET", dependency.Name);
+        Assert.DoesNotContain(factory.Logs.Messages, m => m.Contains("SECRET", StringComparison.Ordinal));
+    }
+}
+
+public sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    private readonly ConcurrentQueue<string> _messages = new();
+
+    public IReadOnlyCollection<string> Messages => _messages.ToArray();
+
+    public ILogger CreateLogger(string categoryName) => new Logger(categoryName, _messages);
+
+    public void Dispose() { }
+
+    private sealed class Logger(string category, ConcurrentQueue<string> messages) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            messages.Enqueue($"{category}: {formatter(state, exception)}");
+    }
+}

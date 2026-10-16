@@ -42,7 +42,10 @@ public static class WebhookServiceCollectionExtensions
             })
             .ConfigurePrimaryHttpMessageHandler(sp => WebhookHttpHandlerFactory.Create(
                 sp.GetRequiredService<WebhookAddressGuard>(),
-                sp.GetRequiredService<IOptions<WebhookOptions>>().Value.Timeout));
+                sp.GetRequiredService<IOptions<WebhookOptions>>().Value.Timeout))
+            // The factory's logging handlers write the full request URI at Information, and a
+            // webhook URL's path can be the receiver's secret. WebhookSender logs the host instead.
+            .RemoveAllLoggers();
 
         return services;
     }

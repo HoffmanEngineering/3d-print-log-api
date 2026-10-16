@@ -202,5 +202,8 @@ public static class WebhookHttpHandlerFactory
         MaxConnectionsPerServer = 4,
         PooledConnectionLifetime = TimeSpan.FromMinutes(2),
         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+        // Receivers are third parties: no traceparent, tracestate, baggage or Request-Id, which
+        // would hand them this API's trace and request ids.
+        ActivityHeadersPropagator = System.Diagnostics.DistributedContextPropagator.CreateNoOutputPropagator(),
     };
 }

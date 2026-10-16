@@ -50,6 +50,11 @@ public sealed class LoopbackHttpServer : IAsyncDisposable
 
     public int Connections => Volatile.Read(ref _connections);
 
+    /// <summary>The raw request heads (request line and headers) received, in order.</summary>
+    public IReadOnlyList<string> Requests => _requests.ToArray();
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _requests = new();
+
     public static string Ok(string body = "ok") =>
         $"HTTP/1.1 200 OK\r\nContent-Length: {Encoding.UTF8.GetByteCount(body)}\r\nConnection: close\r\n\r\n{body}";
 
@@ -80,6 +85,9 @@ public sealed class LoopbackHttpServer : IAsyncDisposable
                         if (n == 0) break;
                         received.Append(Encoding.ASCII.GetString(buffer, 0, n));
                     }
+                    var text = received.ToString();
+                    var end = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                    _requests.Enqueue(end >= 0 ? text[..end] : text);
                     await stream.WriteAsync(Encoding.UTF8.GetBytes(response), _stop.Token);
                     await stream.FlushAsync(_stop.Token);
                 }
