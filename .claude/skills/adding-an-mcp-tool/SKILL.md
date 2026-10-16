@@ -125,7 +125,11 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
 the user entered and weight is derived from it. Editing density/diameter on a Length/Volume material
 therefore recomputes its weight and remaining-by-weight — expected, not a bug. Say so in the tool
 description. `adjust_material_remaining` is the only tool for changing quantity, and it refuses a
-result below zero or above original capacity.
+result below zero or above original capacity, and any material with no capacity at all.
+
+- **An untracked material's remaining is null, never 0** (#230). Report `FilamentProfile.RemainingMg`
+  through `McpUnits.MgToGramsOrNull`; `MgToGrams` turns null into 0, which reads as "empty". A tool
+  that sums or ranks availability leaves untracked spools out, as `find_material` does.
 
 - Route **every** capacity conversion through `McpMaterialConversion.RequireMgInRange` before the
   `long` cast — `MeasurementUtilities` casts **unchecked**, so an unguarded huge density or amount

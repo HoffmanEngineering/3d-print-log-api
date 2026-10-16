@@ -153,7 +153,7 @@ public class McpAppResourcesTests : IClassFixture<McpDocsWebApplicationFactory>
 
     // ---- The tool's own result is unchanged --------------------------------------------------
 
-    private sealed record Item(Guid Id, string Name, double RemainingGrams, bool IsActive);
+    private sealed record Item(Guid Id, string Name, double? RemainingGrams, bool IsActive);
     private sealed record PageResult(List<Item> Items, int Page, int PageSize, int TotalCount, int TotalPages);
 
     /// <summary>

@@ -110,7 +110,9 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 23, Name = "Email_Onboarding", Description = "Send the onboarding email series (true/false; absent means on)." },
             new UserSettingType() { Id = 24, Name = "Email_MonthlyRecap", Description = "Send the monthly recap email (true/false; absent means on)." },
             new UserSettingType() { Id = 25, Name = "Email_PrinterSilent", Description = "Email when a connected printer stops reporting (true/false; absent means on)." },
-            new UserSettingType() { Id = 26, Name = "Email_NoticeSeenAt", Description = "When the user dismissed the in-app email notice (ISO 8601)." }
+            new UserSettingType() { Id = 26, Name = "Email_NoticeSeenAt", Description = "When the user dismissed the in-app email notice (ISO 8601)." },
+            new UserSettingType() { Id = 27, Name = "ReleaseNotes_LastShownVersion", Description = "The newest web app version whose release notes the What's New dialog has shown the user." },
+            new UserSettingType() { Id = 28, Name = "ReleaseNotes_LastViewedVersion", Description = "The web app version that was current when the user last opened the release notes page." }
             );
 
         var filamentCategory = new MaterialCategory()
@@ -946,19 +948,51 @@ public class PrintLogContext : DbContext
     private void UpdateTimestamps()
     {
         var entries = ChangeTracker
-        .Entries()
-        .Where(e => e.Entity is TimestampEntity && (
-                e.State == EntityState.Added
-                || e.State == EntityState.Modified));
+            .Entries()
+            .Where(e => e.Entity is TimestampEntity)
+            .ToList();
+
+        // Rows being replaced by another instance with the same key, by entity type and key.
+        Dictionary<EntityRowKey, DateTime>? replacedCreatedDates = null;
 
         foreach (var entityEntry in entries)
         {
             var saveDateTime = DateTime.UtcNow;
-            ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
 
             if (entityEntry.State == EntityState.Added)
             {
+                ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
                 ((TimestampEntity)entityEntry.Entity).CreatedDate = saveDateTime;
+            }
+            else if (entityEntry.State == EntityState.Modified)
+            {
+                ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
+
+                // An update never changes when a row was created (#256). Update paths map a
+                // client DTO over the loaded entity, and a client that leaves createdDate out
+                // (the web app re-sends a spool's adjustments that way) would otherwise write
+                // 0001-01-01 over it. To backdate a row on purpose, use ExecuteUpdate.
+                //
+                // AutoMapper replaces a child collection's items with new instances, so the
+                // loaded row is often not this entry: EF marks the loaded instance Deleted and
+                // turns this one, which has the same key, into an update of that row. This
+                // entry's original value is then the client's, only the Deleted twin carries
+                // the stored date, and EF writes the column whether or not it is marked
+                // modified. So the stored date goes into both the original and the current
+                // value: clearing IsModified alone would revert to the client's 0001-01-01.
+                replacedCreatedDates ??= EntityRowKey.IndexFirst(entries
+                    .Where(e => e.State == EntityState.Deleted)
+                    .Select(e => (EntityRowKey.Of(e), (DateTime)e.Property(nameof(TimestampEntity.CreatedDate)).OriginalValue!)));
+
+                var createdDate = entityEntry.Property(nameof(TimestampEntity.CreatedDate));
+                if (replacedCreatedDates.TryGetValue(EntityRowKey.Of(entityEntry), out var stored))
+                {
+                    createdDate.OriginalValue = stored;
+                }
+
+                // Reverts the current value to the original, which also keeps the response
+                // mapped from this entity honest.
+                createdDate.IsModified = false;
             }
         }
     }

@@ -3,6 +3,7 @@ using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Models.DTOs.Sync;
 
 namespace PrintLogApi.Serialization;
 
@@ -52,4 +53,8 @@ namespace PrintLogApi.Serialization;
 [JsonSerializable(typeof(MaterialsResponse))]
 [JsonSerializable(typeof(CostsResponse))]
 [JsonSerializable(typeof(AccuracyResponse))]
+// The integration polling pair (#234): every Home Assistant install reads the version once a
+// minute, all day, and the snapshot whenever it changes.
+[JsonSerializable(typeof(SyncVersionResponse))]
+[JsonSerializable(typeof(SyncSnapshot))]
 public partial class PrintLogJsonSerializerContext : JsonSerializerContext;

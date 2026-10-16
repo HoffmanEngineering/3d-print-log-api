@@ -311,6 +311,46 @@ tags and no GitHub releases, so not `releases/latest`), keyed by connection kind
   which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
   keeps what it reads, so seed it before the host's first connection request.
 
+## Integration polling (#234)
+
+`GET /api/sync/version` and `GET /api/sync/snapshot` (`SyncController`) are what the Home
+Assistant integration (#236) polls. The field rules are on the response records in
+`Models/DTOs/Sync/SyncSnapshot.cs` and in the OpenAPI document.
+
+- **`/version` reads no data, and assumes a single instance.** It is a hash of the user id and
+  the `ICacheVersionService` GUID, which lives in process memory. A restart mints a new one
+  (harmless: one extra snapshot fetch). Scaled out, it is worse than spurious changes: a write
+  bumps only the instance that served it, so polls landing on another instance *miss* the change
+  until that instance's entry expires. A write that forgets to bump the version is invisible here
+  too, as it is to the summaries.
+- **Connection health is never cached.** Heartbeats do not bump the version (and must not: one per
+  printer every 5 minutes would flush every cache the user has), and going stale is the absence
+  of an event. Each request overlays `connection` from one live query. The body carries no
+  `lastSeenAt`, so an unchanged status keeps the `ETag` and the 304.
+- **Four cache entries, all on the version GUID** (`SyncSnapshotService`): the core (printers and
+  spools plus a hash of their bytes, 15 min, about 109 KB for 300 spools, see
+  `CacheBudget.SyncSnapshotCoreBytes`), the core's hash alone (1 h), the month totals keyed on
+  canonical zone and month (1 h, so they roll over without a write), and the saved time zone
+  (1 h; settings writes bump the version).
+- **A 304 never builds the core.** The tag is computed from the version, the cached core hash,
+  the totals and the overlay; only a 200 reads the core. So a conditional refresh costs the
+  overlay query and cache hits, even after the core expired.
+- **The ETag follows content, not just the version.** A change that missed its bump gets a new tag
+  once the hash entry expires (at most an hour) and the core is rebuilt. Tags are weak (`W/`),
+  because compression serves several encodings under one tag.
+- **Time zones are canonical** (`SyncZone`): resolved, then mapped through their Windows zone to
+  CLDR's primary IANA id, so aliases share one entry and tag. The echoed id can be a sibling
+  (`Europe/Paris` reads back `Europe/Berlin`) with identical month boundaries. Omitted means the
+  user's saved setting, else UTC.
+- **`remainingGrams` is null for an untracked spool**, pending #230; never `BalanceMg`'s negative
+  figure. Changing it is a contract change for the integration.
+- **A full miss is five statements, whatever the printer count** (three for the core, two for the
+  totals; `SyncSnapshotQueryShapeTests`).
+  The current and last print per printer are correlated `FirstOrDefault`s that EF turns into
+  `ROW_NUMBER()` joins, one statement.
+- `schemaVersion` versions the shape. Adding a field is fine; renaming, removing or changing a
+  meaning needs a new version and the integration's agreement.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under
@@ -643,7 +683,8 @@ same repo installs the plugin.
 ## JSON serialization
 
 `PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume
-responses: the two cached summary lists and the six analytics tabs. It is **partial by design** and
+responses: the two cached summary lists, the six analytics tabs and the two sync responses (#234).
+It is **partial by design** and
 is `Insert`ed at position 0 of `JsonSerializerOptions.TypeInfoResolverChain`, with ASP.NET Core's
 `DefaultJsonTypeInfoResolver` still behind it. Assigning `TypeInfoResolver` instead would drop that
 fallback, and the failure surfaces on some unrelated endpoint rather than at the edit.
@@ -768,6 +809,17 @@ without the token; do not suppress the rule.
 differently from v2, and that alone broke two tests that had been asserting on seeded rows a
 sibling deletes (`DeleteAllNotifications_*`) or pages past (the summary endpoints default to
 `PageSize = 10`). Both were latent; nothing about v3 made them wrong. Arrange what you assert on.
+
+### Gotcha: inotify limits in containers
+
+In a container with a low inotify limit (Claude Code cloud sessions allow 128 instances), a full
+`dotnet test` fails about 800 tests with `IOException: The configured user limit (128) on the
+number of inotify instances has been reached`. Each test host's JSON configuration source starts
+its own file watcher. It is the environment, not the code. Run the suite with polling watchers:
+
+```bash
+DOTNET_USE_POLLING_FILE_WATCHER=true dotnet test --verbosity quiet
+```
 
 ### Gotcha: testing JWT-protected endpoints against a local signing key
 

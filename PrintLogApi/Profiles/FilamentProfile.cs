@@ -86,22 +86,18 @@ public class FilamentProfile : Profile
         NetAdjustmentMg);
 
     /// <summary>
-    /// Remaining milligrams as the detail page reports it, or null for a spool with no nominal
-    /// weight (untracked): the nominal weight less <see cref="ConsumedMg"/>. May be negative when
-    /// more usage was logged than the spool held; callers decide whether to clamp.
+    /// Remaining milligrams: the nominal weight less <see cref="ConsumedMg"/>, or null for a spool
+    /// with no nominal weight (untracked). May be negative when more usage was logged than the
+    /// spool held; callers decide whether to clamp.
+    ///
+    /// <para>This is the only remaining figure (#230). The detail page, the list, the printer
+    /// page, the MCP tools, analytics and the Spoolman API all report it, so an untracked spool
+    /// is null ("not tracked") everywhere rather than counting down from zero on some surfaces.
+    /// A caller that wants how much has left the spool regardless of tracking wants
+    /// <see cref="ConsumedMg"/>, not a remaining figure that pretends the spool started empty.</para>
     /// </summary>
     public static readonly Expression<Func<Filament, long?>> RemainingMg = ExpressionSplice.With<Filament, double, long?>(
         (f, consumed) => f.InitialNominalWeightMg.HasValue ? (long?)Math.Round(f.InitialNominalWeightMg.Value - consumed) : null,
-        ConsumedMgExact);
-
-    /// <summary>
-    /// <see cref="RemainingMg"/> as the list, the MCP inventory and loaded-filament views report
-    /// it: an untracked spool counts from zero instead of reporting null, so it reads as minus
-    /// whatever it has consumed. Kept as it was; whether those views should say "not tracked"
-    /// like the detail page is a separate, caller-visible decision.
-    /// </summary>
-    public static readonly Expression<Func<Filament, long?>> BalanceMg = ExpressionSplice.With<Filament, double, long?>(
-        (f, consumed) => (long?)Math.Round((f.InitialNominalWeightMg ?? 0) - consumed),
         ConsumedMgExact);
 
     /// <summary>
@@ -136,8 +132,9 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
             // Volume and length are NOT mapped here: FilamentSummaryDto derives them from
             // this figure so the list, the detail page and each other cannot disagree.
-            // Prints and adjustments both count; see UsageRowMg and BalanceMg above.
-            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(BalanceMg))
+            // Prints and adjustments both count, and an untracked spool is null as on the
+            // detail page; see UsageRowMg and RemainingMg above.
+            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(RemainingMg))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src =>

@@ -31,7 +31,7 @@ public class PrinterToolsTests : IClassFixture<McpDataWebApplicationFactory>
 
     private sealed record LoadedFilament(
         Guid FilamentId, string? Name, string? Brand, string? Material, string? Color,
-        double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt,
+        double? DiameterMm, double? RemainingGrams, DateTimeOffset LoadedAt,
         int? Slot, string? SlotLabel);
 
     private sealed record PrinterDetail(
