@@ -105,6 +105,23 @@ public class AdjustMaterialToolTests : IClassFixture<McpDataWebApplicationFactor
         Assert.True(isError);
     }
 
+    // An untracked spool (no starting amount) has no remaining amount to correct, so a delta
+    // against it is rejected rather than reported against a figure that does not exist (#230).
+    // Before, a removal was rejected as "below zero" and an addition reported a negative total.
+    [Fact]
+    public async Task Adjust_UntrackedMaterial_IsRejected()
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+
+        var result = await client.CallToolAsync("adjust_material_remaining",
+            new Dictionary<string, object?> { ["materialId"] = McpTestData.InactiveFilamentId, ["source"] = "Weight", ["delta"] = 50.0 },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsError);
+        var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().First().Text;
+        Assert.Contains("not tracked", text);
+    }
+
     // create_material refuses a diameter-tracking material without a diameter, or a zero density,
     // but the web app has saved both, so the tests below set them on the row directly.
     private async Task SetConversionInputs(Guid id, double density, double? diameterMm)

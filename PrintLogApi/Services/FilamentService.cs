@@ -237,24 +237,25 @@ public class FilamentService(
 
         // Negative RemainingGrams are reported as-is: they indicate a real data problem
         // (usage logged beyond the spool's initial weight) that the user should be able to see
-        // and fix. Only find_material clamps them, and only when summing availability.
+        // and fix. Only find_material clamps them, and only when summing availability. Null
+        // means the spool is not tracked (#230).
         var items = rows.Select(r => new MaterialInventoryItem(
             r.Id, r.DisplayName!, r.Brand, r.MaterialType!, r.ColorName,
-            McpUnits.MgToGrams(r.FilamentRemaining), r.IsActive,
+            McpUnits.MgToGramsOrNull(r.FilamentRemaining), r.IsActive,
             r.StorageLocation, r.DiameterMm)).ToList();
 
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
         return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
     }
 
-    public async Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
+    public async Task<double?> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
     {
         var remainingMg = await context.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == userId && f.Id == materialId)
             .ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider)
             .Select(f => f.FilamentRemaining)
             .FirstOrDefaultAsync(ct);
-        return McpUnits.MgToGrams(remainingMg);
+        return McpUnits.MgToGramsOrNull(remainingMg);
     }
 
     public async Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct)
@@ -274,7 +275,7 @@ public class FilamentService(
     /// Projects an owned material to the MCP detail shape. The caller has ALREADY established
     /// ownership; this method does not re-check it and must never be handed a foreign row.
     /// </summary>
-    private static MaterialDetail ToMaterialDetail(Filament f, double remainingGrams)
+    private static MaterialDetail ToMaterialDetail(Filament f, double? remainingGrams)
     {
         // The authoritative amount, in the unit the user actually entered. Storage keeps length in
         // METERS while the MCP boundary is mm.
@@ -935,6 +936,19 @@ public class FilamentService(
             throw McpToolException.NotFound("Material not found.");
         }
 
+        // An untracked spool has no remaining amount (it is null on every surface, #230), so there
+        // is nothing for a delta to correct and no floor or ceiling to check it against.
+        if (!material.InitialNominalWeightMg.HasValue)
+        {
+            throw McpToolException.InvalidArguments(
+                "This material has no starting amount, so its remaining amount is not tracked. " +
+                "Set initialAmount with update_material to the spool's ORIGINAL size. If you only " +
+                "know what is on it now, set initialAmount to any original size, then call " +
+                "get_material and adjust_material_remaining by the difference: logged usage is " +
+                "subtracted from initialAmount, so setting it to the current amount counts that " +
+                "usage twice.");
+        }
+
         // The same check the web app's create and update paths make (#232).
         if (!AdjustmentConversionInputs.Of(material).CanConvert((FilamentAdjustment.SourceMeasurement)(int)source))
         {
@@ -966,7 +980,8 @@ public class FilamentService(
         UpdateFilamentAdjustmentMeasurements(adjustment, material);
 
         var deltaGrams = McpUnits.MgToGrams(adjustment.AmountMg);
-        var beforeGrams = await GetRemainingGramsForMcp(userId, materialId, ct);
+        // Tracked (checked above), so remaining has a value.
+        var beforeGrams = (await GetRemainingGramsForMcp(userId, materialId, ct))!.Value;
         var afterGrams = Math.Round(beforeGrams + deltaGrams, 3, MidpointRounding.AwayFromZero);
         var capacityGrams = McpUnits.MgToGrams(material.InitialNominalWeightMg);
 
@@ -1025,12 +1040,18 @@ public class FilamentService(
     public async Task<FindMaterialResult> FindMaterialForMcp(
         long userId, string? material, string? color, double? requiredGrams, CancellationToken ct)
     {
-        var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false);
+        // Untracked spools are left out (#230): their remaining is null, and counting one as 0 or
+        // as anything else would make an availability answer up. Filtered on the column, not on
+        // the projected FilamentRemaining, so SQL Server does not evaluate the correlated usage
+        // sums in the WHERE as well as the SELECT. The two agree: remaining is null exactly when
+        // InitialNominalWeightMg is.
+        var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false)
+            .Where(f => f.InitialNominalWeightMg != null);
 
         // Order by remaining weight so that if the candidate set is truncated, the spools most
         // likely to satisfy the requirement are the ones that survive.
         var candidates = await projected
-            .OrderByDescending(f => f.FilamentRemaining ?? 0)
+            .OrderByDescending(f => f.FilamentRemaining)
             .ThenBy(f => f.Id)
             .Take(MaxCandidates + 1) // +1 detects truncation without a second COUNT
             .Select(f => new SpoolItem(
