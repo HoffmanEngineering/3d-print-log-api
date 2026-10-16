@@ -1354,15 +1354,25 @@ public class FilamentService(
             .Select(f => f.Id)
             .ToListAsync(ct);
 
+        var numbered = 0;
         foreach (var id in unnumbered)
         {
             var number = await ReserveSpoolNumberAsync(userId, ct);
 
             // Conditional, so two lookups racing to number the same spool cannot both win and
             // the second overwrite the first; the loser's reserved number becomes a gap.
-            await context.Filaments
+            numbered += await context.Filaments
                 .Where(f => f.Id == id && f.SpoolNumber == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(f => f.SpoolNumber, number), ct);
+        }
+
+        // ExecuteUpdate bypasses SaveChanges, so nothing else bumps the version for these rows,
+        // and every cached view showing spool numbers (the summaries, the sync snapshot) would keep
+        // reporting them unnumbered. Only when something was numbered: this normally finds
+        // nothing, and a bump on every call would flush the user's caches for no change.
+        if (numbered > 0)
+        {
+            cacheVersionService.InvalidateUserCache(userId);
         }
     }
 
