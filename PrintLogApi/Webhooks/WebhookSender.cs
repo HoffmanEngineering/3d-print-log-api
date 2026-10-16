@@ -68,16 +68,16 @@ public sealed class WebhookSender(
                 WebhookSignature.Create(secret, clock.GetUtcNow().ToUnixTimeSeconds(), message.Body));
 
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            await DrainCapped(response, token);
 
+            // Decided from the status line, before the body: a receiver that answered 2xx has run
+            // its automation, and retrying because its body was slow would run it again.
             var status = (int)response.StatusCode;
-            if (response.IsSuccessStatusCode)
-            {
-                return new WebhookAttemptResult(WebhookDeliveryResults.Success, status, Retryable: false);
-            }
-            var retryable = status >= 500
-                || response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
-            return new WebhookAttemptResult(WebhookDeliveryResults.HttpError, status, retryable);
+            var result = response.IsSuccessStatusCode
+                ? new WebhookAttemptResult(WebhookDeliveryResults.Success, status, Retryable: false)
+                : new WebhookAttemptResult(WebhookDeliveryResults.HttpError, status,
+                    Retryable: status >= 500 || response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests);
+            await DrainCapped(response, token);
+            return result;
         }
         catch (Exception ex) when (IsBlocked(ex))
         {
@@ -116,9 +116,10 @@ public sealed class WebhookSender(
                 remaining -= read;
             }
         }
-        catch (Exception ex) when (ex is IOException or HttpRequestException)
+        catch (Exception ex) when (ex is IOException or HttpRequestException or OperationCanceledException)
         {
-            // The status already arrived; a body cut short changes nothing.
+            // The status already arrived; a body cut short, or still arriving when the attempt's
+            // time ran out, changes nothing.
         }
         finally
         {
