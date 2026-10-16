@@ -248,11 +248,29 @@ public class PrintsControllerSlicerSettingsTests(CustomWebApplicationFactory fac
     {
         var print = await CreatePrintAsync();
         var metadata = Moonraker();
-        metadata.Slicer = "SuperSlicer";
+        metadata.Slicer = "KISSlicer";
 
         var result = await ReadResultAsync(await SendAsync(print.Id, new PrintSlicerSettingsDto { Metadata = metadata }));
 
         Assert.Equal("other", result.Slicer);
+    }
+
+    [Theory]
+    [InlineData("ElegooSlicer")]
+    [InlineData("Creality_Print")]
+    [InlineData("SuperSlicer")]
+    [InlineData("QIDISlicer")]
+    public async Task MetadataOnly_OrcaAndPrusaForks_CountAsOrcaSlicer(string fork)
+    {
+        // The owner's decision (2026-10-15): forks earn the OrcaSlicer badge.
+        var print = await CreatePrintAsync();
+        var metadata = Moonraker();
+        metadata.Slicer = fork;
+
+        var result = await ReadResultAsync(await SendAsync(print.Id, new PrintSlicerSettingsDto { Metadata = metadata }));
+
+        Assert.Equal("orcaslicer", result.Slicer);
+        Assert.Equal(fork, Assert.Single(await LoadSettingsAsync(print.Id)).Slicer);
     }
 
     [Fact]
