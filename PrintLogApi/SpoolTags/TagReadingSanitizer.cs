@@ -19,6 +19,7 @@ public static partial class TagReadingSanitizer
     private const int MaxExtraValue = 200;
     private const int MaxText = 255;
     private const int MaxSku = 64;
+    private const int MaxFormat = 50;
     private const double DiameterTolerance = 0.01;
 
     private static readonly double[] Diameters = [1.75, 2.85, 3.0];
@@ -36,7 +37,7 @@ public static partial class TagReadingSanitizer
 
         return new TagReading
         {
-            Format = Text(r.Format, MaxText),
+            Format = Text(r.Format, MaxFormat),
             DecoderVersion = r.DecoderVersion,
             Brand = Text(r.Brand, MaxText),
             Manufacturer = Text(r.Manufacturer, MaxText),

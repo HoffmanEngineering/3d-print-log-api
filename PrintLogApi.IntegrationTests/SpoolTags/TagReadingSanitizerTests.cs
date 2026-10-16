@@ -26,6 +26,21 @@ public class TagReadingSanitizerTests
     }
 
     [Fact]
+    public void FormatAndSku_AreCappedToTheirColumnWidths()
+    {
+        var result = TagReadingSanitizer.Sanitize(new TagReading { Format = new string('f', 255), Sku = new string('9', 255) });
+
+        Assert.True(result.Format!.Length <= ColumnWidth<PrintLogApi.Models.FilamentTag>(nameof(PrintLogApi.Models.FilamentTag.Format)));
+        Assert.True(result.Format.Length <= ColumnWidth<PrintLogApi.Models.FilamentCatalogSku>(nameof(PrintLogApi.Models.FilamentCatalogSku.Format)));
+        Assert.True(result.Sku!.Length <= ColumnWidth<PrintLogApi.Models.FilamentCatalogSku>(nameof(PrintLogApi.Models.FilamentCatalogSku.Sku)));
+    }
+
+    // SQLite ignores column lengths, so the suite cannot see an over-long value; compare to the model instead.
+    internal static int ColumnWidth<T>(string property) =>
+        ((System.ComponentModel.DataAnnotations.MaxLengthAttribute)Attribute.GetCustomAttribute(
+            typeof(T).GetProperty(property)!, typeof(System.ComponentModel.DataAnnotations.MaxLengthAttribute))!).Length;
+
+    [Fact]
     public void AllHotendFields_AreChecked()
     {
         var result = TagReadingSanitizer.Sanitize(new TagReading

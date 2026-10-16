@@ -107,6 +107,42 @@ public class FilamentTagReadingsTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
+    public async Task Create_AFormatLongerThanTheColumn_IsCappedToItsWidth()
+    {
+        var uid = RandomUid();
+        var entryId = await SeedEntryAsync();
+        var sku = RandomSku();
+        var reading = Reading(sku);
+        reading.Format = new string('x', 60);
+
+        var response = await PostAsync([uid], [new() { Uid = uid, Reading = reading }], entryId);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var tag = await LoadTagAsync(uid);
+        Assert.True(tag.Format is null || tag.Format.Length <= TagReadingSanitizerTests.ColumnWidth<FilamentTag>(nameof(FilamentTag.Format)));
+        var vote = Assert.Single(await VotesAsync(sku));
+        Assert.True(vote.Format.Length <= TagReadingSanitizerTests.ColumnWidth<FilamentCatalogSku>(nameof(FilamentCatalogSku.Format)));
+    }
+
+    [Fact]
+    public async Task Put_OmittingTagUidsAndReadings_LeavesTheStoredReadingAlone()
+    {
+        var uid = RandomUid();
+        var created = await CreateAsync([uid], [new() { Uid = uid, Reading = Reading(RandomSku()) }]);
+        var before = await LoadTagAsync(uid);
+
+        var current = await GetAsync(created.Id);
+        current.TagUids = null;
+        current.TagReadings = null;
+        Assert.True((await SendAsync(HttpMethod.Put, $"/api/Filaments/{created.Id}", current)).IsSuccessStatusCode);
+
+        var after = await LoadTagAsync(uid);
+        Assert.Equal(before.DecodedJson, after.DecodedJson);
+        Assert.Equal(before.Format, after.Format);
+        Assert.Equal(before.LastReadAt, after.LastReadAt);
+    }
+
+    [Fact]
     public async Task Get_UnreadableStoredJson_ReturnsTheSpoolWithANullReading()
     {
         var uid = RandomUid();

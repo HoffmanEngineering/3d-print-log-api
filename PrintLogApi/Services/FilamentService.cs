@@ -1519,7 +1519,7 @@ public class FilamentService(
 
             tag.Format = reading.Format ?? tag.Format;
             tag.DecodedJson = json;
-            tag.DecoderVersion = reading.DecoderVersion;
+            tag.DecoderVersion = reading.DecoderVersion == 0 ? tag.DecoderVersion : reading.DecoderVersion;
             tag.LastReadAt = DateTime.UtcNow;
             if (!applied.Contains(tag))
             {
