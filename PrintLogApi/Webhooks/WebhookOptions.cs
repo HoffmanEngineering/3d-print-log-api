@@ -24,8 +24,16 @@ public sealed class WebhookOptions
     /// <summary>Timeout for one delivery attempt, connect included.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>Waits before each retry; the count is the number of retries.</summary>
-    public TimeSpan[] RetryDelays { get; set; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+    /// <summary>
+    /// Waits before each retry; the count is the number of retries. Null (the default) means
+    /// <see cref="DefaultRetryDelays"/>. Not initialized to them, because the configuration binder
+    /// appends a configured array to an initialized one instead of replacing it.
+    /// </summary>
+    public TimeSpan[]? RetryDelays { get; set; }
+
+    public static readonly TimeSpan[] DefaultRetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+
+    public TimeSpan[] EffectiveRetryDelays => RetryDelays is { Length: > 0 } delays ? delays : DefaultRetryDelays;
 
     /// <summary>Failed deliveries in a row (each after its retries) that turn a subscription off.</summary>
     public int MaxConsecutiveFailures { get; set; } = 10;
@@ -55,7 +63,7 @@ public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
             failures.Add($"{nameof(WebhookOptions.SecretEncryptionKeys)} entries must be base64 and at least {MinimumKeyBytes} bytes.");
         }
         if (options.Timeout <= TimeSpan.Zero) failures.Add($"{nameof(WebhookOptions.Timeout)} must be positive.");
-        if (options.RetryDelays.Any(d => d < TimeSpan.Zero)) failures.Add($"{nameof(WebhookOptions.RetryDelays)} must not be negative.");
+        if (options.EffectiveRetryDelays.Any(d => d < TimeSpan.Zero)) failures.Add($"{nameof(WebhookOptions.RetryDelays)} must not be negative.");
         if (options.MaxConsecutiveFailures <= 0) failures.Add($"{nameof(WebhookOptions.MaxConsecutiveFailures)} must be positive.");
         if (options.MaxResponseBytes < 0) failures.Add($"{nameof(WebhookOptions.MaxResponseBytes)} must not be negative.");
         if (options.QueueCapacity <= 0) failures.Add($"{nameof(WebhookOptions.QueueCapacity)} must be positive.");

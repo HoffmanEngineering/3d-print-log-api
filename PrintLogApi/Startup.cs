@@ -184,6 +184,7 @@ public class Startup
         services.AddTransient<IPrintEventService, PrintEventService>();
         services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
+        services.AddTransient<IPrintStartNotifier, PrintStartNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();

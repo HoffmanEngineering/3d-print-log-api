@@ -27,7 +27,8 @@ public sealed class PrintService(
     IPrinterService printerService,
     INotificationService notificationService,
     ICacheVersionService cacheVersionService,
-    IPrintFinishNotifier printFinishNotifier) : IPrintService
+    IPrintFinishNotifier printFinishNotifier,
+    IPrintStartNotifier printStartNotifier) : IPrintService
 {
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
@@ -757,11 +758,14 @@ public sealed class PrintService(
             return null;
         }
 
+        var previousStatus = existing.Status;
         if (await ApplyConnectorOwnedFields(existing, print, userId))
         {
             existing.UpdatedById = userId;
             await context.SaveChangesAsync();
             cacheVersionService.InvalidateUserCache(userId);
+            // A connector that created the print Pending and now reports it running (#235).
+            printStartNotifier.NotifyIfJustStarted(existing, previousStatus);
         }
 
         // Null-forgiven: the row was read a moment ago and replay never deletes it.
@@ -957,6 +961,7 @@ public sealed class PrintService(
 
         context.Prints.Add(newPrint);
         await context.SaveChangesAsync();
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(newPrint.Id))!;
     }
@@ -1104,6 +1109,7 @@ public sealed class PrintService(
         }
 
         cacheVersionService.InvalidateUserCache(userId);
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
     }
 
