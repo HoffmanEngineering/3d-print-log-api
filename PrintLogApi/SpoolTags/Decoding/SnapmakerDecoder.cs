@@ -27,7 +27,8 @@ public sealed class SnapmakerDecoder : ITagDecoder
 
     public bool CanDecode(TagMemory memory)
     {
-        return memory is { Kind: TagMemoryKind.Classic, KeyFormat: KeyFormatName }
+        return memory.Kind == TagMemoryKind.Classic
+            && string.Equals(memory.KeyFormat, KeyFormatName, StringComparison.OrdinalIgnoreCase)
             && memory.Data.Length == TagMemory.ClassicBytes
             && U16(memory.Data, 64) is >= MinVersion and <= MaxVersion;
     }

@@ -48,7 +48,77 @@ public class TagDecoderRegistryTests
 
         Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
         Assert.Null(result.DetectedFormat);
-        Assert.Equal(data, result.RedactedData);
+        Assert.Equal(data[..640], result.RedactedData![..640]);
+        Assert.All(result.RedactedData[640..], b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public void UnrecognizedSnapmakerVersion_IsUnknownAndNeverKeepsTheSignatureRegion()
+    {
+        var source = TagFixtures.Memory("snapmaker-805BEC3E");
+        var data = (byte[])source.Data.Clone();
+        data[64] = 11;
+        data[65] = 0;
+        Array.Fill(data, (byte)0xAB, 640, 384);
+
+        var result = Registry().Decode("00", source with { Data = data });
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
+        Assert.Equal(data[..640], result.RedactedData![..640]);
+        Assert.All(result.RedactedData[640..], b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public void KeyFormatNamingARegisteredDecoder_UsesItsRedactionForUnknown()
+    {
+        var stub = new StubDecoder("stubfmt") { CanDecodeResult = false };
+        var memory = new TagMemory(TagMemoryKind.Classic, new byte[1024], "STUBFMT", []);
+
+        var result = new TagDecoderRegistry([stub]).Decode("00", memory);
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
+        Assert.Equal(new byte[] { 9, 9 }, result.RedactedData);
+    }
+
+    [Fact]
+    public void KeyFormatNamingARegisteredDecoderWhoseRedactThrows_StoresNothing()
+    {
+        var stub = new StubDecoder("stubfmt") { CanDecodeResult = false, RedactThrows = true };
+        var memory = new TagMemory(TagMemoryKind.Classic, new byte[1024], "stubfmt", []);
+
+        var result = new TagDecoderRegistry([stub]).Decode("00", memory);
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
+        Assert.Null(result.RedactedData);
+    }
+
+    [Fact]
+    public void KeyFormatCase_DoesNotMatter()
+    {
+        var source = TagFixtures.Memory("snapmaker-805BEC3E");
+        var result = Registry().Decode("00", source with { KeyFormat = "SNAPMAKER" });
+
+        Assert.Equal(TagDecodeOutcome.Decoded, result.Outcome);
+        Assert.Equal("snapmaker", result.DetectedFormat);
+    }
+
+    [Fact]
+    public void ClassicWithNoReadableSector_IsUnknownWithNoData()
+    {
+        var source = TagFixtures.Memory("snapmaker-805BEC3E");
+        var result = Registry().Decode("00", source with { Unreadable = Enumerable.Range(0, 16).ToArray() });
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
+        Assert.Null(result.RedactedData);
+    }
+
+    [Fact]
+    public void ClassicWithUnreadableRecordSectorAndNoKeyFormat_IsNotPartial()
+    {
+        var source = TagFixtures.Memory("snapmaker-805BEC3E");
+        var result = Registry().Decode("00", source with { KeyFormat = null, Unreadable = [1] });
+
+        Assert.Equal(TagDecodeOutcome.Unknown, result.Outcome);
     }
 
     [Fact]
@@ -199,6 +269,7 @@ public class TagDecoderRegistryTests
         public bool DecodeThrows { get; init; }
         public bool RedactThrows { get; init; }
         public bool NotRecognized { get; init; }
+        public bool CanDecodeResult { get; init; } = true;
         public string Message { get; init; } = "boom";
 
         public string Format => format;
@@ -207,7 +278,7 @@ public class TagDecoderRegistryTests
 
         public bool CanDecode(TagMemory memory)
         {
-            return ProbeThrows ? throw new InvalidOperationException(Message) : true;
+            return ProbeThrows ? throw new InvalidOperationException(Message) : CanDecodeResult;
         }
 
         public TagReading Decode(string uid, TagMemory memory)

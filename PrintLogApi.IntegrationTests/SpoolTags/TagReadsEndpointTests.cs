@@ -181,6 +181,20 @@ public class TagReadsEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task NothingReadable_IsUnknownWithNoHintAndNoFailureRow()
+    {
+        var uid = RandomUid();
+        var request = Fixture("snapmaker-805BEC3E", uid);
+        request.Memory!.Unreadable = Enumerable.Range(0, 16).ToList();
+
+        var result = await ReadAsync(request);
+
+        Assert.Equal("unknown", result.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("hint").ValueKind);
+        Assert.Empty(await FailuresAsync(uid));
+    }
+
+    [Fact]
     public async Task DecodedRead_HasNoHint()
     {
         var result = await ReadAsync(Fixture("snapmaker-805BEC3E", RandomUid()));
