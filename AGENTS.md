@@ -142,8 +142,9 @@ The two things most likely to be "tidied" into a regression:
 - **`EnableForHttps = true` is not the framework default.** It is a considered BREACH decision that
   rests on this API being token-authenticated, so no request can be forged with the victim's
   ambient credentials. **If cookie or session authentication is ever added, this must be revisited
-  before that ships** — start at `POST /api/UserApiKeys`, the one response that returns a secret
-  alongside caller-supplied text.
+  before that ships** — start at the responses that return a secret alongside caller-supplied
+  text: `POST /api/UserApiKeys`, and `POST /api/Webhooks` and `POST /api/Webhooks/{id}/rotate-secret`
+  (the signing secret next to the caller's URL and description).
 - **Both providers are on `CompressionLevel.Fastest`, and raising either is a CPU decision, not a
   tuning preference.** The measurements are in the doc comment. Brotli `SmallestSize` is a 600x CPU
   increase for three percentage points — never use it on a request thread. Gzip `Optimal` is the
@@ -295,6 +296,34 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   also logs prints) and persisted `/use` (the secret can charge length to any of the user's
   spools on its printer's open notifier print, and load a spool into slot 0 on a single-slot
   printer). Both are for the connection's own printer only, and still only under `/spoolman`.
+
+## Outbound webhooks (#235)
+
+Users subscribe URLs (Home Assistant webhook triggers first) to `print.started`, `print.finished`
+and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
+
+- **Two choke points, and every print transition must go through one.** Finished and failed come
+  from `PrintFinishNotifier.NotifyIfJustFinished` (#166); started from `PrintStartNotifier`, called
+  after the save on every path that creates a print in Printing or moves one into it. A new path
+  that starts or finishes a print calls the matching notifier, or webhooks silently miss it.
+- **The URL path can be the receiver's secret** (a Home Assistant webhook id). Logs, notifications
+  and telemetry carry the host only: `WebhookTelemetryRedactionInitializer` cuts the dependency to
+  `scheme://host:port/`, the named client has its logging handlers removed, and outbound requests
+  carry no trace headers (no-output propagator on the handler, and
+  `SetComponentCorrelationHttpHeaders = false` for Application Insights, which applies to every
+  outbound call, not only webhooks).
+- **SSRF is enforced at connect time** in the handler's `ConnectCallback`
+  (`WebhookAddressGuard.ConnectAsync`); the check at save is only for a clear 400. Redirects and
+  proxies are off. `Webhooks:AllowPrivateAddresses` is honored in Development only.
+- **Secrets are encrypted, not hashed** (they sign), with `Webhooks:SecretEncryptionKeys`: the first
+  encrypts, all decrypt. No key: endpoints 503 and deliveries are skipped. Removing a key makes its
+  secrets `secret_unavailable` until rotated.
+- **Delivery is in process.** Events queue in a `Channel`; `WebhookDeliveryService` fans each out
+  into per-subscription deliveries, runs single attempts (32 workers, at most 2 in flight per user
+  and per host), waits out retries on timers, and opens a circuit after repeated failures. A restart
+  loses what is queued. Tests deliver synchronously through `WebhookTestFactory.DeliverPendingAsync`;
+  the worker's own tests use a SQLite file, because the shared in-memory connection is not
+  thread-safe.
 
 ## Agent update notice (printlog-bridge#39)
 
