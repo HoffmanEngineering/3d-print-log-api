@@ -309,9 +309,10 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
 - **The URL path can be the receiver's secret** (a Home Assistant webhook id). Logs, notifications
   and telemetry carry the host only: `WebhookTelemetryRedactionInitializer` cuts the dependency to
   `scheme://host:port/`, the named client has its logging handlers removed, and outbound requests
-  carry no trace headers (no-output propagator on the handler, and
-  `SetComponentCorrelationHttpHeaders = false` for Application Insights, which applies to every
-  outbound call, not only webhooks).
+  carry no trace headers (no-output propagator on the webhook handler, and
+  `SetComponentCorrelationHttpHeaders = false` for Application Insights). That second switch is
+  process-wide but only stops the SDK's own headers; other clients still send the runtime's
+  `traceparent`. The initializer recognizes a delivery by a request option or the event header.
 - **SSRF is enforced at connect time** in the handler's `ConnectCallback`
   (`WebhookAddressGuard.ConnectAsync`); the check at save is only for a clear 400. Redirects and
   proxies are off. `Webhooks:AllowPrivateAddresses` is honored in Development only.
@@ -319,11 +320,17 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
   encrypts, all decrypt. No key: endpoints 503 and deliveries are skipped. Removing a key makes its
   secrets `secret_unavailable` until rotated.
 - **Delivery is in process.** Events queue in a `Channel`; `WebhookDeliveryService` fans each out
-  into per-subscription deliveries, runs single attempts (32 workers, at most 2 in flight per user
-  and per host), waits out retries on timers, and opens a circuit after repeated failures. A restart
-  loses what is queued. Tests deliver synchronously through `WebhookTestFactory.DeliverPendingAsync`;
-  the worker's own tests use a SQLite file, because the shared in-memory connection is not
-  thread-safe.
+  into per-subscription deliveries and schedules single attempts: FIFO per subscription (a retry
+  holds its lane, so `print.finished` never overtakes `print.started`), at most 32 in flight, 2 per
+  user and 16 per host. **Keep the host cap well above the user cap**: every Home Assistant Cloud
+  user posts to hooks.nabu.casa. The handler's connection pool follows the host cap. Capacity waits
+  are per-key lists drained on release, not polling; a delivery that waits past `MaxDeliveryWait`,
+  or finds the queue full, is recorded as `dropped` (a failure). Every attempt re-reads the
+  subscription first. A circuit opens after 3 failures; one event claims the probe after the
+  cooldown with a conditional update on `LastDeliveryAt`, and a successful test event closes it. A
+  restart loses what is queued. Tests deliver synchronously through
+  `WebhookTestFactory.DeliverPendingAsync`; the worker's own tests use a SQLite file, because the
+  shared in-memory connection is not thread-safe.
 
 ## Agent update notice (printlog-bridge#39)
 
