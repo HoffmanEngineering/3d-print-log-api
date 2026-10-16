@@ -62,4 +62,29 @@ public class AnalyticsSqlServerTranslationTests
         Assert.Contains("APPLY", sql);
         Assert.Contains("SUM(", sql);
     }
+
+    /// <summary>
+    /// #231's adjustment rows, with every clause the filter can add: the ownership join through
+    /// the spool, the half-open CreatedDate window and the spool-id list.
+    /// </summary>
+    [Fact]
+    public void MaterialAdjustmentRows_TranslateOnSqlServer()
+    {
+        using var context = SqlServerContext();
+        var filter = new PrintLogApi.Models.DTOs.Analytics.AnalyticsFilter
+        {
+            FromDate = DateTimeOffset.UtcNow.AddDays(-30),
+            ToDate = DateTimeOffset.UtcNow,
+            FilamentIds = { Guid.NewGuid() },
+        };
+
+        var sql = MaterialAnalyticsService
+            .AdjustmentsQuery(context.FilamentAdjustments.AsNoTracking(), 42, filter)
+            .ToQueryString();
+
+        Assert.Contains("[FilamentAdjustments]", sql);
+        Assert.Contains("[CreatedDate] >=", sql);
+        Assert.Contains("[CreatedDate] <", sql);
+        Assert.Contains("[CreatedById]", sql);
+    }
 }

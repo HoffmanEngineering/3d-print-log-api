@@ -18,22 +18,36 @@ public sealed record SwatchDto(
 /// appearances, not of prints, and the row is labelled "Other" rather than carrying a claim
 /// about any particular material — but the field means something slightly different there,
 /// and callers ranking or charting it should not treat it as a print count.
+///
+/// <para>MaterialMg is print consumption only. AdjustmentMg (#231) is the net consumption the
+/// group's spools recorded as adjustments in the window: filament removed counts positive, filament
+/// added back negative, so it can be below zero. Groups rank by MaterialMg + AdjustmentMg.</para>
 /// </summary>
 public sealed record MaterialGroup(
-    string Key, string Label, int PrintCount, long MaterialMg, SwatchDto Swatch);
+    string Key, string Label, int PrintCount, long MaterialMg, SwatchDto Swatch, long AdjustmentMg);
 
+/// <summary>
+/// MaterialMgByType is print consumption only. AdjustmentMg (#231) is the bucket's separate
+/// "adjustments" series: the net consumption recorded as adjustments, signed like
+/// <see cref="MaterialGroup.AdjustmentMg"/>, so a bucket where more was added back than removed
+/// is negative.
+/// </summary>
 public sealed record MaterialSeriesBucket(
-    int Index, DateOnly LocalStart, IReadOnlyDictionary<string, long> MaterialMgByType);
+    int Index, DateOnly LocalStart, IReadOnlyDictionary<string, long> MaterialMgByType, long AdjustmentMg);
 
 /// <summary>
 /// RemainingMg follows the canonical FilamentRemaining rule and may be NEGATIVE: that means
 /// usage was logged beyond the spool's initial weight, a real data problem the user should
 /// be able to see and fix rather than one we quietly clamp away.
+///
+/// <para>UsedMg is print consumption in the window; AdjustmentMg (#231) is the window's net
+/// adjustment consumption, signed like <see cref="MaterialGroup.AdjustmentMg"/>. PercentConsumed
+/// and CostConsumed both describe max(0, UsedMg + AdjustmentMg).</para>
 /// </summary>
 public sealed record SpoolRow(
     string FilamentId, string Label, SwatchDto Swatch,
     long UsedMg, long? RemainingMg, long? InitialMg,
-    double? PercentConsumed, decimal? CostConsumed);
+    double? PercentConsumed, decimal? CostConsumed, long AdjustmentMg);
 
 public sealed record RunwayRow(
     string FilamentId, string Label, SwatchDto Swatch,
