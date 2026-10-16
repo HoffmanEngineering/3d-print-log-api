@@ -226,6 +226,7 @@ public class Startup
         // See each type's remarks for the numbers behind them.
         services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
         services.AddSingleton<ITelemetryInitializer, EmailTokenRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, TagUidRedactionInitializer>();
         services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
         if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
         {

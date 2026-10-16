@@ -3,7 +3,10 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Achievements;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Enums;
+using PrintLogApi.IntegrationTests.Achievements;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using Xunit;
@@ -348,6 +351,42 @@ public class FilamentTagsTests : IClassFixture<CustomWebApplicationFactory>
             }
         }
         Assert.True(JsonNode.DeepEquals(before, after), $"before: {before}\nafter:  {after}");
+    }
+
+    // The whole path the phone takes: a PUT whose only change is a new tag earns Tag, You're It
+    // in the request's own triggered pass, not only when the achievements page reconciles.
+    [Fact]
+    public async Task LinkingATagThroughPut_GrantsTagLinked()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string oauthId;
+        long userId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            scope.ServiceProvider.GetRequiredService<AchievementTriggerTracker>().Suppress(db);
+            var user = await AchievementTestData.CreateUserAsync(db);
+            user.AchievementCatalogVersion = AchievementCatalog.Version;
+            await db.SaveChangesAsync(ct);
+            (oauthId, userId) = (Assert.IsType<string>(user.OAuthUserId), user.Id);
+        }
+
+        var spool = await CreateFilamentAsync(null, oauthId);
+        Assert.False(await HoldsTagLinkedAsync(userId));
+
+        spool.TagUids = [RandomUid()];
+        var put = await SendAsync(HttpMethod.Put, $"/api/Filaments/{spool.Id}", spool, oauthId);
+
+        Assert.True(put.IsSuccessStatusCode, $"{(int)put.StatusCode}");
+        Assert.True(await HoldsTagLinkedAsync(userId));
+    }
+
+    private async Task<bool> HoldsTagLinkedAsync(long userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.UserAchievements.AnyAsync(
+            a => a.UserId == userId && a.AchievementKey == "tag-linked", TestContext.Current.CancellationToken);
     }
 
     private async Task<JsonObject> GetJsonAsync(string url)
