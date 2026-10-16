@@ -16,5 +16,8 @@ public sealed class SpoolTagOptions
 
     public int FailureRetentionDays { get; set; } = 90;
 
+    /// <summary>How long one catalog import may run before it is cancelled, so a stalled download cannot hold the import lock.</summary>
+    public TimeSpan ImportTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     public TimeSpan RunInterval { get; set; } = TimeSpan.FromDays(1);
 }

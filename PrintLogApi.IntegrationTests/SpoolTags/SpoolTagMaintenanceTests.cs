@@ -89,4 +89,38 @@ public class SpoolTagMaintenanceTests
         Assert.Equal(1, host.Stub.RequestCount);
         Assert.Equal(["EDGE", "NEW"], await Uids(host));
     }
+
+    [Fact]
+    public async Task RunOnce_PurgesBeforeItImports()
+    {
+        await using var host = new CatalogTestHost();
+        await SeedFailures(host);
+        string[]? seenByTheImport = null;
+        host.Stub.ServeWith(_ =>
+        {
+            seenByTheImport = Uids(host).GetAwaiter().GetResult();
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+        });
+
+        await host.Maintenance().RunOnceAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["EDGE", "NEW"], seenByTheImport!);
+    }
+
+    [Fact]
+    public async Task RunOnce_WhenTheDownloadStalls_GivesUpAfterTheImportTimeout_AndHasPurged()
+    {
+        await using var host = new CatalogTestHost(importTimeout: TimeSpan.FromMilliseconds(300));
+        host.Stub.ServeStalledBody();
+        await SeedFailures(host);
+        using var guard = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        guard.CancelAfter(TimeSpan.FromSeconds(30));
+
+        await host.Maintenance().RunOnceAsync(Now, guard.Token);
+
+        Assert.False(guard.IsCancellationRequested);
+        Assert.Equal(1, host.Stub.RequestCount);
+        Assert.Equal(0, await CatalogCount(host));
+        Assert.Equal(["EDGE", "NEW"], await Uids(host));
+    }
 }

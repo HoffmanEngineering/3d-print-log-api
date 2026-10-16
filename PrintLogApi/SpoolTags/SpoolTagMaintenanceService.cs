@@ -5,8 +5,8 @@ using PrintLogApi.SpoolTags.Catalog;
 namespace PrintLogApi.SpoolTags;
 
 /// <summary>
-/// Once a day: imports the SpoolmanDB catalog (when enabled) and deletes failed tag reads past
-/// their retention. The first tick waits five minutes so a cold start is not slowed. A failed tick
+/// Once a day: deletes failed tag reads past their retention, then imports the SpoolmanDB catalog
+/// (when enabled, with a time limit). The first tick waits five minutes so a cold start is not slowed. A failed tick
 /// is logged and the loop carries on; only shutdown ends it.
 /// </summary>
 public sealed class SpoolTagMaintenanceService(
@@ -45,28 +45,35 @@ public sealed class SpoolTagMaintenanceService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
 
-        if (options.Value.CatalogImportEnabled)
-        {
-            try
-            {
-                var result = await scope.ServiceProvider.GetRequiredService<FilamentCatalogImporter>().ImportAsync(ct);
-                logger.LogInformation(
-                    "Filament catalog import: {Added} added, {Updated} updated, {Removed} removed, not modified {NotModified}",
-                    result.Added, result.Updated, result.Removed, result.NotModified);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                // A catalog outage must not keep old failed reads from being purged.
-                logger.LogError(ex, "Filament catalog import failed");
-            }
-        }
-
+        // Purge first: a catalog outage or a stalled download must not keep old failed reads around.
         var cutoff = utcNow.AddDays(-options.Value.FailureRetentionDays);
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         var purged = await context.TagReadFailures.Where(f => f.CreatedAt < cutoff).ExecuteDeleteAsync(ct);
         if (purged > 0)
         {
             logger.LogInformation("Purged {Count} failed tag reads older than {Cutoff:O}", purged, cutoff);
+        }
+
+        if (options.Value.CatalogImportEnabled)
+        {
+            // A body that stalls mid-download would otherwise hang the loop and hold the import lock.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(options.Value.ImportTimeout);
+            try
+            {
+                var result = await scope.ServiceProvider.GetRequiredService<FilamentCatalogImporter>().ImportAsync(timeout.Token);
+                logger.LogInformation(
+                    "Filament catalog import: {Added} added, {Updated} updated, {Removed} removed, not modified {NotModified}",
+                    result.Added, result.Updated, result.Removed, result.NotModified);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError("Filament catalog import gave up after {Timeout}", options.Value.ImportTimeout);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Filament catalog import failed");
+            }
         }
     }
 }

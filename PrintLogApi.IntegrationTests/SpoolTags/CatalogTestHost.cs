@@ -16,7 +16,7 @@ public sealed class CatalogTestHost : IAsyncDisposable
 
     public SpoolmanDbStub Stub { get; } = new();
 
-    public CatalogTestHost(bool importEnabled = true, long? maxCatalogBytes = null)
+    public CatalogTestHost(bool importEnabled = true, long? maxCatalogBytes = null, TimeSpan? importTimeout = null)
     {
         _connection.Open();
         SqliteSearchCollation.Register(_connection);
@@ -28,6 +28,10 @@ public sealed class CatalogTestHost : IAsyncDisposable
         if (maxCatalogBytes != null)
         {
             settings["SpoolTags:MaxCatalogBytes"] = maxCatalogBytes.Value.ToString();
+        }
+        if (importTimeout != null)
+        {
+            settings["SpoolTags:ImportTimeout"] = importTimeout.Value.ToString("c");
         }
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
