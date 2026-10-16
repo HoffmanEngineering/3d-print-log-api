@@ -257,9 +257,22 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
 - **`POST /spoolman/notifier`** (`SpoolmanNotifierController`, outside `/spoolman/api/v1`) takes
   Moonraker's `[notifier 3d_print_log]` events over the same Basic credential, through the
   `MoonrakerNotifierHandler` the user-level notifier shares. The printer comes from the credential,
-  never the body. The connection's config block carries `[spoolman]` and the notifier, so one paste
-  sets up both. A printer with a live printlog-bridge has its events dropped: **the bridge stays
-  authoritative** and the notifier tier is only for printers without one.
+  never the body. For a printer without printlog-bridge, the connection's config block carries
+  `[spoolman]` and the notifier, so one paste sets up both. A printer with a live printlog-bridge
+  has its events dropped: **the bridge stays authoritative** and the notifier tier is only for
+  printers without one.
+- **A printer with a printlog-bridge connection gets `[spoolman]` alone.** Any `moonraker`
+  `Connection` row for the printer counts, stale or not: the block is pasted once and kept, and a
+  bridge that is briefly down would otherwise hand the user a notifier that duplicates the
+  bridge's prints when it catches up (the bridge's own check tells them to delete it anyway).
+  Removing the connection in the web app deletes the row, so the next connect includes the
+  notifier again. The response shape does not change; the UI looks for `[notifier` in
+  `configBlock`.
+- **A Snapmaker U1 gets `[spoolman]` alone too**, bridge or not (Make contains "snapmaker",
+  Model matches `\bu1\b`, the web app's rule). Its stock Moonraker ships without `apprise`, so
+  `[notifier]` fails to load ("failed plugins: notifier", seen on firmware 2.0.0). Some vendor
+  builds (older Creality Sonic Pads) lack it too, but nothing identifies them, so they keep the
+  block and the docs cover the error.
 - **Finishing a notifier print replaces its usage rows** with the accumulated `SpoolmanUsages`
   (`PrintEventService.Finished`): clamped at 0, deleted spools skipped, and when every reported
   spool is deleted it falls back to the notifier's own total. Rows carry no fabricated estimate: a

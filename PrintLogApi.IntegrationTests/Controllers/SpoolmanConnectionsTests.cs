@@ -134,6 +134,120 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         + "    {% do payload.update(event_args[1]) %}\n"
         + "    { payload|tojson }\n";
 
+    private static string ServerOnlyBlock(string server) => $"[spoolman]\nserver: {server}\n";
+
+    [Fact]
+    public async Task ConfigBlock_ForAPrinterWithABridge_LeavesOutTheNotifier()
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+        await AddConnectionAsync(user, printer, Connection.MoonrakerKind, DateTime.UtcNow);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Equal(
+            ServerOnlyBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman"),
+            created.ConfigBlock);
+        Assert.DoesNotContain("[notifier", created.ConfigBlock);
+        Assert.Equal($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman", created.ServerUrl);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_ForAPrinterWithAStaleBridge_StillLeavesOutTheNotifier()
+    {
+        // The block is pasted once and kept, so it follows whether the printer runs the bridge,
+        // not whether the bridge happened to be up when the user clicked Connect.
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+        await AddConnectionAsync(user, printer, Connection.MoonrakerKind, DateTime.UtcNow - TimeSpan.FromDays(3));
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[spoolman]\n", created.ConfigBlock);
+        Assert.DoesNotContain("[notifier", created.ConfigBlock);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_KeepsTheNotifier_WhenTheBridgeIsOnAnotherPrinterOrIsNotMoonraker()
+    {
+        var user = await CreateUserAsync(pro: true);
+        var printer = await CreatePrinterAsync(user);
+        var other = await CreatePrinterAsync(user);
+        await AddConnectionAsync(user, other, Connection.MoonrakerKind, DateTime.UtcNow);
+        await AddConnectionAsync(user, printer, "octoprint", DateTime.UtcNow);
+        await AddConnectionAsync(user, null, Connection.MoonrakerKind, DateTime.UtcNow);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Equal(
+            ExpectedBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman",
+                $"jsons://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman/notifier"),
+            created.ConfigBlock);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_KeepsTheNotifier_AfterTheBridgeConnectionIsRemoved()
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+        var instanceId = await AddConnectionAsync(user, printer, Connection.MoonrakerKind, DateTime.UtcNow);
+        Assert.DoesNotContain("[notifier", (await CreateAsync(user, printer)).ConfigBlock);
+
+        var deleted = await SendAsync(HttpMethod.Delete, $"/api/Connections/{instanceId}", user);
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[spoolman]\n", created.ConfigBlock);
+        Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
+    }
+
+    [Theory]
+    [InlineData("Snapmaker", "U1")]
+    [InlineData("snapmaker", "Snapmaker U1")]
+    [InlineData("Snapmaker ", "u1 ")]
+    public async Task ConfigBlock_ForASnapmakerU1_LeavesOutTheNotifier(string make, string model)
+    {
+        // The U1's stock Moonraker has no apprise, so a [notifier] section fails to load and
+        // Moonraker shows "failed plugins: notifier". The U1 logs prints with printlog-bridge.
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: make, model: model);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Equal(
+            ServerOnlyBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman"),
+            created.ConfigBlock);
+    }
+
+    [Theory]
+    [InlineData("Snapmaker", "J1")]
+    [InlineData("Snapmaker", "U10")]
+    [InlineData("Bambu Lab", "U1")]
+    [InlineData(null, "U1")]
+    [InlineData("Snapmaker", null)]
+    public async Task ConfigBlock_KeepsTheNotifier_ForPrintersThatAreNotAU1(string? make, string? model)
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: make, model: model);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_IgnoresAnotherUsersBridgeOnTheSamePrinterId()
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+        var stranger = await CreateUserAsync();
+        await AddConnectionAsync(stranger, printer, Connection.MoonrakerKind, DateTime.UtcNow);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
+    }
+
     [Fact]
     public async Task Create_StoresOnlyAHashOfTheSecret()
     {
@@ -632,6 +746,28 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         return (await response.Content.ReadFromJsonAsync<SpoolmanConnectionCreatedDto>(Ct))!;
     }
 
+    /// <summary>Registers a connector the way a heartbeat would leave it, and returns its instance id.</summary>
+    private async Task<string> AddConnectionAsync(User user, long? printerId, string kind, DateTime lastSeenAt)
+    {
+        return await WithDbAsync(async db =>
+        {
+            var connection = new Connection
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Kind = kind,
+                InstanceId = Guid.NewGuid().ToString("N"),
+                DisplayName = "Bridge",
+                PrinterId = printerId,
+                CreatedDate = lastSeenAt,
+                LastSeenAt = lastSeenAt,
+            };
+            db.Connections.Add(connection);
+            await db.SaveChangesAsync(Ct);
+            return connection.InstanceId;
+        });
+    }
+
     private async Task<List<SpoolmanConnectionDto>> ListAsync(User user)
     {
         var response = await SendAsync(HttpMethod.Get, "/api/SpoolmanConnections", user);
@@ -684,11 +820,11 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         });
     }
 
-    private async Task<long> CreatePrinterAsync(User user, string? name = null)
+    private async Task<long> CreatePrinterAsync(User user, string? name = null, string? make = null, string? model = null)
     {
         return await WithDbAsync(async db =>
         {
-            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM" };
+            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM", Make = make, Model = model };
             db.Printers.Add(printer);
             await db.SaveChangesAsync(Ct);
             return printer.Id;

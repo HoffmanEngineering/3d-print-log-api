@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Security;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -14,7 +15,10 @@ public interface ISpoolmanConnectionService
 {
     /// <summary>
     /// Makes the printer's Spoolman connection, revoking the one it had, and returns the secret
-    /// once. Null when the printer is not the user's. Throws
+    /// once with the block to paste: <c>[spoolman]</c>, plus the <c>[notifier 3d_print_log]</c>
+    /// unless the printer has a printlog-bridge connection or is a Snapmaker U1 (its Moonraker
+    /// can't load the notifier). Null when the printer is not the
+    /// user's. Throws
     /// <see cref="SpoolmanConnectionLimitException"/> when Free's one connection is taken by
     /// another printer.
     /// </summary>
@@ -54,7 +58,7 @@ public interface ISpoolmanConnectionService
 /// <para><b>"Is Pro"</b> is the direct query on <c>Subscriptions</c> used everywhere else (see
 /// <c>PrinterService.GetMaxImagesPerPrinter</c>), not a helper, so there is one definition.</para>
 /// </summary>
-public sealed class SpoolmanConnectionService(
+public sealed partial class SpoolmanConnectionService(
     PrintLogContext context,
     IOptions<SpoolmanOptions> options,
     IOptions<EmailOptions> emailOptions,
@@ -78,7 +82,7 @@ public sealed class SpoolmanConnectionService(
     {
         var printer = await context.Printers
             .Where(p => p.Id == printerId && p.UserId == userId)
-            .Select(p => new { p.Id, p.Name })
+            .Select(p => new { p.Id, p.Name, p.Make, p.Model })
             .SingleOrDefaultAsync(ct);
         if (printer is null)
         {
@@ -148,7 +152,10 @@ public sealed class SpoolmanConnectionService(
         {
             Secret = secret,
             ServerUrl = serverUrl,
-            ConfigBlock = ConfigBlock(serverUrl, NotifierUrl(requestOrigin, printer.Id, secret)),
+            ConfigBlock = ConfigBlock(serverUrl,
+                IsSnapmakerU1(printer.Make, printer.Model) || await HasBridgeAsync(userId, printer.Id, ct)
+                    ? null
+                    : NotifierUrl(requestOrigin, printer.Id, secret)),
         };
         Fill(created, connection, printer.Name);
         return created;
@@ -473,15 +480,55 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
         return $"{apprise}://printer-{printerId}:{secret}@{uri.Authority}{uri.AbsolutePath.TrimEnd('/')}/notifier";
     }
 
-    private static string ConfigBlock(string serverUrl, string notifierUrl) =>
-        $"[spoolman]\nserver: {serverUrl}\n\n"
-        + "[notifier 3d_print_log]\n"
-        + $"url: {notifierUrl}\n"
-        + "events: started, complete, error, cancelled\n"
-        + "body:\n"
-        + "    {% set payload = {\"event_name\": event_name} %}\n"
-        + "    {% do payload.update(event_args[1]) %}\n"
-        + "    { payload|tojson }\n";
+    /// <summary>
+    /// Whether the printer has a printlog-bridge connection, live or stale. Any registered one
+    /// counts, not only one seen in the last <see cref="Connection.StaleAfter"/>: the block is
+    /// pasted once and kept, so it should follow whether the printer runs the bridge, not whether
+    /// the bridge happened to be up at that moment. A bridge that is down for good is removed in
+    /// the web app (which deletes the row), and the next connect includes the notifier again.
+    /// </summary>
+    private Task<bool> HasBridgeAsync(long userId, long printerId, CancellationToken ct) =>
+        context.Connections.AnyAsync(c =>
+            c.UserId == userId && c.PrinterId == printerId && c.Kind == Connection.MoonrakerKind, ct);
+
+    /// <summary>
+    /// Whether the printer is a Snapmaker U1, by the same rule as the web app's Spoolman panel.
+    /// The U1's stock Moonraker ships without <c>apprise</c>, so a <c>[notifier]</c> section fails
+    /// to load ("failed plugins: notifier") and logs nothing: the U1 logs prints with
+    /// printlog-bridge instead.
+    /// </summary>
+    private static bool IsSnapmakerU1(string? make, string? model) =>
+        make?.Contains("snapmaker", StringComparison.OrdinalIgnoreCase) == true
+        && model is not null
+        && U1Model().IsMatch(model);
+
+    [GeneratedRegex(@"\bu1\b", RegexOptions.IgnoreCase)]
+    private static partial Regex U1Model();
+
+    /// <summary>
+    /// The <c>moonraker.conf</c> text to paste: <c>[spoolman]</c>, plus the
+    /// <c>[notifier 3d_print_log]</c> that logs prints when <paramref name="notifierUrl"/> is
+    /// given. It is null for a printer with printlog-bridge, which logs its prints itself: the
+    /// notifier's events would be dropped while the bridge is live, could duplicate its prints
+    /// while it is stale, and the bridge tells the user to delete any notifier that posts here.
+    /// </summary>
+    private static string ConfigBlock(string serverUrl, string? notifierUrl)
+    {
+        var spoolman = $"[spoolman]\nserver: {serverUrl}\n";
+        if (notifierUrl is null)
+        {
+            return spoolman;
+        }
+
+        return spoolman + "\n"
+            + "[notifier 3d_print_log]\n"
+            + $"url: {notifierUrl}\n"
+            + "events: started, complete, error, cancelled\n"
+            + "body:\n"
+            + "    {% set payload = {\"event_name\": event_name} %}\n"
+            + "    {% do payload.update(event_args[1]) %}\n"
+            + "    { payload|tojson }\n";
+    }
 
     private static T Fill<T>(T dto, SpoolmanConnection connection, string? printerName) where T : SpoolmanConnectionDto
     {

@@ -46,6 +46,10 @@ public class SpoolmanConnectionCreatedDto : SpoolmanConnectionDto
     /// <summary>The <c>server</c> value for <c>moonraker.conf</c>, secret included.</summary>
     public string? ServerUrl { get; set; }
 
-    /// <summary>The whole <c>[spoolman]</c> section, ready to paste at the bottom of <c>moonraker.conf</c>.</summary>
+    /// <summary>
+    /// The text to paste at the bottom of <c>moonraker.conf</c>: the <c>[spoolman]</c> section,
+    /// followed by a <c>[notifier 3d_print_log]</c> section that logs prints unless the printer
+    /// has a printlog-bridge connection (the bridge logs them itself).
+    /// </summary>
     public string? ConfigBlock { get; set; }
 }
