@@ -1,0 +1,14 @@
+{
+  "uid": "0416C55A061F91",
+  "techs": [
+    "android.nfc.tech.NfcA",
+    "android.nfc.tech.MifareUltralight",
+    "android.nfc.tech.NfcA",
+    "android.nfc.tech.MifareUltralight"
+  ],
+  "memory": {
+    "kind": "type2",
+    "data": "BBbGXFoGH5HSSAAA4RASAAEDoAw0AwD+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAL0EAAD/AAUAAAAAAAAAAAAABBbGXFoGH5HSSAAA",
+    "unreadable": []
+  }
+}

@@ -30,11 +30,19 @@ public class FilamentTag
     public string Uid { get; set; } = null!;
 
     /// <summary>
-    /// The tag's data format (<c>openspool</c>, <c>openprinttag</c>, <c>bambu</c>…). Reserved for
-    /// later: nothing writes it in v1, which only needs the UID.
+    /// The tag's data format (<c>snapmaker</c>, <c>anycubic-ace</c>, <c>openspool</c>…), set when
+    /// a read of the linked tag decodes (<c>POST /api/Filaments/tag-reads</c>). Null until then.
     /// </summary>
     [MaxLength(50)]
     public string? Format { get; set; }
+
+    /// <summary>The last decoded reading of this tag, as JSON (at most 8 KB).</summary>
+    public string? DecodedJson { get; set; }
+
+    /// <summary>The decoder version that produced <see cref="DecodedJson"/>.</summary>
+    public int? DecoderVersion { get; set; }
+
+    public DateTime? LastReadAt { get; set; }
 
     public DateTime CreatedDate { get; set; }
 }

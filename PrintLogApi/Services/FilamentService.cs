@@ -7,7 +7,9 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
+using PrintLogApi.SpoolTags;
 using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services;
@@ -1436,6 +1438,16 @@ public class FilamentService(
         throw new InvalidOperationException($"User {userId} does not exist, so no spool number can be reserved.");
     }
 
+    private const int MaxTagReadingsPerRequest = 10;
+
+    private static void ThrowIfTooManyTagReadings(ICollection<TagReadingInputDto>? readings)
+    {
+        if (readings is { Count: > MaxTagReadingsPerRequest })
+        {
+            throw new BadRequestException($"A request can carry at most {MaxTagReadingsPerRequest} tag readings.");
+        }
+    }
+
     private static BadRequestException InvalidTagUid(string? uid) =>
         new($"'{uid}' is not a tag UID. Expected hex bytes, such as 04:A2:3F:11.");
 
@@ -1517,6 +1529,88 @@ public class FilamentService(
     }
 
     /// <summary>
+    /// Keeps the decoded readings a client sent with a spool's tags. A reading applies only to a
+    /// tag whose UID is in <paramref name="uids"/> (the normalized set), is sanitized first, and
+    /// is skipped when it does not fit the stored size cap, so the tag keeps what it had. The
+    /// last reading for a UID wins. Returns the tags that took a reading, for the SKU votes.
+    /// </summary>
+    private static List<FilamentTag> ApplyTagReadings(
+        Filament filament, IReadOnlyCollection<string> uids, IEnumerable<TagReadingInputDto>? readings)
+    {
+        var applied = new List<FilamentTag>();
+        foreach (var input in readings ?? [])
+        {
+            var uid = TagUid.Normalize(input?.Uid);
+            if (uid is null || input?.Reading is null || !uids.Contains(uid))
+            {
+                continue;
+            }
+
+            var tag = filament.Tags.FirstOrDefault(t => t.Uid == uid);
+            if (tag is null)
+            {
+                continue;
+            }
+
+            var reading = TagReadingSanitizer.Sanitize(input.Reading);
+            if (TagReadingJson.Serialize(reading) is not { } json)
+            {
+                continue;
+            }
+
+            tag.Format = reading.Format ?? tag.Format;
+            tag.DecodedJson = json;
+            tag.DecoderVersion = reading.DecoderVersion == 0 ? tag.DecoderVersion : reading.DecoderVersion;
+            tag.LastReadAt = DateTime.UtcNow;
+            if (!applied.Contains(tag))
+            {
+                applied.Add(tag);
+            }
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Records the user's vote that each tag's SKU is <paramref name="catalogEntryId"/>: one row per
+    /// (format, sku, user), pointed at the entry the user just chose. Saved with the filament.
+    /// </summary>
+    private async Task CastSkuVotes(long userId, string catalogEntryId, IEnumerable<FilamentTag> tags)
+    {
+        var votes = new Dictionary<(string Format, string Sku), string>();
+        foreach (var tag in tags)
+        {
+            if (string.IsNullOrEmpty(tag.Format) || TagReadingJson.Deserialize(tag.DecodedJson)?.Sku is not { Length: > 0 } sku)
+            {
+                continue;
+            }
+
+            votes[(tag.Format, sku)] = catalogEntryId;
+        }
+
+        foreach (var ((format, sku), entryId) in votes)
+        {
+            var vote = await context.FilamentCatalogSkus
+                .SingleOrDefaultAsync(s => s.UserId == userId && s.Format == format && s.Sku == sku);
+            if (vote is null)
+            {
+                context.FilamentCatalogSkus.Add(new FilamentCatalogSku
+                {
+                    Format = format,
+                    Sku = sku,
+                    CatalogEntryId = entryId,
+                    UserId = userId,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                vote.CatalogEntryId = entryId;
+            }
+        }
+    }
+
+    /// <summary>
     /// SaveChanges, reporting a lost race on the (UserId, Uid) index as the same conflict the
     /// pre-check raises. Any other failure is rethrown unchanged.
     /// </summary>
@@ -1563,7 +1657,16 @@ public class FilamentService(
     {
         // Before anything else, so an invalid or taken tag rejects the whole create (#147).
         var tagUids = NormalizeTagUids(filament.TagUids ?? []);
+        ThrowIfTooManyTagReadings(filament.TagReadings);
         await ThrowIfTagsHeldElsewhere(userId, null, tagUids);
+
+        // Only a create sets the catalog entry. Removed entries are soft-deleted, so they are unknown here.
+        filament.CatalogEntryId = string.IsNullOrWhiteSpace(filament.CatalogEntryId) ? null : filament.CatalogEntryId.Trim();
+        if (filament.CatalogEntryId is { } catalogEntryId
+            && !await context.FilamentCatalogEntries.AnyAsync(e => e.Id == catalogEntryId && e.RemovedAt == null))
+        {
+            throw new BadRequestException("Unknown catalog entry.");
+        }
 
         // Backward-compat: old clients send ColorHex only — normalize to Colors array
         if ((filament.Colors == null || filament.Colors.Count == 0) && !string.IsNullOrWhiteSpace(filament.ColorHex))
@@ -1609,6 +1712,11 @@ public class FilamentService(
         newFilament.UpdatedById = userId;
 
         ReplaceTags(newFilament, tagUids);
+        var readTags = ApplyTagReadings(newFilament, tagUids, filament.TagReadings);
+        if (filament.CatalogEntryId is { } votedEntryId)
+        {
+            await CastSkuVotes(userId, votedEntryId, readTags);
+        }
 
         // Reserved before the insert, so a create that then fails (a tag conflict) leaves a gap
         // rather than a number someone else could be given later. Gaps are harmless; reuse is not.
@@ -1869,6 +1977,7 @@ public class FilamentService(
         // Null keeps the tags (#147): clients that predate them send the whole filament without
         // the field, and must not wipe tags another client added.
         var tagUids = dto.TagUids is null ? null : NormalizeTagUids(dto.TagUids);
+        ThrowIfTooManyTagReadings(dto.TagReadings);
 
         var existingFilament = await GetFilamentById(id);
 
@@ -1894,6 +2003,7 @@ public class FilamentService(
         if (tagUids is not null)
         {
             ReplaceTags(updatedFilament, tagUids);
+            ApplyTagReadings(updatedFilament, tagUids, dto.TagReadings);
         }
 
         var materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);

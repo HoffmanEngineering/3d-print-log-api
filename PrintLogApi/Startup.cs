@@ -31,6 +31,7 @@ using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Moonraker;
 using PrintLogApi.Services.Push;
+using PrintLogApi.SpoolTags;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
@@ -251,6 +252,7 @@ public class Startup
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
         services.AddEmail(Configuration);
+        services.AddSpoolTags(Configuration);
         services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {

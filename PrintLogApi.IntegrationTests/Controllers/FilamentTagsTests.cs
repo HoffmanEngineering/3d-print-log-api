@@ -339,11 +339,14 @@ public class FilamentTagsTests : IClassFixture<CustomWebApplicationFactory>
         var after = await GetJsonAsync(url);
 
         Assert.Contains(added, after["tagUids"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Contains(added, after["tagDetails"]!.AsArray().Select(n => n!["uid"]!.GetValue<string>()));
         // A PUT rewrites the adjustment rows, so their audit timestamps move along with the
         // spool's own. That is true of the existing adjustment and favorite updates too.
         foreach (var node in new[] { before, after })
         {
             node.Remove("tagUids");
+            // One entry per tag, so it grows with the tag the PUT added.
+            node.Remove("tagDetails");
             node.Remove("updatedDate");
             foreach (var adjustment in node["filamentAdjustments"]!.AsArray())
             {

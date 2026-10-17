@@ -392,6 +392,10 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<string>("CatalogEntryId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("ColorHex")
                         .HasMaxLength(6)
                         .HasColumnType("nvarchar(6)");
@@ -528,6 +532,8 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CatalogEntryId");
+
                     b.HasIndex("CreatedById")
                         .HasDatabaseName("IX_Filaments_CreatedById");
 
@@ -596,6 +602,138 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("FilamentAdjustments");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.FilamentCatalogEntry", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("BedTemp")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BedTempMax")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BedTempMin")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ColorHex")
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<string>("ColorHexesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<double>("Density")
+                        .HasColumnType("float");
+
+                    b.Property<double>("DiameterMm")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("ExtruderTemp")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExtruderTempMax")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExtruderTempMin")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Finish")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("Glow")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Material")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("Pattern")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime?>("RemovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SpoolType")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("SpoolWeightG")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Translucent")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("WeightG")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Manufacturer", "Material");
+
+                    b.ToTable("FilamentCatalogEntries");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.FilamentCatalogSku", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CatalogEntryId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogEntryId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("Format", "Sku");
+
+                    b.HasIndex("Format", "Sku", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("FilamentCatalogSkus");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.FilamentImage", b =>
@@ -669,12 +807,21 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("CreatedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("DecodedJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("DecoderVersion")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("FilamentId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Format")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("LastReadAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Uid")
                         .IsRequired()
@@ -2140,6 +2287,52 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Subscriptions");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.TagReadFailure", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("varbinary(2048)");
+
+                    b.Property<string>("DetectedFormat")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Error")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("MemoryKind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Techs")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Uid")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("TagReadFailures");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.User", b =>
                 {
                     b.Property<long>("Id")
@@ -2661,6 +2854,11 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>
                 {
+                    b.HasOne("PrintLogApi.Models.FilamentCatalogEntry", "CatalogEntry")
+                        .WithMany()
+                        .HasForeignKey("CatalogEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
                         .WithMany()
                         .HasForeignKey("CreatedById")
@@ -2678,6 +2876,8 @@ namespace PrintLogApi.Migrations
                         .HasForeignKey("UpdatedById")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("CatalogEntry");
 
                     b.Navigation("CreatedBy");
 
@@ -2711,6 +2911,25 @@ namespace PrintLogApi.Migrations
                     b.Navigation("Filament");
 
                     b.Navigation("UpdatedBy");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.FilamentCatalogSku", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.FilamentCatalogEntry", "CatalogEntry")
+                        .WithMany()
+                        .HasForeignKey("CatalogEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CatalogEntry");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.FilamentImage", b =>

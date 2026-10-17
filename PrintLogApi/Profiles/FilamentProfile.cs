@@ -4,6 +4,8 @@ using PrintLogApi.Enums;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.SpoolTags;
+using PrintLogApi.SpoolTags;
 
 namespace PrintLogApi.Profiles;
 
@@ -118,6 +120,30 @@ public class FilamentProfile : Profile
         (f, prints) => (long)Math.Round(prints),
         PrintUsageMg);
 
+    /// <summary>
+    /// A tag as the detail page reports it. Stored JSON that no longer reads (a hand edit, an old
+    /// shape) gives a null reading rather than failing the whole response.
+    /// </summary>
+    private static FilamentTagDetailDto ToTagDetail(FilamentTag tag)
+    {
+        TagReading? reading = null;
+        try
+        {
+            reading = TagReadingJson.Deserialize(tag.DecodedJson);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return new FilamentTagDetailDto
+        {
+            Uid = tag.Uid,
+            Format = tag.Format,
+            Reading = reading,
+            LastReadAt = tag.LastReadAt,
+        };
+    }
+
     public FilamentProfile()
     {
         // Lightweight mapping for printer summary views - avoids expensive calculations
@@ -166,6 +192,11 @@ public class FilamentProfile : Profile
 
         CreateMap<FilamentDetailDto, Filament>()
             .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore())
+            // Only a create sets the catalog entry (validated); a PUT can never change it.
+            .ForMember(dest => dest.CatalogEntryId, opt => opt.Ignore())
+            // Response-only and request-only tag members: the service applies readings itself.
+            .ForSourceMember(src => src.TagDetails, opt => opt.DoNotValidate())
+            .ForSourceMember(src => src.TagReadings, opt => opt.DoNotValidate())
             .ForMember(dest => dest.Source, src => src.MapFrom(src => src.Source.HasValue ? src.Source : Filament.SourceMeasurement.Weight))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))
@@ -175,6 +206,7 @@ public class FilamentProfile : Profile
         CreateMap<Filament, FilamentDetailDto>()
             // Ordered so a client diffing the list sees a stable order. GetFilamentById Includes Tags.
             .ForMember(dest => dest.TagUids, src => src.MapFrom(src => src.Tags.Select(t => t.Uid).OrderBy(u => u).ToList()))
+            .ForMember(dest => dest.TagDetails, src => src.MapFrom(src => src.Tags.OrderBy(t => t.Uid).Select(ToTagDetail).ToList()))
             // Volume and length are NOT mapped here: FilamentDetailDto derives them from
             // this figure, which also gives them the untracked-spool null for free. Without
             // that an untracked spool would return remaining null alongside length 0 and
