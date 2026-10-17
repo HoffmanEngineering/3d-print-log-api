@@ -42,9 +42,13 @@ public sealed record PrintDetailResult(
     string? FileName, string? Url, string ViewStatus,
     int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads);
 
+/// <summary>
+/// One spool in the inventory. <see cref="RemainingGrams"/> is null for a spool with no tracked
+/// capacity ("not tracked"), never 0, which would read as empty (#230).
+/// </summary>
 public sealed record MaterialInventoryItem(
     Guid Id, string Name, string? Brand, string Material, string? Color,
-    double RemainingGrams, bool IsActive,
+    double? RemainingGrams, bool IsActive,
     string? StorageLocation, double? DiameterMm);
 
 /// <summary>
@@ -55,9 +59,8 @@ public sealed record MaterialInventoryItem(
 /// would hide which number is real.
 /// </para>
 /// <para>
-/// <see cref="RemainingGrams"/> is 0 both when a spool is empty and when it never had a tracked
-/// capacity, so <see cref="HasNominalCapacity"/> disambiguates: without it "0 g left" and "we
-/// don't know" are the same answer.
+/// <see cref="RemainingGrams"/> is null when the spool never had a tracked capacity, as on every
+/// other surface (#230), and <see cref="HasNominalCapacity"/> is false. 0 means empty.
 /// </para>
 /// </summary>
 public sealed record MaterialDetail(
@@ -70,7 +73,7 @@ public sealed record MaterialDetail(
     double? InitialCapacityGrams,
     double? InitialTotalWeightGrams,
     double? SpoolWeightGrams,
-    double RemainingGrams, bool HasNominalCapacity,
+    double? RemainingGrams, bool HasNominalCapacity,
     double? TempRangeStartC, double? TempRangeEndC, double? RecommendedTempC, double? RecommendedBedTempC,
     double? InitialLayerTimeS, double? LayerTimeS, double? MeltingTemperatureC,
     string? InertGas, double? MaterialRefreshRatio,
@@ -78,6 +81,10 @@ public sealed record MaterialDetail(
     DateTimeOffset? PurchaseDate, string? StorageLocation,
     string? PurchaseLocation, string? PurchasePriceValue, string? PurchasePriceCurrency, string? PurchaseNotes);
 
+/// <summary>
+/// A find_material candidate. Untracked spools are never candidates, so
+/// <see cref="RemainingGrams"/> is always a real figure here (#230).
+/// </summary>
 public sealed record SpoolItem(
     Guid Id, string Name, string? Brand, string Material, string? Color,
     double? DiameterMm, double RemainingGrams, string? StorageLocation);
@@ -125,10 +132,11 @@ public sealed record PrinterListItem(
 /// <summary>
 /// A spool currently mounted on a printer (never one that has been unloaded). <c>Slot</c> is the
 /// 0-based tool or AMS position, null when the spool was loaded without one.
+/// <c>RemainingGrams</c> is null for a spool with no tracked capacity (#230).
 /// </summary>
 public sealed record LoadedFilament(
     Guid FilamentId, string? Name, string? Brand, string? Material, string? Color,
-    double? DiameterMm, double RemainingGrams, DateTimeOffset LoadedAt,
+    double? DiameterMm, double? RemainingGrams, DateTimeOffset LoadedAt,
     int? Slot, string? SlotLabel);
 
 public sealed record PrinterDetailResult(

@@ -142,8 +142,9 @@ The two things most likely to be "tidied" into a regression:
 - **`EnableForHttps = true` is not the framework default.** It is a considered BREACH decision that
   rests on this API being token-authenticated, so no request can be forged with the victim's
   ambient credentials. **If cookie or session authentication is ever added, this must be revisited
-  before that ships** — start at `POST /api/UserApiKeys`, the one response that returns a secret
-  alongside caller-supplied text.
+  before that ships** — start at the responses that return a secret alongside caller-supplied
+  text: `POST /api/UserApiKeys`, and `POST /api/Webhooks` and `POST /api/Webhooks/{id}/rotate-secret`
+  (the signing secret next to the caller's URL and description).
 - **Both providers are on `CompressionLevel.Fastest`, and raising either is a CPU decision, not a
   tuning preference.** The measurements are in the doc comment. Brotli `SmallestSize` is a 600x CPU
   increase for three percentage points — never use it on a request thread. Gzip `Optimal` is the
@@ -296,6 +297,44 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   spools on its printer's open notifier print, and load a spool into slot 0 on a single-slot
   printer). Both are for the connection's own printer only, and still only under `/spoolman`.
 
+## Outbound webhooks (#235)
+
+Users subscribe URLs (Home Assistant webhook triggers first) to `print.started`, `print.finished`
+and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
+
+- **Two choke points, and every print transition must go through one.** Finished and failed come
+  from `PrintFinishNotifier.NotifyIfJustFinished` (#166); started from `PrintStartNotifier`, called
+  after the save on every path that creates a print in Printing or moves one into it. A new path
+  that starts or finishes a print calls the matching notifier, or webhooks silently miss it.
+- **The URL path can be the receiver's secret** (a Home Assistant webhook id). Logs, notifications
+  and telemetry carry the host only: `WebhookTelemetryRedactionInitializer` cuts the dependency to
+  `scheme://host:port/`, the named client has its logging handlers removed, and outbound requests
+  carry no trace headers (no-output propagator on the webhook handler, and
+  `SetComponentCorrelationHttpHeaders = false` for Application Insights). That second switch is
+  process-wide but only stops the SDK's own headers; other clients still send the runtime's
+  `traceparent`. The initializer recognizes a delivery by a request option or the event header.
+- **SSRF is enforced at connect time** in the handler's `ConnectCallback`
+  (`WebhookAddressGuard.ConnectAsync`); the check at save is only for a clear 400. Redirects and
+  proxies are off. `Webhooks:AllowPrivateAddresses` is honored in Development only.
+- **Secrets are encrypted, not hashed** (they sign), with `Webhooks:SecretEncryptionKeys`: the first
+  encrypts, all decrypt. No key: endpoints 503 and deliveries are skipped. Removing a key makes its
+  secrets `secret_unavailable` until rotated.
+- **Delivery is in process.** Events queue in a `Channel`; `WebhookDeliveryService` fans each out
+  into per-subscription deliveries and schedules single attempts: FIFO per subscription (a retry
+  holds its lane, so `print.finished` never overtakes `print.started`), at most 32 in flight, 2 per
+  user and 16 per host. **Keep the host cap well above the user cap**: every Home Assistant Cloud
+  user posts to hooks.nabu.casa. The handler's connection pool follows the host cap. Capacity waits
+  are per-key lists drained on release, not polling; a delivery that waits past `MaxDeliveryWait`,
+  or finds the queue full, is recorded as `dropped`. **A drop is not a failure**: it is our
+  capacity, so it never touches `ConsecutiveFailures`, the circuit or auto-disable, and its write is
+  conditional on nothing newer being recorded. Drop writes go through one recorder loop (one at a
+  time, coalesced per subscription), never one task per drop. Every attempt re-reads the
+  subscription first. A circuit opens after 3 failures; one event claims the probe after the
+  cooldown with a conditional update on `LastDeliveryAt`, and a successful test event closes it. A
+  restart loses what is queued. Tests deliver synchronously through
+  `WebhookTestFactory.DeliverPendingAsync`; the worker's own tests use a SQLite file, because the
+  shared in-memory connection is not thread-safe.
+
 ## Agent update notice (printlog-bridge#39)
 
 `ConnectionDto.latestAgentVersion` and `updateAvailable` tell a connector, in its own check-in,
@@ -310,6 +349,46 @@ tags and no GitHub releases, so not `releases/latest`), keyed by connection kind
 - **Every test host routes the `AgentReleases` client to `CustomWebApplicationFactory.GitHub`**,
   which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
   keeps what it reads, so seed it before the host's first connection request.
+
+## Integration polling (#234)
+
+`GET /api/sync/version` and `GET /api/sync/snapshot` (`SyncController`) are what the Home
+Assistant integration (#236) polls. The field rules are on the response records in
+`Models/DTOs/Sync/SyncSnapshot.cs` and in the OpenAPI document.
+
+- **`/version` reads no data, and assumes a single instance.** It is a hash of the user id and
+  the `ICacheVersionService` GUID, which lives in process memory. A restart mints a new one
+  (harmless: one extra snapshot fetch). Scaled out, it is worse than spurious changes: a write
+  bumps only the instance that served it, so polls landing on another instance *miss* the change
+  until that instance's entry expires. A write that forgets to bump the version is invisible here
+  too, as it is to the summaries.
+- **Connection health is never cached.** Heartbeats do not bump the version (and must not: one per
+  printer every 5 minutes would flush every cache the user has), and going stale is the absence
+  of an event. Each request overlays `connection` from one live query. The body carries no
+  `lastSeenAt`, so an unchanged status keeps the `ETag` and the 304.
+- **Four cache entries, all on the version GUID** (`SyncSnapshotService`): the core (printers and
+  spools plus a hash of their bytes, 15 min, about 109 KB for 300 spools, see
+  `CacheBudget.SyncSnapshotCoreBytes`), the core's hash alone (1 h), the month totals keyed on
+  canonical zone and month (1 h, so they roll over without a write), and the saved time zone
+  (1 h; settings writes bump the version).
+- **A 304 never builds the core.** The tag is computed from the version, the cached core hash,
+  the totals and the overlay; only a 200 reads the core. So a conditional refresh costs the
+  overlay query and cache hits, even after the core expired.
+- **The ETag follows content, not just the version.** A change that missed its bump gets a new tag
+  once the hash entry expires (at most an hour) and the core is rebuilt. Tags are weak (`W/`),
+  because compression serves several encodings under one tag.
+- **Time zones are canonical** (`SyncZone`): resolved, then mapped through their Windows zone to
+  CLDR's primary IANA id, so aliases share one entry and tag. The echoed id can be a sibling
+  (`Europe/Paris` reads back `Europe/Berlin`) with identical month boundaries. Omitted means the
+  user's saved setting, else UTC.
+- **`remainingGrams` is null for an untracked spool**, pending #230; never `BalanceMg`'s negative
+  figure. Changing it is a contract change for the integration.
+- **A full miss is five statements, whatever the printer count** (three for the core, two for the
+  totals; `SyncSnapshotQueryShapeTests`).
+  The current and last print per printer are correlated `FirstOrDefault`s that EF turns into
+  `ROW_NUMBER()` joins, one statement.
+- `schemaVersion` versions the shape. Adding a field is fine; renaming, removing or changing a
+  meaning needs a new version and the integration's agreement.
 
 ## The clock
 
@@ -643,7 +722,8 @@ same repo installs the plugin.
 ## JSON serialization
 
 `PrintLogJsonSerializerContext` (#67) supplies compile-time metadata for the highest-volume
-responses: the two cached summary lists and the six analytics tabs. It is **partial by design** and
+responses: the two cached summary lists, the six analytics tabs and the two sync responses (#234).
+It is **partial by design** and
 is `Insert`ed at position 0 of `JsonSerializerOptions.TypeInfoResolverChain`, with ASP.NET Core's
 `DefaultJsonTypeInfoResolver` still behind it. Assigning `TypeInfoResolver` instead would drop that
 fallback, and the failure surfaces on some unrelated endpoint rather than at the edit.
@@ -768,6 +848,17 @@ without the token; do not suppress the rule.
 differently from v2, and that alone broke two tests that had been asserting on seeded rows a
 sibling deletes (`DeleteAllNotifications_*`) or pages past (the summary endpoints default to
 `PageSize = 10`). Both were latent; nothing about v3 made them wrong. Arrange what you assert on.
+
+### Gotcha: inotify limits in containers
+
+In a container with a low inotify limit (Claude Code cloud sessions allow 128 instances), a full
+`dotnet test` fails about 800 tests with `IOException: The configured user limit (128) on the
+number of inotify instances has been reached`. Each test host's JSON configuration source starts
+its own file watcher. It is the environment, not the code. Run the suite with polling watchers:
+
+```bash
+DOTNET_USE_POLLING_FILE_WATCHER=true dotnet test --verbosity quiet
+```
 
 ### Gotcha: testing JWT-protected endpoints against a local signing key
 

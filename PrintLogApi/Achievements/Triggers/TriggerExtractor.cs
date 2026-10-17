@@ -30,7 +30,22 @@ public static class TriggerExtractor
     private static readonly string[] ProfileProperties =
         [nameof(User.DisplayName), nameof(User.ProfilePicture), nameof(User.Bio)];
 
-    private readonly record struct UsageSignature(Guid? FilamentId, int? AmountMg, int? EstimatedAmountMg);
+    /// <summary>
+    /// Every column the material total reads off a usage row: a row recorded only as a length or
+    /// volume counts too (#229), so a change there is a material change.
+    /// </summary>
+    private readonly record struct UsageSignature(
+        Guid? FilamentId, int? AmountMg, int? EstimatedAmountMg,
+        double? LengthInM, double? EstimatedLengthInM, double? VolumeMl, double? EstimatedVolumeMl);
+
+    /// <summary>
+    /// The spool columns that change what its prints count as: the material type, and the
+    /// density and diameter a length or volume row converts through (#229).
+    /// </summary>
+    private static readonly string[] FilamentMetricProperties =
+    [
+        nameof(Filament.MaterialType), nameof(Filament.MaterialDensityGramPerCubicCm), nameof(Filament.DiameterMm),
+    ];
 
     public static PendingWork Extract(DbContext ctx)
     {
@@ -65,7 +80,7 @@ public static class TriggerExtractor
 
                 case Filament filament:
                     if (state is EntityState.Added or EntityState.Deleted
-                        || (state == EntityState.Modified && Changed(entry, nameof(Filament.MaterialType))))
+                        || (state == EntityState.Modified && Changed(entry, FilamentMetricProperties)))
                         ForUser(filament.CreatedById, AchievementTrigger.FilamentChanged);
                     break;
 
@@ -136,7 +151,11 @@ public static class TriggerExtractor
         return new UsageSignature(
             (Guid?)Value(nameof(PrintFilament.FilamentId)),
             (int?)Value(nameof(PrintFilament.AmountMg)),
-            (int?)Value(nameof(PrintFilament.EstimatedAmountMg)));
+            (int?)Value(nameof(PrintFilament.EstimatedAmountMg)),
+            (double?)Value(nameof(PrintFilament.LengthInM)),
+            (double?)Value(nameof(PrintFilament.EstimatedLengthInM)),
+            (double?)Value(nameof(PrintFilament.VolumeMl)),
+            (double?)Value(nameof(PrintFilament.EstimatedVolumeMl)));
     }
 
     private static List<UsageSignature> Bucket(Dictionary<long, List<UsageSignature>> map, long printId)
@@ -152,5 +171,7 @@ public static class TriggerExtractor
         a.Count == b.Count && Sorted(a).SequenceEqual(Sorted(b));
 
     private static IEnumerable<UsageSignature> Sorted(List<UsageSignature> list) =>
-        list.OrderBy(s => s.FilamentId).ThenBy(s => s.AmountMg).ThenBy(s => s.EstimatedAmountMg);
+        list.OrderBy(s => s.FilamentId).ThenBy(s => s.AmountMg).ThenBy(s => s.EstimatedAmountMg)
+            .ThenBy(s => s.LengthInM).ThenBy(s => s.EstimatedLengthInM)
+            .ThenBy(s => s.VolumeMl).ThenBy(s => s.EstimatedVolumeMl);
 }

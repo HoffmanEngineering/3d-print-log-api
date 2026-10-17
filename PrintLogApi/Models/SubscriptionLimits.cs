@@ -21,4 +21,11 @@ public static class SubscriptionLimits
     /// </summary>
     public const long FreeMaxFileStorageBytes = 0L;
     public const long ProMaxFileStorageBytes = 50L * 1024 * 1024 * 1024; // 50 GB
+
+    /// <summary>
+    /// Webhook subscriptions (#235). Checked when one is created; a downgrade keeps the ones that
+    /// exist, which cost next to nothing, and only blocks new ones.
+    /// </summary>
+    public const int FreeMaxWebhooks = 1;
+    public const int ProMaxWebhooks = 10;
 }

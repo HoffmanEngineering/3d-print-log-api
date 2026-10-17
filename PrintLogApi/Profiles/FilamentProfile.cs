@@ -10,8 +10,9 @@ namespace PrintLogApi.Profiles;
 public class FilamentProfile : Profile
 {
     /// <summary>
-    /// Milligrams one usage row took off its spool: the actual amount where one was recorded,
-    /// the estimate otherwise, in whichever measure the row carries. PrintService normalizes a
+    /// The actual side of the usage-row rule. A row took <see cref="UsageRowMg"/> milligrams off
+    /// its spool: the actual amount where one was recorded (this expression), the estimate
+    /// otherwise, in whichever measure the row carries. PrintService normalizes a
     /// saved row into all three measures, so AmountMg is usually present, but a row written
     /// around that path (seeded data, an import, a filament with no usable diameter at save time)
     /// carries only what the user entered, and milligrams are the common denominator.
@@ -20,50 +21,83 @@ public class FilamentProfile : Profile
     /// never off the outer spool: SQL Server refuses a correlated aggregate that reads several
     /// outer columns (error 8124, see FilamentSqlServerTranslationTests).</para>
     ///
-    /// <para>This is the one copy of the rule. Every spool figure below is built from it, so
-    /// the web app, the MCP tools, analytics and the Spoolman API cannot disagree.</para>
+    /// <para>Volume and length need the spool's density (and diameter), so a row with no spool
+    /// converts only a weight; its other measures count as not recorded and fall through. The
+    /// <c>p.Filament != null</c> guards say so explicitly, which also keeps the rule safe to
+    /// evaluate in memory over a row whose spool is gone.</para>
+    ///
+    /// <para>This is the one copy of the rule. Every spool figure below, and every per-print
+    /// total (#229, see <see cref="PrintMetrics"/>), is built from it, so the web app, the MCP
+    /// tools, analytics and the Spoolman API cannot disagree.</para>
     /// </summary>
-    public static readonly Expression<Func<PrintFilament, double>> UsageRowMg = p =>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowActualMg = p =>
         p.AmountMg.HasValue && p.AmountMg > 0 ? (double)p.AmountMg.Value
-        : p.VolumeMl.HasValue && p.VolumeMl > 0 ? p.VolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-        : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-            ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
-        : p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
-        : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 ? p.EstimatedVolumeMl.Value * p.Filament!.MaterialDensityGramPerCubicCm * 1000.0
-        : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament!.DiameterMm.HasValue && p.Filament.DiameterMm > 0
-            ? 250.0 * Math.PI * p.Filament!.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+        : p.VolumeMl.HasValue && p.VolumeMl > 0 && p.Filament != null
+            ? p.VolumeMl.Value * p.Filament.MaterialDensityGramPerCubicCm * 1000.0
+        : p.LengthInM.HasValue && p.LengthInM > 0 && p.Filament != null && p.Filament.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+            ? 250.0 * Math.PI * p.Filament.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.LengthInM.Value
         : 0.0;
+
+    /// <summary>The estimated side of <see cref="UsageRowMg"/>: the same conversions, on the estimated measures.</summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowEstimatedMg = p =>
+        p.EstimatedAmountMg.HasValue && p.EstimatedAmountMg > 0 ? (double)p.EstimatedAmountMg.Value
+        : p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0 && p.Filament != null
+            ? p.EstimatedVolumeMl.Value * p.Filament.MaterialDensityGramPerCubicCm * 1000.0
+        : p.EstimatedLengthInM.HasValue && p.EstimatedLengthInM > 0 && p.Filament != null && p.Filament.DiameterMm.HasValue && p.Filament.DiameterMm > 0
+            ? 250.0 * Math.PI * p.Filament.MaterialDensityGramPerCubicCm * p.Filament.DiameterMm!.Value * p.Filament.DiameterMm!.Value * p.EstimatedLengthInM.Value
+        : 0.0;
+
+    /// <summary>The resolved figure: <see cref="UsageRowActualMg"/> where the row has one, <see cref="UsageRowEstimatedMg"/> otherwise.</summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowMg = ExpressionSplice.With<PrintFilament, double, double, double>(
+        (p, actual, estimated) => actual > 0 ? actual : estimated,
+        UsageRowActualMg,
+        UsageRowEstimatedMg);
+
+    /// <summary>True when <see cref="UsageRowMg"/> fell back to the estimate: no usable actual, and an estimate there is.</summary>
+    public static readonly Expression<Func<PrintFilament, bool>> UsageRowIsEstimated = ExpressionSplice.With<PrintFilament, double, double, bool>(
+        (p, actual, estimated) => !(actual > 0) && estimated > 0,
+        UsageRowActualMg,
+        UsageRowEstimatedMg);
 
     /// <summary>Milligrams the spool's prints took off it, by <see cref="UsageRowMg"/>.</summary>
     private static readonly Expression<Func<Filament, double>> PrintUsageMg =
         ExpressionSplice.Inline<Filament, Func<PrintFilament, double>, double>((f, row) => f.PrintFilaments!.Sum(row), UsageRowMg);
 
     /// <summary>
-    /// Milligrams taken off the spool by prints and by adjustments together: print usage less the
-    /// net adjustment. An adjustment is signed (negative removes filament, positive adds it back)
-    /// and is normalized into AmountMg when saved, whatever measure it was entered in.
+    /// One adjustment's signed milligrams, as the spool sees it: negative removes filament, positive
+    /// adds it back. An adjustment is normalized into AmountMg when saved, whatever measure it was
+    /// entered in, so a row without one counts as nothing. The consumption an adjustment represents
+    /// is the negation of this (Materials analytics, #231).
     /// </summary>
-    private static readonly Expression<Func<Filament, double>> ConsumedMgExact = ExpressionSplice.With<Filament, double, double>(
-        (f, prints) => prints - f.FilamentAdjustments!.Sum(adj => (double)(adj.AmountMg ?? 0)),
-        PrintUsageMg);
+    public static readonly Expression<Func<FilamentAdjustment, double>> AdjustmentAmountMg =
+        adj => (double)(adj.AmountMg ?? 0);
+
+    /// <summary>The spool's net adjustment, by <see cref="AdjustmentAmountMg"/>.</summary>
+    private static readonly Expression<Func<Filament, double>> NetAdjustmentMg =
+        ExpressionSplice.Inline<Filament, Func<FilamentAdjustment, double>, double>((f, adjustment) => f.FilamentAdjustments!.Sum(adjustment), AdjustmentAmountMg);
 
     /// <summary>
-    /// Remaining milligrams as the detail page reports it, or null for a spool with no nominal
-    /// weight (untracked): the nominal weight less <see cref="ConsumedMg"/>. May be negative when
-    /// more usage was logged than the spool held; callers decide whether to clamp.
+    /// Milligrams taken off the spool by prints and by adjustments together: print usage less the
+    /// net adjustment (<see cref="AdjustmentAmountMg"/>).
+    /// </summary>
+    private static readonly Expression<Func<Filament, double>> ConsumedMgExact = ExpressionSplice.With<Filament, double, double, double>(
+        (f, prints, adjustments) => prints - adjustments,
+        PrintUsageMg,
+        NetAdjustmentMg);
+
+    /// <summary>
+    /// Remaining milligrams: the nominal weight less <see cref="ConsumedMg"/>, or null for a spool
+    /// with no nominal weight (untracked). May be negative when more usage was logged than the
+    /// spool held; callers decide whether to clamp.
+    ///
+    /// <para>This is the only remaining figure (#230). The detail page, the list, the printer
+    /// page, the MCP tools, analytics and the Spoolman API all report it, so an untracked spool
+    /// is null ("not tracked") everywhere rather than counting down from zero on some surfaces.
+    /// A caller that wants how much has left the spool regardless of tracking wants
+    /// <see cref="ConsumedMg"/>, not a remaining figure that pretends the spool started empty.</para>
     /// </summary>
     public static readonly Expression<Func<Filament, long?>> RemainingMg = ExpressionSplice.With<Filament, double, long?>(
         (f, consumed) => f.InitialNominalWeightMg.HasValue ? (long?)Math.Round(f.InitialNominalWeightMg.Value - consumed) : null,
-        ConsumedMgExact);
-
-    /// <summary>
-    /// <see cref="RemainingMg"/> as the list, the MCP inventory and loaded-filament views report
-    /// it: an untracked spool counts from zero instead of reporting null, so it reads as minus
-    /// whatever it has consumed. Kept as it was; whether those views should say "not tracked"
-    /// like the detail page is a separate, caller-visible decision.
-    /// </summary>
-    public static readonly Expression<Func<Filament, long?>> BalanceMg = ExpressionSplice.With<Filament, double, long?>(
-        (f, consumed) => (long?)Math.Round((f.InitialNominalWeightMg ?? 0) - consumed),
         ConsumedMgExact);
 
     /// <summary>
@@ -98,8 +132,9 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
             // Volume and length are NOT mapped here: FilamentSummaryDto derives them from
             // this figure so the list, the detail page and each other cannot disagree.
-            // Prints and adjustments both count; see UsageRowMg and BalanceMg above.
-            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(BalanceMg))
+            // Prints and adjustments both count, and an untracked spool is null as on the
+            // detail page; see UsageRowMg and RemainingMg above.
+            .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(RemainingMg))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src =>

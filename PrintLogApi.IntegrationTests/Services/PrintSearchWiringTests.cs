@@ -77,7 +77,8 @@ public class PrintSearchWiringTests : IClassFixture<CustomWebApplicationFactory>
             sp.GetRequiredService<IPrinterService>(),
             sp.GetRequiredService<INotificationService>(),
             sp.GetRequiredService<ICacheVersionService>(),
-            sp.GetRequiredService<IPrintFinishNotifier>());
+            sp.GetRequiredService<IPrintFinishNotifier>(),
+            sp.GetRequiredService<IPrintStartNotifier>());
 
         return (service, recorder);
     }

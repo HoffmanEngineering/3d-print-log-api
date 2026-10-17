@@ -27,7 +27,8 @@ public sealed record MaterialUsageInput(
     McpMeasurementSource? EstimatedSource = null, double? EstimatedAmount = null,
     string? Notes = null);
 
-public sealed record MaterialRemaining(Guid MaterialId, double RemainingGrams);
+/// <summary>Grams left on a spool a print used; null when the spool is not tracked (#230).</summary>
+public sealed record MaterialRemaining(Guid MaterialId, double? RemainingGrams);
 
 public sealed record CreatePrintResult(
     PrintDetailResult Print, bool WasReplayed, IReadOnlyList<MaterialRemaining> MaterialRemaining);

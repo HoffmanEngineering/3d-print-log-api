@@ -523,6 +523,62 @@ public class AchievementInterceptorTests : IClassFixture<CustomWebApplicationFac
         Assert.True(await HoldsAsync(user.Id, "material-types"));
     }
 
+    /// <summary>
+    /// Material counts a usage row recorded only as a length (#229), so editing that length is a
+    /// material change even though neither weight column moved.
+    /// </summary>
+    [Fact]
+    public async Task PrintFilamentLengthEdit_QualifiesForMaterialUsed()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var spool = await AddFilamentAsync(db, user);
+        spool.DiameterMm = 1.75;
+        await db.SaveChangesAsync(Ct);
+        var print = await AchievementTestData.AddPrintAsync(db, user);
+        await AddLengthOnlyUsageAsync(db, print, spool.Id, meters: 1);
+        Assert.False(await HoldsAsync(user.Id, "material-used"));
+
+        var usage = await db.PrintFilament.SingleAsync(pf => pf.PrintId == print.Id, Ct);
+        usage.LengthInM = 400; // about 1.19 kg at 1.75 mm and 1.24 g/cm3
+        await db.SaveChangesAsync(Ct);
+
+        Assert.True(await HoldsAsync(user.Id, "material-used"));
+    }
+
+    /// <summary>
+    /// A length converts only through its spool's diameter and density, so giving a spool a
+    /// diameter turns its length-only rows into material and must re-evaluate it.
+    /// </summary>
+    [Fact]
+    public async Task FilamentDiameterEdit_OnLengthOnlyUsage_QualifiesForMaterialUsed()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var spool = await AddFilamentAsync(db, user);
+        var print = await AchievementTestData.AddPrintAsync(db, user);
+        await AddLengthOnlyUsageAsync(db, print, spool.Id, meters: 400);
+        Assert.False(await HoldsAsync(user.Id, "material-used"));
+
+        spool.DiameterMm = 1.75;
+        await db.SaveChangesAsync(Ct);
+
+        Assert.True(await HoldsAsync(user.Id, "material-used"));
+    }
+
+    private static async Task AddLengthOnlyUsageAsync(PrintLogContext db, Print print, Guid filamentId, double meters)
+    {
+        db.PrintFilament.Add(new PrintFilament
+        {
+            PrintId = print.Id,
+            FilamentId = filamentId,
+            LengthInM = meters,
+            Source = PrintFilament.SourceMeasurement.Length,
+            EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+        });
+        await db.SaveChangesAsync(Ct);
+    }
+
     [Fact]
     public async Task Comment_TriggersPrintOwner_NotCommenter()
     {

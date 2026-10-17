@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 
@@ -76,11 +77,11 @@ public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvide
             .ToListAsync(ct);
         coverage.Total = printers.Count;
 
-        // Per printer, in SQL. The material sum is an inlined copy of MaterialMgExpr because
-        // g.Sum takes a Func, not an Expression (PrintMetrics.cs:31-38).
+        // Per printer, in SQL. The material sum is PrintMetrics.OwnedMaterialMgExpr, spliced in
+        // as the Func g.Sum takes; the durations stay inline.
         var stats = await scoped
             .GroupBy(p => p.PrinterId)
-            .Select(g => new
+            .SelectWith((g, material) => new
             {
                 PrinterId = g.Key,
                 PrintCount = g.Count(),
@@ -102,17 +103,8 @@ public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvide
                     : 0)),
                 // `no linked spool OR an owned one`, not `linked AND owned` — an unlinked
                 // usage row is legitimate untracked material under the rowSum + other rule.
-                MaterialMg = g.Sum(p =>
-                    (long)p.FilamentUsage!
-                        .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
-                        .Sum(pf =>
-                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                        : 0)
-                    + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-                       : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-                       : 0)),
-            })
+                MaterialMg = g.Sum(material),
+            }, PrintMetrics.OwnedMaterialMgExpr(userId))
             .ToDictionaryAsync(x => x.PrinterId, ct);
 
         // Intervals for utilization, plus the per-bucket time series: both need per-print

@@ -2499,7 +2499,77 @@ namespace PrintLogApi.Migrations
                             Id = 26,
                             Description = "When the user dismissed the in-app email notice (ISO 8601).",
                             Name = "Email_NoticeSeenAt"
+                        },
+                        new
+                        {
+                            Id = 27,
+                            Description = "The newest web app version whose release notes the What's New dialog has shown the user.",
+                            Name = "ReleaseNotes_LastShownVersion"
+                        },
+                        new
+                        {
+                            Id = 28,
+                            Description = "The web app version that was current when the user last opened the release notes page.",
+                            Name = "ReleaseNotes_LastViewedVersion"
                         });
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.WebhookSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AutoDisabledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EncryptedSecret")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("Events")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastDeliveryAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastDeliveryResult")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int?>("LastStatusCode")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedDate");
+
+                    b.ToTable("WebhookSubscriptions");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Comment", b =>
@@ -3236,6 +3306,17 @@ namespace PrintLogApi.Migrations
                     b.Navigation("User");
 
                     b.Navigation("UserSettingType");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.WebhookSubscription", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>

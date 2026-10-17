@@ -1,5 +1,6 @@
 ﻿using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Webhooks;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Services;
@@ -8,7 +9,8 @@ namespace PrintLogApi.Services;
 /// The "print completed" and "print failed" notifications, shared by every path that finishes a
 /// print: the notifier and OctoPrint events (<see cref="PrintEventService.Finished"/>) and
 /// <c>POST /api/Prints/{id}/complete</c> (<see cref="PrintService.CompletePrint"/>), so the two
-/// cannot drift apart again (#166).
+/// cannot drift apart again (#166). The <c>print.finished</c> and <c>print.failed</c> webhooks
+/// (#235) go out from here for the same reason.
 /// </summary>
 public interface IPrintFinishNotifier
 {
@@ -25,6 +27,7 @@ public interface IPrintFinishNotifier
 
 public class PrintFinishNotifier(
     INotificationService notificationService,
+    IWebhookDispatcher webhookDispatcher,
     ILogger<PrintFinishNotifier> logger) : IPrintFinishNotifier
 {
     public async Task NotifyIfJustFinished(Print print, PrintStatus previousStatus)
@@ -33,6 +36,11 @@ public class PrintFinishNotifier(
         {
             return;
         }
+
+        // Queued first and independently: a failed in-app notification must not cost the webhook.
+        webhookDispatcher.Enqueue(
+            print.Status == PrintStatus.Success ? WebhookEventTypes.PrintFinished : WebhookEventTypes.PrintFailed,
+            print.CreatedById, print.Id);
 
         try
         {

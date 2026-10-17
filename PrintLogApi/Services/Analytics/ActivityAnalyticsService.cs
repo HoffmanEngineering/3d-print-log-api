@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 
@@ -66,30 +67,20 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0,
             })
-            .Select(g => new
+            .SelectWith((g, material) => new
             {
                 g.Key.StartDate,
                 g.Key.DurationSeconds,
                 Count = g.Count(),
-                // Inlined copy of PrintMetrics.MaterialMgExpr: g.Sum takes a Func, not an
-                // Expression, so a group projection cannot consume the shared expression.
+                // PrintMetrics.OwnedMaterialMgExpr, spliced in as the Func g.Sum takes.
                 //
                 // The ownership guard is `no linked spool OR an owned one`, NOT
                 // `linked AND owned`: a usage row with FilamentId == null is legitimate
                 // untracked material and counts toward the canonical rowSum + other rule.
                 // Requiring a linked spool would silently drop it and make these totals
                 // disagree with /overview.
-                MaterialMg = g.Sum(p =>
-                    (long)p.FilamentUsage!
-                        .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
-                        .Sum(pf =>
-                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                        : 0)
-                    + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-                       : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-                       : 0)),
-            })
+                MaterialMg = g.Sum(material),
+            }, PrintMetrics.OwnedMaterialMgExpr(userId))
             .ToListAsync(ct))
             .Select(r => new ActivityRow(r.StartDate!.Value, r.DurationSeconds, r.Count, r.MaterialMg))
             .ToList();

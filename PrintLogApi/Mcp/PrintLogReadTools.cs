@@ -97,7 +97,9 @@ public class PrintLogReadTools(
         "also finds 'PLA (Polylactic Acid)', 'PLA+' and 'Silk PLA', and 'blue' also finds " +
         "'Light Blue'. Inactive spools are excluded unless includeInactive is true. A negative " +
         "remainingGrams means more filament has been logged as used than the spool started " +
-        "with, which is a data problem worth reporting to the user. Paginated (default 25, max 100).")]
+        "with, which is a data problem worth reporting to the user. A null remainingGrams means " +
+        "the spool has no starting amount, so its remaining amount is not tracked: say 'not " +
+        "tracked', never empty. Paginated (default 25, max 100).")]
     public Task<McpPage<MaterialInventoryItem>> GetMaterialInventory(
         [Description("Optional material filter (e.g. PLA). Matches whole words, so PLA also finds 'PLA (Polylactic Acid)' and 'PLA+'.")] string? material = null,
         [Description("Optional color filter (e.g. blue). Matches whole words, so blue also finds 'Light Blue'.")] string? color = null,
@@ -118,9 +120,9 @@ public class PrintLogReadTools(
         "cure times, purchase details, notes, and capacity. Weights are grams, lengths mm, volumes " +
         "ml, temperatures °C, cure times seconds. 'sourceUnit' names the measurement the capacity " +
         "was entered in (Weight/Length/Volume) — 'initialAmountInSourceUnit' is that authoritative " +
-        "figure; the gram values are derived from it. 'remainingGrams' is 0 both for an empty spool " +
-        "and for one with no tracked capacity: check 'hasNominalCapacity' before reporting 'none " +
-        "left'. Materials belonging to anyone else are 'not found'.")]
+        "figure; the gram values are derived from it. 'remainingGrams' is null for a material with " +
+        "no tracked capacity ('hasNominalCapacity' false): its remaining amount is not tracked, " +
+        "which is not the same as empty. Materials belonging to anyone else are 'not found'.")]
     public async Task<MaterialDetail> GetMaterial(
         [Description("The material id (see get_material_inventory or find_material).")] Guid materialId,
         CancellationToken ct = default)
@@ -140,7 +142,8 @@ public class PrintLogReadTools(
         "the requirement. If candidatesTruncated is true the caller has more matching spools " +
         "than could be examined, and a null meetsRequirementByCombiningSpools means UNKNOWN, " +
         "not no: say the answer could not be determined rather than telling the user they lack " +
-        "the material. Weights are grams.")]
+        "the material. Spools with no tracked starting amount are left out, because how much " +
+        "they hold is unknown. Weights are grams.")]
     public Task<FindMaterialResult> FindMaterial(
         [Description("Optional material filter (e.g. PLA). Matches whole words.")] string? material = null,
         [Description("Optional color filter (e.g. blue). Matches whole words.")] string? color = null,
@@ -223,7 +226,8 @@ public class PrintLogReadTools(
         "Get the full details of one of your own printers by id: description, nozzle diameter, " +
         "bed dimensions, heated bed/chamber, wattage, and the filament spools CURRENTLY loaded " +
         "on it (spools that have been unloaded are not included). Only the printer's owner can " +
-        "read it; any other id returns not found. Weights are grams.")]
+        "read it; any other id returns not found. Weights are grams. A loaded spool's " +
+        "remainingGrams is null when it has no starting amount (not tracked).")]
     public Task<PrinterDetailResult> GetPrinter(
         [Description("The printer id.")] long id,
         CancellationToken ct = default)

@@ -75,8 +75,10 @@ public sealed class SpoolmanInventoryService(
     /// the first miss after it appears; a new instance starts with an empty cache, any write
     /// bumps the version, and the entry's absolute expiry caps the wait at 15 minutes.</para>
     ///
-    /// <para>Numbering does not bump the cache version, and must not: this runs inside the factory
-    /// for the key that version names, so a bump here would orphan the entry being built.</para>
+    /// <para>Numbering bumps the cache version when it numbers anything (#234 review), so other
+    /// cached views pick the numbers up. Inside this factory that orphans the entry being built
+    /// under the old version: the next request rebuilds it once, finds nothing left to number,
+    /// and caches normally. That only happens in the deploy window described above.</para>
     /// </summary>
     private static async Task<SpoolmanInventory> NumberAndLoadAsync(IServiceProvider services, long userId, CancellationToken ct)
     {
