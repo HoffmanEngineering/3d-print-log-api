@@ -577,6 +577,12 @@ public class PrintLogContext : DbContext
             .IsUnique()
             .HasFilter("[PrintId] IS NOT NULL");
 
+        // Backs the cascade from Prints. Production's optimizer would not use the filtered index
+        // above for it and scanned the whole table (51 GB) on every print delete, which timed out.
+        // The migration creates it online and only if missing, so it can be created by hand first.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.PrintId, "IX_CuraSettings_PrintId_ForeignKey");
+
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");
