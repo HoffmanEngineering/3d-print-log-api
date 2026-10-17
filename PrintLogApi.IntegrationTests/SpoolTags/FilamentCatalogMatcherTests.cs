@@ -153,6 +153,7 @@ public class FilamentCatalogMatcherTests
         Assert.Equal("Polymaker", match.Manufacturer);
         Assert.Equal(140, match.SpoolWeightG);
         Assert.Equal(match.Name, match.ColorName);
+        Assert.Equal(1.24, match.Density);
     }
 
     [Fact]
@@ -187,6 +188,8 @@ public class FilamentCatalogMatcherTests
 
         Assert.NotEqual(petgId, (await Match(host, pla))?.Id);
         Assert.Equal(petgId, (await Match(host, petg))?.Id);
+        // The entry's own density, so a PETG spool doesn't inherit PLA's.
+        Assert.Equal(1.25, (await Match(host, petg))?.Density);
         // And the PETG reading never lands on a PLA entry.
         Assert.NotEqual(BlueId, (await Match(host, petg))?.Id);
         Assert.NotEqual(SilkBlackId, (await Match(host, petg))?.Id);

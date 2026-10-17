@@ -34,6 +34,9 @@ public class CatalogMatchDto
     public string? Name { get; set; }
     public string? Manufacturer { get; set; }
 
+    /// <summary>The product's density in g/cm³, from SpoolmanDB.</summary>
+    public double? DensityGramPerCubicCm { get; set; }
+
     /// <summary>Always "SpoolmanDB".</summary>
     public string? Source { get; set; }
 }

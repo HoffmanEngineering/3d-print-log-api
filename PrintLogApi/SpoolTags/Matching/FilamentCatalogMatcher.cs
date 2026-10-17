@@ -5,7 +5,7 @@ namespace PrintLogApi.SpoolTags.Matching;
 
 internal sealed record SkuTally(string EntryId, int Votes, int Users);
 
-public sealed record CatalogMatch(string Id, double Confidence, int? SpoolWeightG, string? ColorName, string Name, string Manufacturer);
+public sealed record CatalogMatch(string Id, double Confidence, int? SpoolWeightG, string? ColorName, string Name, string Manufacturer, double Density);
 
 /// <summary>Finds the catalog entry a tag reading describes: a trusted SKU first, then a scored match.</summary>
 public sealed class FilamentCatalogMatcher(PrintLogContext db)
@@ -111,5 +111,5 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
     }
 
     private static CatalogMatch ToMatch(FilamentCatalogEntry e, double confidence) =>
-        new(e.Id, confidence, e.SpoolWeightG, e.Name, e.Name, e.Manufacturer);
+        new(e.Id, confidence, e.SpoolWeightG, e.Name, e.Name, e.Manufacturer, e.Density);
 }

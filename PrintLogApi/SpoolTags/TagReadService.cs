@@ -66,6 +66,7 @@ public class TagReadService(
                 ColorName = match.ColorName,
                 Name = match.Name,
                 Manufacturer = match.Manufacturer,
+                DensityGramPerCubicCm = match.Density,
                 Source = "SpoolmanDB",
             },
             Suggestions = suggestions
