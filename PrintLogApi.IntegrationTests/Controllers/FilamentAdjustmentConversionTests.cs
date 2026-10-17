@@ -163,9 +163,8 @@ public class FilamentAdjustmentConversionTests : IClassFixture<CustomWebApplicat
     [Fact]
     public async Task UpdateFilament_AdjustmentsLeftOutOfTheRequest_AreRemoved()
     {
-        // Pins current behavior: the adjustment list in a PUT replaces the stored one, so no
-        // stored adjustment can be left behind un-re-derived. A client that omits the list
-        // deletes every adjustment.
+        // An explicit empty adjustment list in a PUT replaces the stored one, so every
+        // adjustment is removed. A null or omitted list keeps the stored adjustments (#248).
         var filament = await CreateFilamentAsync("Adjustments Omitted 232");
         await AssertSuccessAsync(await PutAsync(filament, [LengthAdjustment(filament.Id, -10)]));
 
