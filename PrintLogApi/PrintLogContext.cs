@@ -577,6 +577,12 @@ public class PrintLogContext : DbContext
             .IsUnique()
             .HasFilter("[PrintId] IS NOT NULL");
 
+        // The OrcaSlicer plugin's pending-uploads lookup: install id, then newest first. Filtered,
+        // because only that plugin's uploads carry one.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => new { c.InstallId, c.CreatedDate })
+            .HasFilter("[InstallId] IS NOT NULL");
+
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");

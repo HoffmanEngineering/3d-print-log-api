@@ -335,6 +335,47 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
   `WebhookTestFactory.DeliverPendingAsync`; the worker's own tests use a SQLite file, because the
   shared in-memory connection is not thread-safe.
 
+## Slicer uploads (OrcaSlicer plugin)
+
+`POST /api/Slicer/uploads` (`SlicerController`) takes the OrcaSlicer plugin's G-code
+(3d-print-log-orca-plugin) and parses it here with `SlicerGcodeParser` from
+`PrintLog.SlicerSettings`, storing the same `CuraSetting` the Slic3r uploader posts to
+`/api/Cura/settings`. Anonymous, claimed by the first user to load it, as for the Cura plugin.
+The body is multipart: `gcode` (gzip of the UTF-8 text) and `metadata` (JSON; fields in the
+action's OpenAPI remarks).
+
+- **The action binds no parameters, not even a `CancellationToken`.** Any bound parameter makes MVC
+  build its value providers, and the form one reads the whole multipart body first, past every
+  cap. Every upload test fails if one is added.
+- **Caps (`SlicerUploadReader`):** request 8 MiB (counted as read, because the test server ignores
+  `[RequestSizeLimit]` and a chunked body has no length), `metadata` 1 MiB, inflated text
+  4,000,001 characters (inflation stops at the cap, so a gzip bomb costs the cap, not the bomb),
+  1,000 models, 64 presets. 413 for the sizes, 400 for the counts.
+- **Scrubbed before parsing:** the text with `SlicerSettingsScrubber.ScrubText`, each preset with
+  `ScrubJson` (sensitive keys blanked at any depth, so preset and G-code agree). A preset that is
+  not a JSON object is dropped, not a 400. The text is never stored or logged; the
+  `SlicerUploadSaved` event carries counts and fixed values only.
+- **Rate limit:** per client address, `Slicer:UploadRateLimitPerMinute` (10) and
+  `Slicer:UploadRateLimitPerDay` (200), both must allow; 0 turns one off. IPv6 is partitioned by
+  /64. The address is the socket peer, so the App Service caveat on the anonymous "api" budget
+  applies: if the front end collapses callers, every plugin user shares this budget.
+- **Browser fallback: `installId` and `GET /api/Slicer/uploads/pending`.** When the plugin cannot
+  open the browser itself, its page lists the install's uploads. The metadata may carry
+  `installId`, exactly 32 lowercase hex characters (`uuid4().hex`); any other string, empty
+  included, is a 400. It is stored on `CuraSetting.InstallId` (`[JsonIgnore]`, so
+  `GET /api/Cura/settings` never returns it and `POST /api/Cura/settings` cannot set it). The list
+  returns that install's uploads from the last 7 days that nobody claimed, plus the caller's own
+  claimed ones (`claimed: true`), newest first, at most 20, read from the stored `Settings`
+  (`print_name`, `file_name`, `estimated_print_time_seconds`), never the note or snapshot.
+- **Security of the list.** `installId` is a bearer-style identifier, like a setting id: anyone
+  signed in who learns it can list (and then claim) that install's unclaimed uploads, which is the
+  exposure a leaked setting id already has. So the list requires sign-in (`InteractiveUserOnly`:
+  no API key, because those live in printer config files), never shows uploads another user
+  claimed, and **claims nothing**: an upload is still claimed only by `GET /api/Cura/settings`. Its
+  budget is per user, `Slicer:PendingRateLimitPerMinute` (60), in place of "api".
+- **No `[AllowAnonymous]` on `SlicerController` itself.** It would make the list anonymous too;
+  the upload action carries it.
+
 ## Agent update notice (printlog-bridge#39)
 
 `ConnectionDto.latestAgentVersion` and `updateAvailable` tell a connector, in its own check-in,

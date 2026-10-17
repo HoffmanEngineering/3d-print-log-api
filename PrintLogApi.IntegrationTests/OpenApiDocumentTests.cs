@@ -200,6 +200,7 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     // InteractiveUserOnly rejects API keys, so the document must not offer them.
     [InlineData("/api/Devices", "post", new[] { "oauth2" }, false)]
     [InlineData("/api/Users/me/email", "get", new[] { "oauth2" }, false)]
+    [InlineData("/api/Slicer/uploads/pending", "get", new[] { "oauth2" }, false)]
     public async Task SecurityRequirements_MatchTheEndpointsAuthorization(
         string path, string method, string[] schemes, bool allowsAnonymous)
     {
@@ -330,6 +331,37 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
+    public async Task SlicerPendingUploads_DocumentsItsQueryResponsesAndFields()
+    {
+        // The OrcaSlicer plugin's browser fallback page reads this list.
+        var document = await LoadDocument();
+        var operation = document.GetProperty("paths").GetProperty("/api/Slicer/uploads/pending").GetProperty("get");
+
+        Assert.Equal("Slicer_GetPendingUploads", operation.GetProperty("operationId").GetString());
+        var responses = operation.GetProperty("responses");
+        foreach (var status in new[] { "200", "400", "401", "429" })
+        {
+            Assert.True(responses.TryGetProperty(status, out _), $"no {status} response");
+        }
+
+        var installId = Assert.Single(operation.GetProperty("parameters").EnumerateArray(), p => p.GetProperty("name").GetString() == "installId");
+        Assert.Equal("query", installId.GetProperty("in").GetString());
+        Assert.True(installId.GetProperty("required").GetBoolean());
+        Assert.Contains("32", installId.GetProperty("description").GetString());
+
+        var item = document.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PrintLogApi.Models.DTOs.Slicer.SlicerPendingUploadDto").GetProperty("properties");
+        Assert.Equal(
+            new[] { "claimed", "createdDate", "estimatedPrintTimeSeconds", "fileName", "pluginVersion", "printName", "settingId", "slicerVersion" },
+            item.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.All(item.EnumerateObject(), p => Assert.True(p.Value.TryGetProperty("description", out _), $"{p.Name} has no description"));
+
+        // The upload documents the metadata field the list is keyed on.
+        var upload = document.GetProperty("paths").GetProperty("/api/Slicer/uploads").GetProperty("post");
+        Assert.Contains("installId", upload.GetProperty("description").GetString());
+    }
+
+    [Fact]
     public async Task CuraSetting_DoesNotDocumentItsPrintLink()
     {
         // #164's CuraSetting.PrintId/Print are server-side only; the plugins' schema is unchanged.
@@ -339,6 +371,8 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
 
         Assert.False(properties.TryGetProperty("printId", out _));
         Assert.False(properties.TryGetProperty("print", out _));
+        // The OrcaSlicer plugin's install id is server-side too: GET /api/Cura/settings never returns it.
+        Assert.False(properties.TryGetProperty("installId", out _));
     }
 
     [Fact]

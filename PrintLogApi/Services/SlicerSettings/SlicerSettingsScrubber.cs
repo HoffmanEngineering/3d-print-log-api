@@ -1,5 +1,7 @@
 ﻿using System.Buffers;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace PrintLogApi.Services.SlicerSettings;
 
@@ -90,6 +92,64 @@ public static class SlicerSettingsScrubber
         }
 
         return scrubbed;
+    }
+
+    /// <summary>
+    /// A slicer's preset file (OrcaSlicer's user presets are JSON objects) with the value of every
+    /// sensitive key, at any depth, replaced by an empty string. Blanked rather than removed, as
+    /// <see cref="ScrubText"/> leaves <c>; key =</c>: the parser compares preset values with the
+    /// G-code's, and both sides then read empty. Null when the text is not a JSON object.
+    /// </summary>
+    public static string? ScrubJson(string json)
+    {
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(json);
+        }
+        catch (Exception e) when (e is JsonException or ArgumentException)
+        {
+            // ArgumentException: a duplicate property name.
+            return null;
+        }
+
+        if (root is not JsonObject preset)
+        {
+            return null;
+        }
+
+        BlankSensitiveValues(preset);
+        return preset.ToJsonString();
+    }
+
+    /// <summary>Recursion is bounded by the parser's default maximum depth (64).</summary>
+    private static void BlankSensitiveValues(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject properties:
+                foreach (var key in properties.Select(p => p.Key).ToList())
+                {
+                    if (IsSensitiveKey(key))
+                    {
+                        properties[key] = string.Empty;
+                    }
+                    else
+                    {
+                        BlankSensitiveValues(properties[key]);
+                    }
+                }
+
+                break;
+
+            case JsonArray items:
+                foreach (var item in items)
+                {
+                    BlankSensitiveValues(item);
+                }
+
+                break;
+        }
     }
 
     /// <summary>

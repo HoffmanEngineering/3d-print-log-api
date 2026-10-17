@@ -61,4 +61,17 @@ public class CuraSetting
 
     [JsonIgnore]
     public Print? Print { get; set; }
+
+    /// <summary>
+    /// The OrcaSlicer plugin's install id (32 lowercase hex characters) when the upload carried one,
+    /// so the plugin's browser fallback page can list that install's unclaimed uploads
+    /// (<c>GET /api/Slicer/uploads/pending</c>). A bearer-style identifier, like the setting's own id.
+    /// <para>
+    /// Server-side only, like <see cref="PrintId"/>: never serialized by <c>GET /api/Cura/settings</c>
+    /// and never bound from <c>POST /api/Cura/settings</c>.
+    /// </para>
+    /// </summary>
+    [StringLength(32)]
+    [JsonIgnore]
+    public string? InstallId { get; set; }
 }

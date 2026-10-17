@@ -162,6 +162,10 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("InstallId")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<string>("PluginVersion")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -185,6 +189,9 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("PrintId")
                         .IsUnique()
                         .HasFilter("[PrintId] IS NOT NULL");
+
+                    b.HasIndex("InstallId", "CreatedDate")
+                        .HasFilter("[InstallId] IS NOT NULL");
 
                     b.ToTable("CuraSettings");
                 });
