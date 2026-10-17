@@ -18,4 +18,6 @@ public enum AchievementTrigger
     MaintenanceChanged = 128,
     ProfileChanged = 256,
     TimeZoneChanged = 512,
+    /// <summary>A spool tag was linked or unlinked.</summary>
+    TagChanged = 1024,
 }

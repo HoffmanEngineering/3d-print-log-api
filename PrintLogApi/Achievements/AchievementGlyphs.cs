@@ -14,7 +14,7 @@ public static class AchievementGlyphs
         "printer-bedslinger", "spool", "layers", "plug", "camera", "id-badge",
         "numeral", "clock", "scale", "timer", "factory", "shelf", "flask", "palette", "folder-star",
         "flame", "calendar", "stack-plates",
-        "fork", "octopus", "moon-link", "robot",
+        "fork", "octopus", "moon-link", "robot", "nfc-tag",
         "globe", "chat", "wrench",
         "noodles", "wave", "moon", "confetti",
         "question", "stack",

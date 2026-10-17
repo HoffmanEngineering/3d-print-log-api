@@ -214,6 +214,38 @@ public class AchievementTriggerRecordingTests : IClassFixture<RecordingRunnerFac
     }
 
     [Fact]
+    public async Task TagsOnlyEdit_RaisesTagChanged_NotFilamentChanged()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var spool = await AddFilamentAsync(db, user);
+        Recorder.Runs.Clear();
+
+        db.FilamentTags.Add(new FilamentTag { FilamentId = spool.Id, UserId = user.Id, Uid = "04A23F11", CreatedDate = DateTime.UtcNow });
+        await db.SaveChangesAsync(Ct);
+
+        // FilamentChanged would also re-evaluate material-types and the filament counts.
+        Assert.Equal([AchievementTrigger.TagChanged], Recorder.For(user.Id));
+    }
+
+    [Fact]
+    public async Task RemovingTag_RaisesTagChanged()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var spool = await AddFilamentAsync(db, user);
+        var tag = new FilamentTag { FilamentId = spool.Id, UserId = user.Id, Uid = "04A23F12", CreatedDate = DateTime.UtcNow };
+        db.FilamentTags.Add(tag);
+        await db.SaveChangesAsync(Ct);
+        Recorder.Runs.Clear();
+
+        db.FilamentTags.Remove(tag);
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal([AchievementTrigger.TagChanged], Recorder.For(user.Id));
+    }
+
+    [Fact]
     public async Task Comment_TriggersByPrintId_ForTheOwnerToResolve()
     {
         var (scope, db, owner) = await ArrangeAsync();

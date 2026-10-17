@@ -204,6 +204,23 @@ public class CountMetricsTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task TagsCount_CountsOnlyTheUsersTags()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var other = await AchievementTestData.CreateUserAsync(db);
+        var spool = await AddFilamentAsync(db, user);
+        var otherSpool = await AddFilamentAsync(db, other);
+        db.FilamentTags.AddRange(
+            new FilamentTag { FilamentId = spool.Id, UserId = user.Id, Uid = "04A23F11", CreatedDate = DateTime.UtcNow },
+            new FilamentTag { FilamentId = spool.Id, UserId = user.Id, Uid = "04A23F12", CreatedDate = DateTime.UtcNow },
+            new FilamentTag { FilamentId = otherSpool.Id, UserId = other.Id, Uid = "04A23F13", CreatedDate = DateTime.UtcNow });
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(2, await MeasureAsync(scope, db, user, "tags.count"));
+    }
+
+    [Fact]
     public async Task CommentsReceived_ExcludesSelfAndCountsDistinct()
     {
         var (scope, db, user) = await ArrangeAsync();

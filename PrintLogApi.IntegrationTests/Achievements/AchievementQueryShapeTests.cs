@@ -47,8 +47,9 @@ public class AchievementQueryShapeTests : IClassFixture<CustomWebApplicationFact
 
         await evaluator.EvaluateAsync(user.Id, AchievementTrigger.None, EvaluationMode.Full, Ct);
 
-        // User, time zone, print rows, usage rows, photos, six other entities, held tiers.
-        Assert.InRange(counter.Commands.Count, 1, 12);
+        // User, time zone, print rows, usage rows, photos, seven other entities (tags.count is the
+        // seventh), held tiers.
+        Assert.InRange(counter.Commands.Count, 1, 13);
         var printCommands = counter.Commands.Count(c => c.Contains("\"Prints\"", StringComparison.Ordinal));
         Assert.InRange(printCommands, 1, 3);
     }

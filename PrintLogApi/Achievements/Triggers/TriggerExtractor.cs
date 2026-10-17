@@ -84,6 +84,13 @@ public static class TriggerExtractor
                         ForUser(filament.CreatedById, AchievementTrigger.FilamentChanged);
                     break;
 
+                // Its own flag, not FilamentChanged: a tags-only save must not re-evaluate
+                // material-types (the full print aggregate) and the filament counts. Deleted
+                // raises it too; grants are never revoked, so it is harmless and symmetric.
+                case FilamentTag tag when state is EntityState.Added or EntityState.Deleted:
+                    ForUser(tag.UserId, AchievementTrigger.TagChanged);
+                    break;
+
                 case Printer printer when state is EntityState.Added or EntityState.Deleted:
                     ForUser(printer.UserId, AchievementTrigger.PrinterChanged);
                     break;

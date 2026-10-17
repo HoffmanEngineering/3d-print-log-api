@@ -37,6 +37,8 @@ public static class CountMetrics
             ctx.Db.Printers.LongCountAsync(p => p.UserId == ctx.UserId, ct));
         yield return FromQuery("filaments.count", (ctx, ct) =>
             ctx.Db.Filaments.LongCountAsync(f => f.CreatedById == ctx.UserId, ct));
+        yield return FromQuery("tags.count", (ctx, ct) =>
+            ctx.Db.FilamentTags.LongCountAsync(t => t.UserId == ctx.UserId, ct));
         yield return FromQuery("projects.count", (ctx, ct) =>
             ctx.Db.Projects.LongCountAsync(p => p.CreatedById == ctx.UserId, ct));
         // Owned through the printer: only a printer's owner can log maintenance on it.
