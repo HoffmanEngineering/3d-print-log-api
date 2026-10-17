@@ -10,7 +10,7 @@ public class TagDecoderRegistryTests
     private static TagDecoderRegistry Registry(params ITagDecoder[] extra)
     {
         // Registered out of priority order on purpose.
-        ITagDecoder[] real = [new NdefOpenSpoolDecoder(), new AnycubicAceDecoder(), new SnapmakerDecoder()];
+        ITagDecoder[] real = [new NdefOpenSpoolDecoder(), new BambuDecoder(), new AnycubicAceDecoder(), new SnapmakerDecoder()];
         return new TagDecoderRegistry(real.Concat(extra));
     }
 
@@ -19,6 +19,7 @@ public class TagDecoderRegistryTests
     [InlineData("snapmaker-50EDB4E2", "snapmaker")]
     [InlineData("anycubic-539D1881020001", "anycubic-ace")]
     [InlineData("anycubic-dng-0416DE5A061F91", "anycubic-ace")]
+    [InlineData("bambu-AEF31F97", "bambu")]
     public void Fixtures_DecodeWithTheRightFormat(string fixture, string format)
     {
         var result = Registry().Decode("00", TagFixtures.Memory(fixture));

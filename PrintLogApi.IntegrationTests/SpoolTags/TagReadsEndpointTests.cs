@@ -195,6 +195,19 @@ public class TagReadsEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task UnknownBambuTag_ReturnsTheReading()
+    {
+        var result = await ReadAsync(Fixture("bambu-AEF31F97", RandomUid()));
+
+        Assert.Equal("unknown", result.GetProperty("status").GetString());
+        var reading = result.GetProperty("reading");
+        Assert.Equal("bambu", reading.GetProperty("format").GetString());
+        Assert.Equal("Bambu Lab", reading.GetProperty("brand").GetString());
+        Assert.Equal("PLA", reading.GetProperty("materialType").GetString());
+        Assert.Equal("A00-N1", reading.GetProperty("sku").GetString());
+    }
+
+    [Fact]
     public async Task DecodedRead_HasNoHint()
     {
         var result = await ReadAsync(Fixture("snapmaker-805BEC3E", RandomUid()));

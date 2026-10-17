@@ -41,6 +41,7 @@ public sealed class TagDecoderRegistry
         ["snapmaker"] = 0,
         ["anycubic-ace"] = 1,
         ["openspool"] = 2,
+        ["bambu"] = 3,
     };
 
     private readonly ITagDecoder[] _decoders;

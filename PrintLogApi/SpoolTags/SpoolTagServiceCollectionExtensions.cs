@@ -21,6 +21,7 @@ public static class SpoolTagServiceCollectionExtensions
         services.AddHostedService<SpoolTagMaintenanceService>();
 
         services.AddSingleton<ITagDecoder, SnapmakerDecoder>();
+        services.AddSingleton<ITagDecoder, BambuDecoder>();
         services.AddSingleton<ITagDecoder, AnycubicAceDecoder>();
         services.AddSingleton<ITagDecoder, NdefOpenSpoolDecoder>();
         services.AddSingleton<TagDecoderRegistry>();
