@@ -91,6 +91,22 @@ public class AchievementEvaluatorTests : IClassFixture<CustomWebApplicationFacto
     }
 
     [Fact]
+    public async Task Triggered_TagChanged_GrantsTagLinked()
+    {
+        var (scope, db, user) = await ArrangeAsync();
+        using var _ = scope;
+        var spool = await AchievementMetricTestKit.AddFilamentAsync(db, user);
+        db.FilamentTags.Add(new FilamentTag { FilamentId = spool.Id, UserId = user.Id, Uid = "04A23F11", CreatedDate = DateTime.UtcNow });
+        await db.SaveChangesAsync(Ct);
+        var (evaluator, evalDb) = Build(scope.ServiceProvider);
+        await using var __ = evalDb;
+
+        var result = await evaluator.EvaluateAsync(user.Id, AchievementTrigger.TagChanged, EvaluationMode.Triggered, Ct);
+
+        Assert.Equal([("tag-linked", 1)], result.Granted);
+    }
+
+    [Fact]
     public async Task Full_GrantsEverythingQualified()
     {
         var (scope, db, user) = await ArrangeAsync();

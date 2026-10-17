@@ -13,8 +13,8 @@ namespace PrintLogApi.IntegrationTests.Achievements;
 /// </summary>
 public partial class AchievementCatalogTests
 {
-    // SHA-256 over the sorted "key:t1,t2,..." lines of catalog Version 1.
-    private const string ExpectedHashForVersion1 = "C1027BA0FDD9CB46BF044B78678EF19C9905E1B1424CF0B66AB06B7E14A6A06B";
+    // SHA-256 over the sorted "key:t1,t2,..." lines of catalog Version 2 (Version 1 + tag-linked).
+    private const string ExpectedHashForVersion2 = "13B70D01C657DD781D63205F11DB5717AA02D5A58881D323DD18F4352AFECB4E";
 
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex KebabCase();
@@ -64,10 +64,10 @@ public partial class AchievementCatalogTests
     }
 
     [Fact]
-    public void Definitions_Count_Is34() => Assert.Equal(34, AchievementCatalog.Definitions.Count);
+    public void Definitions_Count_Is35() => Assert.Equal(35, AchievementCatalog.Definitions.Count);
 
     [Fact]
-    public void TotalTierCount_Is90() => Assert.Equal(90, AchievementCatalog.TotalTierCount);
+    public void TotalTierCount_Is91() => Assert.Equal(91, AchievementCatalog.TotalTierCount);
 
     [Fact]
     public void TierNames_AreTheFilamentFinishes()
@@ -98,7 +98,7 @@ public partial class AchievementCatalogTests
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines))));
 
         Assert.True(
-            AchievementCatalog.Version == 1 && hash == ExpectedHashForVersion1,
+            AchievementCatalog.Version == 2 && hash == ExpectedHashForVersion2,
             $"The catalog's keys or thresholds changed (hash {hash}): bump AchievementCatalog.Version and update the hash");
     }
 

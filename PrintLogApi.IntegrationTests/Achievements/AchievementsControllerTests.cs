@@ -66,7 +66,7 @@ public class AchievementsControllerTests : IClassFixture<CustomWebApplicationFac
         Assert.All(HiddenKeys, key => Assert.DoesNotContain(key, body));
         var catalog = (await response.Content.ReadFromJsonAsync<AchievementCatalogDto>(Ct))!;
         Assert.Equal(AchievementCatalog.Version, catalog.Version);
-        Assert.Equal(30, catalog.Families.Count);
+        Assert.Equal(31, catalog.Families.Count);
         Assert.Equal(4, catalog.HiddenCount);
         var hours = catalog.Families.Single(f => f.Key == "print-hours");
         Assert.Equal("Rack up 1,000 hours of total print time.", hours.Tiers[4].Description);
