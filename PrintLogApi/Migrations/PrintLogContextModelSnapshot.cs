@@ -186,6 +186,8 @@ namespace PrintLogApi.Migrations
                         .IsUnique()
                         .HasFilter("[PrintId] IS NOT NULL");
 
+                    b.HasIndex(new[] { "PrintId" }, "IX_CuraSettings_PrintId_ForeignKey");
+
                     b.ToTable("CuraSettings");
                 });
 
