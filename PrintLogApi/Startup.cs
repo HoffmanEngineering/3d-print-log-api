@@ -353,6 +353,11 @@ public class Startup
                     });
             });
 
+            // The OrcaSlicer plugin's anonymous G-code upload: per client address, 10 a minute and
+            // 200 a day by default. See SlicerUploadRateLimiting for the address caveat.
+            options.AddPolicy(Services.SlicerSettings.SlicerUploadRateLimiting.Policy, httpContext =>
+                Services.SlicerSettings.SlicerUploadRateLimiting.GetPartition(httpContext, Configuration));
+
             // Webhooks (#235): the test endpoint and the writes make the server resolve and call
             // hosts the caller chose, so each has a small per-user budget of its own. An endpoint
             // with one of these does not also get "api" (see the MapControllers convention).

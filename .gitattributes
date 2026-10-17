@@ -61,3 +61,6 @@ Dockerfile  text eol=lf
 # Slicer settings fixtures are compared byte for byte with the uploader's rendered notes (LF, and a
 # UTF-8 "×"), so no checkout may rewrite them.
 tests-fixtures/slicer-settings/** -text
+
+# A whole OrcaSlicer G-code (CRLF, as Orca wrote it), uploaded and parsed byte for byte.
+tests-fixtures/slicer-uploads/** -text

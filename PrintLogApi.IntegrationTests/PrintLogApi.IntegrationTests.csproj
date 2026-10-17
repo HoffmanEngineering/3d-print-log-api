@@ -56,6 +56,8 @@
     <!-- Settings blocks cut from the slicer parser library's fixtures, and the uploader's own
          dry-run note for each (PrintsControllerSlicerSettingsTests). -->
     <None Include="..\tests-fixtures\slicer-settings\*.txt" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\slicer-settings" />
+    <!-- A whole G-code from the parser library's fixtures, as the OrcaSlicer plugin uploads it (SlicerControllerTests). -->
+    <None Include="..\tests-fixtures\slicer-uploads\*.gcode" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\slicer-uploads" />
     <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->
