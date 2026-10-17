@@ -7,7 +7,8 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 
 /// <summary>
 /// The anonymous per-address budget on <c>POST /api/Slicer/uploads</c>: a per-minute window and a
-/// per-day window, both of which must allow a request. The suite runs with both off; each class
+/// per-day window, both of which must allow a request; and the per-user budget on
+/// <c>GET /api/Slicer/uploads/pending</c>. The suite runs with both off; each class
 /// here gets its own factory, and so its own limiter, because every test request comes from the
 /// same address.
 /// </summary>
@@ -68,6 +69,49 @@ public class SlicerUploadRateLimitTests
             var retryAfter = last.Headers.RetryAfter?.Delta;
             Assert.NotNull(retryAfter);
             Assert.InRange(retryAfter.Value, TimeSpan.FromHours(23), TimeSpan.FromDays(1));
+        }
+    }
+
+    public sealed class PendingFactory : CustomWebApplicationFactory
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.ConfigureAppConfiguration((_, cfg) =>
+                cfg.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Slicer:PendingRateLimitPerMinute"] = Limit.ToString(),
+                }));
+            base.ConfigureWebHost(builder);
+        }
+    }
+
+    /// <summary><c>GET /api/Slicer/uploads/pending</c>: a per-user minute budget of its own.</summary>
+    public class Pending(PendingFactory factory) : IClassFixture<PendingFactory>
+    {
+        [Fact]
+        public async Task ExceedingTheMinuteBudget_Returns429_ForThatUserOnly()
+        {
+            var client = factory.CreateClient();
+            var responses = new List<HttpResponseMessage>();
+            for (var i = 0; i < Limit + 1; i++)
+            {
+                responses.Add(await client.SendAsync(PendingRequest(IntegrationTestSeeder.TestUserOAuthId), TestContext.Current.CancellationToken));
+            }
+
+            Assert.All(responses.Take(Limit), r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+            Assert.Equal(HttpStatusCode.TooManyRequests, responses[Limit].StatusCode);
+            Assert.NotNull(responses[Limit].Headers.RetryAfter?.Delta);
+
+            // Partitioned by user, not by address: everyone here shares one.
+            var other = await client.SendAsync(PendingRequest(IntegrationTestSeeder.SecondaryUserOAuthId), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+        }
+
+        private static HttpRequestMessage PendingRequest(string user)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Slicer/uploads/pending?installId=0123456789abcdef0123456789abcdef");
+            request.Headers.Add(TestAuthHandler.TestUserIdHeader, user);
+            return request;
         }
     }
 

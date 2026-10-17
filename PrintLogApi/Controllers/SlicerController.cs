@@ -2,8 +2,11 @@
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using PrintLog.SlicerSettings;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.CuraSettings;
 using PrintLogApi.Models.DTOs.Slicer;
@@ -16,11 +19,24 @@ namespace PrintLogApi.Controllers;
 /// Uploads from slicer plugins that send the G-code itself and let the server parse it: the
 /// OrcaSlicer plugin (3d-print-log-orca-plugin).
 /// </summary>
+/// <remarks>
+/// No controller-level authorization attribute: the upload is <c>[AllowAnonymous]</c> and the
+/// pending list is <c>InteractiveUserOnly</c>, and an <c>[AllowAnonymous]</c> on the class would
+/// make every action anonymous, the list included.
+/// </remarks>
 [Route("api/[controller]")]
 [ApiController]
-[AllowAnonymous]
-public class SlicerController(PrintLogContext context, TelemetryClient telemetry) : ControllerBase
+public class SlicerController(PrintLogContext context, TelemetryClient telemetry, TimeProvider timeProvider) : ControllerBase
 {
+    /// <summary>The per-user budget on <c>GET /api/Slicer/uploads/pending</c> (<c>Slicer:PendingRateLimitPerMinute</c>, 60).</summary>
+    public const string PendingRateLimitPolicy = "slicer-pending";
+
+    /// <summary>How far back the pending list looks.</summary>
+    public static readonly TimeSpan PendingWindow = TimeSpan.FromDays(7);
+
+    /// <summary>The most uploads the pending list returns.</summary>
+    public const int MaxPending = 20;
+
     /// <summary>The whole request, multipart framing included: 8 MiB.</summary>
     public const int MaxRequestBytes = 8 * 1024 * 1024;
 
@@ -57,7 +73,8 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
     /// UTF-8 text: the whole file when it is at most 4,000,000 bytes, otherwise its first and last
     /// 2,000,000 bytes joined by a newline. `metadata` is a JSON object: `pluginVersion` (required),
     /// `template` (`default` or `full`, required), `slicerVersion`, `outputName`, `host`,
-    /// `models` (at most 1,000 of `{name, minX, maxX, minY, maxY, maxZ}`, every field required)
+    /// `installId` (exactly 32 lowercase hex characters, the plugin's `uuid4().hex`; anything else
+    /// is a 400), `models` (at most 1,000 of `{name, minX, maxX, minY, maxY, maxZ}`, every field required)
     /// and `userPresets` (at most 64 of `{kind, name, json}`, `kind` one of `process`, `filament`,
     /// `machine`, `json` the preset file's text; one that is not a JSON object is ignored).
     ///
@@ -71,6 +88,7 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
     /// <response code="415">The body is not multipart/form-data.</response>
     /// <response code="429">Too many uploads from this address. Retry after the `Retry-After` header's seconds.</response>
     [HttpPost("uploads")]
+    [AllowAnonymous]
     [EnableRateLimiting(SlicerUploadRateLimiting.Policy)]
     // Kestrel's limit, enforced as the body is read. The reader counts the body too, because the
     // test server has no such feature and a chunked body has no Content-Length to check.
@@ -107,6 +125,100 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
         }
     }
 
+    /// <summary>
+    /// Lists an OrcaSlicer plugin install's recent uploads that nobody else has claimed, for the
+    /// plugin's browser fallback page.
+    /// </summary>
+    /// <remarks>
+    /// For a signed-in user (not an API key). Returns the uploads whose metadata carried this
+    /// `installId`, stored in the last 7 days, that no user has claimed yet, plus those the caller
+    /// has claimed (`claimed: true`, so the page can show them as already opened). Uploads another
+    /// user claimed are left out. Newest first, at most 20. Listing claims nothing: an upload is
+    /// claimed when the new-print page loads it through `GET /api/Cura/settings`.
+    ///
+    /// The install id is a bearer-style identifier, like a setting id: anyone signed in who knows
+    /// it can list that install's unclaimed uploads. Limited per user: 60 a minute.
+    /// </remarks>
+    /// <param name="installId">The plugin's install id: exactly 32 lowercase hex characters.</param>
+    /// <param name="cancellationToken">The request's cancellation.</param>
+    /// <response code="200">The uploads, newest first; empty when there are none.</response>
+    /// <response code="400">The installId is missing or not 32 lowercase hex characters.</response>
+    /// <response code="401">Not signed in, or signed in with an API key.</response>
+    /// <response code="429">Too many requests from this user. Retry after the `Retry-After` header's seconds.</response>
+    [HttpGet("uploads/pending")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [EnableRateLimiting(PendingRateLimitPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<List<SlicerPendingUploadDto>>> GetPendingUploads(
+        [FromQuery, BindRequired] string? installId, CancellationToken cancellationToken)
+    {
+        if (!SlicerInstallId.IsValid(installId))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid install id",
+                detail: "installId must be exactly 32 lowercase hexadecimal characters.");
+        }
+
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        var since = timeProvider.GetUtcNow() - PendingWindow;
+        var uploads = await context.CuraSettings
+            .AsNoTracking()
+            .Where(c => c.InstallId == installId && c.CreatedDate >= since && (c.UserId == null || c.UserId == userId))
+            .OrderByDescending(c => c.CreatedDate)
+            .Take(MaxPending)
+            .ToListAsync(cancellationToken);
+
+        return uploads.Select(c =>
+        {
+            var settings = c.Settings;
+            return new SlicerPendingUploadDto
+            {
+                SettingId = c.Id,
+                CreatedDate = c.CreatedDate,
+                PrintName = StringSetting(settings, "print_name"),
+                FileName = StringSetting(settings, "file_name"),
+                EstimatedPrintTimeSeconds = SecondsSetting(settings, "estimated_print_time_seconds"),
+                SlicerVersion = c.CuraVersion,
+                PluginVersion = c.PluginVersion,
+                Claimed = c.UserId is not null,
+            };
+        }).ToList();
+    }
+
+    private static string? StringSetting(JsonElement settings, string name) =>
+        settings.ValueKind == JsonValueKind.Object
+        && settings.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static long? SecondsSetting(JsonElement settings, string name)
+    {
+        if (settings.ValueKind != JsonValueKind.Object
+            || !settings.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.Number)
+        {
+            return null;
+        }
+
+        if (value.TryGetInt64(out var whole))
+        {
+            return whole;
+        }
+
+        return value.TryGetDouble(out var seconds) && double.IsFinite(seconds) && Math.Abs(seconds) < long.MaxValue
+            ? (long)Math.Round(seconds, MidpointRounding.AwayFromZero)
+            : null;
+    }
+
     private async Task<NewCuraSettingsDto> Save(string gcode, Metadata metadata, CancellationToken ct)
     {
         SlicerGcodeResult result;
@@ -135,6 +247,7 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
             PluginVersion = Truncate($"orca-plugin/{metadata.PluginVersion}", 100),
             Settings = settings.RootElement.Clone(),
             CreatedDate = DateTimeOffset.UtcNow,
+            InstallId = metadata.InstallId,
         };
         context.CuraSettings.Add(record);
         await context.SaveChangesAsync(ct);
@@ -148,6 +261,7 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
             ["Destination"] = metadata.IsExport ? "file" : "printHost",
             ["Models"] = metadata.Models.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["UserPresets"] = metadata.UserPresets.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["HasInstallId"] = (metadata.InstallId is not null).ToString(),
         });
 
         return new NewCuraSettingsDto { NewSettingId = record.Id };
@@ -180,6 +294,13 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
             || (!template.Equals("default", StringComparison.OrdinalIgnoreCase) && !template.Equals("full", StringComparison.OrdinalIgnoreCase)))
         {
             throw Invalid("metadata.template must be \"default\" or \"full\".");
+        }
+
+        // Absent or null is fine; any string that is not exactly the plugin's format is refused,
+        // empty included, so a plugin bug shows up here rather than as an upload nobody can list.
+        if (dto.InstallId is not null && !SlicerInstallId.IsValid(dto.InstallId))
+        {
+            throw Invalid("metadata.installId must be exactly 32 lowercase hexadecimal characters.");
         }
 
         var models = dto.Models ?? [];
@@ -230,6 +351,7 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
             string.IsNullOrEmpty(dto.OutputName) ? null : dto.OutputName,
             IsExport: string.Equals(dto.Host, "File", StringComparison.Ordinal),
             template,
+            dto.InstallId,
             bounds,
             files);
     }
@@ -240,6 +362,7 @@ public class SlicerController(PrintLogContext context, TelemetryClient telemetry
         string? OutputName,
         bool IsExport,
         string Template,
+        string? InstallId,
         List<ModelBounds> Models,
         List<UserPresetFile> UserPresets);
 

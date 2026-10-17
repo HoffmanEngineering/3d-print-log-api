@@ -21,6 +21,12 @@ public class SlicerUploadMetadataDto
     /// <summary>Required. The note template: <c>default</c> or <c>full</c>, any case.</summary>
     public string? Template { get; set; }
 
+    /// <summary>
+    /// The plugin's install id: exactly 32 lowercase hex characters (Python's <c>uuid4().hex</c>).
+    /// Optional; when sent, <c>GET /api/Slicer/uploads/pending</c> can list the upload for that install.
+    /// </summary>
+    public string? InstallId { get; set; }
+
     /// <summary>Each object instance's extrusion bounds, for the note's models section. At most 1,000.</summary>
     public List<SlicerUploadModelDto?>? Models { get; set; }
 

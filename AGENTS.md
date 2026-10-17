@@ -359,6 +359,22 @@ action's OpenAPI remarks).
   `Slicer:UploadRateLimitPerDay` (200), both must allow; 0 turns one off. IPv6 is partitioned by
   /64. The address is the socket peer, so the App Service caveat on the anonymous "api" budget
   applies: if the front end collapses callers, every plugin user shares this budget.
+- **Browser fallback: `installId` and `GET /api/Slicer/uploads/pending`.** When the plugin cannot
+  open the browser itself, its page lists the install's uploads. The metadata may carry
+  `installId`, exactly 32 lowercase hex characters (`uuid4().hex`); any other string, empty
+  included, is a 400. It is stored on `CuraSetting.InstallId` (`[JsonIgnore]`, so
+  `GET /api/Cura/settings` never returns it and `POST /api/Cura/settings` cannot set it). The list
+  returns that install's uploads from the last 7 days that nobody claimed, plus the caller's own
+  claimed ones (`claimed: true`), newest first, at most 20, read from the stored `Settings`
+  (`print_name`, `file_name`, `estimated_print_time_seconds`), never the note or snapshot.
+- **Security of the list.** `installId` is a bearer-style identifier, like a setting id: anyone
+  signed in who learns it can list (and then claim) that install's unclaimed uploads, which is the
+  exposure a leaked setting id already has. So the list requires sign-in (`InteractiveUserOnly`:
+  no API key, because those live in printer config files), never shows uploads another user
+  claimed, and **claims nothing**: an upload is still claimed only by `GET /api/Cura/settings`. Its
+  budget is per user, `Slicer:PendingRateLimitPerMinute` (60), in place of "api".
+- **No `[AllowAnonymous]` on `SlicerController` itself.** It would make the list anonymous too;
+  the upload action carries it.
 
 ## Agent update notice (printlog-bridge#39)
 
