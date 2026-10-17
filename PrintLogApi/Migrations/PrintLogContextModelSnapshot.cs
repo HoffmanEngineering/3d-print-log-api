@@ -1322,6 +1322,11 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("UpdatedById");
 
+                    b.HasIndex("CreatedById", "FileHash")
+                        .HasDatabaseName("IX_Prints_User_FileHash")
+                        .HasFilter("[FileHash] IS NOT NULL")
+                        .HasAnnotation("SqlServer:Online", true);
+
                     b.HasIndex("CreatedById", "ExternalSource", "ExternalId")
                         .IsUnique()
                         .HasDatabaseName("IX_Prints_User_ExternalSource_ExternalId")

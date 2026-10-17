@@ -148,6 +148,14 @@ public interface IPrintService
     /// at most <paramref name="limit"/>.
     /// </summary>
     Task<List<ClaimablePrintDto>> GetClaimablePrints(long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// The reprint counter (UI #10): how many of <paramref name="userId"/>'s prints share print
+    /// <paramref name="id"/>'s file hash, that print included, and the newest
+    /// <paramref name="limit"/> of the others. Null when the print does not exist or is not the
+    /// user's. A print with no hash counts 0, because nothing identifies its file.
+    /// </summary>
+    Task<SameFilePrintsDto?> GetSameFilePrints(long id, long userId, int limit, CancellationToken ct);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
 
