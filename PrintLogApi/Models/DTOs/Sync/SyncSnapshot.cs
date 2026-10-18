@@ -58,6 +58,7 @@ public sealed record SyncPrinter(
 /// <param name="Date">The entry's date.</param>
 public sealed record SyncMaintenance(Guid Id, DateTimeOffset Date, string? Category, string? Description);
 
+/// <summary>The maintenance entries not yet marked done.</summary>
 /// <param name="Count">How many entries are not done; 0 when none.</param>
 /// <param name="NextDate">The earliest date among them, or null when <see cref="Count"/> is 0.</param>
 public sealed record SyncOpenMaintenance(int Count, DateTimeOffset? NextDate);

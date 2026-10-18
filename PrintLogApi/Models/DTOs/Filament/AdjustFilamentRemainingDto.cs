@@ -15,10 +15,12 @@ public class AdjustFilamentRemainingDto
     public string? Notes { get; set; }
 }
 
-/// <summary>The spool's remaining weight around an adjustment, always in grams.</summary>
+/// <summary>The spool's remaining weight around an adjustment, always in grams, whatever unit the delta was in.</summary>
 public class AdjustFilamentRemainingResultDto
 {
+    /// <summary>Grams remaining before the adjustment.</summary>
     public double BeforeGrams { get; set; }
 
+    /// <summary>Grams remaining after the adjustment.</summary>
     public double AfterGrams { get; set; }
 }

@@ -393,16 +393,17 @@ Assistant integration (#236) polls. The field rules are on the response records 
   `lastMaintenance` (newest entry marked done, or null) and `openMaintenance` (`count`, and
   `nextDate` when `count` > 0; never null). `currentPrint` and `lastFinishedPrint` carry `source`
   (the print's origin) and `url`, a link to the print in the web app built from `Email:WebBaseUrl`;
-  `currentPrint` adds `filament`, one `{slot, spoolId, estimatedGrams}` per estimate row, read in
-  one statement for all printers. `account` adds `successCount` and `failedCount` (prints started
+  `currentPrint` adds `filament`, one `{slot, spoolId, estimatedGrams}` per PrintFilament row (`estimatedGrams` is null
+  when a row has no estimate), read in one statement for all printers. `account` adds `successCount` and `failedCount` (prints started
   this month; canceled and partial are in `printCount` only). The ETag covers all of them.
 - **Two filament writes for the integration** (`FilamentsController`): `POST /api/Filaments/{id}/adjustments`
   (signed delta, wraps the MCP `adjust_material_remaining` logic) and `PUT /api/Filaments/{id}/active`.
   Both bump the user's cache version (so the next poll sees them), accept API keys, and answer
   failures with problem details carrying a machine-readable `code`: **404 `material_not_found`**
   (missing and foreign spools look the same), **400 `material_untracked`**,
-  **`adjustment_out_of_range`**, **`invalid_adjustment`** (bad unit, zero or non-finite delta, notes
-  over 1000 characters) and **`invalid_request`** (`isActive` missing). **A client tells an old API
+  **`adjustment_out_of_range`**, **`invalid_adjustment`** (bad unit, zero or non-finite delta, a delta
+  over 2,000,000 in magnitude, a length or volume delta on a spool without the density or diameter
+  needed to convert it, notes over 1000 characters) and **`invalid_request`** (`isActive` missing). **A client tells an old API
   apart from a missing spool by the code**: an unmatched route is also a 404 but has no
   `material_not_found`, so a 404 without that code means the API predates these endpoints.
   `FilamentIntegrationEndpointsTests` pins the codes; they are a contract with the integration.

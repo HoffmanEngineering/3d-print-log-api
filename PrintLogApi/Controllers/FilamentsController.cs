@@ -409,7 +409,7 @@ public class FilamentsController(
     /// <param name="dto">The unit, signed delta and optional note.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="200">The remaining weight before and after, in grams.</response>
-    /// <response code="400">Unknown source, zero or non-finite delta, untracked spool, or an out-of-range result.</response>
+    /// <response code="400">Unknown source, zero or non-finite delta, a delta over 2,000,000 in magnitude, a length or volume delta on a spool without the density or diameter needed to convert it, untracked spool, or an out-of-range result.</response>
     /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
     [HttpPost("{id:guid}/adjustments")]
     [ProducesResponseType<AdjustFilamentRemainingResultDto>(StatusCodes.Status200OK)]
@@ -448,7 +448,7 @@ public class FilamentsController(
             var result = await filamentService.AdjustMaterialRemainingForMcp(userId.Value, id, source, dto.Delta, dto.Notes, ct);
             return Ok(new AdjustFilamentRemainingResultDto { BeforeGrams = result.BeforeGrams, AfterGrams = result.AfterGrams });
         }
-        catch (McpToolException ex)
+        catch (McpToolException ex) when (ex.Code is "not_found" or "invalid_arguments")
         {
             return ToProblem(ex);
         }
@@ -485,7 +485,7 @@ public class FilamentsController(
             await filamentService.SetMaterialActiveForMcp(userId.Value, id, dto.IsActive.Value, ct);
             return NoContent();
         }
-        catch (McpToolException ex)
+        catch (McpToolException ex) when (ex.Code is "not_found" or "invalid_arguments")
         {
             return ToProblem(ex);
         }
@@ -495,6 +495,8 @@ public class FilamentsController(
     /// Maps the MCP service's outcomes to problem details with a machine-readable `code`. A
     /// missing and a foreign spool are both 404 `material_not_found`: the Home Assistant client
     /// tells that apart from an unmatched route (also a 404 problem body) by the code.
+    /// Callers catch only the `not_found` and `invalid_arguments` codes, so any other one surfaces
+    /// as a server error instead of a misleading 400.
     /// </summary>
     private ObjectResult ToProblem(McpToolException ex)
     {
