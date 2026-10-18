@@ -200,6 +200,7 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     // InteractiveUserOnly rejects API keys, so the document must not offer them.
     [InlineData("/api/Devices", "post", new[] { "oauth2" }, false)]
     [InlineData("/api/Users/me/email", "get", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/onboarding", "get", new[] { "oauth2" }, false)]
     public async Task SecurityRequirements_MatchTheEndpointsAuthorization(
         string path, string method, string[] schemes, bool allowsAnonymous)
     {

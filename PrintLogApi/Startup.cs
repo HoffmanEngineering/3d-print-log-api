@@ -97,6 +97,7 @@ public class Startup
         services.AddPrintLogOpenApi(Configuration);
 
         services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
+        services.Configure<UserOnboardingOptions>(Configuration.GetSection(UserOnboardingOptions.SectionName));
 
         var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
         var pushConfigured = false;

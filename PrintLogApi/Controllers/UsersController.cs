@@ -5,6 +5,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Email;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
@@ -29,7 +30,8 @@ public class UsersController(
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IBlobStorageService blobStorageService,
-    ISubscriptionService subscriptionService) : ControllerBase
+    ISubscriptionService subscriptionService,
+    IOptions<UserOnboardingOptions> onboardingOptions) : ControllerBase
 {
     private readonly string profileImageContainerName = "userprofile";
 
@@ -100,6 +102,32 @@ public class UsersController(
             .Select(u => new AccountEmailDto(u.Email, u.EmailVerified))
             .AsNoTracking()
             .SingleAsync(ct);
+    }
+
+    /// <summary>
+    /// Whether the current user goes through onboarding. Interactive sessions only. Deliberately
+    /// not part of the public user detail, which is anonymous.
+    /// </summary>
+    [HttpGet("me/onboarding")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<ActionResult<OnboardingStatusDto>> GetOnboardingStatus(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var user = await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.CreatedDate, u.EmailVerified })
+            .AsNoTracking()
+            .SingleAsync(ct);
+
+        return new OnboardingStatusDto(
+            onboardingOptions.Value.IsEligible(user.CreatedDate),
+            user.CreatedDate,
+            user.EmailVerified);
     }
 
     /// <summary>
