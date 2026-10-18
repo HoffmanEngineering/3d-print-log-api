@@ -402,7 +402,8 @@ public class FilamentsController(
     /// <remarks>
     /// Wraps the same logic as the MCP `adjust_material_remaining` tool. The result cannot go below
     /// zero or above the spool's original capacity, and a spool with no starting amount cannot be
-    /// adjusted. `beforeGrams` and `afterGrams` are grams whatever unit `delta` is in.
+    /// adjusted. `delta` must be finite, non-zero and at most 2,000,000 in magnitude (g / mm / ml).
+    /// `beforeGrams` and `afterGrams` are grams whatever unit `delta` is in.
     /// </remarks>
     /// <param name="id">The ID of the filament.</param>
     /// <param name="dto">The unit, signed delta and optional note.</param>
@@ -472,9 +473,14 @@ public class FilamentsController(
             return Unauthorized();
         }
 
+        if (dto.IsActive is null)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "isActive is required.", "invalid_request");
+        }
+
         try
         {
-            await filamentService.SetMaterialActiveForMcp(userId.Value, id, dto.IsActive, ct);
+            await filamentService.SetMaterialActiveForMcp(userId.Value, id, dto.IsActive.Value, ct);
             return NoContent();
         }
         catch (McpToolException ex)
@@ -495,13 +501,7 @@ public class FilamentsController(
             return CodedProblem(StatusCodes.Status404NotFound, ex.Message, "material_not_found");
         }
 
-        var code = ex.Message switch
-        {
-            var m when m.Contains("no starting amount", StringComparison.Ordinal) => "material_untracked",
-            var m when m.Contains("below zero", StringComparison.Ordinal)
-                || m.Contains("exceed", StringComparison.Ordinal) => "adjustment_out_of_range",
-            _ => "invalid_adjustment",
-        };
+        var code = ex.SubCode is "material_untracked" or "adjustment_out_of_range" ? ex.SubCode : "invalid_adjustment";
         return CodedProblem(StatusCodes.Status400BadRequest, ex.Message, code);
     }
 

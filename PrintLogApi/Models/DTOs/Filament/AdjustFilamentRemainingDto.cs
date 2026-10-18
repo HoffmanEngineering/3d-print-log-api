@@ -8,7 +8,7 @@ public class AdjustFilamentRemainingDto
     /// <summary>The unit of <c>delta</c>: <c>weight</c> (grams), <c>length</c> (millimeters) or <c>volume</c> (milliliters). Case-insensitive.</summary>
     public string? Source { get; set; }
 
-    /// <summary>Signed amount in the unit of <c>source</c>. Positive adds, negative removes. Must be finite and not 0.</summary>
+    /// <summary>Signed amount in the unit of <c>source</c>. Positive adds, negative removes. Must be finite, not 0, and at most 2,000,000 in magnitude.</summary>
     public double Delta { get; set; }
 
     /// <summary>Optional note, at most 1000 characters (checked in the action so the 400 carries a `code`).</summary>

@@ -219,12 +219,36 @@ public class FilamentIntegrationEndpointsTests(SyncTestFactory factory) : IClass
     {
         var user = await factory.CreateUserAsync();
         var spool = await AddSpoolAsync(user);
+        var before = await SnapshotAsync(user);
+        Assert.True(SnapshotSpool(await JsonAsync(before), spool.Id).GetProperty("active").GetBoolean());
 
         var response = await _client.SendAsync(SetActive(user, spool.Id, false), Ct);
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        var snapshot = await JsonAsync(await SnapshotAsync(user));
-        Assert.False(SnapshotSpool(snapshot, spool.Id).GetProperty("active").GetBoolean());
+        var after = await SnapshotAsync(user);
+        Assert.False(SnapshotSpool(await JsonAsync(after), spool.Id).GetProperty("active").GetBoolean());
+        Assert.NotEqual(before.Headers.ETag!.ToString(), after.Headers.ETag!.ToString());
+    }
+
+    [Fact]
+    public async Task Adjust_MagnitudeOverLimit_Returns400InvalidAdjustment()
+    {
+        var user = await factory.CreateUserAsync();
+        var spool = await AddSpoolAsync(user, usedMg: 400_000);
+
+        await AssertProblemAsync(await _client.SendAsync(Adjust(user, spool.Id, new { source = "weight", delta = 3_000_000 }), Ct), HttpStatusCode.BadRequest, "invalid_adjustment");
+    }
+
+    [Fact]
+    public async Task SetActive_MissingIsActive_Returns400_AndLeavesSpoolActive()
+    {
+        var user = await factory.CreateUserAsync();
+        var spool = await AddSpoolAsync(user);
+        var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{spool.Id}/active") { Content = JsonContent.Create(new { isactiv = false }) };
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, user.OAuthUserId);
+
+        await AssertProblemAsync(await _client.SendAsync(request, Ct), HttpStatusCode.BadRequest, "invalid_request");
+        Assert.True(SnapshotSpool(await JsonAsync(await SnapshotAsync(user)), spool.Id).GetProperty("active").GetBoolean());
     }
 
     [Fact]

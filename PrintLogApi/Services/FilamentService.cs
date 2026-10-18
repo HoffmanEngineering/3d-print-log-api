@@ -948,7 +948,7 @@ public class FilamentService(
                 "know what is on it now, set initialAmount to any original size, then call " +
                 "get_material and adjust_material_remaining by the difference: logged usage is " +
                 "subtracted from initialAmount, so setting it to the current amount counts that " +
-                "usage twice.");
+                "usage twice.", "material_untracked");
         }
 
         // The same check the web app's create and update paths make (#232).
@@ -989,11 +989,11 @@ public class FilamentService(
 
         if (afterGrams < 0)
         {
-            throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.");
+            throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.", "adjustment_out_of_range");
         }
         if (capacityGrams > 0 && afterGrams > capacityGrams)
         {
-            throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.");
+            throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.", "adjustment_out_of_range");
         }
 
         context.FilamentAdjustments.Add(adjustment);

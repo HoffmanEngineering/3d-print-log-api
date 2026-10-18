@@ -2,5 +2,6 @@
 
 public class SetFilamentActiveDto
 {
-    public bool IsActive { get; set; }
+    /// <summary>Required. Omitting it is a 400, never a silent retire.</summary>
+    public bool? IsActive { get; set; }
 }
