@@ -10,8 +10,9 @@ namespace PrintLogApi.PrinterCatalog.Generation;
 /// override), so neither a new alias, a rename in a source, nor a name override moves an id.
 /// <list type="bullet">
 /// <item>A model takes back the id of a previous model or reserved entry that shares any of its
-/// source keys. When several match, the lowest id wins, and models claim in the order of their
-/// sorted keys, so conflicts resolve the same way every run.</item>
+/// source keys. Visible previous ids are claimed before reserved ones; when several match, the
+/// lowest id wins, and models claim in the order of their sorted keys, so conflicts resolve the
+/// same way every run. A merged-away id is reclaimed only when its model splits off again.</item>
 /// <item>The normalized make|model key is only a fallback, for previous entries with no source
 /// keys: a hand-added override extra (or a file written before source keys existed). A source
 /// model with the extra's names adopts its id.</item>
@@ -77,9 +78,18 @@ public static partial class CatalogIds
         var claimOrder = Enumerable.Range(0, models.Count).OrderBy(i => ClaimOrder(models[i]), StringComparer.Ordinal).ToList();
 
         // Keep published ids first, so a new model can never take one before its owner does.
-        // Pass 1 matches own keys, pass 2 any key; in each the lowest-sorting free id wins, which
-        // is also what makes the lower id survive when two published ids merge.
-        foreach (var index in new[] { BuildIndex(ownKeys), BuildIndex(previousKeys) })
+        // 1. Visible previous ids (survivors), by own keys then by any key. The lowest-sorting free
+        //    id wins, which is what makes the lower id survive when two published ids merge, and a
+        //    model holding any of a survivor's keys stays on it, so dropping one source of a merged
+        //    model never moves its id.
+        // 2. Reserved ids (merged, retired, hidden), by own keys only. A merged-away id comes back
+        //    only on a true split: another model took its survivor, and this one still produces a
+        //    key the merged-away id held itself.
+        var visible = (previous?.Models ?? []).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        var visibleOwn = ownKeys.Where(p => visible.Contains(p.Key)).ToDictionary(StringComparer.Ordinal);
+        var visibleAll = previousKeys.Where(p => visible.Contains(p.Key)).ToDictionary(StringComparer.Ordinal);
+        var reservedOwn = ownKeys.Where(p => !visible.Contains(p.Key)).ToDictionary(StringComparer.Ordinal);
+        foreach (var index in new[] { BuildIndex(visibleOwn), BuildIndex(visibleAll), BuildIndex(reservedOwn) })
         {
             foreach (var i in claimOrder.Where(i => ids[i] is null))
             {

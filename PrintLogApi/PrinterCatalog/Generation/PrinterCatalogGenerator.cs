@@ -167,6 +167,9 @@ public static class PrinterCatalogGenerator
 
         // An id that lost its keys to another generated model was merged into it. An existing
         // pointer stays: it names the direct successor, and the chain is the consumer's to follow.
+        // An id generated this run (hidden, since visible ids are not reserved) has its own model,
+        // so it is merged into nothing and an old pointer is dropped.
+        var generatedIds = generated.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         var idByKey = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var m in generated)
         {
@@ -176,9 +179,35 @@ public static class PrinterCatalogGenerator
             }
         }
         string? SuccessorOf(string id, IReadOnlyList<string>? keys) =>
-            mergedInto.GetValueOrDefault(id)
-            ?? (keys ?? []).Select(k => idByKey.GetValueOrDefault(k)).Where(s => s is not null && s != id).Order(StringComparer.Ordinal).FirstOrDefault();
+            generatedIds.Contains(id)
+                ? null
+                : mergedInto.GetValueOrDefault(id)
+                    ?? (keys ?? []).Select(k => idByKey.GetValueOrDefault(k)).Where(s => s is not null && s != id).Order(StringComparer.Ordinal).FirstOrDefault();
 
-        return keysById.Select(r => new ReservedId { Id = r.Key, SourceKeys = r.Value, MergedInto = SuccessorOf(r.Key, r.Value) }).ToList();
+        var reserved = keysById.Select(r => new ReservedId { Id = r.Key, SourceKeys = r.Value, MergedInto = SuccessorOf(r.Key, r.Value) }).ToList();
+        ThrowOnMergedIntoCycle(reserved);
+        return reserved;
+    }
+
+    /// <summary>
+    /// Following <c>mergedInto</c> from any reserved id must end, at a visible id or at a reserved
+    /// one with no successor. A cycle would send the seeder round forever, so it fails the run.
+    /// </summary>
+    private static void ThrowOnMergedIntoCycle(IReadOnlyList<ReservedId> reserved)
+    {
+        var next = reserved.Where(r => r.MergedInto is not null).ToDictionary(r => r.Id, r => r.MergedInto!, StringComparer.Ordinal);
+        foreach (var start in next.Keys)
+        {
+            var visited = new List<string>();
+            for (string? id = start; id is not null; id = next.GetValueOrDefault(id))
+            {
+                if (visited.Contains(id, StringComparer.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        $"reserved: mergedInto forms a cycle ({string.Join(" -> ", visited.Append(id))}); fix the reserved entries in the previous file");
+                }
+                visited.Add(id);
+            }
+        }
     }
 }

@@ -323,6 +323,126 @@ public class CatalogIdStabilityTests
         Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(third.Reserved, r => r.Id == "sovol-sv06").MergedInto);
     }
 
+    // --- Round 4: a merged id stays put unless the model truly splits ---
+
+    private static readonly Dictionary<string, string> SovolAlias = new() { ["Sovol 3D"] = "Sovol" };
+
+    /// <summary>Runs 1 and 2 of the merge test: sovol-sv06 is merged into sovol-3d-sovol-sv06.</summary>
+    private static CatalogFile MergedSovol(string curaRoot, string orcaRoot)
+    {
+        var first = Run(curaRoot, orcaRoot, null, aliases: new Dictionary<string, string>());
+        var second = Run(curaRoot, orcaRoot, first, aliases: SovolAlias);
+        Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(second.Models, m => m.SourceKeys!.Contains(SovolOrca)).Id);
+        Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(second.Reserved, r => r.Id == "sovol-sv06").MergedInto);
+        return second;
+    }
+
+    [Theory]
+    [InlineData("cura")]
+    [InlineData("orca")]
+    public void DroppingOneSourceOfAMergedModel_NeverChangesItsId(string dropped)
+    {
+        using var cura = SovolCuraTree();
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+        var merged = MergedSovol(cura.Root, orca.Root);
+        var remaining = dropped == "cura" ? SovolOrca : SovolCura;
+
+        // The dropped side's Sovol printer is gone; the Cura fixture keeps the run non-empty.
+        CatalogFile Next(CatalogFile previous) => dropped == "cura"
+            ? Run(CuraFixture, orca.Root, previous, aliases: SovolAlias)
+            : Run(cura.Root, null, previous, aliases: SovolAlias);
+
+        var third = Next(merged);
+        var fourth = Next(third);
+        var fifth = Next(fourth);
+
+        foreach (var file in new[] { third, fourth, fifth })
+        {
+            var model = Assert.Single(file.Models, m => m.SourceKeys!.Contains(remaining));
+            Assert.Equal("sovol-3d-sovol-sv06", model.Id);
+            Assert.Equal([SovolCura, SovolOrca], model.SourceKeys);
+            Assert.DoesNotContain(file.Models, m => m.Id == "sovol-sv06");
+            Assert.Equal(
+                System.Text.Json.JsonSerializer.Serialize(merged.Reserved, CatalogFile.JsonOptions),
+                System.Text.Json.JsonSerializer.Serialize(file.Reserved, CatalogFile.JsonOptions));
+        }
+        Assert.Equal(CatalogFile.Serialize(third), CatalogFile.Serialize(fourth));
+        Assert.Equal(CatalogFile.Serialize(fourth), CatalogFile.Serialize(fifth));
+    }
+
+    [Fact]
+    public void HidingAMergedIdThenDroppingTheSurvivorsOtherSource_LeavesNoMergedIntoCycle()
+    {
+        using var cura = SovolCuraTree();
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+        var hide = JsonNode.Parse("""{ "sovol-sv06": { "hidden": true } }""")!.AsObject();
+        var merged = MergedSovol(cura.Root, orca.Root);
+        var log = new List<string>();
+
+        // The hide targets the merged-away id; the Cura side then leaves.
+        var third = Run(CuraFixture, orca.Root, merged, hide, SovolAlias, log);
+        var fourth = Run(CuraFixture, orca.Root, third, hide, SovolAlias);
+
+        foreach (var file in new[] { third, fourth })
+        {
+            Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(file.Models, m => m.SourceKeys!.Contains(SovolOrca)).Id);
+            Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(file.Reserved, r => r.Id == "sovol-sv06").MergedInto);
+            AssertNoMergedIntoCycle(file);
+        }
+        Assert.Contains(log, l => l.Contains("sovol-sv06", StringComparison.Ordinal) && l.Contains("hides a retired id", StringComparison.Ordinal));
+        Assert.Equal(CatalogFile.Serialize(third), CatalogFile.Serialize(fourth));
+    }
+
+    [Fact]
+    public void AReclaimedButHiddenId_DropsItsOldMergedInto()
+    {
+        using var cura = SovolCuraTree();
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+        var hide = JsonNode.Parse("""{ "sovol-sv06": { "hidden": true } }""")!.AsObject();
+        var merged = MergedSovol(cura.Root, orca.Root);
+
+        // The alias goes away (a true split): the Orca half reclaims sovol-sv06, which is hidden.
+        var split = Run(cura.Root, orca.Root, merged, hide, new Dictionary<string, string>());
+
+        Assert.Equal([SovolCura], Assert.Single(split.Models, m => m.Id == "sovol-3d-sovol-sv06").SourceKeys);
+        var hidden = Assert.Single(split.Reserved, r => r.Id == "sovol-sv06");
+        Assert.Equal([SovolOrca], hidden.SourceKeys);
+        Assert.Null(hidden.MergedInto);
+        AssertNoMergedIntoCycle(split);
+    }
+
+    [Fact]
+    public void AMergedIntoCycle_FailsTheRun()
+    {
+        var previous = new CatalogFile
+        {
+            Reserved =
+            [
+                new ReservedId { Id = "loop-a", SourceKeys = ["orca:Gone/A"], MergedInto = "loop-b" },
+                new ReservedId { Id = "loop-b", SourceKeys = ["orca:Gone/B"], MergedInto = "loop-a" },
+            ],
+        };
+        using var tree = new ProfileTree().OrcaVendor("Acme", ["Acme Other"]);
+
+        var e = Assert.Throws<InvalidDataException>(() => Run(null, tree.Root, previous));
+
+        Assert.Contains("cycle", e.Message, StringComparison.Ordinal);
+        Assert.Contains("loop-a", e.Message, StringComparison.Ordinal);
+    }
+
+    private static void AssertNoMergedIntoCycle(CatalogFile file)
+    {
+        var next = file.Reserved.Where(r => r.MergedInto is not null).ToDictionary(r => r.Id, r => r.MergedInto!);
+        foreach (var start in next.Keys)
+        {
+            var seen = new HashSet<string>();
+            for (var id = start; id is not null; id = next.GetValueOrDefault(id))
+            {
+                Assert.True(seen.Add(id), $"mergedInto cycle through {id}");
+            }
+        }
+    }
+
     [Fact]
     public void SourceKeysAccumulate_SoAModelThatSwitchesSourcesKeepsItsId()
     {
