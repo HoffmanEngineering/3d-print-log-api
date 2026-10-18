@@ -1629,6 +1629,24 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Printers");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.PrinterCatalogVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("SeededAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterCatalogVersions");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.PrinterCategory", b =>
                 {
                     b.Property<string>("Nickname")

@@ -44,7 +44,7 @@ public class PrinterModel
     public int? DefaultSlotCount { get; set; }
     public string? Kinematics { get; set; }
 
-    /// <summary>JSON array of the sources the facts came from.</summary>
+    /// <summary>JSON object mapping each spec field to the source it came from (cura, orca or override).</summary>
     public string SourcesJson { get; set; } = "[]";
 
     /// <summary>Position in the featured list, or null when the model is not featured.</summary>

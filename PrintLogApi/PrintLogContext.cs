@@ -18,6 +18,7 @@ public class PrintLogContext : DbContext
 
     public DbSet<Printer> Printers { get; set; }
     public DbSet<PrinterModel> PrinterModels { get; set; } = null!;
+    public DbSet<PrinterCatalogVersion> PrinterCatalogVersions { get; set; } = null!;
 
     public DbSet<PrinterCategory> PrinterCategories { get; set; }
 
