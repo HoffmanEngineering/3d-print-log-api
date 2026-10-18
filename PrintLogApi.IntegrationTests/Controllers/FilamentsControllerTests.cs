@@ -584,6 +584,66 @@ public class FilamentsControllerTests : IClassFixture<CustomWebApplicationFactor
         Assert.Equal("Updated notes", updatedFilament.Notes);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateFilament_NullAdjustments_PreservesExistingAdjustments(bool omitNullProperties)
+    {
+        var filament = await CreateUsageTotalsFilamentAsync($"Null adjustments {omitNullProperties}");
+        await AddWeightAdjustmentAsync(filament, -200000);
+
+        var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filament.Id}");
+        getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        var updateDto = (await getResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        Assert.Single(updateDto.FilamentAdjustments!);
+
+        updateDto.FilamentAdjustments = null;
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = omitNullProperties
+                ? System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                : System.Text.Json.Serialization.JsonIgnoreCondition.Never
+        };
+        var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{filament.Id}");
+        updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        updateRequest.Content = JsonContent.Create(updateDto, options: jsonOptions);
+
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+        var updatedFilament = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        Assert.Single(updatedFilament.FilamentAdjustments!);
+        Assert.Equal(800000, updatedFilament.FilamentRemaining);
+    }
+
+    [Fact]
+    public async Task UpdateFilament_EmptyAdjustments_RemovesExistingAdjustments()
+    {
+        var filament = await CreateUsageTotalsFilamentAsync("Empty adjustments removes history");
+        await AddWeightAdjustmentAsync(filament, -200000);
+
+        var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/Filaments/{filament.Id}");
+        getRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var getResponse = await _httpClient.SendAsync(getRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        var updateDto = (await getResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        Assert.Single(updateDto.FilamentAdjustments!);
+
+        updateDto.FilamentAdjustments = new List<FilamentAdjustmentDto>();
+        var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{filament.Id}");
+        updateRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        updateRequest.Content = JsonContent.Create(updateDto);
+
+        var updateResponse = await _httpClient.SendAsync(updateRequest, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, updateResponse.StatusCode);
+        var updatedFilament = (await updateResponse.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!;
+        Assert.Empty(updatedFilament.FilamentAdjustments!);
+        Assert.Equal(1000000, updatedFilament.FilamentRemaining);
+    }
+
     [Fact]
     public async Task UpdateFilament_NotAuthenticated_ReturnsUnauthorized()
     {
