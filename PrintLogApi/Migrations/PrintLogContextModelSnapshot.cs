@@ -2706,6 +2706,18 @@ namespace PrintLogApi.Migrations
                             Id = 28,
                             Description = "The web app version that was current when the user last opened the release notes page.",
                             Name = "ReleaseNotes_LastViewedVersion"
+                        },
+                        new
+                        {
+                            Id = 29,
+                            Description = "When the user finished or skipped the new-user welcome flow (ISO 8601).",
+                            Name = "Onboarding_WelcomeFinishedAt"
+                        },
+                        new
+                        {
+                            Id = 30,
+                            Description = "When the user dismissed the Getting Started checklist (ISO 8601).",
+                            Name = "Onboarding_ChecklistDismissedAt"
                         });
                 });
 

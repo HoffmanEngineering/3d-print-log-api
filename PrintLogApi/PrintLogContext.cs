@@ -116,7 +116,9 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 25, Name = "Email_PrinterSilent", Description = "Email when a connected printer stops reporting (true/false; absent means on)." },
             new UserSettingType() { Id = 26, Name = "Email_NoticeSeenAt", Description = "When the user dismissed the in-app email notice (ISO 8601)." },
             new UserSettingType() { Id = 27, Name = "ReleaseNotes_LastShownVersion", Description = "The newest web app version whose release notes the What's New dialog has shown the user." },
-            new UserSettingType() { Id = 28, Name = "ReleaseNotes_LastViewedVersion", Description = "The web app version that was current when the user last opened the release notes page." }
+            new UserSettingType() { Id = 28, Name = "ReleaseNotes_LastViewedVersion", Description = "The web app version that was current when the user last opened the release notes page." },
+            new UserSettingType() { Id = 29, Name = "Onboarding_WelcomeFinishedAt", Description = "When the user finished or skipped the new-user welcome flow (ISO 8601)." },
+            new UserSettingType() { Id = 30, Name = "Onboarding_ChecklistDismissedAt", Description = "When the user dismissed the Getting Started checklist (ISO 8601)." }
             );
 
         var filamentCategory = new MaterialCategory()

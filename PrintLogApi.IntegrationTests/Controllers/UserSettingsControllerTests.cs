@@ -620,6 +620,8 @@ public class UserSettingsControllerTests : IClassFixture<CustomWebApplicationFac
     [InlineData(16, "Push_PrintFailed")]
     [InlineData(27, "ReleaseNotes_LastShownVersion")]
     [InlineData(28, "ReleaseNotes_LastViewedVersion")]
+    [InlineData(29, "Onboarding_WelcomeFinishedAt")]
+    [InlineData(30, "Onboarding_ChecklistDismissedAt")]
     public async Task SettingTypes_AreSeeded(int id, string expectedName)
     {
         using var scope = _factory.Services.CreateScope();
