@@ -166,6 +166,18 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
                 db.PrintFilament.Add(new PrintFilament { PrintId = print.Id, FilamentId = spoolId, LengthInM = 10, Source = PrintFilament.SourceMeasurement.Length });
             }
 
+            // A failed print this month, with no usage, so the success/failed split is proven on SQL Server.
+            db.Prints.Add(new Print
+            {
+                Title = "Failed",
+                PrinterId = printerId,
+                Status = Print.PrintStatus.Failed,
+                StartDate = now.AddDays(-2),
+                PrintTimeInSeconds = 300,
+                ViewStatus = Print.PrintViewStatus.Private,
+                CreatedById = userId,
+                UpdatedById = userId,
+            });
             db.Connections.Add(new Connection
             {
                 Id = Guid.NewGuid(),
@@ -195,7 +207,9 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
             // Two prints of 10 m of 1.75 mm PLA at 1.24 g/cm³: about 59.7 g.
             Assert.InRange(spool.UsedGrams, 59, 61);
             Assert.InRange(spool.RemainingGrams!.Value, 939, 941);
-            Assert.Equal(2, totals.PrintCount);
+            Assert.Equal(3, totals.PrintCount);
+            Assert.Equal(1, totals.SuccessCount);
+            Assert.Equal(1, totals.FailedCount);
             Assert.InRange(totals.Grams, 59, 61);
             Assert.Equal("online", connections[printerId].Status);
         }

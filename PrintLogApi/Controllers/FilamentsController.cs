@@ -461,9 +461,11 @@ public class FilamentsController(
     /// <param name="dto">The new active flag.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <response code="204">The flag was set.</response>
+    /// <response code="400">isActive is missing. Problem details with code invalid_request.</response>
     /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
     [HttpPut("{id:guid}/active")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetActive(Guid id, [FromBody] SetFilamentActiveDto dto, CancellationToken ct)
     {

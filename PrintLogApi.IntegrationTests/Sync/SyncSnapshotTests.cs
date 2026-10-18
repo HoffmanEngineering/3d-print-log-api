@@ -2,9 +2,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.UserApiKeys;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Sync;
-using PrintLogApi.Models.DTOs.UserApiKeys;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Sync;
