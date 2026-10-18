@@ -1,0 +1,8 @@
+{
+    "type": "machine_model",
+    "name": "Zed Labs Z1",
+    "nozzle_diameter": "0.4",
+    "bed_model": "zed_z1_bed.stl",
+    "family": "Zed",
+    "machine_tech": "FFF"
+}

@@ -56,6 +56,9 @@
     <!-- Settings blocks cut from the slicer parser library's fixtures, and the uploader's own
          dry-run note for each (PrintsControllerSlicerSettingsTests). -->
     <None Include="..\tests-fixtures\slicer-settings\*.txt" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\slicer-settings" />
+    <!-- A minimal Cura tree and Orca profile folder for the printer catalog generator
+         (CatalogGeneratorTests). Facts-shaped stand-ins, not copies of real profiles. -->
+    <None Include="..\tests-fixtures\printer-catalog\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\printer-catalog" />
     <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->

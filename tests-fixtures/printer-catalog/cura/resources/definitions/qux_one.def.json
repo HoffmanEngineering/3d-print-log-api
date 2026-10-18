@@ -1,0 +1,18 @@
+{
+    "name": "Qux3D One",
+    "version": 2,
+    "inherits": "fdmprinter",
+    "metadata":
+    {
+        "visible": true,
+        "manufacturer": "Qux3D"
+    },
+    "overrides":
+    {
+        "machine_width": { "default_value": 300 },
+        "machine_depth": { "default_value": 310 },
+        "machine_height": { "default_value": 320 },
+        "machine_heated_build_volume": { "default_value": true },
+        "machine_extruder_count": { "default_value": 2 }
+    }
+}

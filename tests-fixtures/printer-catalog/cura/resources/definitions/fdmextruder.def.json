@@ -1,0 +1,21 @@
+{
+    "name": "Extruder",
+    "version": 2,
+    "metadata":
+    {
+        "type": "extruder",
+        "visible": false
+    },
+    "settings":
+    {
+        "machine_settings":
+        {
+            "label": "Machine",
+            "type": "category",
+            "children":
+            {
+                "extruder_nr": { "type": "extruder", "default_value": 0 }
+            }
+        }
+    }
+}

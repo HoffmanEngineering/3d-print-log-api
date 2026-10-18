@@ -1,0 +1,12 @@
+[
+  {
+    "repo": "Ultimaker/Cura",
+    "tag": "placeholder",
+    "license": "LGPL-3.0"
+  },
+  {
+    "repo": "SoftFever/OrcaSlicer",
+    "tag": "placeholder",
+    "license": "AGPL-3.0"
+  }
+]

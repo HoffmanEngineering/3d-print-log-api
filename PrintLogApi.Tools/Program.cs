@@ -3,11 +3,18 @@ using PrintLogApi;
 using PrintLogApi.Email.Backfill;
 
 // Usage: PrintLogApi.Tools email-backfill --file <export.json[.gz]> --connection <connection string> [--dry-run]
+//        PrintLogApi.Tools printer-catalog [--cura <dir>] [--orca <dir>] ... --out <file>
 const string Usage = "usage: email-backfill --file <path> --connection <connection string> [--dry-run]";
+
+if (args.Length > 0 && args[0] == "printer-catalog")
+{
+    return await PrinterCatalogCommand.RunAsync(args[1..]);
+}
 
 if (args.Length == 0 || args[0] != "email-backfill")
 {
     Console.Error.WriteLine(Usage);
+    Console.Error.WriteLine(PrinterCatalogCommand.Usage);
     return 2;
 }
 

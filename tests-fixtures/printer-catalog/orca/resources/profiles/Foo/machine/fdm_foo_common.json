@@ -1,0 +1,13 @@
+{
+    "type": "machine",
+    "name": "fdm_foo_common",
+    "inherits": "fdm_machine_common",
+    "from": "system",
+    "instantiation": "false",
+    "printer_structure": "corexy",
+    "filament_diameter": [
+        "1.75"
+    ],
+    "printable_height": "235",
+    "machine_end_gcode": "M84 ; foo end"
+}

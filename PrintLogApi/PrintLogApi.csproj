@@ -88,4 +88,11 @@
     <EmbeddedResource Include="Mcp\Apps\*.html" LogicalName="PrintLogApi.Mcp.Apps.%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Printer catalog generator inputs. The printer-catalog tool reads them from the source
+         tree; the running API never does, so they stay out of the build and publish output. -->
+    <Content Remove="PrinterCatalog\catalog-sources.json;PrinterCatalog\catalog-overrides.json;PrinterCatalog\make-aliases.json" />
+    <None Include="PrinterCatalog\catalog-sources.json;PrinterCatalog\catalog-overrides.json;PrinterCatalog\make-aliases.json" />
+  </ItemGroup>
+
 </Project>
