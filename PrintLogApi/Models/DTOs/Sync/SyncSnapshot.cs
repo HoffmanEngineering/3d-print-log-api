@@ -33,6 +33,12 @@ public sealed record SyncSnapshot(
 /// </param>
 /// <param name="LastFinishedPrint">The newest finished print, or null.</param>
 /// <param name="Loaded">What is in each slot now, in slot order; unslotted spools last.</param>
+/// <param name="PrintTimeSeconds">
+/// All-time print time on this printer, the figure <c>GET /api/analytics/printers</c> reports as
+/// <c>printTimeSeconds</c> with no date filter: each print's recorded time, else its estimate, else 0.
+/// </param>
+/// <param name="LastMaintenance">The newest maintenance entry marked done, or null.</param>
+/// <param name="OpenMaintenance">Maintenance entries not yet done. Never null.</param>
 public sealed record SyncPrinter(
     long Id,
     string? Name,
@@ -43,7 +49,19 @@ public sealed record SyncPrinter(
     SyncConnection? Connection,
     SyncCurrentPrint? CurrentPrint,
     SyncFinishedPrint? LastFinishedPrint,
-    IReadOnlyList<SyncLoadedSpool> Loaded);
+    IReadOnlyList<SyncLoadedSpool> Loaded,
+    long PrintTimeSeconds,
+    SyncMaintenance? LastMaintenance,
+    SyncOpenMaintenance OpenMaintenance);
+
+/// <summary>A completed maintenance entry.</summary>
+/// <param name="Date">The entry's date.</param>
+public sealed record SyncMaintenance(Guid Id, DateTimeOffset Date, string? Category, string? Description);
+
+/// <summary>The maintenance entries not yet marked done.</summary>
+/// <param name="Count">How many entries are not done; 0 when none.</param>
+/// <param name="NextDate">The earliest date among them, or null when <see cref="Count"/> is 0.</param>
+public sealed record SyncOpenMaintenance(int Count, DateTimeOffset? NextDate);
 
 /// <summary>Connector health, computed per request against the clock.</summary>
 /// <param name="Kind">The connector type, such as <c>moonraker</c>.</param>
@@ -60,7 +78,16 @@ public sealed record SyncCurrentPrint(
     string? Title,
     DateTimeOffset? StartedAt,
     int? EstimatedSeconds,
-    DateTimeOffset? EstimatedEndAt);
+    DateTimeOffset? EstimatedEndAt,
+    string Source,
+    string? Url,
+    IReadOnlyList<SyncPrintFilament> Filament);
+
+/// <summary>One slot's estimate for a print in progress.</summary>
+/// <param name="Slot">The printer slot (tool) the material feeds from, or null when not recorded.</param>
+/// <param name="SpoolId">The linked spool, or null when none is.</param>
+/// <param name="EstimatedGrams">The slicer's estimate to 0.1 g, or null when there is none.</param>
+public sealed record SyncPrintFilament(int? Slot, Guid? SpoolId, double? EstimatedGrams);
 
 /// <param name="Status"><c>success</c>, <c>failed</c>, <c>canceled</c> or <c>partial_success</c>.</param>
 /// <param name="FinishedAt">Start plus print time, when both exist; the print stores no finish time of its own.</param>
@@ -69,7 +96,9 @@ public sealed record SyncFinishedPrint(
     string? Title,
     string Status,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? FinishedAt);
+    DateTimeOffset? FinishedAt,
+    string Source,
+    string? Url);
 
 /// <summary>A spool in a slot, repeating the matching <see cref="SyncSpool"/> fields a slot sensor needs.</summary>
 /// <param name="RemainingGrams">Null for a spool with no initial weight (pending #230).</param>
@@ -110,4 +139,4 @@ public sealed record SyncSpool(
 /// <param name="TimeZone">The zone the month was taken in, as requested.</param>
 /// <param name="PrintCount">Prints started this month.</param>
 /// <param name="Grams">What those prints' usage rows took, in grams.</param>
-public sealed record SyncAccountTotals(string Month, string TimeZone, int PrintCount, double Grams);
+public sealed record SyncAccountTotals(string Month, string TimeZone, int PrintCount, double Grams, int SuccessCount, int FailedCount);

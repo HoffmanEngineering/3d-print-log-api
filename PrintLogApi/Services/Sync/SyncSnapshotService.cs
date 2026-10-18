@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Achievements.Metrics;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
@@ -53,7 +54,7 @@ public interface ISyncSnapshotService
 /// entries, all keyed on the user's version GUID so any write replaces them:
 /// <list type="bullet">
 /// <item><b>core</b> (<see cref="CoreKey"/>, 15 min): printers and spools, with a hash of their
-/// serialized form. The expensive part: three statements.</item>
+/// serialized form. The expensive part: four statements.</item>
 /// <item><b>core hash</b> (<see cref="HashKey"/>, 1 h): just that hash, so a conditional request
 /// can answer 304 without the core, even after the core expired. Written by the core factory, so
 /// it can outlive the core but never describe a different one.</item>
@@ -67,7 +68,8 @@ public sealed class SyncSnapshotService(
     PrintLogContext context,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersion) : ISyncSnapshotService
+    ICacheVersionService cacheVersion,
+    IOptions<EmailOptions> emailOptions) : ISyncSnapshotService
 {
     private static readonly HybridCacheEntryOptions CoreOptions = new()
     {
@@ -96,7 +98,7 @@ public sealed class SyncSnapshotService(
 
     internal static string HashKey(long userId, string guid) => $"sync_core_hash:{userId}:{guid}";
 
-    private static string TotalsKey(long userId, string guid, SyncMonth month) => $"sync_totals:{userId}:{guid}:{month.ZoneId}:{month.Key}";
+    internal static string TotalsKey(long userId, string guid, SyncMonth month) => $"sync_totals:{userId}:{guid}:{month.ZoneId}:{month.Key}";
 
     private static string ZoneKey(long userId, string guid) => $"sync_zone:{userId}:{guid}";
 
@@ -134,11 +136,11 @@ public sealed class SyncSnapshotService(
 
         var core = await cache.GetOrCreateAsync(
             CoreKey(userId, guid),
-            (computation, cache, userId, guid),
+            (computation, cache, userId, guid, webBase: emailOptions.Value.WebBaseUrl?.TrimEnd('/')),
             static (state, token) => state.computation.RunAsync(
                 async (services, innerToken) =>
                 {
-                    var entry = await LoadCoreAsync(services.GetRequiredService<PrintLogContext>(), state.userId, innerToken);
+                    var entry = await LoadCoreAsync(services.GetRequiredService<PrintLogContext>(), state.userId, state.webBase, innerToken);
                     await state.cache.SetAsync(HashKey(state.userId, state.guid), entry.Hash, SmallOptions, cancellationToken: innerToken);
                     return entry;
                 },
@@ -171,7 +173,8 @@ public sealed class SyncSnapshotService(
             new[]
             {
                 version, coreHash, totals.TimeZone, totals.Month,
-                totals.PrintCount.ToString(CultureInfo.InvariantCulture), totals.Grams.ToString("R", CultureInfo.InvariantCulture),
+                totals.PrintCount.ToString(CultureInfo.InvariantCulture),
+                totals.SuccessCount.ToString(CultureInfo.InvariantCulture), totals.FailedCount.ToString(CultureInfo.InvariantCulture), totals.Grams.ToString("R", CultureInfo.InvariantCulture),
             }
             .Concat(connections.OrderBy(c => c.Key).Select(c => $"{c.Key}:{c.Value.Kind}:{c.Value.Status}"))));
 
@@ -219,28 +222,54 @@ public sealed class SyncSnapshotService(
             });
     }
 
-    /// <summary>Prints started in <paramref name="month"/> and the grams their usage rows took: two statements.</summary>
+    /// <summary>Prints started in <paramref name="month"/> with their success and failed counts (one grouped statement), and the grams their usage rows took (a second): two statements.</summary>
     internal static async Task<SyncAccountTotals> LoadTotalsAsync(PrintLogContext db, long userId, SyncMonth month, CancellationToken ct)
     {
-        var printCount = await db.Prints
+        // One grouped statement: the print count is every group's sum. Success and failed are the two
+        // outcomes the sensors split out; canceled and partial are in printCount only.
+        var byStatus = await db.Prints
             .AsNoTracking()
-            .CountAsync(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To, ct);
+            .Where(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To)
+            .GroupBy(p => p.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
         var monthMg = await db.PrintFilament
             .AsNoTracking()
             .Where(pf => pf.Print.CreatedById == userId && pf.Print.StartDate >= month.From && pf.Print.StartDate < month.To)
             .Select(FilamentProfile.UsageRowMg)
             .SumAsync(ct);
-        return new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg));
+        return new SyncAccountTotals(month.Key, month.ZoneId, byStatus.Sum(o => o.Count), Grams(monthMg),
+            byStatus.Where(o => o.Status == PrintStatus.Success).Sum(o => o.Count),
+            byStatus.Where(o => o.Status == PrintStatus.Failed).Sum(o => o.Count));
     }
 
     /// <summary>
-    /// The expensive part of a miss: printers, loaded slots and spools, three statements however
+    /// The expensive part of a miss: printers, loaded slots and spools, four statements however
     /// many printers and spools the user has (<c>SyncSnapshotQueryShapeTests</c>), plus a hash of
     /// the result so the response can be named by its content.
     /// </summary>
-    internal static async Task<CoreEntry> LoadCoreAsync(PrintLogContext db, long userId, CancellationToken ct)
+    internal static async Task<CoreEntry> LoadCoreAsync(PrintLogContext db, long userId, string? webBase, CancellationToken ct)
     {
         var printers = await PrintersQuery(db, userId).ToListAsync(ct);
+
+        // Estimates for the Printing prints, in one statement for all printers (a collection inside
+        // the correlated print subquery would not translate to one).
+        var currentIds = printers.Where(p => p.Current is not null).Select(p => p.Current!.Id).ToList();
+        var estimateRows = currentIds.Count == 0
+            ? []
+            : await db.PrintFilament
+                .AsNoTracking()
+                .Where(pf => currentIds.Contains(pf.PrintId))
+                .Select(pf => new { pf.PrintId, pf.Id, pf.Slot, pf.FilamentId, pf.EstimatedAmountMg })
+                .ToListAsync(ct);
+        var estimatesByPrint = estimateRows
+            .GroupBy(r => r.PrintId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<SyncPrintFilament>)g
+                .OrderBy(r => r.Slot == null)
+                .ThenBy(r => r.Slot)
+                .ThenBy(r => r.Id)
+                .Select(r => new SyncPrintFilament(r.Slot, r.FilamentId, r.EstimatedAmountMg.HasValue ? Grams(r.EstimatedAmountMg.Value) : null))
+                .ToList());
 
         var loaded = await db.PrinterFilament
             .AsNoTracking()
@@ -279,13 +308,19 @@ public sealed class SyncSnapshotService(
                 Connection: null,
                 CurrentPrint: p.Current is { } c
                     ? new SyncCurrentPrint(c.Id, c.Title, c.StartDate, c.EstimatedSeconds,
-                        c.StartDate.HasValue && c.EstimatedSeconds.HasValue ? c.StartDate.Value.AddSeconds(c.EstimatedSeconds.Value) : null)
+                        c.StartDate.HasValue && c.EstimatedSeconds.HasValue ? c.StartDate.Value.AddSeconds(c.EstimatedSeconds.Value) : null,
+                        SyncPrintSource.Name(c.Source), SyncPrintSource.Url(webBase, c.Id),
+                        estimatesByPrint.TryGetValue(c.Id, out var est) ? est : [])
                     : null,
                 LastFinishedPrint: p.LastFinished is { } f
                     ? new SyncFinishedPrint(f.Id, f.Title, StatusName(f.Status), f.StartDate,
-                        f.StartDate.HasValue && f.PrintSeconds.HasValue ? f.StartDate.Value.AddSeconds(f.PrintSeconds.Value) : null)
+                        f.StartDate.HasValue && f.PrintSeconds.HasValue ? f.StartDate.Value.AddSeconds(f.PrintSeconds.Value) : null,
+                        SyncPrintSource.Name(f.Source), SyncPrintSource.Url(webBase, f.Id))
                     : null,
-                Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : []))
+                Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : [],
+                PrintTimeSeconds: p.PrintSeconds,
+                LastMaintenance: p.LastMaintenance is { } m ? new SyncMaintenance(m.Id, m.Date, m.Category, m.Description) : null,
+                OpenMaintenance: new SyncOpenMaintenance(p.OpenMaintenanceCount, p.NextMaintenanceDate)))
             .ToList();
 
         // The body is a pure function of these two lists (ordered above), so their bytes name it.
@@ -301,8 +336,8 @@ public sealed class SyncSnapshotService(
     internal sealed record CoreEntry(IReadOnlyList<SyncPrinter> Printers, IReadOnlyList<SyncSpool> Spools, string Hash);
 
     /// <summary>
-    /// The user's printers with their newest Printing print and newest finished print, as two
-    /// correlated top-1 subqueries in one statement. Exposed for the translation tests.
+    /// The user's printers with their newest Printing print and newest finished print, all-time print
+    /// seconds, and last/open maintenance, as correlated subqueries in one statement. Exposed for the translation tests.
     /// </summary>
     internal static IQueryable<PrinterRow> PrintersQuery(PrintLogContext db, long userId) =>
         db.Printers
@@ -316,6 +351,26 @@ public sealed class SyncSnapshotService(
                 Model = p.Model,
                 IsActive = p.IsActive,
                 SlotCount = p.SlotCount,
+                // The analytics duration rule (PrinterAnalyticsService): recorded time, else estimate, else 0.
+                PrintSeconds = db.Prints
+                    .Where(pr => pr.PrinterId == p.Id && pr.CreatedById == userId)
+                    .Sum(pr =>
+                        (long)(pr.PrintTimeInSeconds.HasValue && pr.PrintTimeInSeconds > 0 ? pr.PrintTimeInSeconds.Value
+                        : pr.EstimatedPrintTimeInSeconds.HasValue && pr.EstimatedPrintTimeInSeconds > 0 ? pr.EstimatedPrintTimeInSeconds.Value
+                        : 0)),
+                LastMaintenance = db.PrinterMaintenance
+                    .Where(m => m.PrinterId == p.Id && m.Done)
+                    .OrderByDescending(m => m.Date)
+                    .ThenByDescending(m => m.Id)
+                    .Select(m => new MaintenanceRow { Id = m.Id, Date = m.Date, Category = m.Category, Description = m.Description })
+                    .FirstOrDefault(),
+                OpenMaintenanceCount = db.PrinterMaintenance.Count(m => m.PrinterId == p.Id && !m.Done),
+                // Top-1 rather than Min: SQLite cannot aggregate a DateTimeOffset.
+                NextMaintenanceDate = db.PrinterMaintenance
+                    .Where(m => m.PrinterId == p.Id && !m.Done)
+                    .OrderBy(m => m.Date)
+                    .Select(m => (DateTimeOffset?)m.Date)
+                    .FirstOrDefault(),
                 Current = db.Prints
                     .Where(pr => pr.PrinterId == p.Id && pr.CreatedById == userId && pr.Status == PrintStatus.Printing)
                     .OrderByDescending(pr => pr.StartDate)
@@ -328,6 +383,7 @@ public sealed class SyncSnapshotService(
                         StartDate = pr.StartDate,
                         EstimatedSeconds = pr.EstimatedPrintTimeInSeconds,
                         PrintSeconds = pr.PrintTimeInSeconds,
+                        Source = pr.Source,
                     })
                     .FirstOrDefault(),
                 LastFinished = db.Prints
@@ -344,6 +400,7 @@ public sealed class SyncSnapshotService(
                         StartDate = pr.StartDate,
                         EstimatedSeconds = pr.EstimatedPrintTimeInSeconds,
                         PrintSeconds = pr.PrintTimeInSeconds,
+                        Source = pr.Source,
                     })
                     .FirstOrDefault(),
             });
@@ -433,6 +490,18 @@ public sealed class SyncSnapshotService(
         public int SlotCount { get; init; }
         public PrintRow? Current { get; init; }
         public PrintRow? LastFinished { get; init; }
+        public long PrintSeconds { get; init; }
+        public MaintenanceRow? LastMaintenance { get; init; }
+        public int OpenMaintenanceCount { get; init; }
+        public DateTimeOffset? NextMaintenanceDate { get; init; }
+    }
+
+    internal sealed class MaintenanceRow
+    {
+        public Guid Id { get; init; }
+        public DateTimeOffset Date { get; init; }
+        public string? Category { get; init; }
+        public string? Description { get; init; }
     }
 
     internal sealed class PrintRow
@@ -443,6 +512,7 @@ public sealed class SyncSnapshotService(
         public DateTimeOffset? StartDate { get; init; }
         public int? EstimatedSeconds { get; init; }
         public int? PrintSeconds { get; init; }
+        public PrintSource Source { get; init; }
     }
 
     internal sealed class SpoolRow

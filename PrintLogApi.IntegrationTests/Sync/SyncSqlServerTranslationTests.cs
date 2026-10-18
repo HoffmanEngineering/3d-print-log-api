@@ -66,18 +66,20 @@ public class SyncSqlServerTranslationTests
 
     /// <summary>
     /// EF Core 10 turns each correlated <c>FirstOrDefault</c> into a LEFT JOIN over a
-    /// <c>ROW_NUMBER()</c> partitioned by printer, filtered to the user's prints: one statement,
+    /// <c>ROW_NUMBER()</c> partitioned by printer, filtered to the user's rows: one statement,
     /// one pass per subquery, however many printers there are.
     /// </summary>
     [Fact]
-    public void Printers_CurrentAndLastPrint_TranslateToTwoPerPrinterTopOneJoins()
+    public void Printers_CurrentAndLastPrint_TranslateToPerPrinterTopOneJoins()
     {
         using var db = SqlServerContext();
         var sql = SyncSnapshotService.PrintersQuery(db, 42).ToQueryString();
 
-        Assert.Equal(2, CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY [p0].[PrinterId]") + CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY [p1].[PrinterId]"));
-        Assert.Equal(2, CountOf(sql, "[row] <= 1"));
-        Assert.Equal(2, CountOf(sql, "].[CreatedById] = @userId"));
+        // Last maintenance, current print and last finished print: three joins. The print-time sum
+        // and the two open-maintenance figures are scalar subqueries, not joins.
+        Assert.Equal(3, CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY"));
+        Assert.Equal(3, CountOf(sql, "[row] <= 1"));
+        Assert.Equal(3, CountOf(sql, "].[CreatedById] = @userId"));
         Assert.DoesNotContain("OUTER APPLY", sql);
     }
 
@@ -164,6 +166,18 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
                 db.PrintFilament.Add(new PrintFilament { PrintId = print.Id, FilamentId = spoolId, LengthInM = 10, Source = PrintFilament.SourceMeasurement.Length });
             }
 
+            // A failed print this month, with no usage, so the success/failed split is proven on SQL Server.
+            db.Prints.Add(new Print
+            {
+                Title = "Failed",
+                PrinterId = printerId,
+                Status = Print.PrintStatus.Failed,
+                StartDate = now.AddDays(-2),
+                PrintTimeInSeconds = 300,
+                ViewStatus = Print.PrintViewStatus.Private,
+                CreatedById = userId,
+                UpdatedById = userId,
+            });
             db.Connections.Add(new Connection
             {
                 Id = Guid.NewGuid(),
@@ -181,7 +195,7 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, Ct);
+            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, null, Ct);
             var totals = await SyncSnapshotService.LoadTotalsAsync(db, userId, SyncMonth.Containing(now, SyncZone.Utc), Ct);
             var connections = await SyncSnapshotService.LoadConnectionsAsync(db, userId, now, Ct);
 
@@ -193,7 +207,9 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
             // Two prints of 10 m of 1.75 mm PLA at 1.24 g/cm³: about 59.7 g.
             Assert.InRange(spool.UsedGrams, 59, 61);
             Assert.InRange(spool.RemainingGrams!.Value, 939, 941);
-            Assert.Equal(2, totals.PrintCount);
+            Assert.Equal(3, totals.PrintCount);
+            Assert.Equal(1, totals.SuccessCount);
+            Assert.Equal(1, totals.FailedCount);
             Assert.InRange(totals.Grams, 59, 61);
             Assert.Equal("online", connections[printerId].Status);
         }
