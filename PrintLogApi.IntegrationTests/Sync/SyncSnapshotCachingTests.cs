@@ -200,6 +200,26 @@ public class SyncSnapshotCachingTests(SyncTestFactory factory) : IClassFixture<S
                 {
                     db.PrinterFilament.Add(new PrinterFilament { PrinterId = printer.Id, FilamentId = spools[p * 4 + slot].Id, Slot = slot, SlotLabel = $"AMS A{slot + 1}", LoadedDateTime = SyncTestFactory.Start });
                 }
+
+                // Each printer is mid-print, with an estimate row for two of its slots: the current
+                // print carries its url and per-slot estimates, which are part of the core.
+                var current = new Print
+                {
+                    Title = $"Benchy {p}",
+                    PrinterId = printer.Id,
+                    Status = Print.PrintStatus.Printing,
+                    StartDate = SyncTestFactory.Start.AddMinutes(-20),
+                    EstimatedPrintTimeInSeconds = 5400,
+                    ViewStatus = Print.PrintViewStatus.Private,
+                    CreatedById = user.Id,
+                    UpdatedById = user.Id,
+                };
+                db.Prints.Add(current);
+                await db.SaveChangesAsync(Ct);
+                for (var slot = 0; slot < 2; slot++)
+                {
+                    db.PrintFilament.Add(new PrintFilament { PrintId = current.Id, Slot = slot, FilamentId = spools[p * 4 + slot].Id, EstimatedAmountMg = 12_500, Source = PrintFilament.SourceMeasurement.Weight });
+                }
             }
 
             await db.SaveChangesAsync(Ct);
@@ -208,7 +228,7 @@ public class SyncSnapshotCachingTests(SyncTestFactory factory) : IClassFixture<S
         CoreSize size;
         using (var scope = factory.Services.CreateScope())
         {
-            var entry = await SyncSnapshotService.LoadCoreAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>(), user.Id, null, Ct);
+            var entry = await SyncSnapshotService.LoadCoreAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>(), user.Id, "https://www.3dprintlog.com", Ct);
             size = new CoreSize(JsonSerializer.SerializeToUtf8Bytes(entry).Length);
         }
 
