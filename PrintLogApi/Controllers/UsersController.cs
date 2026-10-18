@@ -31,7 +31,8 @@ public class UsersController(
     TelemetryClient telemetry,
     IBlobStorageService blobStorageService,
     ISubscriptionService subscriptionService,
-    IOptions<UserOnboardingOptions> onboardingOptions) : ControllerBase
+    IOptions<UserOnboardingOptions> onboardingOptions,
+    IEmailVerificationRefresher emailVerificationRefresher) : ControllerBase
 {
     private readonly string profileImageContainerName = "userprofile";
 
@@ -124,10 +125,13 @@ public class UsersController(
             .AsNoTracking()
             .SingleAsync(ct);
 
+        // The token claim lags until the next sign-in, so ask Auth0 (throttled) while unverified.
+        var emailVerified = user.EmailVerified || await emailVerificationRefresher.RefreshAsync(userId.Value, ct);
+
         return new OnboardingStatusDto(
             onboardingOptions.Value.IsEligible(user.CreatedDate),
             user.CreatedDate,
-            user.EmailVerified);
+            emailVerified);
     }
 
     /// <summary>
