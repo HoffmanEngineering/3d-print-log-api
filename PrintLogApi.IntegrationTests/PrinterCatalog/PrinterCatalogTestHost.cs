@@ -21,6 +21,9 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
 
     public SettableTimeProvider Time { get; } = new(Start);
 
+    /// <summary>The host lifetime the seeder waits on; <see cref="FakeLifetime.Start"/> fires ApplicationStarted.</summary>
+    public FakeLifetime Lifetime { get; } = new();
+
     public PrinterCatalogTestHost()
     {
         _connection.Open();
@@ -46,6 +49,7 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
         _provider.GetRequiredService<IServiceScopeFactory>(),
         Index,
         Time,
+        Lifetime,
         _provider.GetRequiredService<ILogger<PrinterCatalogSeeder>>())
     {
         LoadCatalog = load ?? PrinterCatalogFileLoader.LoadEmbedded,
@@ -96,7 +100,31 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Lifetime.Dispose();
         await _provider.DisposeAsync();
         await _connection.DisposeAsync();
+    }
+}
+
+/// <summary>An <see cref="IHostApplicationLifetime"/> whose events fire only when a test says so.</summary>
+public sealed class FakeLifetime : IHostApplicationLifetime, IDisposable
+{
+    private readonly CancellationTokenSource _started = new();
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly CancellationTokenSource _stopped = new();
+
+    public CancellationToken ApplicationStarted => _started.Token;
+    public CancellationToken ApplicationStopping => _stopping.Token;
+    public CancellationToken ApplicationStopped => _stopped.Token;
+
+    public void Start() => _started.Cancel();
+
+    public void StopApplication() => _stopping.Cancel();
+
+    public void Dispose()
+    {
+        _started.Dispose();
+        _stopping.Dispose();
+        _stopped.Dispose();
     }
 }

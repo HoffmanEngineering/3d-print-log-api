@@ -45,7 +45,7 @@ public class PrinterModel
     public string? Kinematics { get; set; }
 
     /// <summary>JSON object mapping each spec field to the source it came from (cura, orca or override).</summary>
-    public string SourcesJson { get; set; } = "[]";
+    public string SourcesJson { get; set; } = "{}";
 
     /// <summary>Position in the featured list, or null when the model is not featured.</summary>
     public int? Featured { get; set; }
@@ -60,4 +60,7 @@ public class PrinterModel
     public int OwnerCount { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>A shallow copy that EF has never seen, for the in-memory index.</summary>
+    public PrinterModel DetachedCopy() => (PrinterModel)MemberwiseClone();
 }

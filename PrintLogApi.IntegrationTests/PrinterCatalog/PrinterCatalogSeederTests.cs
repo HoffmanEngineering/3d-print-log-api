@@ -254,4 +254,70 @@ public class PrinterCatalogSeederTests
         Assert.Equal(embedded.Version, await host.MarkerAsync());
         Assert.Equal("bambu-lab-p1s", host.Index.Search("p1s", 1).Single().Id);
     }
+
+    [Fact]
+    public async Task OlderFile_ThanTheOneSeeded_IsSkipped_AndANewerOneSeeds()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var june = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        await host.SeedAsync(File("v2", [Model("a", bedWidth: 300)]) with { GeneratedAt = june });
+
+        // A rollback deploy ships last month's file: it must not undo the newer seed.
+        var older = await host.SeedAsync(File("v1", [Model("a"), Model("b")]) with { GeneratedAt = june.AddMonths(-1) });
+
+        Assert.Equal(new SeedResult(0, 0, 0, 2, 0), older);
+        Assert.Equal(["a"], (await host.RowsAsync()).Keys);
+        Assert.Equal(300, (await host.RowsAsync())["a"].BedWidthMm);
+        Assert.Equal("v2", await host.MarkerAsync());
+
+        var newer = await host.SeedAsync(File("v3", [Model("a"), Model("b")]) with { GeneratedAt = june.AddMonths(1) });
+
+        Assert.Equal(new SeedResult(1, 1, 0, 0, 0), newer);
+        Assert.Equal("v3", await host.MarkerAsync());
+    }
+
+    [Fact]
+    public async Task TheHostedService_WaitsForApplicationStarted()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var loads = 0;
+        var seeder = host.Seeder(() =>
+        {
+            Interlocked.Increment(ref loads);
+            return File("v1", [Model("a")]);
+        });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+
+        // Long enough for an unguarded seed of a one-model file to finish many times over.
+        await Task.WhenAny(seeder.ExecuteTask!, Task.Delay(500, TestContext.Current.CancellationToken));
+        Assert.Equal(0, loads);
+        Assert.False(seeder.ExecuteTask!.IsCompleted);
+
+        host.Lifetime.Start();
+        await seeder.ExecuteTask.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, loads);
+        Assert.NotNull(host.Index.Get("a"));
+        await seeder.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task TheHostedService_StoppedBeforeStart_NeverSeeds()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var loads = 0;
+        var seeder = host.Seeder(() =>
+        {
+            Interlocked.Increment(ref loads);
+            return File("v1", [Model("a")]);
+        });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+        await seeder.StopAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(seeder.ExecuteTask!.IsCompleted);
+        Assert.Equal(0, loads);
+        Assert.False(host.Index.IsReady);
+    }
 }

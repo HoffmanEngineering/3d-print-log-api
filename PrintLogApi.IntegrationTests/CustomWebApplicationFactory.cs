@@ -31,7 +31,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 {
     private SqliteConnection _connection;
     private bool _seeded = false;
-    private IServiceProvider? _hostServices;
+    private bool _catalogSeeded;
 
     private static readonly Lazy<CatalogFile> EmbeddedPrinterCatalog = new(PrinterCatalogFileLoader.LoadEmbedded);
 
@@ -280,15 +280,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     {
         var host = base.CreateHost(builder);
 
-        // Seed the database using the actual host's service provider
+        // Seed the database using the actual host's service provider. WithWebHostBuilder children
+        // share this database (and run this method), so the database is prepared once, by
+        // whichever host is built first.
         if (!_seeded)
         {
-            _hostServices = host.Services;
             using (var scope = host.Services.CreateScope())
             {
                 PrepareDatabase(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
             }
             _seeded = true;
+        }
+
+        // Every host has its own index singleton, so each one is built, child or parent.
+        if (_catalogSeeded)
+        {
+            using var scope = host.Services.CreateScope();
+            RebuildPrinterCatalogIndex(scope.ServiceProvider);
         }
 
         return host;
@@ -299,7 +307,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     {
         CopyCatalogTemplate(db);
         IntegrationTestSeeder.Seed(db);
-        RebuildPrinterCatalogIndex(db);
+        _catalogSeeded = true;
     }
 
     /// <summary>
@@ -343,14 +351,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     });
 
     /// <summary>
-    /// Builds the host's catalog index from its table, as the startup seeder does after seeding. A
-    /// host that prepares its own database calls this if its tests need the index.
+    /// Builds a host's catalog index from its table, as the startup seeder does after seeding. Runs
+    /// for every host once the base <see cref="PrepareDatabase"/> has seeded the catalog; a host that
+    /// prepares its own database without it gets an empty index.
     /// </summary>
-    protected void RebuildPrinterCatalogIndex(PrintLogContext db)
-    {
-        var services = _hostServices ?? throw new InvalidOperationException("The host is not built yet.");
-        services.GetRequiredService<IPrinterCatalogIndex>().Rebuild(db.PrinterModels.AsNoTracking().ToList());
-    }
+    private static void RebuildPrinterCatalogIndex(IServiceProvider services) =>
+        services.GetRequiredService<IPrinterCatalogIndex>().Rebuild(
+            services.GetRequiredService<PrintLogContext>().PrinterModels.AsNoTracking().ToList());
 
     protected override void Dispose(bool disposing)
     {

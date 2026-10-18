@@ -25,6 +25,7 @@ public sealed class PrinterCatalogSeeder(
     IServiceScopeFactory scopeFactory,
     IPrinterCatalogIndex index,
     TimeProvider timeProvider,
+    IHostApplicationLifetime lifetime,
     ILogger<PrinterCatalogSeeder> logger) : BackgroundService
 {
     /// <summary>Compact, camelCase and unescaped, so "MINI+" stays readable in the column.</summary>
@@ -37,7 +38,27 @@ public sealed class PrinterCatalogSeeder(
     /// <summary>The seam for tests. Read once per run; the parsed file is dropped when the run ends.</summary>
     internal Func<CatalogFile> LoadCatalog { get; init; } = PrinterCatalogFileLoader.LoadEmbedded;
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => RunOnceAsync(stoppingToken);
+    /// <summary>
+    /// Waits for ApplicationStarted first: in Development and E2ETesting, <c>Startup.Configure</c>
+    /// migrates (and in E2ETesting recreates) the database, and a seed racing that would fail or
+    /// write into a database about to be dropped. Startup itself is never blocked.
+    /// </summary>
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (lifetime.ApplicationStarted.Register(() => started.TrySetResult()))
+        {
+            try
+            {
+                await started.Task.WaitAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+        await RunOnceAsync(stoppingToken);
+    }
 
     /// <summary>Seeds when the version changed, then rebuilds the index. Never throws but on shutdown.</summary>
     internal async Task RunOnceAsync(CancellationToken ct)
@@ -86,13 +107,10 @@ public sealed class PrinterCatalogSeeder(
             throw new InvalidDataException($"The printer catalog lists the id {duplicate.Key} more than once.");
         }
 
-        var recorded = await db.PrinterCatalogVersions.AsNoTracking()
-            .Where(v => v.Id == PrinterCatalogVersion.SingletonId)
-            .Select(v => v.Version)
-            .SingleOrDefaultAsync(ct);
-        if (recorded != null && recorded == file.Version)
+        var skipped = new SeedResult(0, 0, 0, file.Models.Count, 0);
+        if (IsSeeded(await ReadMarkerAsync(db, ct), file, logger))
         {
-            return new SeedResult(0, 0, 0, file.Models.Count, 0);
+            return skipped;
         }
 
         var strategy = db.Database.CreateExecutionStrategy();
@@ -103,6 +121,23 @@ public sealed class PrinterCatalogSeeder(
             try
             {
                 await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                if (db.Database.IsSqlServer())
+                {
+                    // Two instances starting together seed one after the other. The lock is
+                    // released with the transaction, and the loser then finds the winner's marker.
+                    await db.Database.ExecuteSqlRawAsync(
+                        """
+                        DECLARE @result int;
+                        EXEC @result = sp_getapplock @Resource = 'PrinterCatalogSeed', @LockMode = 'Exclusive', @LockOwner = 'Transaction';
+                        IF @result < 0 THROW 50000, 'Could not take the printer catalog seed lock.', 1;
+                        """,
+                        ct);
+                    if (IsSeeded(await ReadMarkerAsync(db, ct), file, logger))
+                    {
+                        await transaction.CommitAsync(ct);
+                        return skipped;
+                    }
+                }
                 var result = await ApplyAsync(db, file, now, logger, ct);
                 await transaction.CommitAsync(ct);
                 return result;
@@ -113,6 +148,33 @@ public sealed class PrinterCatalogSeeder(
                 throw;
             }
         });
+    }
+
+    private static Task<PrinterCatalogVersion?> ReadMarkerAsync(PrintLogContext db, CancellationToken ct) =>
+        db.PrinterCatalogVersions.AsNoTracking().SingleOrDefaultAsync(v => v.Id == PrinterCatalogVersion.SingletonId, ct);
+
+    /// <summary>
+    /// True when <paramref name="file"/> is already seeded, or is older than the file that was: a
+    /// rollback deploy carries last month's catalog and must not undo the newer seed.
+    /// </summary>
+    private static bool IsSeeded(PrinterCatalogVersion? marker, CatalogFile file, ILogger? logger)
+    {
+        if (marker == null)
+        {
+            return false;
+        }
+        if (marker.Version == file.Version)
+        {
+            return true;
+        }
+        if (marker.CatalogGeneratedAt is { } seeded && file.GeneratedAt < seeded)
+        {
+            logger?.LogWarning(
+                "The embedded printer catalog ({Version}, generated {GeneratedAt:O}) is older than the seeded one ({SeededVersion}, generated {SeededGeneratedAt:O}); not seeding it",
+                file.Version, file.GeneratedAt, marker.Version, seeded);
+            return true;
+        }
+        return false;
     }
 
     private static async Task<SeedResult> ApplyAsync(
@@ -154,11 +216,12 @@ public sealed class PrinterCatalogSeeder(
         var marker = await db.PrinterCatalogVersions.SingleOrDefaultAsync(v => v.Id == PrinterCatalogVersion.SingletonId, ct);
         if (marker == null)
         {
-            db.PrinterCatalogVersions.Add(new PrinterCatalogVersion { Version = file.Version, SeededAt = now });
+            db.PrinterCatalogVersions.Add(new PrinterCatalogVersion { Version = file.Version, CatalogGeneratedAt = file.GeneratedAt, SeededAt = now });
         }
         else
         {
             marker.Version = file.Version;
+            marker.CatalogGeneratedAt = file.GeneratedAt;
             marker.SeededAt = now;
         }
         await db.SaveChangesAsync(ct);

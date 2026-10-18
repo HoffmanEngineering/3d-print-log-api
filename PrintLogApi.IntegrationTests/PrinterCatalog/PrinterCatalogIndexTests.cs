@@ -44,6 +44,7 @@ public class PrinterCatalogIndexTests
     [InlineData("k1 max", "creality-k1-max")]
     [InlineData("bambo p1s", "bambu-lab-p1s")]
     [InlineData("p1s", "bambu-lab-p1s")]
+    [InlineData("bmabu p1s", "bambu-lab-p1s")]
     public void Search_PutsTheExpectedModelFirst(string query, string expected) => Assert.Equal(expected, First(query));
 
     [Fact]
@@ -201,6 +202,8 @@ public class PrinterCatalogIndexTests
     [InlineData("Bambu Lab P1S 0.4 nozzle - Copy")]
     [InlineData("Bambu Lab P1S - 3DPrintLog")]
     [InlineData("\"Bambu Lab P1S\"")]
+    [InlineData("\"Bambu Lab P1S")]
+    [InlineData("Bambu Lab P1S\"")]
     public void Match_CleansSlicerDecorations(string name) =>
         Assert.Equal(new CatalogMatch("bambu-lab-p1s", CatalogMatch.Exact), Real.Value.Match(name));
 
@@ -218,4 +221,32 @@ public class PrinterCatalogIndexTests
     [InlineData("")]
     [InlineData("0.4 nozzle")]
     public void Match_UnknownOrAmbiguous_IsNull(string name) => Assert.Null(Real.Value.Match(name));
+
+    [Fact]
+    public void AShortToken_IsNeverFuzzed() =>
+        Assert.DoesNotContain("bambu-lab-x1-carbon", Real.Value.Search("x1d", 50).Select(m => m.Id));
+
+    [Fact]
+    public void TheIndex_HoldsCopies_NotTheRowsItWasBuiltFrom()
+    {
+        var index = NewIndex();
+        var row = Row("a", "Acme", "A", owners: 3);
+        index.Rebuild([row]);
+        row.OwnerCount = 99;
+
+        var held = index.Get("a")!;
+        Assert.NotSame(row, held);
+        Assert.Equal(3, held.OwnerCount);
+    }
+
+    [Fact]
+    public void IsReady_IsFalseUntilTheFirstRebuild()
+    {
+        var index = NewIndex();
+        Assert.False(index.IsReady);
+
+        index.Rebuild([]);
+
+        Assert.True(index.IsReady);
+    }
 }

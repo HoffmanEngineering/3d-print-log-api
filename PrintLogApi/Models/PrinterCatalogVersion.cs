@@ -21,5 +21,11 @@ public class PrinterCatalogVersion
     [MaxLength(64)]
     public string Version { get; set; } = null!;
 
+    /// <summary>
+    /// The seeded file's <c>generatedAt</c>. The seeder skips an embedded file older than this, so a
+    /// rollback deploy does not re-seed last month's catalog. Null on rows from before it existed.
+    /// </summary>
+    public DateTimeOffset? CatalogGeneratedAt { get; set; }
+
     public DateTimeOffset SeededAt { get; set; }
 }

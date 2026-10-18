@@ -77,4 +77,42 @@ public class PrinterCatalogSeederSqlServerTests
             await teardown.Database.EnsureDeletedAsync(CancellationToken.None);
         }
     }
+
+    [Fact]
+    public async Task TwoSeedsAtOnce_RunOneAfterTheOther()
+    {
+        Assert.SkipUnless(Connection is not null, "Set PRINTLOG_SQLSERVER_TEST_CONNECTION to run against SQL Server.");
+        var connection = new SqlConnectionStringBuilder(Connection) { InitialCatalog = $"PrinterCatalogSeed_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlServer(connection).Options;
+        var embedded = PrinterCatalogFileLoader.LoadEmbedded();
+        var now = new DateTimeOffset(2026, 10, 18, 12, 0, 0, TimeSpan.Zero);
+
+        await using (var setup = new PrintLogContext(options))
+        {
+            await setup.Database.MigrateAsync(Ct);
+        }
+        try
+        {
+            async Task<SeedResult> Seed()
+            {
+                await using var db = new PrintLogContext(options);
+                return await PrinterCatalogSeeder.SeedAsync(db, embedded, now, Ct);
+            }
+
+            // Without the applock both would read an empty table and the second insert would hit
+            // the primary key; with it, the loser waits and then finds the winner's marker.
+            var results = await Task.WhenAll(Seed(), Seed());
+
+            Assert.Contains(new SeedResult(embedded.Models.Count, 0, 0, 0, 0), results);
+            Assert.Contains(new SeedResult(0, 0, 0, embedded.Models.Count, 0), results);
+            await using var check = new PrintLogContext(options);
+            Assert.Equal(embedded.Models.Count, await check.PrinterModels.CountAsync(Ct));
+            Assert.Equal(embedded.GeneratedAt, (await check.PrinterCatalogVersions.SingleAsync(Ct)).CatalogGeneratedAt);
+        }
+        finally
+        {
+            await using var teardown = new PrintLogContext(options);
+            await teardown.Database.EnsureDeletedAsync(CancellationToken.None);
+        }
+    }
 }

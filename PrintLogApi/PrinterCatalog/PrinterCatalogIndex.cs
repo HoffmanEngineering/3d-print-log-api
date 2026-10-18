@@ -25,6 +25,9 @@ public interface IPrinterCatalogIndex
     /// <summary>Changes whenever a rebuild changes what any read could return. For ETags.</summary>
     string Version { get; }
 
+    /// <summary>False until the first <see cref="Rebuild"/>: an empty index then means "not loaded yet", not "no models".</summary>
+    bool IsReady { get; }
+
     /// <summary>Replaces the whole index. Reads running meanwhile finish on the previous one.</summary>
     void Rebuild(IEnumerable<PrinterModel> models);
 
@@ -51,11 +54,26 @@ public interface IPrinterCatalogIndex
 public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> options) : IPrinterCatalogIndex
 {
     private readonly int _minOwners = options.Value.PopularityMinOwners;
+    private readonly Lock _rebuild = new();
     private volatile Snapshot _snapshot = Snapshot.Build([]);
+    private volatile bool _isReady;
 
     public string Version => _snapshot.Version;
 
-    public void Rebuild(IEnumerable<PrinterModel> models) => _snapshot = Snapshot.Build(models);
+    public bool IsReady => _isReady;
+
+    /// <summary>
+    /// Serialized, so two rebuilds (the seeder and the popularity job) swap in the order they ran
+    /// rather than whichever finished building last.
+    /// </summary>
+    public void Rebuild(IEnumerable<PrinterModel> models)
+    {
+        lock (_rebuild)
+        {
+            _snapshot = Snapshot.Build(models);
+            _isReady = true;
+        }
+    }
 
     public IReadOnlyList<PrinterModel> Search(string? query, int limit)
     {
@@ -137,10 +155,8 @@ public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> 
     internal static string CleanSlicerName(string? name)
     {
         var cleaned = (name ?? "").Trim();
-        if (cleaned.Length >= 2 && cleaned[0] == cleaned[^1] && cleaned[0] is '"' or '\'')
-        {
-            cleaned = cleaned[1..^1].Trim();
-        }
+        // The UI strips one pair of quotes; a name cut mid-string can still carry a lone one.
+        cleaned = cleaned.Trim('"', '\'').Trim();
 
         string previous;
         do
@@ -232,12 +248,29 @@ public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> 
         Fuzzy = 6,
     }
 
-    private sealed record Query(string Normalized, string Compact, string[] Tokens)
+    /// <summary>
+    /// One way to read a query as a make followed by a model: the first tokens and the rest, each
+    /// with its compact form. Built once per query, not once per model.
+    /// </summary>
+    private sealed record Split(string Make, string MakeCompact, string? Model, string? ModelCompact);
+
+    private sealed record Query(string Normalized, string Compact, string[] Tokens, Split[] Splits)
     {
         public static Query? Parse(string? text)
         {
             var normalized = Normalize(text ?? "");
-            return normalized.Length == 0 ? null : new Query(normalized, PrinterCatalogIndex.Compact(normalized), normalized.Split(' '));
+            if (normalized.Length == 0)
+            {
+                return null;
+            }
+            var tokens = normalized.Split(' ');
+            var splits = Enumerable.Range(1, tokens.Length).Select(split =>
+            {
+                var make = string.Join(' ', tokens, 0, split);
+                var model = split == tokens.Length ? null : string.Join(' ', tokens, split, tokens.Length - split);
+                return new Split(make, PrinterCatalogIndex.Compact(make), model, model == null ? null : PrinterCatalogIndex.Compact(model));
+            }).ToArray();
+            return new Query(normalized, PrinterCatalogIndex.Compact(normalized), tokens, splits);
         }
     }
 
@@ -286,7 +319,7 @@ public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> 
             {
                 return Tier.ModelPrefix;
             }
-            if (prefixTiers && MakeThenModel(query.Tokens))
+            if (prefixTiers && MakeThenModel(query.Splits))
             {
                 return Tier.MakeThenModel;
             }
@@ -302,21 +335,17 @@ public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> 
         }
 
         /// <summary>The make starts with the first tokens, and the rest (if any) start the model.</summary>
-        private bool MakeThenModel(string[] tokens)
+        private bool MakeThenModel(Split[] splits)
         {
-            for (var split = 1; split <= tokens.Length; split++)
+            foreach (var split in splits)
             {
-                var makePart = string.Join(' ', tokens, 0, split);
-                if (!_make.StartsWith(makePart, StringComparison.Ordinal) && !_makeCompact.StartsWith(Compact(makePart), StringComparison.Ordinal))
+                if (!_make.StartsWith(split.Make, StringComparison.Ordinal) && !_makeCompact.StartsWith(split.MakeCompact, StringComparison.Ordinal))
                 {
                     return false;
                 }
-                if (split == tokens.Length)
-                {
-                    return true;
-                }
-                var modelPart = string.Join(' ', tokens, split, tokens.Length - split);
-                if (_model.StartsWith(modelPart, StringComparison.Ordinal) || _modelCompact.StartsWith(Compact(modelPart), StringComparison.Ordinal))
+                if (split.Model == null
+                    || _model.StartsWith(split.Model, StringComparison.Ordinal)
+                    || _modelCompact.StartsWith(split.ModelCompact!, StringComparison.Ordinal))
                 {
                     return true;
                 }
@@ -355,7 +384,8 @@ public sealed partial class PrinterCatalogIndex(IOptions<PrinterCatalogOptions> 
 
         public static Snapshot Build(IEnumerable<PrinterModel> models)
         {
-            var all = models.ToList();
+            // Detached copies: the index never holds an object a DbContext tracks or a caller still has.
+            var all = models.Select(m => m.DetachedCopy()).ToList();
             var visible = all
                 .Where(m => !m.Hidden && !m.Retired)
                 .OrderByDescending(m => m.OwnerCount)

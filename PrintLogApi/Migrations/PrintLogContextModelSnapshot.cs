@@ -1634,6 +1634,9 @@ namespace PrintLogApi.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("CatalogGeneratedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset>("SeededAt")
                         .HasColumnType("datetimeoffset");
 
