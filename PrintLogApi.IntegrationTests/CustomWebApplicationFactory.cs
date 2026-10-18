@@ -311,6 +311,41 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         /// </summary>
         public bool ThrowCancelledOnGetUserEmail { get; set; }
 
+        /// <summary>What <see cref="GetEmailStatus"/> returns. Null mimics an empty Auth0 body.</summary>
+        public Auth0EmailStatus? EmailStatus { get; set; }
+
+        /// <summary>When set, <see cref="GetEmailStatus"/> throws.</summary>
+        public bool ThrowOnEmailStatus { get; set; }
+
+        /// <summary>Number of <see cref="GetEmailStatus"/> calls so far.</summary>
+        public int EmailStatusCalls { get; set; }
+
+        /// <summary>User ids passed to <see cref="SendVerificationEmail"/>.</summary>
+        public List<string> VerificationEmailsSent { get; } = new();
+
+        /// <summary>When set, <see cref="SendVerificationEmail"/> throws Auth0ApiException.</summary>
+        public bool ThrowOnSendVerification { get; set; }
+
+        public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            EmailStatusCalls++;
+            if (ThrowOnEmailStatus)
+            {
+                throw new InvalidOperationException("Simulated Auth0 email status failure.");
+            }
+            return Task.FromResult(EmailStatus);
+        }
+
+        public Task SendVerificationEmail(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            if (ThrowOnSendVerification)
+            {
+                throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
+            }
+            VerificationEmailsSent.Add(oauthUserId);
+            return Task.CompletedTask;
+        }
+
         public Task DeleteUser(string? oauthUserId)
         {
             return Task.CompletedTask;

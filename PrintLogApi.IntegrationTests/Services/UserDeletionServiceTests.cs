@@ -382,6 +382,13 @@ public class UserDeletionServiceTests
 
     private class TestAuth0Service : IAuth0Service
     {
+        public Task<PrintLogApi.Services.Auth0EmailStatus?> GetEmailStatus(
+            string oauthUserId, System.Threading.CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task SendVerificationEmail(string oauthUserId, System.Threading.CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task DeleteUser(string? oauthUserId)
         {
             return Task.CompletedTask;
