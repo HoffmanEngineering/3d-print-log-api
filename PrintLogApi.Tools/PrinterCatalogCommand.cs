@@ -103,14 +103,15 @@ internal static class PrinterCatalogCommand
             }
 
             var previousFile = previous is null ? null : CatalogFile.Deserialize(await File.ReadAllTextAsync(previous));
+            var overridesJson = JsonNode.Parse(await File.ReadAllTextAsync(overrides)) as JsonObject
+                ?? throw new InvalidDataException($"{overrides} must be a JSON object");
             var file = PrinterCatalogGenerator.Generate(new CatalogInputs
             {
                 CuraDir = declared.Any(s => s.Repo == CuraRepo) ? cura : null,
                 OrcaDir = declared.Any(s => s.Repo == OrcaRepo) ? orca : null,
                 Sources = resolved,
                 MakeAliases = CatalogNormalizer.LoadAliases(aliases),
-                Overrides = JsonNode.Parse(await File.ReadAllTextAsync(overrides)) as JsonObject
-                    ?? throw new InvalidDataException($"{overrides} must be a JSON object"),
+                Overrides = overridesJson,
                 Previous = previousFile,
                 Clock = TimeProvider.System,
                 Log = message => Console.Error.WriteLine($"warning: {message}"),
@@ -120,10 +121,16 @@ internal static class PrinterCatalogCommand
 
             var before = previousFile?.Models.Select(m => m.Id).ToHashSet() ?? [];
             var after = file.Models.Select(m => m.Id).ToHashSet();
+            // Hidden by an override is not gone from the sources; count it apart.
+            var hidden = overridesJson.Where(o => o.Value is JsonObject entry && entry["hidden"]?.GetValueKind() == JsonValueKind.True)
+                .Select(o => o.Key)
+                .Where(id => file.Reserved.Any(r => r.Id == id))
+                .ToHashSet();
             Console.WriteLine($"Wrote {output}");
             Console.WriteLine($"  Models   {file.Models.Count,6}");
             Console.WriteLine($"  Added    {after.Count(id => !before.Contains(id)),6}");
-            Console.WriteLine($"  Gone     {before.Count(id => !after.Contains(id)),6}");
+            Console.WriteLine($"  Gone     {before.Count(id => !after.Contains(id) && !hidden.Contains(id)),6}");
+            Console.WriteLine($"  Hidden   {before.Count(id => hidden.Contains(id)),6}");
             Console.WriteLine($"  Version  {file.Version}");
             return 0;
         }

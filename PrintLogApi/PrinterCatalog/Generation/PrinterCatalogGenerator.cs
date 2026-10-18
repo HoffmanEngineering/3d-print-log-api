@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace PrintLogApi.PrinterCatalog.Generation;
 
@@ -38,19 +39,23 @@ public static class PrinterCatalogGenerator
 {
     public static CatalogFile Generate(CatalogInputs inputs)
     {
+        if (inputs.CuraDir is null && inputs.OrcaDir is null)
+        {
+            throw new InvalidDataException("no source is configured; catalog-sources.json must declare Cura, OrcaSlicer or both");
+        }
         var normalizer = new CatalogNormalizer(inputs.MakeAliases);
 
         var cura = ReadSource("cura", inputs.CuraDir, dir => CuraProfileReader.Read(dir, normalizer, inputs.Log));
         var orca = ReadSource("orca", inputs.OrcaDir, dir => OrcaProfileReader.Read(dir, normalizer, inputs.Log));
 
         var merged = CatalogMerger.Merge(cura, orca, normalizer, inputs.Log);
-        var withIds = CatalogIds.Assign(merged, inputs.Previous, normalizer);
+        var withIds = CatalogIds.Assign(merged, inputs.Previous, normalizer, inputs.Log);
 
         // Ids a generated model held before but that no source produces now. An override for one
         // is stale; it must not turn into an extra entry that takes the id over.
         var generatedIds = withIds.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
-        var dormantIds = (inputs.Previous?.Models ?? []).Where(m => m.SourceKey is not null).Select(m => m.Id)
-            .Concat((inputs.Previous?.Reserved ?? []).Where(r => r.SourceKey is not null).Select(r => r.Id))
+        var dormantIds = (inputs.Previous?.Models ?? []).Where(m => m.SourceKeys is not null).Select(m => m.Id)
+            .Concat((inputs.Previous?.Reserved ?? []).Where(r => r.SourceKeys is not null).Select(r => r.Id))
             .Where(id => !generatedIds.Contains(id))
             .ToHashSet(StringComparer.Ordinal);
 
@@ -68,7 +73,8 @@ public static class PrinterCatalogGenerator
         var unchanged = inputs.Previous is { } previous
             && previous.Version == version
             && previous.Sources.SequenceEqual(inputs.Sources)
-            && previous.Reserved.SequenceEqual(reserved);
+            // Records holding lists compare by reference, so compare what would be written.
+            && JsonSerializer.Serialize(previous.Reserved, CatalogFile.JsonOptions) == JsonSerializer.Serialize(reserved, CatalogFile.JsonOptions);
 
         return new CatalogFile
         {
@@ -102,23 +108,23 @@ public static class PrinterCatalogGenerator
     /// </summary>
     private static IReadOnlyList<ReservedId> Reserved(CatalogFile? previous, IReadOnlyList<CatalogModel> generated, IReadOnlyList<CatalogModel> visible)
     {
-        var byId = new SortedDictionary<string, string?>(StringComparer.Ordinal);
+        var byId = new SortedDictionary<string, IReadOnlyList<string>?>(StringComparer.Ordinal);
         foreach (var r in previous?.Reserved ?? [])
         {
-            byId[r.Id] = r.SourceKey;
+            byId[r.Id] = r.SourceKeys;
         }
         foreach (var m in previous?.Models ?? [])
         {
-            byId[m.Id] = m.SourceKey;
+            byId[m.Id] = m.SourceKeys;
         }
         foreach (var m in generated)
         {
-            byId[m.Id] = m.SourceKey;
+            byId[m.Id] = m.SourceKeys;
         }
         foreach (var m in visible)
         {
             byId.Remove(m.Id);
         }
-        return byId.Select(r => new ReservedId { Id = r.Key, SourceKey = r.Value }).ToList();
+        return byId.Select(r => new ReservedId { Id = r.Key, SourceKeys = r.Value }).ToList();
     }
 }

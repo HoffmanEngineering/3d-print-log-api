@@ -38,9 +38,9 @@ public static class CatalogMerger
         var merged = new List<CatalogModel>();
         foreach (var (key, c) in curaByKey)
         {
-            merged.Add((orcaByKey.TryGetValue(key, out var o) ? Combine(o, c) : c) with { SourceKey = key });
+            merged.Add(orcaByKey.TryGetValue(key, out var o) ? Combine(o, c) : c);
         }
-        merged.AddRange(orcaByKey.Where(o => !curaByKey.ContainsKey(o.Key)).Select(o => o.Value with { SourceKey = o.Key }));
+        merged.AddRange(orcaByKey.Where(o => !curaByKey.ContainsKey(o.Key)).Select(o => o.Value));
         return merged;
     }
 
@@ -50,8 +50,12 @@ public static class CatalogMerger
         var byKey = new Dictionary<string, CatalogModel>(StringComparer.Ordinal);
         foreach (var model in models)
         {
-            if (!byKey.TryAdd(normalizer.Key(model.Make, model.Model), model))
+            var key = normalizer.Key(model.Make, model.Model);
+            if (!byKey.TryAdd(key, model))
             {
+                // The duplicate's identity still points at the kept model, so its id survives
+                // whichever of the two files disappears first.
+                byKey[key] = byKey[key] with { SourceKeys = UnionKeys(byKey[key].SourceKeys, model.SourceKeys) };
                 log?.Invoke($"{source}: duplicate key, keeping the first: {model.Make} | {model.Model}");
             }
         }
@@ -87,6 +91,7 @@ public static class CatalogMerger
             ExtruderCount = Pick("extruderCount", preferred.ExtruderCount, other.ExtruderCount),
             DefaultSlotCount = Pick("defaultSlotCount", preferred.DefaultSlotCount, other.DefaultSlotCount),
             Kinematics = Pick("kinematics", preferred.Kinematics, other.Kinematics),
+            SourceKeys = UnionKeys(preferred.SourceKeys, other.SourceKeys),
             Sources = sources,
         };
     }
@@ -125,6 +130,12 @@ public static class CatalogMerger
                 && ProfileValues.AsString(entry["model"]) is { Length: > 0 })
             {
                 result.Add(Override(new CatalogModel { Id = id, Sources = new SortedDictionary<string, string>(StringComparer.Ordinal) }, id, entry));
+            }
+            else if (reservedIds?.Contains(id) == true)
+            {
+                log?.Invoke(hidden.Contains(id)
+                    ? $"catalog-overrides.json: \"{id}\" hides a retired id; nothing to hide until its model returns"
+                    : $"catalog-overrides.json: \"{id}\" is a retired id; its corrections wait until its model returns");
             }
             else
             {
@@ -188,6 +199,13 @@ public static class CatalogMerger
             };
         }
         return m with { Sources = sources };
+    }
+
+    /// <summary>Sorted, distinct, ordinal.</summary>
+    public static IReadOnlyList<string>? UnionKeys(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+    {
+        var keys = (a ?? []).Concat(b ?? []).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        return keys.Count == 0 ? null : keys;
     }
 
     private static InvalidDataException Invalid(string id, string field, string expected) =>

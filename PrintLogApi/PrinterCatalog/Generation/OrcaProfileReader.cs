@@ -78,11 +78,12 @@ public static class OrcaProfileReader
             {
                 log?.Invoke($"orca: {vendorName} / {name} has no preset; listed without bed or nozzle facts");
             }
-            yield return ReadModel(make, model, modelFile, preset);
+            // The vendor folder and machine_model name: raw, before the prefix cut and alias.
+            yield return ReadModel($"{Source}:{Path.GetFileName(vendorDir)}/{name}", make, model, modelFile, preset);
         }
     }
 
-    private static CatalogModel ReadModel(string make, string model, JsonObject? modelFile, JsonObject? preset)
+    private static CatalogModel ReadModel(string sourceKey, string make, string model, JsonObject? modelFile, JsonObject? preset)
     {
         var options = (ProfileValues.AsString(modelFile?["nozzle_diameter"]) ?? "")
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -99,6 +100,7 @@ public static class OrcaProfileReader
 
         return CatalogMerger.Stamp(new CatalogModel
         {
+            SourceKeys = [sourceKey],
             Make = make,
             Model = model,
             Technology = Technology(ProfileValues.AsString(modelFile?["machine_tech"])),

@@ -89,6 +89,8 @@ public static partial class CuraProfileReader
 
         return CatalogMerger.Stamp(new CatalogModel
         {
+            // The definition id: raw, before the alias and prefix stripping above.
+            SourceKeys = [$"{Source}:{chain[^1].Id}"],
             Make = make,
             Model = model,
             Technology = "FFF",
