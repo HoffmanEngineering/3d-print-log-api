@@ -73,6 +73,15 @@ public sealed record ReservedId
 
     /// <summary>See <see cref="CatalogModel.SourceKeys"/>. Null for a retired override extra.</summary>
     public IReadOnlyList<string>? SourceKeys { get; init; }
+
+    /// <summary>
+    /// Set when this id was merged into another: two published ids came to describe one model
+    /// (for example, a new make alias joined a Cura and an Orca entry), and the lower-sorting id
+    /// survived. Points at the direct successor only; if that id is later merged too, its own
+    /// entry points further, so a consumer (the seeder) follows the chain. Null for a plain
+    /// retirement or a hide. If the merged model splits again, this id returns and leaves the list.
+    /// </summary>
+    public string? MergedInto { get; init; }
 }
 
 /// <summary>One printer model. Every spec field is optional, and an unknown one is omitted.</summary>

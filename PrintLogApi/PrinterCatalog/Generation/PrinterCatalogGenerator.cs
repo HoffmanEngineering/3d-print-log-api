@@ -59,6 +59,8 @@ public static class PrinterCatalogGenerator
             .Where(id => !generatedIds.Contains(id))
             .ToHashSet(StringComparer.Ordinal);
 
+        LogNewIdCollisions(inputs, withIds, normalizer);
+
         var models = CatalogMerger.ApplyOverrides(withIds, inputs.Overrides, inputs.Log, dormantIds)
             .OrderBy(m => m.Make, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Model, StringComparer.OrdinalIgnoreCase)
@@ -87,6 +89,38 @@ public static class PrinterCatalogGenerator
         };
     }
 
+    /// <summary>
+    /// An override extra (make and model given) whose id a brand-new source model took this run,
+    /// under different names. Accepted edge case: the entry is applied to that model as
+    /// corrections, so say so.
+    /// </summary>
+    private static void LogNewIdCollisions(CatalogInputs inputs, IReadOnlyList<CatalogModel> generated, CatalogNormalizer normalizer)
+    {
+        if (inputs.Log is null)
+        {
+            return;
+        }
+        var issued = (inputs.Previous?.Models ?? []).Select(m => m.Id)
+            .Concat((inputs.Previous?.Reserved ?? []).Select(r => r.Id))
+            .ToHashSet(StringComparer.Ordinal);
+        var byId = generated.ToDictionary(m => m.Id, StringComparer.Ordinal);
+        foreach (var (id, node) in inputs.Overrides)
+        {
+            if (issued.Contains(id)
+                || !byId.TryGetValue(id, out var model)
+                || node is not JsonObject entry
+                || ProfileValues.AsString(entry["make"]) is not { Length: > 0 } make
+                || ProfileValues.AsString(entry["model"]) is not { Length: > 0 } name
+                || normalizer.Key(make, name) == normalizer.Key(model.Make, model.Model))
+            {
+                continue;
+            }
+            inputs.Log(
+                $"catalog-overrides.json: \"{id}\" (an extra, {make} | {name}) collides with the new source model " +
+                $"{model.Make} | {model.Model}, which took that id; its fields are applied to that model as corrections");
+        }
+    }
+
     /// <summary>A configured source must exist and produce models; an empty one fails the run (R3).</summary>
     private static IReadOnlyList<CatalogModel> ReadSource(string name, string? dir, Func<string, IReadOnlyList<CatalogModel>> read)
     {
@@ -108,23 +142,43 @@ public static class PrinterCatalogGenerator
     /// </summary>
     private static IReadOnlyList<ReservedId> Reserved(CatalogFile? previous, IReadOnlyList<CatalogModel> generated, IReadOnlyList<CatalogModel> visible)
     {
-        var byId = new SortedDictionary<string, IReadOnlyList<string>?>(StringComparer.Ordinal);
+        var keysById = new SortedDictionary<string, IReadOnlyList<string>?>(StringComparer.Ordinal);
+        var mergedInto = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var r in previous?.Reserved ?? [])
         {
-            byId[r.Id] = r.SourceKeys;
+            keysById[r.Id] = r.SourceKeys;
+            if (r.MergedInto is not null)
+            {
+                mergedInto[r.Id] = r.MergedInto;
+            }
         }
         foreach (var m in previous?.Models ?? [])
         {
-            byId[m.Id] = m.SourceKeys;
+            keysById[m.Id] = m.SourceKeys;
         }
         foreach (var m in generated)
         {
-            byId[m.Id] = m.SourceKeys;
+            keysById[m.Id] = m.SourceKeys;
         }
         foreach (var m in visible)
         {
-            byId.Remove(m.Id);
+            keysById.Remove(m.Id);
         }
-        return byId.Select(r => new ReservedId { Id = r.Key, SourceKeys = r.Value }).ToList();
+
+        // An id that lost its keys to another generated model was merged into it. An existing
+        // pointer stays: it names the direct successor, and the chain is the consumer's to follow.
+        var idByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var m in generated)
+        {
+            foreach (var key in m.SourceKeys ?? [])
+            {
+                idByKey.TryAdd(key, m.Id);
+            }
+        }
+        string? SuccessorOf(string id, IReadOnlyList<string>? keys) =>
+            mergedInto.GetValueOrDefault(id)
+            ?? (keys ?? []).Select(k => idByKey.GetValueOrDefault(k)).Where(s => s is not null && s != id).Order(StringComparer.Ordinal).FirstOrDefault();
+
+        return keysById.Select(r => new ReservedId { Id = r.Key, SourceKeys = r.Value, MergedInto = SuccessorOf(r.Key, r.Value) }).ToList();
     }
 }

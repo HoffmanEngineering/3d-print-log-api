@@ -129,7 +129,9 @@ internal static class PrinterCatalogCommand
             Console.WriteLine($"Wrote {output}");
             Console.WriteLine($"  Models   {file.Models.Count,6}");
             Console.WriteLine($"  Added    {after.Count(id => !before.Contains(id)),6}");
-            Console.WriteLine($"  Gone     {before.Count(id => !after.Contains(id) && !hidden.Contains(id)),6}");
+            var merged = file.Reserved.Where(r => r.MergedInto is not null).Select(r => r.Id).ToHashSet();
+            Console.WriteLine($"  Gone     {before.Count(id => !after.Contains(id) && !hidden.Contains(id) && !merged.Contains(id)),6}");
+            Console.WriteLine($"  Merged   {before.Count(id => merged.Contains(id)),6}");
             Console.WriteLine($"  Hidden   {before.Count(id => hidden.Contains(id)),6}");
             Console.WriteLine($"  Version  {file.Version}");
             return 0;

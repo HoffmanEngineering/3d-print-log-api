@@ -182,8 +182,9 @@ public class CatalogIdStabilityTests
         var curaOnly = Run(CuraFixture, null, both);
         var orcaOnly = Run(null, OrcaFixture, both);
 
-        Assert.Equal(["cura:foo_bar"], Assert.Single(curaOnly.Models, m => m.Id == "foo-bar").SourceKeys);
-        Assert.Equal(["orca:Foo/Foo Bar"], Assert.Single(orcaOnly.Models, m => m.Id == "foo-bar").SourceKeys);
+        // Keys accumulate (round 3): a source that drops out is still remembered.
+        Assert.Equal(["cura:foo_bar", "orca:Foo/Foo Bar"], Assert.Single(curaOnly.Models, m => m.Id == "foo-bar").SourceKeys);
+        Assert.Equal(["cura:foo_bar", "orca:Foo/Foo Bar"], Assert.Single(orcaOnly.Models, m => m.Id == "foo-bar").SourceKeys);
         Assert.DoesNotContain(curaOnly.Models, m => m.Id.StartsWith("foo-bar-", StringComparison.Ordinal));
         Assert.DoesNotContain(orcaOnly.Models, m => m.Id.StartsWith("foo-bar-", StringComparison.Ordinal));
     }
@@ -242,5 +243,108 @@ public class CatalogIdStabilityTests
         var e = Assert.Throws<InvalidDataException>(() => PrinterCatalogGenerator.Generate(new CatalogInputs()));
 
         Assert.Contains("no source", e.Message, StringComparison.Ordinal);
+    }
+
+    // --- Round 3: merged ids and accumulated keys ---
+
+    private const string SovolOrca = "orca:Sovol/Sovol SV06";
+    private const string SovolCura = "cura:sovol_sv06";
+    private const string Sovol1Cura = "cura:sovol1_sv06";
+
+    private static string CuraDef(string name, string make) =>
+        $$"""{ "name": "{{name}}", "version": 2, "inherits": "fdmprinter", "metadata": { "visible": true, "manufacturer": "{{make}}" } }""";
+
+    private static ProfileTree SovolCuraTree(bool withSovol1 = false)
+    {
+        var tree = new ProfileTree().CopyFrom(CuraFixture)
+            .Write("resources/definitions/sovol_sv06.def.json", CuraDef("Sovol SV06", "Sovol 3D"));
+        return withSovol1 ? tree.Write("resources/definitions/sovol1_sv06.def.json", CuraDef("Sovol 1 SV06", "Sovol 1")) : tree;
+    }
+
+    [Fact]
+    public void AnAliasThatMergesTwoPublishedIds_KeepsTheLowerOne_AndPointsTheOtherAtIt()
+    {
+        using var cura = SovolCuraTree();
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+        var noAlias = new Dictionary<string, string>();
+        var sovolAlias = new Dictionary<string, string> { ["Sovol 3D"] = "Sovol" };
+
+        // Run 1: Cura "Sovol 3D | Sovol SV06" and Orca "Sovol | SV06" are two models.
+        var first = Run(cura.Root, orca.Root, null, aliases: noAlias);
+        Assert.Equal([SovolCura], Assert.Single(first.Models, m => m.Id == "sovol-3d-sovol-sv06").SourceKeys);
+        Assert.Equal([SovolOrca], Assert.Single(first.Models, m => m.Id == "sovol-sv06").SourceKeys);
+
+        // Run 2: "Sovol 3D" -> "Sovol" joins them; the lower-sorting id survives.
+        var second = Run(cura.Root, orca.Root, first, aliases: sovolAlias);
+        var merged = Assert.Single(second.Models, m => m.SourceKeys!.Contains(SovolOrca));
+        Assert.Equal("sovol-3d-sovol-sv06", merged.Id);
+        Assert.Equal([SovolCura, SovolOrca], merged.SourceKeys);
+        var loser = Assert.Single(second.Reserved);
+        Assert.Equal(("sovol-sv06", "sovol-3d-sovol-sv06"), (loser.Id, loser.MergedInto));
+        Assert.Equal([SovolOrca], loser.SourceKeys);
+
+        // An unchanged rerun is byte-identical.
+        var again = Run(cura.Root, orca.Root, second, aliases: sovolAlias);
+        Assert.Equal(CatalogFile.Serialize(second), CatalogFile.Serialize(again));
+
+        // Run 3: the alias goes away and the model splits; each half gets its own id back.
+        var third = Run(cura.Root, orca.Root, again, aliases: noAlias);
+        Assert.Equal([SovolCura], Assert.Single(third.Models, m => m.Id == "sovol-3d-sovol-sv06").SourceKeys);
+        Assert.Equal([SovolOrca], Assert.Single(third.Models, m => m.Id == "sovol-sv06").SourceKeys);
+        Assert.Empty(third.Reserved);
+
+        // And the split is stable on the next run.
+        var fourth = Run(cura.Root, orca.Root, third, aliases: noAlias);
+        Assert.Equal(CatalogFile.Serialize(third), CatalogFile.Serialize(fourth));
+    }
+
+    [Fact]
+    public void AMergeChain_KeepsEachEntryPointingAtItsDirectSuccessor()
+    {
+        using var cura = SovolCuraTree(withSovol1: true);
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+
+        var first = Run(cura.Root, orca.Root, null, aliases: new Dictionary<string, string>());
+        Assert.Equal(
+            ["sovol-1-sv06", "sovol-3d-sovol-sv06", "sovol-sv06"],
+            first.Models.Where(m => m.Id.StartsWith("sovol", StringComparison.Ordinal)).Select(m => m.Id).Order(StringComparer.Ordinal));
+
+        // Run 2: sovol-sv06 merges into sovol-3d-sovol-sv06.
+        var second = Run(cura.Root, orca.Root, first, aliases: new Dictionary<string, string> { ["Sovol 3D"] = "Sovol" });
+        Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(second.Reserved, r => r.Id == "sovol-sv06").MergedInto);
+
+        // Run 3: "Sovol 1" joins too, and the lower-sorting sovol-1-sv06 absorbs the survivor.
+        var third = Run(cura.Root, orca.Root, second,
+            aliases: new Dictionary<string, string> { ["Sovol 3D"] = "Sovol", ["Sovol 1"] = "Sovol" });
+        var merged = Assert.Single(third.Models, m => m.SourceKeys!.Contains(SovolOrca));
+        Assert.Equal("sovol-1-sv06", merged.Id);
+        Assert.Equal([Sovol1Cura, SovolCura, SovolOrca], merged.SourceKeys);
+        Assert.Equal("sovol-1-sv06", Assert.Single(third.Reserved, r => r.Id == "sovol-3d-sovol-sv06").MergedInto);
+        Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(third.Reserved, r => r.Id == "sovol-sv06").MergedInto);
+    }
+
+    [Fact]
+    public void SourceKeysAccumulate_SoAModelThatSwitchesSourcesKeepsItsId()
+    {
+        var both = Run(CuraFixture, OrcaFixture, null);
+        var curaOnly = Run(CuraFixture, null, both);
+        var orcaOnly = Run(null, OrcaFixture, curaOnly);
+
+        var fooBar = Assert.Single(orcaOnly.Models, m => m.Make == "Foo" && m.Model == "Bar");
+        Assert.Equal("foo-bar", fooBar.Id);
+        Assert.Equal(["cura:foo_bar", "orca:Foo/Foo Bar"], fooBar.SourceKeys);
+    }
+
+    [Fact]
+    public void ANewExtraCollidingWithANewSourceModel_IsLogged()
+    {
+        var overrides = JsonNode.Parse("""{ "acme-rocket": { "make": "Acme", "model": "Rocket Mk2" } }""")!.AsObject();
+        var log = new List<string>();
+
+        var file = RunOrca(null, ["Acme Rocket", "Acme Other"], overrides, log);
+
+        // Accepted edge case: the entry corrects the source model rather than standing beside it.
+        Assert.Equal("Rocket Mk2", Assert.Single(file.Models, m => m.Id == "acme-rocket").Model);
+        Assert.Contains(log, l => l.Contains("acme-rocket", StringComparison.Ordinal) && l.Contains("collides", StringComparison.Ordinal));
     }
 }
