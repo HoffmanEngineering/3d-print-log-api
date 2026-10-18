@@ -79,6 +79,7 @@ public class EmailPipelineEndToEndTests : IClassFixture<CustomWebApplicationFact
                 db,
                 campaigns,
                 new EmailPreferenceService(db, telemetry),
+                new FakeVerificationRefresher(),
                 new EmailAddressHasher(options),
                 transport,
                 new EmailTokenService(options, clock),

@@ -23,6 +23,7 @@ public sealed class EmailDispatcher(
     PrintLogContext db,
     IEnumerable<IEmailCampaign> campaigns,
     IEmailPreferenceService preferences,
+    IEmailVerificationRefresher verification,
     IEmailAddressHasher hasher,
     IEmailTransport transport,
     IEmailTokenService tokens,
@@ -215,9 +216,27 @@ public sealed class EmailDispatcher(
             return Skip(row, EmailSkipReasons.DisabledCampaign);
         }
 
-        if (string.IsNullOrWhiteSpace(user.Email) || !user.EmailVerified)
+        if (string.IsNullOrWhiteSpace(user.Email))
         {
             return Skip(row, EmailSkipReasons.Unverified);
+        }
+
+        if (!user.EmailVerified)
+        {
+            // The welcome email goes out right after sign-up, before the Auth0 flag has reached our
+            // database (the token claim lags until the next sign-in). Ask Auth0 and, if the user
+            // still hasn't verified, wait: the row's lifetime bounds how long. Everything else skips.
+            if (row.Campaign != OnboardingCampaign.CampaignName)
+            {
+                return Skip(row, EmailSkipReasons.Unverified);
+            }
+
+            // The refresher saves through this same context. The projection above is untracked, so
+            // its EmailVerified stays stale, but nothing below reads it.
+            if (!await verification.RefreshAsync(row.UserId, ct))
+            {
+                return Defer(row, now + GateRecheck, EmailSkipReasons.Unverified);
+            }
         }
 
         var hashes = hasher.CandidateHashes(user.Email);

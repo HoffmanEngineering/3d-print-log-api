@@ -213,7 +213,7 @@ public class SesEventProcessorTests : IClassFixture<CustomWebApplicationFactory>
             var telemetry = new TelemetryClient(new TelemetryConfiguration());
             var clock = new SettableTimeProvider(DateTimeOffset.UtcNow);
             var transport = new FakeEmailTransport();
-            var dispatcher = new EmailDispatcher(db, [campaign], new EmailPreferenceService(db, telemetry), Hasher, transport,
+            var dispatcher = new EmailDispatcher(db, [campaign], new EmailPreferenceService(db, telemetry), new FakeVerificationRefresher(), Hasher, transport,
                 new EmailTokenService(wrapped, clock), new EmailLinkBuilder(wrapped), wrapped, clock, telemetry);
 
             await dispatcher.RunOnceAsync(clock.GetUtcNow(), Ct);

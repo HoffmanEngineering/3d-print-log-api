@@ -9,6 +9,7 @@ using PrintLogApi.Email.Templates;
 using PrintLogApi.Email.Tokens;
 using PrintLogApi.Email.Transport;
 using PrintLogApi.IntegrationTests.Analytics;
+using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Models;
 using Xunit;
 
@@ -61,6 +62,13 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         public TestCampaign Campaign => (TestCampaign)Campaigns[0];
         public EmailOptions Options { get; }
         public FakeEmailTransport Transport { get; } = new();
+        public FakeVerificationRefresher Verification { get; } = new();
+        public RecordingTelemetryChannel Channel { get; } = new();
+        public TelemetryClient Telemetry => new(new TelemetryConfiguration
+        {
+            ConnectionString = "InstrumentationKey=00000000-0000-0000-0000-000000000000",
+            TelemetryChannel = Channel,
+        });
         public SettableTimeProvider Clock { get; } = new(Now);
         public EmailAddressHasher Hasher { get; }
         public CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -69,11 +77,12 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         {
             var context = db ?? Db;
             var options = Microsoft.Extensions.Options.Options.Create(Options);
-            var telemetry = new TelemetryClient(new TelemetryConfiguration());
+            var telemetry = Telemetry;
             return new EmailDispatcher(
                 context,
                 Campaigns,
                 new EmailPreferenceService(context, telemetry),
+                Verification,
                 Hasher,
                 Transport,
                 new EmailTokenService(options, Clock),
@@ -155,6 +164,101 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         await h.TickAsync();
 
         AssertSkipped(await h.ReloadAsync(row.Id), EmailSkipReasons.Unverified);
+    }
+
+    [Fact]
+    public async Task OtherCampaign_Unverified_StillSkipped()
+    {
+        using var h = new Harness(_factory, new TestCampaign("not-onboarding"));
+        var row = await h.QueueAsync((await h.UserAsync(verified: false)).Id);
+        h.Verification.Result = true;
+
+        await h.TickAsync();
+
+        AssertSkipped(await h.ReloadAsync(row.Id), EmailSkipReasons.Unverified);
+        Assert.Equal(0, h.Verification.Calls);
+    }
+
+    [Fact]
+    public async Task Onboarding_Unverified_DefersOneHour()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var row = await h.QueueAsync((await h.UserAsync(verified: false)).Id);
+
+        await h.TickAsync();
+
+        var deferred = await h.ReloadAsync(row.Id);
+        Assert.Equal(EmailOutboxStatus.Pending, deferred.Status);
+        Assert.Equal(Now.AddHours(1), deferred.NextAttemptAt);
+        Assert.Equal(1, h.Verification.Calls);
+        Assert.Empty(h.Transport.Sent);
+        var evt = Assert.Single(h.Channel.Events("Email_Deferred"));
+        Assert.Equal(EmailSkipReasons.Unverified, evt.Properties["why"]);
+        Assert.Equal(OnboardingCampaign.CampaignName, evt.Properties["campaign"]);
+    }
+
+    [Fact]
+    public async Task Onboarding_UnverifiedThenVerified_Sends()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var user = await h.UserAsync(verified: false);
+        var row = await h.QueueAsync(user.Id);
+
+        await h.TickAsync();
+        Assert.Equal(EmailOutboxStatus.Pending, (await h.ReloadAsync(row.Id)).Status);
+
+        h.Verification.Result = true;
+        await h.Db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(s => s.SetProperty(u => u.EmailVerified, true), h.Ct);
+        h.Clock.SetUtcNow(Now.AddHours(1));
+
+        await h.TickAsync();
+
+        Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+        Assert.Single(h.Transport.Sent);
+        Assert.Equal(1, h.Verification.Calls); // the second tick reads the flag from the database
+    }
+
+    // The refresher is the one that finds out: the database flag is still false on this tick.
+    [Fact]
+    public async Task Onboarding_RefresherSaysVerified_ContinuesDownTheGates()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var row = await h.QueueAsync((await h.UserAsync(verified: false)).Id);
+        h.Verification.Result = true;
+
+        await h.TickAsync();
+
+        Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+    }
+
+    [Fact]
+    public async Task Onboarding_UnverifiedPastLifetime_Expires()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var row = EmailTestData.OutboxRow((await h.UserAsync(verified: false)).Id, OnboardingCampaign.CampaignName, "old", Now.AddDays(-3));
+        row.ExpiresAt = Now.AddSeconds(-1);
+        h.Db.EmailOutbox.Add(row);
+        await h.Db.SaveChangesAsync(h.Ct);
+
+        await h.TickAsync();
+
+        AssertSkipped(await h.ReloadAsync(row.Id), EmailSkipReasons.Expired);
+        Assert.Equal(0, h.Verification.Calls);
+    }
+
+    [Fact]
+    public async Task Onboarding_NoAddress_StillSkipsAsUnverified()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var user = await h.UserAsync();
+        await h.Db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(s => s.SetProperty(u => u.Email, (string?)null), h.Ct);
+        var row = await h.QueueAsync(user.Id);
+        h.Verification.Result = true;
+
+        await h.TickAsync();
+
+        AssertSkipped(await h.ReloadAsync(row.Id), EmailSkipReasons.Unverified);
+        Assert.Equal(0, h.Verification.Calls);
     }
 
     [Fact]
