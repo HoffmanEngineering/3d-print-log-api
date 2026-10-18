@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.SpoolTags;
@@ -393,6 +394,126 @@ public class FilamentsController(
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Correct how much of a spool remains by applying a signed delta.
+    /// </summary>
+    /// <remarks>
+    /// Wraps the same logic as the MCP `adjust_material_remaining` tool. The result cannot go below
+    /// zero or above the spool's original capacity, and a spool with no starting amount cannot be
+    /// adjusted. `beforeGrams` and `afterGrams` are grams whatever unit `delta` is in.
+    /// </remarks>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The unit, signed delta and optional note.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The remaining weight before and after, in grams.</response>
+    /// <response code="400">Unknown source, zero or non-finite delta, untracked spool, or an out-of-range result.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
+    [HttpPost("{id:guid}/adjustments")]
+    [ProducesResponseType<AdjustFilamentRemainingResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AdjustRemaining(Guid id, [FromBody] AdjustFilamentRemainingDto dto, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        McpMeasurementSource source;
+        switch (dto.Source?.Trim().ToLowerInvariant())
+        {
+            case "weight": source = McpMeasurementSource.Weight; break;
+            case "length": source = McpMeasurementSource.Length; break;
+            case "volume": source = McpMeasurementSource.Volume; break;
+            default:
+                return CodedProblem(StatusCodes.Status400BadRequest, "source must be one of: weight, length, volume.", "invalid_adjustment");
+        }
+
+        if (!double.IsFinite(dto.Delta) || dto.Delta == 0)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "delta must be a finite, non-zero number.", "invalid_adjustment");
+        }
+
+        if (dto.Notes is { Length: > 1000 })
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "notes must be at most 1000 characters.", "invalid_adjustment");
+        }
+
+        try
+        {
+            var result = await filamentService.AdjustMaterialRemainingForMcp(userId.Value, id, source, dto.Delta, dto.Notes, ct);
+            return Ok(new AdjustFilamentRemainingResultDto { BeforeGrams = result.BeforeGrams, AfterGrams = result.AfterGrams });
+        }
+        catch (McpToolException ex)
+        {
+            return ToProblem(ex);
+        }
+    }
+
+    /// <summary>
+    /// Activate or retire a spool.
+    /// </summary>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The new active flag.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="204">The flag was set.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
+    [HttpPut("{id:guid}/active")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetActive(Guid id, [FromBody] SetFilamentActiveDto dto, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            await filamentService.SetMaterialActiveForMcp(userId.Value, id, dto.IsActive, ct);
+            return NoContent();
+        }
+        catch (McpToolException ex)
+        {
+            return ToProblem(ex);
+        }
+    }
+
+    /// <summary>
+    /// Maps the MCP service's outcomes to problem details with a machine-readable `code`. A
+    /// missing and a foreign spool are both 404 `material_not_found`: the Home Assistant client
+    /// tells that apart from an unmatched route (also a 404 problem body) by the code.
+    /// </summary>
+    private ObjectResult ToProblem(McpToolException ex)
+    {
+        if (ex.Code == "not_found")
+        {
+            return CodedProblem(StatusCodes.Status404NotFound, ex.Message, "material_not_found");
+        }
+
+        var code = ex.Message switch
+        {
+            var m when m.Contains("no starting amount", StringComparison.Ordinal) => "material_untracked",
+            var m when m.Contains("below zero", StringComparison.Ordinal)
+                || m.Contains("exceed", StringComparison.Ordinal) => "adjustment_out_of_range",
+            _ => "invalid_adjustment",
+        };
+        return CodedProblem(StatusCodes.Status400BadRequest, ex.Message, code);
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 
     /// <summary>
