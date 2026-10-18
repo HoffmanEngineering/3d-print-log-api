@@ -61,4 +61,11 @@ public class AddPrinterDTO
     /// </summary>
     [Range(1, Models.Printer.MaxSlotCount)]
     public int? SlotCount { get; set; }
+
+    /// <summary>
+    /// Id of the printer catalog model this printer is, such as `bambu-lab-p1s`. Must exist and not
+    /// be hidden; a retired model is accepted only if the printer already has it.
+    /// </summary>
+    [MaxLength(100)]
+    public string? CatalogModelId { get; set; }
 }

@@ -30,7 +30,8 @@ public class PrintersController(
     IPrinterCategoryService printerCategoryService,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    ICacheVersionService cacheVersionService,
+    TimeProvider timeProvider) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
     private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
@@ -89,6 +90,7 @@ public class PrintersController(
                 Make = item.Make,
                 Model = item.Model,
                 IsActive = item.IsActive,
+                CatalogModelId = item.CatalogModelId,
                 WattageW = item.WattageW,
                 SlotCount = item.SlotCount,
                 Category = item.Category,
@@ -247,6 +249,12 @@ public class PrintersController(
             return Forbid();
         }
 
+        var catalogProblem = await ValidateCatalogModelAsync(printer.CatalogModelId, existingPrinter.CatalogModelId);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
+        }
+
         existingPrinter = mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
         var printerCategory = await printerCategoryService.get(printer.Category ?? existingPrinter.Category!.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
@@ -321,7 +329,14 @@ public class PrintersController(
             return Unauthorized();
         }
 
+        var catalogProblem = await ValidateCatalogModelAsync(printer.CatalogModelId, currentCatalogModelId: null);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
+        }
+
         var newPrinter = mapper.Map<Printer>(printer);
+        newPrinter.CreatedAt = timeProvider.GetUtcNow();
 
         var printerType = await printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
 
@@ -348,6 +363,48 @@ public class PrintersController(
         cacheVersionService.InvalidateUserCache(userId.Value);
 
         return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, mapper.Map<PrinterDetailDto>(newPrinter));
+    }
+
+    /// <summary>
+    /// Checks a catalog model id on a printer write. Null is always fine. Otherwise the model must
+    /// exist and not be hidden, and a retired model is accepted only when the printer already has it.
+    /// Keeping the id a printer already has is always accepted, so editing a printer whose model
+    /// was hidden or retired later never fails on a field the user did not touch.
+    /// </summary>
+    private async Task<ObjectResult?> ValidateCatalogModelAsync(string? catalogModelId, string? currentCatalogModelId)
+    {
+        if (catalogModelId is null || catalogModelId == currentCatalogModelId)
+        {
+            // An unchanged id still has to exist, but the FK guarantees that for a stored one.
+            return null;
+        }
+
+        var model = await context.PrinterModels
+            .AsNoTracking()
+            .Where(m => m.Id == catalogModelId)
+            .Select(m => new { m.Hidden, m.Retired })
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
+
+        if (model is null || model.Hidden || model.Retired)
+        {
+            return CodedProblem(
+                StatusCodes.Status400BadRequest,
+                "The printer model was not found in the catalog.",
+                "printer_model_not_found");
+        }
+
+        return null;
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 
     /// <summary>

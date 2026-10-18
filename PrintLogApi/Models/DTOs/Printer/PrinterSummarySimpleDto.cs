@@ -18,6 +18,9 @@ public class PrinterSummarySimpleDto
 
     public bool IsActive { get; set; }
 
+    /// <summary>Id of the printer catalog model this printer was picked from, if any.</summary>
+    public string? CatalogModelId { get; set; }
+
     public double? WattageW { get; set; }
 
     /// <summary>How many filament positions the printer has. 1 for a single-tool printer.</summary>
