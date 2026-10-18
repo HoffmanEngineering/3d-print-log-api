@@ -183,7 +183,7 @@ public class SyncSqlServerTests(EmailPipelineSqlServerTests.SqlServerFactory fac
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, Ct);
+            var snapshot = await SyncSnapshotService.LoadCoreAsync(db, userId, null, Ct);
             var totals = await SyncSnapshotService.LoadTotalsAsync(db, userId, SyncMonth.Containing(now, SyncZone.Utc), Ct);
             var connections = await SyncSnapshotService.LoadConnectionsAsync(db, userId, now, Ct);
 

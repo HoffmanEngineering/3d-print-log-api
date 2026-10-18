@@ -69,7 +69,8 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
         });
 
     private Task<Print> AddPrintAsync(User user, Printer printer, Print.PrintStatus status, DateTimeOffset? start,
-        int? estimateSeconds = null, int? printSeconds = null, string? title = null, (Filament Spool, int Mg)? usage = null) =>
+        int? estimateSeconds = null, int? printSeconds = null, string? title = null, (Filament Spool, int Mg)? usage = null,
+        PrintSource source = PrintSource.Unknown, (int? Slot, Filament? Spool, int? EstimatedMg)[]? estimates = null) =>
         WithDbAsync(async db =>
         {
             var print = new Print
@@ -81,11 +82,17 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
                 EstimatedPrintTimeInSeconds = estimateSeconds,
                 PrintTimeInSeconds = printSeconds,
                 ViewStatus = Print.PrintViewStatus.Private,
+                Source = source,
                 CreatedById = user.Id,
                 UpdatedById = user.Id,
             };
             db.Prints.Add(print);
             await db.SaveChangesAsync(Ct);
+            foreach (var e in estimates ?? [])
+            {
+                db.PrintFilament.Add(new PrintFilament { PrintId = print.Id, Slot = e.Slot, FilamentId = e.Spool?.Id, EstimatedAmountMg = e.EstimatedMg, Source = PrintFilament.SourceMeasurement.Weight });
+            }
+
             if (usage is { } u)
             {
                 db.PrintFilament.Add(new PrintFilament { PrintId = print.Id, FilamentId = u.Spool.Id, AmountMg = u.Mg, Source = PrintFilament.SourceMeasurement.Weight });
@@ -608,5 +615,108 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
         Assert.NotEqual(etag, second.Headers.ETag!.ToString());
         var body = JsonDocument.Parse(await second.Content.ReadAsStringAsync(Ct)).RootElement;
         Assert.Equal(1, Printer(body, printer.Id).GetProperty("openMaintenance").GetProperty("count").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(PrintSource.SlicerPlugin, "slicer_plugin")]
+    [InlineData(PrintSource.ApiKey, "api_key")]
+    [InlineData(PrintSource.OctoPrint, "octoprint")]
+    [InlineData(PrintSource.Unknown, "unknown")]
+    public async Task Snapshot_Source_IsSnakeCase(PrintSource source, string expected)
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        await AddPrintAsync(user, printer, Print.PrintStatus.Printing, SyncTestFactory.Start.AddMinutes(-5), source: source);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, SyncTestFactory.Start.AddHours(-5), source: source);
+
+        var p = Printer(await SnapshotAsync(user), printer.Id);
+
+        Assert.Equal(expected, p.GetProperty("currentPrint").GetProperty("source").GetString());
+        Assert.Equal(expected, p.GetProperty("lastFinishedPrint").GetProperty("source").GetString());
+    }
+
+    [Theory]
+    [InlineData("https://www.example.test/", true)]
+    [InlineData("", false)]
+    public async Task Snapshot_Url_UsesWebBaseUrl(string webBase, bool expectUrl)
+    {
+        using var host = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+            s.PostConfigure<PrintLogApi.Email.EmailOptions>(o => o.WebBaseUrl = webBase)));
+        var client = host.CreateClient();
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        var current = await AddPrintAsync(user, printer, Print.PrintStatus.Printing, SyncTestFactory.Start.AddMinutes(-5));
+        var finished = await AddPrintAsync(user, printer, Print.PrintStatus.Success, SyncTestFactory.Start.AddHours(-5));
+
+        var response = await client.SendAsync(factory.Get(user, "/api/sync/snapshot"), Ct);
+        var p = Printer(JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement, printer.Id);
+
+        var cur = p.GetProperty("currentPrint").GetProperty("url");
+        var fin = p.GetProperty("lastFinishedPrint").GetProperty("url");
+        if (expectUrl)
+        {
+            Assert.Equal($"https://www.example.test/prints/{current.Id}", cur.GetString());
+            Assert.Equal($"https://www.example.test/prints/{finished.Id}", fin.GetString());
+        }
+        else
+        {
+            Assert.Equal(JsonValueKind.Null, cur.ValueKind);
+            Assert.Equal(JsonValueKind.Null, fin.ValueKind);
+        }
+    }
+
+    [Fact]
+    public async Task Snapshot_CurrentPrintFilament_SlotOrderGrams()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        var spool = await AddSpoolAsync(user, "Black", 1_000_000, 1);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Printing, SyncTestFactory.Start.AddMinutes(-5),
+            estimates: [(2, spool, 12_345), (null, null, 500), (1, null, null)]);
+
+        var f = Printer(await SnapshotAsync(user), printer.Id).GetProperty("currentPrint").GetProperty("filament").EnumerateArray().ToList();
+
+        Assert.Equal(3, f.Count);
+        Assert.Equal(1, f[0].GetProperty("slot").GetInt32());
+        Assert.Equal(JsonValueKind.Null, f[0].GetProperty("spoolId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, f[0].GetProperty("estimatedGrams").ValueKind);
+        Assert.Equal(2, f[1].GetProperty("slot").GetInt32());
+        Assert.Equal(spool.Id, f[1].GetProperty("spoolId").GetGuid());
+        Assert.Equal(12.3, f[1].GetProperty("estimatedGrams").GetDouble());
+        Assert.Equal(JsonValueKind.Null, f[2].GetProperty("slot").ValueKind);
+        Assert.Equal(0.5, f[2].GetProperty("estimatedGrams").GetDouble());
+    }
+
+    [Fact]
+    public async Task Snapshot_CurrentPrintFilament_IsEmptyWithoutRows()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        await AddPrintAsync(user, printer, Print.PrintStatus.Printing, SyncTestFactory.Start.AddMinutes(-5));
+
+        var f = Printer(await SnapshotAsync(user), printer.Id).GetProperty("currentPrint").GetProperty("filament");
+
+        Assert.Equal(0, f.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Snapshot_Account_SuccessAndFailedCounts()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        factory.Clock.SetUtcNow(SyncTestFactory.Start);
+        var day = new DateTimeOffset(2026, 10, 5, 8, 0, 0, TimeSpan.Zero);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, day);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, day.AddHours(1));
+        await AddPrintAsync(user, printer, Print.PrintStatus.Failed, day.AddHours(2));
+        await AddPrintAsync(user, printer, Print.PrintStatus.Cancelled, day.AddHours(3));
+        await AddPrintAsync(user, printer, Print.PrintStatus.PartialSuccess, day.AddHours(4));
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, day.AddMonths(-1));
+
+        var a = (await SnapshotAsync(user)).GetProperty("account");
+
+        Assert.Equal(2, a.GetProperty("successCount").GetInt32());
+        Assert.Equal(1, a.GetProperty("failedCount").GetInt32());
+        Assert.Equal(5, a.GetProperty("printCount").GetInt32());
     }
 }

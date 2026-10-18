@@ -77,7 +77,16 @@ public sealed record SyncCurrentPrint(
     string? Title,
     DateTimeOffset? StartedAt,
     int? EstimatedSeconds,
-    DateTimeOffset? EstimatedEndAt);
+    DateTimeOffset? EstimatedEndAt,
+    string Source,
+    string? Url,
+    IReadOnlyList<SyncPrintFilament> Filament);
+
+/// <summary>One slot's estimate for a print in progress.</summary>
+/// <param name="Slot">The printer slot (tool) the material feeds from, or null when not recorded.</param>
+/// <param name="SpoolId">The linked spool, or null when none is.</param>
+/// <param name="EstimatedGrams">The slicer's estimate to 0.1 g, or null when there is none.</param>
+public sealed record SyncPrintFilament(int? Slot, Guid? SpoolId, double? EstimatedGrams);
 
 /// <param name="Status"><c>success</c>, <c>failed</c>, <c>canceled</c> or <c>partial_success</c>.</param>
 /// <param name="FinishedAt">Start plus print time, when both exist; the print stores no finish time of its own.</param>
@@ -86,7 +95,9 @@ public sealed record SyncFinishedPrint(
     string? Title,
     string Status,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? FinishedAt);
+    DateTimeOffset? FinishedAt,
+    string Source,
+    string? Url);
 
 /// <summary>A spool in a slot, repeating the matching <see cref="SyncSpool"/> fields a slot sensor needs.</summary>
 /// <param name="RemainingGrams">Null for a spool with no initial weight (pending #230).</param>
@@ -127,4 +138,4 @@ public sealed record SyncSpool(
 /// <param name="TimeZone">The zone the month was taken in, as requested.</param>
 /// <param name="PrintCount">Prints started this month.</param>
 /// <param name="Grams">What those prints' usage rows took, in grams.</param>
-public sealed record SyncAccountTotals(string Month, string TimeZone, int PrintCount, double Grams);
+public sealed record SyncAccountTotals(string Month, string TimeZone, int PrintCount, double Grams, int SuccessCount, int FailedCount);

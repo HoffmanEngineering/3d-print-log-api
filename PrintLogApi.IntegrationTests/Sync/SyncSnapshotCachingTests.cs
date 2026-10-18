@@ -208,7 +208,7 @@ public class SyncSnapshotCachingTests(SyncTestFactory factory) : IClassFixture<S
         CoreSize size;
         using (var scope = factory.Services.CreateScope())
         {
-            var entry = await SyncSnapshotService.LoadCoreAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>(), user.Id, Ct);
+            var entry = await SyncSnapshotService.LoadCoreAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>(), user.Id, null, Ct);
             size = new CoreSize(JsonSerializer.SerializeToUtf8Bytes(entry).Length);
         }
 

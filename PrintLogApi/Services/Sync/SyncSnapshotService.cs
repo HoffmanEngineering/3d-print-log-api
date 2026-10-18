@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Achievements.Metrics;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
@@ -53,11 +54,11 @@ public interface ISyncSnapshotService
 /// entries, all keyed on the user's version GUID so any write replaces them:
 /// <list type="bullet">
 /// <item><b>core</b> (<see cref="CoreKey"/>, 15 min): printers and spools, with a hash of their
-/// serialized form. The expensive part: three statements.</item>
+/// serialized form. The expensive part: four statements.</item>
 /// <item><b>core hash</b> (<see cref="HashKey"/>, 1 h): just that hash, so a conditional request
 /// can answer 304 without the core, even after the core expired. Written by the core factory, so
 /// it can outlive the core but never describe a different one.</item>
-/// <item><b>totals</b> (zone and month in the key, 1 h): two small statements.</item>
+/// <item><b>totals</b> (zone and month in the key, 1 h): three small statements.</item>
 /// <item><b>saved zone</b> (1 h): the user's time zone setting; settings writes bump the version.</item>
 /// </list>
 /// Connection health is read live on every request (one statement), because heartbeats do not
@@ -67,7 +68,8 @@ public sealed class SyncSnapshotService(
     PrintLogContext context,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersion) : ISyncSnapshotService
+    ICacheVersionService cacheVersion,
+    IOptions<EmailOptions> emailOptions) : ISyncSnapshotService
 {
     private static readonly HybridCacheEntryOptions CoreOptions = new()
     {
@@ -134,11 +136,11 @@ public sealed class SyncSnapshotService(
 
         var core = await cache.GetOrCreateAsync(
             CoreKey(userId, guid),
-            (computation, cache, userId, guid),
+            (computation, cache, userId, guid, webBase: emailOptions.Value.WebBaseUrl?.TrimEnd('/')),
             static (state, token) => state.computation.RunAsync(
                 async (services, innerToken) =>
                 {
-                    var entry = await LoadCoreAsync(services.GetRequiredService<PrintLogContext>(), state.userId, innerToken);
+                    var entry = await LoadCoreAsync(services.GetRequiredService<PrintLogContext>(), state.userId, state.webBase, innerToken);
                     await state.cache.SetAsync(HashKey(state.userId, state.guid), entry.Hash, SmallOptions, cancellationToken: innerToken);
                     return entry;
                 },
@@ -171,7 +173,8 @@ public sealed class SyncSnapshotService(
             new[]
             {
                 version, coreHash, totals.TimeZone, totals.Month,
-                totals.PrintCount.ToString(CultureInfo.InvariantCulture), totals.Grams.ToString("R", CultureInfo.InvariantCulture),
+                totals.PrintCount.ToString(CultureInfo.InvariantCulture),
+                totals.SuccessCount.ToString(CultureInfo.InvariantCulture), totals.FailedCount.ToString(CultureInfo.InvariantCulture), totals.Grams.ToString("R", CultureInfo.InvariantCulture),
             }
             .Concat(connections.OrderBy(c => c.Key).Select(c => $"{c.Key}:{c.Value.Kind}:{c.Value.Status}"))));
 
@@ -219,28 +222,57 @@ public sealed class SyncSnapshotService(
             });
     }
 
-    /// <summary>Prints started in <paramref name="month"/> and the grams their usage rows took: two statements.</summary>
+    /// <summary>Prints started in <paramref name="month"/>, their success and failed counts, and the grams their usage rows took: three statements.</summary>
     internal static async Task<SyncAccountTotals> LoadTotalsAsync(PrintLogContext db, long userId, SyncMonth month, CancellationToken ct)
     {
         var printCount = await db.Prints
             .AsNoTracking()
             .CountAsync(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To, ct);
+        // Success and failed are the two outcomes the sensors split out; canceled and partial are in printCount only.
+        var outcomes = await db.Prints
+            .AsNoTracking()
+            .Where(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To
+                && (p.Status == PrintStatus.Success || p.Status == PrintStatus.Failed))
+            .GroupBy(p => p.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
         var monthMg = await db.PrintFilament
             .AsNoTracking()
             .Where(pf => pf.Print.CreatedById == userId && pf.Print.StartDate >= month.From && pf.Print.StartDate < month.To)
             .Select(FilamentProfile.UsageRowMg)
             .SumAsync(ct);
-        return new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg));
+        return new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg),
+            outcomes.Where(o => o.Status == PrintStatus.Success).Sum(o => o.Count),
+            outcomes.Where(o => o.Status == PrintStatus.Failed).Sum(o => o.Count));
     }
 
     /// <summary>
-    /// The expensive part of a miss: printers, loaded slots and spools, three statements however
+    /// The expensive part of a miss: printers, loaded slots and spools, four statements however
     /// many printers and spools the user has (<c>SyncSnapshotQueryShapeTests</c>), plus a hash of
     /// the result so the response can be named by its content.
     /// </summary>
-    internal static async Task<CoreEntry> LoadCoreAsync(PrintLogContext db, long userId, CancellationToken ct)
+    internal static async Task<CoreEntry> LoadCoreAsync(PrintLogContext db, long userId, string? webBase, CancellationToken ct)
     {
         var printers = await PrintersQuery(db, userId).ToListAsync(ct);
+
+        // Estimates for the Printing prints, in one statement for all printers (a collection inside
+        // the correlated print subquery would not translate to one).
+        var currentIds = printers.Where(p => p.Current is not null).Select(p => p.Current!.Id).ToList();
+        var estimateRows = currentIds.Count == 0
+            ? []
+            : await db.PrintFilament
+                .AsNoTracking()
+                .Where(pf => currentIds.Contains(pf.PrintId))
+                .Select(pf => new { pf.PrintId, pf.Id, pf.Slot, pf.FilamentId, pf.EstimatedAmountMg })
+                .ToListAsync(ct);
+        var estimatesByPrint = estimateRows
+            .GroupBy(r => r.PrintId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<SyncPrintFilament>)g
+                .OrderBy(r => r.Slot == null)
+                .ThenBy(r => r.Slot)
+                .ThenBy(r => r.Id)
+                .Select(r => new SyncPrintFilament(r.Slot, r.FilamentId, r.EstimatedAmountMg.HasValue ? Grams(r.EstimatedAmountMg.Value) : null))
+                .ToList());
 
         var loaded = await db.PrinterFilament
             .AsNoTracking()
@@ -279,11 +311,14 @@ public sealed class SyncSnapshotService(
                 Connection: null,
                 CurrentPrint: p.Current is { } c
                     ? new SyncCurrentPrint(c.Id, c.Title, c.StartDate, c.EstimatedSeconds,
-                        c.StartDate.HasValue && c.EstimatedSeconds.HasValue ? c.StartDate.Value.AddSeconds(c.EstimatedSeconds.Value) : null)
+                        c.StartDate.HasValue && c.EstimatedSeconds.HasValue ? c.StartDate.Value.AddSeconds(c.EstimatedSeconds.Value) : null,
+                        SyncPrintSource.Name(c.Source), SyncPrintSource.Url(webBase, c.Id),
+                        estimatesByPrint.TryGetValue(c.Id, out var est) ? est : [])
                     : null,
                 LastFinishedPrint: p.LastFinished is { } f
                     ? new SyncFinishedPrint(f.Id, f.Title, StatusName(f.Status), f.StartDate,
-                        f.StartDate.HasValue && f.PrintSeconds.HasValue ? f.StartDate.Value.AddSeconds(f.PrintSeconds.Value) : null)
+                        f.StartDate.HasValue && f.PrintSeconds.HasValue ? f.StartDate.Value.AddSeconds(f.PrintSeconds.Value) : null,
+                        SyncPrintSource.Name(f.Source), SyncPrintSource.Url(webBase, f.Id))
                     : null,
                 Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : [],
                 PrintTimeSeconds: p.PrintSeconds,
@@ -351,6 +386,7 @@ public sealed class SyncSnapshotService(
                         StartDate = pr.StartDate,
                         EstimatedSeconds = pr.EstimatedPrintTimeInSeconds,
                         PrintSeconds = pr.PrintTimeInSeconds,
+                        Source = pr.Source,
                     })
                     .FirstOrDefault(),
                 LastFinished = db.Prints
@@ -367,6 +403,7 @@ public sealed class SyncSnapshotService(
                         StartDate = pr.StartDate,
                         EstimatedSeconds = pr.EstimatedPrintTimeInSeconds,
                         PrintSeconds = pr.PrintTimeInSeconds,
+                        Source = pr.Source,
                     })
                     .FirstOrDefault(),
             });
@@ -478,6 +515,7 @@ public sealed class SyncSnapshotService(
         public DateTimeOffset? StartDate { get; init; }
         public int? EstimatedSeconds { get; init; }
         public int? PrintSeconds { get; init; }
+        public PrintSource Source { get; init; }
     }
 
     internal sealed class SpoolRow
