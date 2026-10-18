@@ -9,9 +9,12 @@ public interface IEmailVerificationRefresher
 {
     /// <summary>
     /// Returns the user's effective email-verified flag, asking Auth0 when the database still
-    /// says unverified (the token claim lags until the user signs in again). Never throws.
+    /// says unverified (the token claim lags until the user signs in again). An Auth0 call is
+    /// throttled to one per user per <see cref="EmailVerificationRefresher.Throttle"/>;
+    /// <paramref name="force"/> skips that check (for callers with their own limit) but still
+    /// sets the throttle. Never throws, except when <paramref name="ct"/> is canceled.
     /// </summary>
-    Task<bool> RefreshAsync(long userId, CancellationToken ct);
+    Task<bool> RefreshAsync(long userId, CancellationToken ct, bool force = false);
 }
 
 public sealed class EmailVerificationRefresher(
@@ -21,7 +24,10 @@ public sealed class EmailVerificationRefresher(
     ILogger<EmailVerificationRefresher> logger,
     TimeProvider clock) : IEmailVerificationRefresher
 {
-    public async Task<bool> RefreshAsync(long userId, CancellationToken ct)
+    /// <summary>How long an unforced call waits after any Auth0 status call for the same user.</summary>
+    public static readonly TimeSpan Throttle = TimeSpan.FromMinutes(55);
+
+    public async Task<bool> RefreshAsync(long userId, CancellationToken ct, bool force = false)
     {
         var user = await db.Users.SingleOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null)
@@ -40,7 +46,7 @@ public sealed class EmailVerificationRefresher(
         }
 
         var key = $"email_verify_refresh:{userId}";
-        if (cache.TryGetValue(key, out _))
+        if (!force && cache.TryGetValue(key, out _))
         {
             return false;
         }
@@ -52,7 +58,7 @@ public sealed class EmailVerificationRefresher(
         // call so a failing Auth0 is not hammered either.
         cache.Set(key, true, new MemoryCacheEntryOptions()
             .SetSize(CacheBudget.SmallEntryBytes)
-            .SetAbsoluteExpiration(TimeSpan.FromHours(1)));
+            .SetAbsoluteExpiration(Throttle));
 
         try
         {
@@ -72,10 +78,23 @@ public sealed class EmailVerificationRefresher(
             await db.SaveChangesAsync(ct);
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // The request went away, so nothing was learned: let the next one ask.
+            cache.Remove(key);
+            Forget(user);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Includes HttpClient's timeout, a TaskCanceledException while ct is still live.
             logger.LogWarning(ex, "Email verification refresh failed for user {UserId}", userId);
-            return user.EmailVerified;
+            Forget(user);
+            return false;
         }
     }
+
+    // The context can be shared (the dispatcher runs a whole tick on one), so an unsaved change
+    // must not be left behind for that caller's next SaveChanges to retry.
+    private void Forget(Models.User user) => db.Entry(user).State = EntityState.Detached;
 }

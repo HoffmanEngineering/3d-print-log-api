@@ -38,7 +38,8 @@ public class UsersController(
     IEmailVerificationRefresher emailVerificationRefresher,
     IAuth0Service auth0Service,
     IMemoryCache cache,
-    TimeProvider clock) : ControllerBase
+    TimeProvider clock,
+    ILogger<UsersController> logger) : ControllerBase
 {
     private readonly string profileImageContainerName = "userprofile";
 
@@ -132,10 +133,13 @@ public class UsersController(
             .SingleAsync(ct);
 
         // The token claim lags until the next sign-in, so ask Auth0 (throttled) while unverified.
-        var emailVerified = user.EmailVerified || await emailVerificationRefresher.RefreshAsync(userId.Value, ct);
+        // Only for an onboarding user: nobody else is shown anything that reads this flag.
+        var eligible = onboardingOptions.Value.IsEligible(user.CreatedDate);
+        var emailVerified = user.EmailVerified
+            || (eligible && await emailVerificationRefresher.RefreshAsync(userId.Value, ct));
 
         return new OnboardingStatusDto(
-            onboardingOptions.Value.IsEligible(user.CreatedDate),
+            eligible,
             user.CreatedDate,
             emailVerified);
     }
@@ -154,11 +158,6 @@ public class UsersController(
             return Unauthorized();
         }
 
-        if (await emailVerificationRefresher.RefreshAsync(userId.Value, ct))
-        {
-            return CodedProblem(StatusCodes.Status409Conflict, "The email address is already verified.", "already_verified");
-        }
-
         var throttleKey = $"verification_email_sent:{userId.Value}";
         if (cache.TryGetValue(throttleKey, out DateTimeOffset expiresAt))
         {
@@ -169,10 +168,17 @@ public class UsersController(
             return CodedProblem(StatusCodes.Status429TooManyRequests, "A verification email was sent recently. Try again later.", "rate_limited");
         }
 
+        // Forced, so a GET me/onboarding a moment ago (which set the refresher's throttle) cannot
+        // hide a verification that just happened. The rate limit above bounds the Auth0 calls.
+        if (await emailVerificationRefresher.RefreshAsync(userId.Value, ct, force: true))
+        {
+            return CodedProblem(StatusCodes.Status409Conflict, "The email address is already verified.", "already_verified");
+        }
+
         var oauthUserId = await context.Users
             .Where(u => u.Id == userId)
             .Select(u => u.OAuthUserId)
-                        .SingleOrDefaultAsync(ct);
+            .SingleOrDefaultAsync(ct);
 
         // Without an Auth0 id there is nothing to resend to. Leave the throttle unset.
         if (string.IsNullOrEmpty(oauthUserId))
@@ -184,8 +190,12 @@ public class UsersController(
         {
             await auth0Service.SendVerificationEmail(oauthUserId, ct);
         }
-        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException)
+        // HttpClient's own timeout is a TaskCanceledException while ct is still live.
+        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {
+            // Logged so a missing update:users grant on the Management API client shows up.
+            logger.LogWarning(ex, "Resending the verification email failed for user {UserId}", userId.Value);
             return CodedProblem(StatusCodes.Status502BadGateway, "The verification email could not be sent right now.", "auth0_unavailable");
         }
 

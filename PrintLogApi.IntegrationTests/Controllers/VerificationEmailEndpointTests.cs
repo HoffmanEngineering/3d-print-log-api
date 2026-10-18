@@ -1,8 +1,10 @@
 ﻿using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using PrintLogApi.Email;
 using PrintLogApi.IntegrationTests.Email;
 using PrintLogApi.Models.DTOs.UserApiKeys;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Controllers;
@@ -21,6 +23,8 @@ public class VerificationEmailEndpointTests : IClassFixture<CustomWebApplication
         _factory.Auth0.ThrowOnSendVerification = false;
         _factory.Auth0.ThrowOnEmailStatus = false;
         _factory.Auth0.EmailStatus = null;
+        _factory.Auth0.EmailStatusCalls = 0;
+        _factory.Auth0.OnSendVerification = null;
     }
 
     // A fresh user per test: the throttle flag lives in the process-wide IMemoryCache.
@@ -69,6 +73,41 @@ public class VerificationEmailEndpointTests : IClassFixture<CustomWebApplication
         Assert.Single(_factory.Auth0.VerificationEmailsSent);
     }
 
+    // Resend forces a fresh Auth0 status check, so the rate limit has to come first, or a client
+    // that keeps pressing Resend drives one Auth0 GET per press.
+    [Fact]
+    public async Task RateLimited_MakesNoAuth0StatusCall()
+    {
+        var (_, oauthId) = await SeedUserAsync(verified: false);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await PostAsync(oauthId)).StatusCode);
+        Assert.Equal(1, _factory.Auth0.EmailStatusCalls);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await PostAsync(oauthId)).StatusCode);
+        Assert.Equal(1, _factory.Auth0.EmailStatusCalls);
+    }
+
+    // The status check is forced, so a GET me/onboarding a moment earlier (which set the
+    // refresher's throttle) cannot hide a verification that has just happened.
+    [Fact]
+    public async Task VerifiedInAuth0_Returns409EvenWhenTheRefreshIsThrottled()
+    {
+        var (_, oauthId) = await SeedUserAsync(verified: false);
+        _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", false);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var id = db.Users.Single(u => u.OAuthUserId == oauthId).Id;
+            await scope.ServiceProvider.GetRequiredService<IEmailVerificationRefresher>().RefreshAsync(id, Ct);
+        }
+        _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", true);
+
+        var response = await PostAsync(oauthId);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Empty(_factory.Auth0.VerificationEmailsSent);
+    }
+
     [Fact]
     public async Task Verified_Returns409AlreadyVerified()
     {
@@ -94,6 +133,20 @@ public class VerificationEmailEndpointTests : IClassFixture<CustomWebApplication
         Assert.Equal(HttpStatusCode.BadGateway, first.StatusCode);
         Assert.Equal(HttpStatusCode.BadGateway, second.StatusCode);
         var body = JsonDocument.Parse(await first.Content.ReadAsStringAsync(Ct)).RootElement;
+        Assert.Equal("auth0_unavailable", body.GetProperty("code").GetString());
+    }
+
+    // HttpClient's own timeout arrives as a TaskCanceledException with the request still live.
+    [Fact]
+    public async Task Auth0TimesOut_Returns502()
+    {
+        var (_, oauthId) = await SeedUserAsync(verified: false);
+        _factory.Auth0.OnSendVerification = () => throw new TaskCanceledException("Simulated HttpClient timeout.");
+
+        var response = await PostAsync(oauthId);
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
         Assert.Equal("auth0_unavailable", body.GetProperty("code").GetString());
     }
 

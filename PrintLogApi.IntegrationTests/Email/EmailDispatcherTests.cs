@@ -2,6 +2,8 @@
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Email;
 using PrintLogApi.Email.Campaigns;
 using PrintLogApi.Email.Outbox;
@@ -11,6 +13,7 @@ using PrintLogApi.Email.Transport;
 using PrintLogApi.IntegrationTests.Analytics;
 using PrintLogApi.IntegrationTests.Telemetry;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Email;
@@ -73,7 +76,7 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         public EmailAddressHasher Hasher { get; }
         public CancellationToken Ct => TestContext.Current.CancellationToken;
 
-        public EmailDispatcher Dispatcher(PrintLogContext? db = null)
+        public EmailDispatcher Dispatcher(PrintLogContext? db = null, IEmailVerificationRefresher? verification = null)
         {
             var context = db ?? Db;
             var options = Microsoft.Extensions.Options.Options.Create(Options);
@@ -82,7 +85,7 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
                 context,
                 Campaigns,
                 new EmailPreferenceService(context, telemetry),
-                Verification,
+                verification ?? Verification,
                 Hasher,
                 Transport,
                 new EmailTokenService(options, Clock),
@@ -191,6 +194,8 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(EmailOutboxStatus.Pending, deferred.Status);
         Assert.Equal(Now.AddHours(1), deferred.NextAttemptAt);
         Assert.Equal(1, h.Verification.Calls);
+        // GateRecheck already limits this to once an hour per row, so the refresher's throttle is skipped.
+        Assert.True(h.Verification.LastForce);
         Assert.Empty(h.Transport.Sent);
         var evt = Assert.Single(h.Channel.Events("Email_Deferred"));
         Assert.Equal(EmailSkipReasons.Unverified, evt.Properties["why"]);
@@ -229,6 +234,34 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         await h.TickAsync();
 
         Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+    }
+
+    // The real refresher, saving through the dispatcher's own context: Auth0 says verified at a
+    // new address, so the welcome goes to that address and the row completes in the same tick.
+    [Fact]
+    public async Task Onboarding_RealRefresher_SendsToTheRefreshedAddress()
+    {
+        using var h = new Harness(_factory, new TestCampaign(OnboardingCampaign.CampaignName));
+        var user = await EmailTestData.CreateUserAsync(h.Db, email: "old-address@example.com", verified: false);
+        var row = await h.QueueAsync(user.Id);
+        var auth0 = _factory.Auth0;
+        auth0.ThrowOnEmailStatus = false;
+        auth0.OnEmailStatus = null;
+        auth0.EmailStatus = new Auth0EmailStatus("new-address@example.com", true);
+        var refresher = new EmailVerificationRefresher(
+            h.Db,
+            auth0,
+            _factory.Services.GetRequiredService<IMemoryCache>(),
+            NullLogger<EmailVerificationRefresher>.Instance,
+            h.Clock);
+
+        await h.Dispatcher(verification: refresher).RunOnceAsync(h.Clock.GetUtcNow(), h.Ct);
+
+        Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+        Assert.Equal("new-address@example.com", Assert.Single(h.Transport.Sent).ToAddress);
+        var stored = await h.Db.Users.AsNoTracking().SingleAsync(u => u.Id == user.Id, h.Ct);
+        Assert.True(stored.EmailVerified);
+        Assert.Equal("new-address@example.com", stored.Email);
     }
 
     [Fact]

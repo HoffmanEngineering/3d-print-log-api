@@ -1,7 +1,8 @@
-﻿using System.Net;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using PrintLogApi.Email;
-using PrintLogApi.Models.DTOs;
 using PrintLogApi.Services;
 using Xunit;
 
@@ -20,6 +21,7 @@ public class EmailVerificationRefresherTests : IClassFixture<CustomWebApplicatio
         _factory.Auth0.EmailStatus = null;
         _factory.Auth0.ThrowOnEmailStatus = false;
         _factory.Auth0.EmailStatusCalls = 0;
+        _factory.Auth0.OnEmailStatus = null;
     }
 
     // A fresh user per test: the throttle flag lives in the process-wide IMemoryCache.
@@ -31,10 +33,10 @@ public class EmailVerificationRefresherTests : IClassFixture<CustomWebApplicatio
         return (user.Id, user.OAuthUserId!);
     }
 
-    private async Task<bool> RefreshAsync(long userId)
+    private async Task<bool> RefreshAsync(long userId, bool force = false)
     {
         using var scope = _factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<IEmailVerificationRefresher>().RefreshAsync(userId, Ct);
+        return await scope.ServiceProvider.GetRequiredService<IEmailVerificationRefresher>().RefreshAsync(userId, Ct, force);
     }
 
     [Fact]
@@ -84,6 +86,34 @@ public class EmailVerificationRefresherTests : IClassFixture<CustomWebApplicatio
         Assert.Equal(1, _factory.Auth0.EmailStatusCalls);
     }
 
+    // The dispatcher and resend have their own limits, so they skip the throttle check. The call
+    // still sets the throttle, so the throttled GET right after it does not ask Auth0 again.
+    [Fact]
+    public async Task Force_BypassesTheThrottleAndStillSetsIt()
+    {
+        var (id, _) = await SeedAsync(verified: false);
+        _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", false);
+
+        Assert.False(await RefreshAsync(id));
+        Assert.False(await RefreshAsync(id, force: true));
+        Assert.Equal(2, _factory.Auth0.EmailStatusCalls);
+
+        Assert.False(await RefreshAsync(id));
+        Assert.Equal(2, _factory.Auth0.EmailStatusCalls);
+    }
+
+    [Fact]
+    public async Task Force_SetsTheThrottleWhenNoneExists()
+    {
+        var (id, _) = await SeedAsync(verified: false);
+        _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", false);
+
+        Assert.False(await RefreshAsync(id, force: true));
+        Assert.False(await RefreshAsync(id));
+
+        Assert.Equal(1, _factory.Auth0.EmailStatusCalls);
+    }
+
     [Fact]
     public async Task Auth0Throws_ReturnsFalseAndDoesNotThrow()
     {
@@ -91,20 +121,76 @@ public class EmailVerificationRefresherTests : IClassFixture<CustomWebApplicatio
         _factory.Auth0.ThrowOnEmailStatus = true;
 
         Assert.False(await RefreshAsync(id));
+
+        // The throttle is set even though Auth0 failed, so a failing Auth0 is not hammered.
+        Assert.False(await RefreshAsync(id));
+        Assert.Equal(1, _factory.Auth0.EmailStatusCalls);
     }
 
+    // HttpClient reports its own timeout as a TaskCanceledException while the caller's token is
+    // still live. That is an Auth0 failure, not the request going away.
     [Fact]
-    public async Task OnboardingEndpoint_RefreshesUnverifiedUser()
+    public async Task Auth0TimesOut_ReturnsFalseAndDoesNotThrow()
     {
-        var (_, oauthId) = await SeedAsync(verified: false);
+        var (id, _) = await SeedAsync(verified: false);
+        _factory.Auth0.OnEmailStatus = () => throw new TaskCanceledException("Simulated HttpClient timeout.");
+
+        Assert.False(await RefreshAsync(id));
+    }
+
+    // A canceled request never learned anything, so it must not leave the throttle behind.
+    [Fact]
+    public async Task CanceledDuringAuth0Call_RemovesTheThrottle()
+    {
+        var (id, _) = await SeedAsync(verified: false);
+        _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", false);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        _factory.Auth0.OnEmailStatus = () =>
+        {
+            cts.Cancel();
+            cts.Token.ThrowIfCancellationRequested();
+        };
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var refresher = scope.ServiceProvider.GetRequiredService<IEmailVerificationRefresher>();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresher.RefreshAsync(id, cts.Token));
+        }
+
+        _factory.Auth0.OnEmailStatus = null;
+        Assert.False(await RefreshAsync(id));
+        Assert.Equal(2, _factory.Auth0.EmailStatusCalls);
+    }
+
+    // The dispatcher shares one context across a whole tick. A failed save must not leave the
+    // user Modified there, or the dispatcher's next SaveChanges retries (and fails on) it.
+    [Fact]
+    public async Task SaveFails_ReturnsFalseAndLeavesNothingModified()
+    {
+        var (id, _) = await SeedAsync(verified: false);
         _factory.Auth0.EmailStatus = new Auth0EmailStatus("a@example.com", true);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me/onboarding");
-        request.Headers.Add(TestAuthHandler.TestUserIdHeader, oauthId);
-        var response = await _factory.CreateClient().SendAsync(request, Ct);
+        using var scope = _factory.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        var options = new DbContextOptionsBuilder<PrintLogContext>(services.GetRequiredService<DbContextOptions<PrintLogContext>>())
+            .AddInterceptors(new FailingSaveInterceptor())
+            .Options;
+        using var db = new PrintLogContext(options);
+        var refresher = new EmailVerificationRefresher(
+            db,
+            services.GetRequiredService<IAuth0Service>(),
+            services.GetRequiredService<IMemoryCache>(),
+            NullLogger<EmailVerificationRefresher>.Instance,
+            TimeProvider.System);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var status = (await response.Content.ReadFromJsonAsync<OnboardingStatusDto>(Ct))!;
-        Assert.True(status.EmailVerified);
+        Assert.False(await refresher.RefreshAsync(id, Ct));
+        Assert.DoesNotContain(db.ChangeTracker.Entries(), e => e.State == EntityState.Modified);
+    }
+
+    private sealed class FailingSaveInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+            => throw new DbUpdateException("Simulated save failure.");
     }
 }

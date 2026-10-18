@@ -320,15 +320,25 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         /// <summary>Number of <see cref="GetEmailStatus"/> calls so far.</summary>
         public int EmailStatusCalls { get; set; }
 
+        /// <summary>
+        /// Runs inside <see cref="GetEmailStatus"/> before it answers, so a test can throw a
+        /// timeout's <see cref="TaskCanceledException"/> or cancel the caller's token mid-call.
+        /// </summary>
+        public Action? OnEmailStatus { get; set; }
+
         /// <summary>User ids passed to <see cref="SendVerificationEmail"/>.</summary>
         public List<string> VerificationEmailsSent { get; } = new();
 
         /// <summary>When set, <see cref="SendVerificationEmail"/> throws Auth0ApiException.</summary>
         public bool ThrowOnSendVerification { get; set; }
 
+        /// <summary>Runs inside <see cref="SendVerificationEmail"/> before it records the send.</summary>
+        public Action? OnSendVerification { get; set; }
+
         public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, System.Threading.CancellationToken ct)
         {
             EmailStatusCalls++;
+            OnEmailStatus?.Invoke();
             if (ThrowOnEmailStatus)
             {
                 throw new InvalidOperationException("Simulated Auth0 email status failure.");
@@ -342,6 +352,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             {
                 throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
             }
+            OnSendVerification?.Invoke();
             VerificationEmailsSent.Add(oauthUserId);
             return Task.CompletedTask;
         }

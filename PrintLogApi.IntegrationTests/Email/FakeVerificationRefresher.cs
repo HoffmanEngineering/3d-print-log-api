@@ -9,9 +9,13 @@ public sealed class FakeVerificationRefresher : IEmailVerificationRefresher
 
     public int Calls { get; private set; }
 
-    public Task<bool> RefreshAsync(long userId, CancellationToken ct)
+    /// <summary>The <c>force</c> flag of the most recent call; null before the first.</summary>
+    public bool? LastForce { get; private set; }
+
+    public Task<bool> RefreshAsync(long userId, CancellationToken ct, bool force = false)
     {
         Calls++;
+        LastForce = force;
         return Task.FromResult(Result);
     }
 }
