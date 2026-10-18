@@ -323,6 +323,44 @@ public class CatalogIdStabilityTests
         Assert.Equal("sovol-3d-sovol-sv06", Assert.Single(third.Reserved, r => r.Id == "sovol-sv06").MergedInto);
     }
 
+    [Fact]
+    public void AChainThatLosesItsMiddleSource_GivesTheOrcaModelItsOwnIdBack_AndKeepsTheChainPointer()
+    {
+        // Runs 1 to 3 of the chain test: sovol-sv06 -> sovol-3d-sovol-sv06 -> sovol-1-sv06.
+        using var cura = SovolCuraTree(withSovol1: true);
+        using var orca = new ProfileTree().OrcaVendor("Sovol", ["Sovol SV06"]);
+        var first = Run(cura.Root, orca.Root, null, aliases: new Dictionary<string, string>());
+        var second = Run(cura.Root, orca.Root, first, aliases: SovolAlias);
+        var third = Run(cura.Root, orca.Root, second,
+            aliases: new Dictionary<string, string> { ["Sovol 3D"] = "Sovol", ["Sovol 1"] = "Sovol" });
+        Assert.Equal("sovol-1-sv06", Assert.Single(third.Models, m => m.SourceKeys!.Contains(SovolOrca)).Id);
+
+        // Run 4: the "Sovol 1" alias is gone and so is Cura's sovol_sv06 (C); sovol1_sv06 (C1) stays.
+        using var curaWithoutC = new ProfileTree().CopyFrom(CuraFixture)
+            .Write("resources/definitions/sovol1_sv06.def.json", CuraDef("Sovol 1 SV06", "Sovol 1"));
+        var fourth = Run(curaWithoutC.Root, orca.Root, third, aliases: SovolAlias);
+
+        var orcaModel = Assert.Single(fourth.Models, m => m.SourceKeys!.Contains(SovolOrca));
+        Assert.Equal("sovol-sv06", orcaModel.Id);
+        Assert.Equal([Sovol1Cura, SovolCura], Assert.Single(fourth.Models, m => m.Id == "sovol-1-sv06").SourceKeys);
+        Assert.Equal("sovol-1-sv06", Assert.Single(fourth.Reserved, r => r.Id == "sovol-3d-sovol-sv06").MergedInto);
+        Assert.DoesNotContain(fourth.Reserved, r => r.Id == "sovol-sv06");
+
+        // No cycle: every mergedInto chain ends.
+        var next = fourth.Reserved.Where(r => r.MergedInto is not null).ToDictionary(r => r.Id, r => r.MergedInto!);
+        foreach (var start in next.Keys)
+        {
+            var seen = new HashSet<string>();
+            for (string? id = start; id is not null; id = next.GetValueOrDefault(id))
+            {
+                Assert.True(seen.Add(id), $"mergedInto cycle through {id}");
+            }
+        }
+
+        var fifth = Run(curaWithoutC.Root, orca.Root, fourth, aliases: SovolAlias);
+        Assert.Equal(CatalogFile.Serialize(fourth), CatalogFile.Serialize(fifth));
+    }
+
     // --- Round 4: a merged id stays put unless the model truly splits ---
 
     private static readonly Dictionary<string, string> SovolAlias = new() { ["Sovol 3D"] = "Sovol" };

@@ -195,6 +195,8 @@ public static class CatalogMerger
                 },
                 "featured" => m with { Featured = Integer(field, v) },
                 "hidden" => m,
+                // For reviewers of catalog-overrides.json (why a value differs from the slicer); never written.
+                "note" => m,
                 _ => throw new InvalidDataException($"catalog-overrides.json: \"{id}\" has unknown field \"{field}\"."),
             };
         }

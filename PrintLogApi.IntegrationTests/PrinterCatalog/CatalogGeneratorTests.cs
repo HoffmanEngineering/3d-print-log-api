@@ -191,6 +191,19 @@ public class CatalogGeneratorTests
     }
 
     [Fact]
+    public void Overrides_ANoteIsForReviewersOnly_AndNeverReachesTheFile()
+    {
+        var overrides = JsonNode.Parse("""
+            { "qux-one": { "bedWidthMm": 305, "note": "The manufacturer lists 305 mm." } }
+            """)!.AsObject();
+
+        var file = PrinterCatalogGenerator.Generate(Inputs(overrides));
+
+        Assert.Equal(305, Assert.Single(file.Models, m => m.Id == "qux-one").BedWidthMm);
+        Assert.DoesNotContain("manufacturer lists", CatalogFile.Serialize(file), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Ids_ARenameThatKeepsTheKeyKeepsTheId_AndANewCollisionGetsASuffix()
     {
         var previous = new CatalogFile

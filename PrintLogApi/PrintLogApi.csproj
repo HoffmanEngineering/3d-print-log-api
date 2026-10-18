@@ -93,6 +93,10 @@
          tree; the running API never does, so they stay out of the build and publish output. -->
     <Content Remove="PrinterCatalog\catalog-sources.json;PrinterCatalog\catalog-overrides.json;PrinterCatalog\make-aliases.json" />
     <None Include="PrinterCatalog\catalog-sources.json;PrinterCatalog\catalog-overrides.json;PrinterCatalog\make-aliases.json" />
+    <!-- The generated catalog (spec §5.1), read from the assembly by PrinterCatalogFileLoader. The
+         logical name is pinned, as for the MCP Apps views. -->
+    <Content Remove="PrinterCatalog\printer-catalog.json" />
+    <EmbeddedResource Include="PrinterCatalog\printer-catalog.json" LogicalName="PrintLogApi.PrinterCatalog.printer-catalog.json" />
   </ItemGroup>
 
 </Project>

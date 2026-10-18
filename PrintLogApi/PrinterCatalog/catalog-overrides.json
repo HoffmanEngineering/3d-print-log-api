@@ -1,1 +1,549 @@
-{}
+{
+  "anycubic-kobra-3": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "bedWidthMm": 250,
+    "bedDepthMm": 250,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "Kobra 3 Combo"
+    ],
+    "featured": 15,
+    "note": "Anycubic lists 250 x 250 x 260 mm; Orca's 255 x 255 is the full plate. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: the Combo ships with a 4-slot ACE Pro."
+  },
+  "anycubic-kobra-3-v2-ace-pro": {
+    "defaultSlotCount": 4,
+    "note": "Bundled with a 4-slot ACE Pro."
+  },
+  "bambu-lab-a1": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "A1 Combo"
+    ],
+    "featured": 1,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS lite, 4."
+  },
+  "bambu-lab-a1-mini": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "A1mini",
+      "A1 mini Combo"
+    ],
+    "featured": 3,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS lite, 4."
+  },
+  "bambu-lab-h2d": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "featured": 11,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS 2 Pro, 4."
+  },
+  "bambu-lab-h2d-pro": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-h2s": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-p1p": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-p1s": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "bedHeightMm": 256,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "P1S Combo"
+    ],
+    "featured": 2,
+    "note": "Bambu lists 256 x 256 x 256 mm; Orca's 250 mm height is Bambu Studio's default safety margin. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-p2s": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "P2S Combo"
+    ],
+    "featured": 5,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS 2 Pro, 4."
+  },
+  "bambu-lab-x1": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-x1-carbon": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "bedHeightMm": 256,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "X1C",
+      "X1-Carbon"
+    ],
+    "featured": 4,
+    "note": "Bambu lists 256 x 256 x 256 mm; Orca's 250 mm height is Bambu Studio's default safety margin. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "bambu-lab-x1e": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
+  },
+  "creality-ender-3-v3": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "aliases": [
+      "Ender 3 V3",
+      "Ender3 V3"
+    ],
+    "featured": 12,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "creality-ender-3-v3-se": {
+    "aliases": [
+      "Ender 3 V3 SE",
+      "Ender3 V3 SE"
+    ],
+    "featured": 9
+  },
+  "creality-k1-cfs-c": {
+    "defaultSlotCount": 4,
+    "note": "The CFS-C bundle: a 4-slot CFS."
+  },
+  "creality-k1-max": {
+    "aliases": [
+      "K1Max"
+    ],
+    "featured": 13
+  },
+  "creality-k1-max-cfs-c": {
+    "defaultSlotCount": 4,
+    "note": "The CFS-C bundle: a 4-slot CFS."
+  },
+  "creality-k1-se-cfs-c": {
+    "defaultSlotCount": 4,
+    "note": "The CFS-C bundle: a 4-slot CFS."
+  },
+  "creality-k1c": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "aliases": [
+      "K1 C"
+    ],
+    "featured": 8,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "creality-k1c-cfs-c": {
+    "defaultSlotCount": 4,
+    "note": "The CFS-C bundle: a 4-slot CFS."
+  },
+  "creality-k2-plus": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "hasHeatedChamber": true,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "K2 Plus Combo"
+    ],
+    "featured": 10,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Heated chamber (active, about 60 C). Slots: the Combo ships with a 4-slot CFS."
+  },
+  "d12-230-pro-m2-direct": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO M2 DIRECT"
+  },
+  "d12-230-pro-m2-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO M2 MONO DUAL"
+  },
+  "d12-230-pro-m2-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO M2 MONO DUAL PoopTool"
+  },
+  "d12-230-pro-smartpad-direct": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO SMARTPAD DIRECT"
+  },
+  "d12-230-pro-smartpad-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO SMARTPAD MONO DUAL"
+  },
+  "d12-230-pro-smartpad-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 230 PRO SMARTPAD MONO DUAL PoopTool"
+  },
+  "d12-300-pro-m2-direct": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO M2 DIRECT"
+  },
+  "d12-300-pro-m2-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO M2 MONO DUAL"
+  },
+  "d12-300-pro-m2-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO M2 MONO DUAL PoopTool"
+  },
+  "d12-300-pro-smartpad-direct": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO SMARTPAD DIRECT"
+  },
+  "d12-300-pro-smartpad-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO SMARTPAD MONO DUAL"
+  },
+  "d12-300-pro-smartpad-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 300 PRO SMARTPAD MONO DUAL PoopTool"
+  },
+  "d12-500-pro-m2-direct": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO M2 DIRECT"
+  },
+  "d12-500-pro-m2-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO M2 MONO DUAL"
+  },
+  "d12-500-pro-m2-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO M2 MONO DUAL PoopTool"
+  },
+  "d12-500-pro-smartpad-direct": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO SMARTPAD DIRECT"
+  },
+  "d12-500-pro-smartpad-mono-dual": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO SMARTPAD MONO DUAL"
+  },
+  "d12-500-pro-smartpad-mono-dual-pooptool": {
+    "make": "Wanhao",
+    "model": "D12 500 PRO SMARTPAD MONO DUAL PoopTool"
+  },
+  "elegoo-centauri-carbon": {
+    "featured": 14
+  },
+  "elegoo-neptune-4": {
+    "bedWidthMm": 225,
+    "bedDepthMm": 225,
+    "aliases": [
+      "N4"
+    ],
+    "featured": 23,
+    "note": "Elegoo lists 225 x 225 x 265 mm; both slicers have a 230 x 230 plate."
+  },
+  "elegoo-neptune-4-pro": {
+    "bedWidthMm": 225,
+    "bedDepthMm": 225,
+    "aliases": [
+      "N4 Pro",
+      "N4Pro"
+    ],
+    "featured": 17,
+    "note": "Elegoo lists 225 x 225 x 265 mm; both slicers have a 230 x 230 plate."
+  },
+  "flashforge-ad5x": {
+    "defaultSlotCount": 4,
+    "note": "The IFS holds 4 spools."
+  },
+  "flashforge-adventurer-5m": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "aliases": [
+      "AD5M",
+      "Adventurer5M"
+    ],
+    "featured": 19,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "flsun-super-racer": {
+    "hidden": true,
+    "note": "Cura's copy of flsun-super-racer-sr."
+  },
+  "geeetech-a10m": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a10pro": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a10t": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a20m": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a20t": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a30m": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a30pro": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-a30t": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-mizarm": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-mizarmax": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-mizarpro": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "geeetech-mizars": {
+    "hidden": true,
+    "note": "Cura's copy of an Orca model whose name differs only by a space; the Orca entry stays."
+  },
+  "generic-klipper-printer": {
+    "hidden": true,
+    "note": "Orca's generic template printer, not a product."
+  },
+  "generic-marlin-printer": {
+    "hidden": true,
+    "note": "Orca's generic template printer, not a product."
+  },
+  "generic-repetier-printer": {
+    "hidden": true,
+    "note": "Orca's generic template printer, not a product."
+  },
+  "generic-rrf-printer": {
+    "hidden": true,
+    "note": "Orca's generic template printer, not a product."
+  },
+  "generic-toolchanger-printer": {
+    "hidden": true,
+    "note": "Orca's generic template printer, not a product."
+  },
+  "lulzbot-taz-4-or-5": {
+    "make": "LulzBot",
+    "model": "TAZ 4 or 5"
+  },
+  "lulzbot-taz-6": {
+    "make": "LulzBot",
+    "model": "TAZ 6"
+  },
+  "lulzbot-taz-pro-dual": {
+    "make": "LulzBot",
+    "model": "TAZ Pro Dual"
+  },
+  "lulzbot-taz-pro-s": {
+    "make": "LulzBot",
+    "model": "TAZ Pro S"
+  },
+  "m3d-enabler-d8500-mm-model": {
+    "make": "M3D",
+    "model": "Enabler D8500 MM Model"
+  },
+  "openeye-peacock-v2": {
+    "make": "OpenEYE",
+    "model": "Peacock V2"
+  },
+  "orca-arena-x1-carbon": {
+    "make": "Orca Arena",
+    "model": "X1 Carbon"
+  },
+  "peopoly-magneto-x": {
+    "make": "Peopoly",
+    "model": "Magneto X"
+  },
+  "peopoly-moai": {
+    "hidden": true,
+    "note": "A resin (SLA) printer that Cura models as FFF with a 0.067 mm nozzle."
+  },
+  "prusa-core-one": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "aliases": [
+      "Core One",
+      "Prusa Core One"
+    ],
+    "featured": 7,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "prusa-core-one-mmu3": {
+    "make": "Prusa",
+    "model": "CORE One MMU3",
+    "technology": "FFF",
+    "bedWidthMm": 250,
+    "bedDepthMm": 220,
+    "bedHeightMm": 270,
+    "nozzleOptionsMm": [
+      0.25,
+      0.4,
+      0.6,
+      0.8
+    ],
+    "defaultNozzleMm": 0.4,
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "extruderCount": 1,
+    "defaultSlotCount": 5,
+    "kinematics": "corexy",
+    "aliases": [
+      "CORE One + MMU3",
+      "Core One MMU"
+    ],
+    "note": "Hand-added: the CORE One with the MMU3, 5 filaments. Specs from prusa3d.com."
+  },
+  "prusa-mini": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "model": "MINI+",
+    "aliases": [
+      "MINI",
+      "MINI Plus",
+      "Original Prusa MINI+"
+    ],
+    "featured": 16,
+    "note": "Orca's \"Prusa MINI\" profile is the MINI+, the model Prusa sells. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "prusa-mk4s": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "aliases": [
+      "Original Prusa MK4S",
+      "i3 MK4S"
+    ],
+    "featured": 6,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "prusa-mk4s-mmu3": {
+    "make": "Prusa",
+    "model": "MK4S MMU3",
+    "technology": "FFF",
+    "bedWidthMm": 250,
+    "bedDepthMm": 210,
+    "bedHeightMm": 220,
+    "nozzleOptionsMm": [
+      0.25,
+      0.4,
+      0.6,
+      0.8
+    ],
+    "defaultNozzleMm": 0.4,
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "extruderCount": 1,
+    "defaultSlotCount": 5,
+    "kinematics": "i3",
+    "aliases": [
+      "MK4S + MMU3",
+      "MK4S MMU"
+    ],
+    "note": "Hand-added: the MK4S with the MMU3, 5 filaments. Specs from prusa3d.com."
+  },
+  "prusa-xl-5t": {
+    "defaultSlotCount": 5,
+    "note": "Five toolheads, one spool each."
+  },
+  "qidi-q1-pro": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "hasHeatedChamber": true,
+    "aliases": [
+      "Q1Pro"
+    ],
+    "featured": 24,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Heated chamber (active, 60 C)."
+  },
+  "qidi-x-plus-4": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "hasHeatedChamber": true,
+    "aliases": [
+      "Plus4",
+      "Plus 4",
+      "X Plus 4"
+    ],
+    "featured": 18,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Heated chamber (active, 65 C)."
+  },
+  "seemecnc-rostock-max-v3-2": {
+    "hidden": true,
+    "note": "Cura's copy of seemecnc-rostockmax-v3-2."
+  },
+  "snapmaker-u1": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "bedHeightMm": 270,
+    "defaultSlotCount": 4,
+    "aliases": [
+      "U1"
+    ],
+    "featured": 21,
+    "note": "Snapmaker lists 270 x 270 x 270 mm; Orca's height is 270.05. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: 4 toolheads, one spool each."
+  },
+  "sovol-sv01pro": {
+    "hidden": true,
+    "note": "Cura's copy of sovol-sv01-pro."
+  },
+  "sovol-sv06": {
+    "featured": 20
+  },
+  "tronxy-x5sa-400-marlin-firmware": {
+    "make": "Tronxy",
+    "model": "X5SA 400 Marlin Firmware"
+  },
+  "troodon-2-0-klipper": {
+    "make": "Vivedino",
+    "model": "Troodon 2.0 Klipper"
+  },
+  "troodon-2-0-rrf": {
+    "make": "Vivedino",
+    "model": "Troodon 2.0 RRF"
+  },
+  "voron-2-4-250": {
+    "bedHeightMm": 210,
+    "note": "Voron's stock Klipper config for the 250 build sets Z position_max 210; Orca has 225."
+  },
+  "voron-2-4-300": {
+    "bedHeightMm": 260,
+    "note": "Voron's stock Klipper config for the 300 build sets Z position_max 260; Orca has 275."
+  },
+  "voron-2-4-350": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "bedHeightMm": 310,
+    "aliases": [
+      "V2.4 350",
+      "Voron2.4 350"
+    ],
+    "featured": 22,
+    "note": "Voron's stock Klipper config for the 350 build sets Z position_max 310; Orca has 325. OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page."
+  },
+  "voxelab-aquila-x2": {
+    "make": "Voxelab",
+    "model": "Aquila X2"
+  }
+}
