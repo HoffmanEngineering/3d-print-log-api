@@ -969,7 +969,7 @@ public class Startup
 
         app.UseCors(builder =>
         {
-            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Request-Context");
         });
 
         // Both wrap routing, authentication and ApiKeyMiddleware, because that is where the
