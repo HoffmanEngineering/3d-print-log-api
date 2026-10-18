@@ -131,6 +131,82 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task Put_NullCatalogModelId_KeepsTheCurrentLink()
+    {
+        var id = await SeedModelAsync();
+        var created = await CreateAsync(id);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(id, updated.CatalogModelId);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await db.Printers.FindAsync([created.Id!.Value], TestContext.Current.CancellationToken);
+        Assert.Equal(id, stored!.CatalogModelId);
+    }
+
+    [Fact]
+    public async Task Post_DifferentlyCasedId_SavesTheCanonicalId()
+    {
+        var id = await SeedModelAsync();
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", NewPrinter(id.ToUpperInvariant()));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(id, created.CatalogModelId);
+    }
+
+    [Fact]
+    public async Task Put_SameIdInDifferentCase_IsUnchangedAndCanonical()
+    {
+        var id = await SeedModelAsync();
+        var created = await CreateAsync(id);
+        await RetireAsync(id);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, id.ToUpperInvariant()));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(id, updated.CatalogModelId);
+    }
+
+    [Fact]
+    public async Task Put_KeepingNowHiddenId_Succeeds()
+    {
+        var id = await SeedModelAsync();
+        var created = await CreateAsync(id);
+        await HideAsync(id);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, id));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Put_DoesNotChangeCreatedAt()
+    {
+        var created = await CreateAsync(null);
+        DateTimeOffset? before;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            before = (await db.Printers.FindAsync([created.Id!.Value], TestContext.Current.CancellationToken))!.CreatedAt;
+        }
+        Assert.NotNull(before);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var scope2 = _factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var after = (await db2.Printers.FindAsync([created.Id!.Value], TestContext.Current.CancellationToken))!.CreatedAt;
+        Assert.Equal(before, after);
+    }
+
+    [Fact]
     public async Task Put_SwitchingToAnotherLiveModel_Succeeds()
     {
         var first = await SeedModelAsync();
@@ -190,6 +266,15 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         return id;
+    }
+
+    private async Task HideAsync(string id)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var model = await db.PrinterModels.FindAsync([id], TestContext.Current.CancellationToken);
+        model!.Hidden = true;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
     private async Task RetireAsync(string id)

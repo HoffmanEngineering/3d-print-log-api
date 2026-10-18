@@ -214,12 +214,13 @@ public class PrintersController(
     /// <param name="printer">The updated printer details.</param>
     /// <returns></returns>
     /// <response code="201">Returned with the updated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -249,7 +250,7 @@ public class PrintersController(
             return Forbid();
         }
 
-        var catalogProblem = await ValidateCatalogModelAsync(printer.CatalogModelId, existingPrinter.CatalogModelId);
+        var catalogProblem = await ValidateCatalogModelAsync(printer, existingPrinter.CatalogModelId);
         if (catalogProblem is not null)
         {
             return catalogProblem;
@@ -312,12 +313,13 @@ public class PrintersController(
     /// </summary>
     /// <param name="printer">The printer details to create</param>
     /// <response code="201">Returned with the newly creeated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -329,7 +331,7 @@ public class PrintersController(
             return Unauthorized();
         }
 
-        var catalogProblem = await ValidateCatalogModelAsync(printer.CatalogModelId, currentCatalogModelId: null);
+        var catalogProblem = await ValidateCatalogModelAsync(printer, currentCatalogModelId: null);
         if (catalogProblem is not null)
         {
             return catalogProblem;
@@ -368,32 +370,42 @@ public class PrintersController(
     /// <summary>
     /// Checks a catalog model id on a printer write. Null is always fine. Otherwise the model must
     /// exist and not be hidden, and a retired model is accepted only when the printer already has it.
-    /// Keeping the id a printer already has is always accepted, so editing a printer whose model
+    /// Keeping the id a printer already has (any case) is always accepted, so editing a printer whose model
     /// was hidden or retired later never fails on a field the user did not touch.
     /// </summary>
-    private async Task<ObjectResult?> ValidateCatalogModelAsync(string? catalogModelId, string? currentCatalogModelId)
+    private async Task<ObjectResult?> ValidateCatalogModelAsync(AddPrinterDTO printer, string? currentCatalogModelId)
     {
-        if (catalogModelId is null || catalogModelId == currentCatalogModelId)
+        var catalogModelId = printer.CatalogModelId;
+        if (catalogModelId is null)
         {
-            // An unchanged id still has to exist, but the FK guarantees that for a stored one.
             return null;
         }
 
-        var model = await context.PrinterModels
-            .AsNoTracking()
-            .Where(m => m.Id == catalogModelId)
-            .Select(m => new { m.Hidden, m.Retired })
-            .SingleOrDefaultAsync(HttpContext.RequestAborted);
-
-        if (model is null || model.Hidden || model.Retired)
+        if (string.Equals(catalogModelId, currentCatalogModelId, StringComparison.OrdinalIgnoreCase))
         {
-            return CodedProblem(
-                StatusCodes.Status400BadRequest,
-                "The printer model was not found in the catalog.",
-                "printer_model_not_found");
+            // Unchanged. The FK guarantees a stored id exists; save it in its stored case.
+            printer.CatalogModelId = currentCatalogModelId;
+            return null;
         }
 
-        return null;
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels
+            .AsNoTracking()
+            .Where(m => m.Id.ToLower() == lowered)
+            .Select(m => new { m.Id, m.Hidden, m.Retired })
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
+
+        if (model is not null && !model.Hidden && !model.Retired)
+        {
+            printer.CatalogModelId = model.Id;
+            return null;
+        }
+
+        return CodedProblem(
+            StatusCodes.Status400BadRequest,
+            "The printer model was not found in the catalog.",
+            "printer_model_not_found");
     }
 
     private ObjectResult CodedProblem(int status, string detail, string code)
