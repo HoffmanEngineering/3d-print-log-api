@@ -59,6 +59,8 @@
     <!-- A minimal Cura tree and Orca profile folder for the printer catalog generator
          (CatalogGeneratorTests). Facts-shaped stand-ins, not copies of real profiles. -->
     <None Include="..\tests-fixtures\printer-catalog\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\printer-catalog" />
+    <!-- The hand-maintained overrides, so PrinterCatalogGoldenTests can check that every exception carries a note. -->
+    <None Include="..\PrintLogApi\PrinterCatalog\catalog-overrides.json" CopyToOutputDirectory="PreserveNewest" Link="printer-catalog-data\catalog-overrides.json" />
     <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
     <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->

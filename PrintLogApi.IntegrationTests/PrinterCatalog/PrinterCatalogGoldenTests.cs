@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using PrintLogApi.PrinterCatalog;
 using PrintLogApi.PrinterCatalog.Generation;
 using Xunit;
@@ -158,6 +159,129 @@ public partial class PrinterCatalogGoldenTests
     public void TheFirstPublishedFile_HasNoMergedIds()
     {
         Assert.All(Catalog.Reserved, r => Assert.Null(r.MergedInto));
+    }
+
+    // --- Sanity rules over every model (fix round 1) ---
+
+    private static readonly JsonObject Overrides = JsonNode.Parse(File.ReadAllText(
+        Path.Combine(AppContext.BaseDirectory, "printer-catalog-data", "catalog-overrides.json")))!.AsObject();
+
+    private static bool OverrideExplains(string id, string field) =>
+        Overrides[id] is JsonObject entry
+        && entry.ContainsKey(field)
+        && entry["note"]?.GetValue<string>() is { Length: > 0 };
+
+    /// <summary>Every Bambu Lab printer takes an AMS (or AMS lite), 4 slots.</summary>
+    [Fact]
+    public void EveryBambuLabModel_HasTheAmsFourSlots()
+    {
+        var bambu = Catalog.Models.Where(m => m.Make == "Bambu Lab").ToList();
+
+        Assert.NotEmpty(bambu);
+        Assert.All(bambu, m => Assert.True(m.DefaultSlotCount == 4, $"{m.Id}: {m.DefaultSlotCount}"));
+    }
+
+    [Fact]
+    public void AMultiExtruderModel_HasASlotPerExtruder_UnlessAnOverrideSaysWhy()
+    {
+        Assert.All(
+            Catalog.Models.Where(m => m.ExtruderCount > 1),
+            m => Assert.True(
+                m.DefaultSlotCount >= m.ExtruderCount || OverrideExplains(m.Id, "defaultSlotCount"),
+                $"{m.Id}: {m.ExtruderCount} extruders, {m.DefaultSlotCount?.ToString() ?? "no"} slots"));
+    }
+
+    /// <summary>The Combo policy: a model whose main SKU ships with a multi-material unit gets its slots.</summary>
+    [Theory]
+    [InlineData("bambu-lab-x2d", 4)] // https://bambulab.com/en/x2d (X2D Combo: AMS 2 Pro)
+    [InlineData("flashforge-creator-5", 4)] // https://flashforge.com (4-toolhead toolchanger)
+    [InlineData("flashforge-creator-5-pro", 4)]
+    [InlineData("creality-k2", 4)] // K2 Combo: one CFS
+    [InlineData("creality-k2-pro", 4)] // K2 Pro Combo: one CFS
+    [InlineData("creality-hi", 4)] // https://www.creality.com/products/creality-hi-combo
+    [InlineData("anycubic-kobra-s1", 4)] // https://store.anycubic.com/products/kobra-s1-combo
+    [InlineData("elegoo-centauri-carbon-2", 4)] // https://www.elegoo.com/products/canvas-for-centauri-carbon-2-centauri-2-series
+    public void AComboModel_HasItsUnitsSlots(string id, int slots)
+    {
+        Assert.Equal(slots, Assert.Single(Catalog.Models, m => m.Id == id).DefaultSlotCount);
+    }
+
+    [Fact]
+    public void FilamentDiameter_IsUnknown175Or285()
+    {
+        Assert.All(Catalog.Models, m => Assert.True(
+            m.FilamentDiameterMm is null or 1.75 or 2.85, $"{m.Id}: {m.FilamentDiameterMm}"));
+    }
+
+    /// <summary>Clay, paste and pellet machines take no filament.</summary>
+    [Theory]
+    [InlineData("eazao-m500")]
+    [InlineData("eazao-m600")]
+    [InlineData("eazao-m700")]
+    [InlineData("eazao-potter")]
+    [InlineData("eazao-zero")]
+    [InlineData("fablabbcn-pasteprinter")]
+    [InlineData("structur3d-io-discov3ry-complete")]
+    public void ANonFilamentMachine_HasNoFilamentDiameter(string id)
+    {
+        Assert.Null(Assert.Single(Catalog.Models, m => m.Id == id).FilamentDiameterMm);
+    }
+
+    [Fact]
+    public void TheDefaultNozzle_IsOneOfTheNozzleOptions()
+    {
+        Assert.All(
+            Catalog.Models.Where(m => m.DefaultNozzleMm is not null && m.NozzleOptionsMm is { Count: > 0 }),
+            m => Assert.True(m.NozzleOptionsMm!.Contains(m.DefaultNozzleMm!.Value), $"{m.Id}: {m.DefaultNozzleMm} not in [{string.Join(", ", m.NozzleOptionsMm!)}]"));
+    }
+
+    [Theory]
+    [InlineData("prusa-mk4s-mmu3", "prusa-mk4s")]
+    [InlineData("prusa-core-one-mmu3", "prusa-core-one")]
+    public void AnMmu3Extra_TakesItsBaseModelsNozzles(string id, string baseId)
+    {
+        var extra = Assert.Single(Catalog.Models, m => m.Id == id);
+        var baseModel = Assert.Single(Catalog.Models, m => m.Id == baseId);
+
+        Assert.Equal(baseModel.NozzleOptionsMm, extra.NozzleOptionsMm);
+        Assert.Equal([0.25, 0.3, 0.4, 0.5, 0.6, 0.8], extra.NozzleOptionsMm);
+    }
+
+    [Theory]
+    [InlineData("orca-arena-x1-carbon")] // Orca's own demo copy of the X1 Carbon, not a product
+    public void ADemoOrTemplatePrinter_IsHidden(string id)
+    {
+        Assert.DoesNotContain(Catalog.Models, m => m.Id == id);
+        Assert.Contains(Catalog.Reserved, r => r.Id == id);
+    }
+
+    [Fact]
+    public void EveryModel_HasABed_ExceptOnesAnOverrideExplains()
+    {
+        Assert.All(Catalog.Models, m => Assert.True(
+            (m.BedWidthMm is not null && m.BedDepthMm is not null && m.BedHeightMm is not null)
+                || OverrideExplains(m.Id, "note"),
+            $"{m.Id}: {m.BedWidthMm} x {m.BedDepthMm} x {m.BedHeightMm}"));
+    }
+
+    [Theory]
+    [InlineData("e3ng-v1-2s", "RH3D")] // https://rh3d.xyz (the E3NG's designer)
+    [InlineData("lh-stinger", "lhndo")] // https://github.com/lhndo/LH-Stinger
+    [InlineData("lh-stinger-mmu", "lhndo")]
+    [InlineData("construct-1", "Construct3D")] // https://construct-3d.com
+    [InlineData("construct-1-xl", "Construct3D")]
+    public void AModelWhoseMakeOrcaGuessedWrong_HasItsRealBrand(string id, string make)
+    {
+        Assert.Equal(make, Assert.Single(Catalog.Models, m => m.Id == id).Make);
+    }
+
+    [Fact]
+    public void TheLoader_SaysWhichResourceIsMissing()
+    {
+        var e = Assert.Throws<InvalidOperationException>(
+            () => PrinterCatalogFileLoader.LoadEmbedded(typeof(PrinterCatalogGoldenTests).Assembly, "No.Such.catalog.json"));
+
+        Assert.Contains("No.Such.catalog.json", e.Message, StringComparison.Ordinal);
     }
 
     private static void AssertSource(CatalogSource source, string repo, string license)

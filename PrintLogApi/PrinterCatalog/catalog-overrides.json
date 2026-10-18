@@ -15,6 +15,10 @@
     "defaultSlotCount": 4,
     "note": "Bundled with a 4-slot ACE Pro."
   },
+  "anycubic-kobra-s1": {
+    "defaultSlotCount": 4,
+    "note": "Combo policy: the Kobra S1 Combo ships with a 4-slot ACE Pro."
+  },
   "bambu-lab-a1": {
     "filamentDiameterMm": 1.75,
     "hasHeatedBed": true,
@@ -106,6 +110,26 @@
     "defaultSlotCount": 4,
     "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: AMS, 4."
   },
+  "bambu-lab-x2d": {
+    "filamentDiameterMm": 1.75,
+    "hasHeatedBed": true,
+    "defaultSlotCount": 4,
+    "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Slots: the X2D ships as a Combo with the AMS 2 Pro, 4."
+  },
+  "bfb-bfb": {
+    "filamentDiameterMm": 1.75,
+    "note": "Cura says 1.7; normalized to 1.75 mm."
+  },
+  "construct-1": {
+    "make": "Construct3D",
+    "model": "Construct 1",
+    "note": "Made by Construct3D (construct-3d.com), Orca's vendor CONSTRUCT3D."
+  },
+  "construct-1-xl": {
+    "make": "Construct3D",
+    "model": "Construct 1 XL",
+    "note": "Made by Construct3D (construct-3d.com), Orca's vendor CONSTRUCT3D."
+  },
   "creality-ender-3-v3": {
     "filamentDiameterMm": 1.75,
     "hasHeatedBed": true,
@@ -122,6 +146,10 @@
       "Ender3 V3 SE"
     ],
     "featured": 9
+  },
+  "creality-hi": {
+    "defaultSlotCount": 4,
+    "note": "Combo policy: the Hi Combo ships with one 4-slot CFS (creality.com/products/creality-hi-combo)."
   },
   "creality-k1-cfs-c": {
     "defaultSlotCount": 4,
@@ -154,6 +182,10 @@
     "defaultSlotCount": 4,
     "note": "The CFS-C bundle: a 4-slot CFS."
   },
+  "creality-k2": {
+    "defaultSlotCount": 4,
+    "note": "Combo policy: the K2 Combo ships with one 4-slot CFS."
+  },
   "creality-k2-plus": {
     "filamentDiameterMm": 1.75,
     "hasHeatedBed": true,
@@ -164,6 +196,10 @@
     ],
     "featured": 10,
     "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Heated chamber (active, about 60 C). Slots: the Combo ships with a 4-slot CFS."
+  },
+  "creality-k2-pro": {
+    "defaultSlotCount": 4,
+    "note": "Combo policy: the K2 Pro Combo ships with one 4-slot CFS."
   },
   "d12-230-pro-m2-direct": {
     "make": "Wanhao",
@@ -215,7 +251,13 @@
   },
   "d12-500-pro-m2-direct": {
     "make": "Wanhao",
-    "model": "D12 500 PRO M2 DIRECT"
+    "model": "D12 500 PRO M2 DIRECT",
+    "bedWidthMm": 500,
+    "bedDepthMm": 500,
+    "bedHeightMm": 500,
+    "defaultNozzleMm": 0.4,
+    "extruderCount": 1,
+    "note": "Orca lists this model with no machine preset; bed, nozzle and extruder copied from its sibling d12-500-pro-smartpad-direct (same frame, other controller)."
   },
   "d12-500-pro-m2-mono-dual": {
     "make": "Wanhao",
@@ -237,8 +279,37 @@
     "make": "Wanhao",
     "model": "D12 500 PRO SMARTPAD MONO DUAL PoopTool"
   },
+  "e3ng-v1-2s": {
+    "make": "RH3D",
+    "model": "E3NG v1.2S",
+    "note": "The E3NG is RH3D's design (rh3d.xyz); Orca's prefix rule took E3NG for the make."
+  },
+  "eazao-m500": {
+    "filamentDiameterMm": null,
+    "note": "A clay printer: it takes no filament."
+  },
+  "eazao-m600": {
+    "filamentDiameterMm": null,
+    "note": "A clay printer: it takes no filament."
+  },
+  "eazao-m700": {
+    "filamentDiameterMm": null,
+    "note": "A clay printer: it takes no filament."
+  },
+  "eazao-potter": {
+    "filamentDiameterMm": null,
+    "note": "A clay printer: it takes no filament."
+  },
+  "eazao-zero": {
+    "filamentDiameterMm": null,
+    "note": "A clay printer: it takes no filament."
+  },
   "elegoo-centauri-carbon": {
     "featured": 14
+  },
+  "elegoo-centauri-carbon-2": {
+    "defaultSlotCount": 4,
+    "note": "Combo policy: the Centauri Carbon 2 Combo ships with the 4-filament CANVAS."
   },
   "elegoo-neptune-4": {
     "bedWidthMm": 225,
@@ -258,6 +329,10 @@
     ],
     "featured": 17,
     "note": "Elegoo lists 225 x 225 x 265 mm; both slicers have a 230 x 230 plate."
+  },
+  "fablabbcn-pasteprinter": {
+    "filamentDiameterMm": null,
+    "note": "A paste printer: it takes no filament."
   },
   "flashforge-ad5x": {
     "defaultSlotCount": 4,
@@ -345,6 +420,20 @@
     "hidden": true,
     "note": "Orca's generic template printer, not a product."
   },
+  "goofoo-cube": {
+    "defaultNozzleMm": 0.7,
+    "note": "Cura's only nozzle variant for this machine is 0.7 mm; the 0.4 default was inherited from its base definition."
+  },
+  "lh-stinger": {
+    "make": "lhndo",
+    "model": "LH Stinger",
+    "note": "The LH Stinger is lhndo's open-source design (github.com/lhndo/LH-Stinger)."
+  },
+  "lh-stinger-mmu": {
+    "make": "lhndo",
+    "model": "LH Stinger MMU",
+    "note": "The LH Stinger is lhndo's open-source design (github.com/lhndo/LH-Stinger)."
+  },
   "lulzbot-taz-4-or-5": {
     "make": "LulzBot",
     "model": "TAZ 4 or 5"
@@ -363,15 +452,16 @@
   },
   "m3d-enabler-d8500-mm-model": {
     "make": "M3D",
-    "model": "Enabler D8500 MM Model"
+    "model": "Enabler D8500 MM Model",
+    "note": "Orca's preset has no printable height and no manufacturer spec page was found, so the height stays unknown."
   },
   "openeye-peacock-v2": {
     "make": "OpenEYE",
     "model": "Peacock V2"
   },
   "orca-arena-x1-carbon": {
-    "make": "Orca Arena",
-    "model": "X1 Carbon"
+    "hidden": true,
+    "note": "Orca's own demo copy of the Bambu X1 Carbon; no such product is sold."
   },
   "peopoly-magneto-x": {
     "make": "Peopoly",
@@ -400,7 +490,9 @@
     "bedHeightMm": 270,
     "nozzleOptionsMm": [
       0.25,
+      0.3,
       0.4,
+      0.5,
       0.6,
       0.8
     ],
@@ -447,7 +539,9 @@
     "bedHeightMm": 220,
     "nozzleOptionsMm": [
       0.25,
+      0.3,
       0.4,
+      0.5,
       0.6,
       0.8
     ],
@@ -489,6 +583,10 @@
     "featured": 18,
     "note": "OrcaSlicer machine profiles carry no filament diameter or heated bed; set from the manufacturer's spec page. Heated chamber (active, 65 C)."
   },
+  "renkforce-cube-one": {
+    "defaultNozzleMm": 0.7,
+    "note": "Cura's only nozzle variant for this machine is 0.7 mm; the 0.4 default was inherited from its base definition."
+  },
   "seemecnc-rostock-max-v3-2": {
     "hidden": true,
     "note": "Cura's copy of seemecnc-rostockmax-v3-2."
@@ -511,6 +609,10 @@
   "sovol-sv06": {
     "featured": 20
   },
+  "structur3d-io-discov3ry-complete": {
+    "filamentDiameterMm": null,
+    "note": "A paste extruder (Cura says 3.175): it takes no filament."
+  },
   "tronxy-x5sa-400-marlin-firmware": {
     "make": "Tronxy",
     "model": "X5SA 400 Marlin Firmware"
@@ -522,6 +624,22 @@
   "troodon-2-0-rrf": {
     "make": "Vivedino",
     "model": "Troodon 2.0 RRF"
+  },
+  "ultimaker-3": {
+    "nozzleOptionsMm": [
+      0.25,
+      0.4,
+      0.8
+    ],
+    "note": "Print cores AA 0.25, AA 0.4, AA 0.8, BB 0.4 and BB 0.8; the generator missed the 0.4 variants (named aa04 and bb04)."
+  },
+  "ultimaker-3-extended": {
+    "nozzleOptionsMm": [
+      0.25,
+      0.4,
+      0.8
+    ],
+    "note": "Print cores AA 0.25, AA 0.4, AA 0.8, BB 0.4 and BB 0.8; the generator missed the 0.4 variants (named aa04 and bb04)."
   },
   "voron-2-4-250": {
     "bedHeightMm": 210,
@@ -545,5 +663,17 @@
   "voxelab-aquila-x2": {
     "make": "Voxelab",
     "model": "Aquila X2"
+  },
+  "wanhao-duplicator-5s": {
+    "filamentDiameterMm": 2.85,
+    "note": "Cura says 3.0; the filament sold for it is 2.85 mm nominal (\"3 mm\")."
+  },
+  "wanhao-duplicator-5s-mini": {
+    "filamentDiameterMm": 2.85,
+    "note": "Cura says 3.0; the filament sold for it is 2.85 mm nominal (\"3 mm\")."
+  },
+  "winbo-dragon-l-4": {
+    "filamentDiameterMm": 2.85,
+    "note": "Cura says 3.0; the filament sold for it is 2.85 mm nominal (\"3 mm\")."
   }
 }

@@ -191,6 +191,32 @@ public class CatalogGeneratorTests
     }
 
     [Fact]
+    public void AMultiExtruderModel_GetsASlotPerExtruder_FromTheSameSource()
+    {
+        var file = PrinterCatalogGenerator.Generate(Inputs());
+
+        var z1 = Assert.Single(file.Models, m => m.Id == "zed-labs-z1");
+        Assert.Equal(2, z1.ExtruderCount);
+        Assert.Equal(2, z1.DefaultSlotCount);
+        Assert.Equal(z1.Sources!["extruderCount"], z1.Sources["defaultSlotCount"]);
+        // A single extruder says nothing about slots.
+        Assert.Null(Assert.Single(file.Models, m => m.Id == "foo-bar").DefaultSlotCount);
+    }
+
+    [Fact]
+    public void Overrides_ANullClearsASourceValue_AndItsSource()
+    {
+        var overrides = JsonNode.Parse("""
+            { "foo-bar": { "filamentDiameterMm": null, "note": "A paste extruder." } }
+            """)!.AsObject();
+
+        var fooBar = Assert.Single(PrinterCatalogGenerator.Generate(Inputs(overrides)).Models, m => m.Id == "foo-bar");
+
+        Assert.Null(fooBar.FilamentDiameterMm);
+        Assert.False(fooBar.Sources!.ContainsKey("filamentDiameterMm"));
+    }
+
+    [Fact]
     public void Overrides_ANoteIsForReviewersOnly_AndNeverReachesTheFile()
     {
         var overrides = JsonNode.Parse("""
@@ -269,10 +295,12 @@ public class CatalogGeneratorTests
 
         var json = JsonNode.Parse(CatalogFile.Serialize(file))!.AsObject();
         var qux = json["models"]!.AsArray().Single(m => (string?)m!["id"] == "qux-one")!.AsObject();
-        // Cura knows nothing about kinematics, slots or aliases: the keys are absent, not null.
+        // Cura knows nothing about kinematics or aliases: the keys are absent, not null.
         Assert.False(qux.ContainsKey("kinematics"));
-        Assert.False(qux.ContainsKey("defaultSlotCount"));
         Assert.False(qux.ContainsKey("aliases"));
+        // A single-extruder model has no slot count either.
+        var fooBar = json["models"]!.AsArray().Single(m => (string?)m!["id"] == "foo-bar")!.AsObject();
+        Assert.False(fooBar.ContainsKey("defaultSlotCount"));
         Assert.False(qux.ContainsKey("featured"));
         Assert.Equal(300, (double)qux["bedWidthMm"]!);
     }

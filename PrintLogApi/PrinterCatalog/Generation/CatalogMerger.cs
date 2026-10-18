@@ -167,6 +167,14 @@ public static class CatalogMerger
 
         foreach (var (field, v) in entry)
         {
+            // A null clears a value a source got wrong (a paste extruder's "filament"), and the
+            // field then has no source at all.
+            if (v is null && Clear(m, field) is { } cleared)
+            {
+                m = cleared;
+                sources.Remove(field == "slotCount" ? "defaultSlotCount" : field);
+                continue;
+            }
             m = field switch
             {
                 "make" => m with { Make = Set(field, Text(field, v)) },
@@ -202,6 +210,43 @@ public static class CatalogMerger
         }
         return m with { Sources = sources };
     }
+
+    /// <summary>The model with one spec field emptied, or null when the field can't be cleared.</summary>
+    private static CatalogModel? Clear(CatalogModel m, string field) => field switch
+    {
+        "bedWidthMm" => m with { BedWidthMm = null },
+        "bedDepthMm" => m with { BedDepthMm = null },
+        "bedHeightMm" => m with { BedHeightMm = null },
+        "nozzleOptionsMm" => m with { NozzleOptionsMm = null },
+        "defaultNozzleMm" => m with { DefaultNozzleMm = null },
+        "filamentDiameterMm" => m with { FilamentDiameterMm = null },
+        "hasHeatedBed" => m with { HasHeatedBed = null },
+        "hasHeatedChamber" => m with { HasHeatedChamber = null },
+        "extruderCount" => m with { ExtruderCount = null },
+        "defaultSlotCount" or "slotCount" => m with { DefaultSlotCount = null },
+        "kinematics" => m with { Kinematics = null },
+        _ => null,
+    };
+
+    /// <summary>
+    /// A model with more than one extruder holds at least one spool per extruder, so its slot count
+    /// defaults to its extruder count, credited to the source the extruder count came from. An
+    /// override can still set a different count (with a note saying why).
+    /// </summary>
+    public static IReadOnlyList<CatalogModel> DeriveSlotCounts(IReadOnlyList<CatalogModel> models) =>
+        models.Select(m =>
+        {
+            if (m.DefaultSlotCount is not null || m.ExtruderCount is not > 1)
+            {
+                return m;
+            }
+            var sources = new SortedDictionary<string, string>(m.Sources?.ToDictionary() ?? [], StringComparer.Ordinal);
+            if (sources.TryGetValue("extruderCount", out var source))
+            {
+                sources["defaultSlotCount"] = source;
+            }
+            return m with { DefaultSlotCount = m.ExtruderCount, Sources = sources };
+        }).ToList();
 
     /// <summary>Sorted, distinct, ordinal.</summary>
     public static IReadOnlyList<string>? UnionKeys(IReadOnlyList<string>? a, IReadOnlyList<string>? b)

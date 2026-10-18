@@ -48,7 +48,7 @@ public static class PrinterCatalogGenerator
         var cura = ReadSource("cura", inputs.CuraDir, dir => CuraProfileReader.Read(dir, normalizer, inputs.Log));
         var orca = ReadSource("orca", inputs.OrcaDir, dir => OrcaProfileReader.Read(dir, normalizer, inputs.Log));
 
-        var merged = CatalogMerger.Merge(cura, orca, normalizer, inputs.Log);
+        var merged = CatalogMerger.DeriveSlotCounts(CatalogMerger.Merge(cura, orca, normalizer, inputs.Log));
         var withIds = CatalogIds.Assign(merged, inputs.Previous, normalizer, inputs.Log);
 
         // Ids a generated model held before but that no source produces now. An override for one
