@@ -157,6 +157,10 @@ public class PrinterMaintenanceController(
         {
             return NotFound();
         }
+        catch (UserCannotAccessPrinterException)
+        {
+            return NotFound();
+        }
     }
 
     /// <summary>
@@ -166,9 +170,11 @@ public class PrinterMaintenanceController(
     /// <returns>The filament detail DTO that was created.</returns>
     /// <response code="201">The filament detail DTO that was created.</response>
     /// <response code="401">Returned if the request is not authenticated.</response>
+    /// <response code="404">Returned if the printer does not exist or belongs to someone else.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrinterMaintenanceDto>> PostPrinterMaintenanceEntry(AddPrinterMaintenanceDto dto)
     {
         var userId = User.GetUserId();
@@ -178,10 +184,17 @@ public class PrinterMaintenanceController(
             return Unauthorized();
         }
 
-        var newEntry = await printerMaintenanceService.AddEntry(dto, userId.Value);
+        try
+        {
+            var newEntry = await printerMaintenanceService.AddEntry(dto, userId.Value);
 
-
-        return CreatedAtAction("GetMaintenanceEntry", new { id = newEntry.Id }, mapper.Map<PrinterMaintenance, PrinterMaintenanceDto>(newEntry));
+            return CreatedAtAction("GetMaintenanceEntry", new { id = newEntry.Id }, mapper.Map<PrinterMaintenance, PrinterMaintenanceDto>(newEntry));
+        }
+        catch (UserCannotAccessPrinterException)
+        {
+            // A deleted printer and another user's look the same.
+            return NotFound();
+        }
     }
 
     /// <summary>
