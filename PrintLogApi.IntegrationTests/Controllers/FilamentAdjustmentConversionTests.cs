@@ -161,17 +161,20 @@ public class FilamentAdjustmentConversionTests : IClassFixture<CustomWebApplicat
     }
 
     [Fact]
-    public async Task UpdateFilament_AdjustmentsLeftOutOfTheRequest_AreRemoved()
+    public async Task UpdateFilament_DensityChange_RederivesAdjustmentsLeftOutOfTheRequest()
     {
-        // An explicit empty adjustment list in a PUT replaces the stored one, so every
-        // adjustment is removed. A null or omitted list keeps the stored adjustments (#248).
-        var filament = await CreateFilamentAsync("Adjustments Omitted 232");
+        var filament = await CreateFilamentAsync("Density Change Omitted 248");
         await AssertSuccessAsync(await PutAsync(filament, [LengthAdjustment(filament.Id, -10)]));
+        var stored = Assert.Single((await GetAsync(filament.Id)).FilamentAdjustments!);
 
-        var response = await PutAsync(filament, [], density: 2.48);
+        // API-key clients leave the list out, which keeps the stored adjustments (#248).
+        var response = await PutAsync(filament, null, density: 2.48);
 
         await AssertSuccessAsync(response);
-        Assert.Empty((await GetAsync(filament.Id)).FilamentAdjustments!);
+        var rederived = Assert.Single((await GetAsync(filament.Id)).FilamentAdjustments!);
+        Assert.Equal(stored.Id, rederived.Id);
+        // Twice the density, twice the weight, give or take the rounding to whole milligrams.
+        Assert.InRange(rederived.AmountMg!.Value, stored.AmountMg!.Value * 2 - 1, stored.AmountMg.Value * 2 + 1);
     }
 
     #endregion
