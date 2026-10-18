@@ -1,6 +1,9 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
+using PrintLogApi.Services.Sync;
 using PrintLogApi.Models.DTOs.UserApiKeys;
 using Xunit;
 
@@ -399,6 +402,38 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
         var changed = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot", etag.Tag), Ct);
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
         Assert.NotEqual(etag.Tag, changed.Headers.ETag?.Tag);
+    }
+
+    [Fact]
+    public async Task Snapshot_ETag_ChangesWhenOnlyTheMonthOutcomesChange()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        factory.Clock.SetUtcNow(SyncTestFactory.Start);
+        var print = await AddPrintAsync(user, printer, Print.PrintStatus.Success, SyncTestFactory.Start.AddDays(-1), printSeconds: 600);
+        var first = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot"), Ct);
+        var etag = first.Headers.ETag!.Tag;
+
+        // Success becomes Failed with no version bump; printCount and grams stay put. Dropping only
+        // the totals entry (the core and its hash stay cached) leaves the outcome counts as the one
+        // input that differs, so a new tag proves they feed the ETag.
+        await WithDbAsync(async db =>
+        {
+            (await db.Prints.FindAsync([print.Id], Ct))!.Status = Print.PrintStatus.Failed;
+            await db.SaveChangesAsync(Ct);
+            return 0;
+        });
+        var guid = factory.Services.GetRequiredService<ICacheVersionService>().GetUserCacheVersion(user.Id);
+        var month = SyncMonth.Containing(SyncTestFactory.Start, SyncZone.Utc);
+        await factory.Services.GetRequiredService<HybridCache>().RemoveAsync(SyncSnapshotService.TotalsKey(user.Id, guid, month), Ct);
+        var second = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot", etag), Ct);
+
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.NotEqual(etag, second.Headers.ETag!.Tag);
+        var account = JsonDocument.Parse(await second.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("account");
+        Assert.Equal(1, account.GetProperty("printCount").GetInt32());
+        Assert.Equal(0, account.GetProperty("successCount").GetInt32());
+        Assert.Equal(1, account.GetProperty("failedCount").GetInt32());
     }
 
     [Fact]

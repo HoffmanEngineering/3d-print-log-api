@@ -121,8 +121,8 @@ public class SyncSnapshotQueryShapeTests(SyncTestFactory factory) : IClassFixtur
         var one = await MissStatementsAsync(await UserWithAsync(1));
         var four = await MissStatementsAsync(await UserWithAsync(4));
 
-        // Core: printers (with both prints), the current prints' slot estimates, loaded slots, spools. Totals: count, success/failed outcomes, grams.
-        Assert.Equal(7, one);
+        // Core: printers (with both prints), the current prints' slot estimates, loaded slots, spools. Totals: month prints grouped by status (count and outcomes), grams.
+        Assert.Equal(6, one);
         Assert.Equal(one, four);
     }
 

@@ -58,7 +58,7 @@ public interface ISyncSnapshotService
 /// <item><b>core hash</b> (<see cref="HashKey"/>, 1 h): just that hash, so a conditional request
 /// can answer 304 without the core, even after the core expired. Written by the core factory, so
 /// it can outlive the core but never describe a different one.</item>
-/// <item><b>totals</b> (zone and month in the key, 1 h): three small statements.</item>
+/// <item><b>totals</b> (zone and month in the key, 1 h): two small statements.</item>
 /// <item><b>saved zone</b> (1 h): the user's time zone setting; settings writes bump the version.</item>
 /// </list>
 /// Connection health is read live on every request (one statement), because heartbeats do not
@@ -98,7 +98,7 @@ public sealed class SyncSnapshotService(
 
     internal static string HashKey(long userId, string guid) => $"sync_core_hash:{userId}:{guid}";
 
-    private static string TotalsKey(long userId, string guid, SyncMonth month) => $"sync_totals:{userId}:{guid}:{month.ZoneId}:{month.Key}";
+    internal static string TotalsKey(long userId, string guid, SyncMonth month) => $"sync_totals:{userId}:{guid}:{month.ZoneId}:{month.Key}";
 
     private static string ZoneKey(long userId, string guid) => $"sync_zone:{userId}:{guid}";
 
@@ -222,17 +222,14 @@ public sealed class SyncSnapshotService(
             });
     }
 
-    /// <summary>Prints started in <paramref name="month"/>, their success and failed counts, and the grams their usage rows took: three statements.</summary>
+    /// <summary>Prints started in <paramref name="month"/> with their success and failed counts (one grouped statement), and the grams their usage rows took (a second): two statements.</summary>
     internal static async Task<SyncAccountTotals> LoadTotalsAsync(PrintLogContext db, long userId, SyncMonth month, CancellationToken ct)
     {
-        var printCount = await db.Prints
+        // One grouped statement: the print count is every group's sum. Success and failed are the two
+        // outcomes the sensors split out; canceled and partial are in printCount only.
+        var byStatus = await db.Prints
             .AsNoTracking()
-            .CountAsync(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To, ct);
-        // Success and failed are the two outcomes the sensors split out; canceled and partial are in printCount only.
-        var outcomes = await db.Prints
-            .AsNoTracking()
-            .Where(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To
-                && (p.Status == PrintStatus.Success || p.Status == PrintStatus.Failed))
+            .Where(p => p.CreatedById == userId && p.StartDate >= month.From && p.StartDate < month.To)
             .GroupBy(p => p.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
             .ToListAsync(ct);
@@ -241,9 +238,9 @@ public sealed class SyncSnapshotService(
             .Where(pf => pf.Print.CreatedById == userId && pf.Print.StartDate >= month.From && pf.Print.StartDate < month.To)
             .Select(FilamentProfile.UsageRowMg)
             .SumAsync(ct);
-        return new SyncAccountTotals(month.Key, month.ZoneId, printCount, Grams(monthMg),
-            outcomes.Where(o => o.Status == PrintStatus.Success).Sum(o => o.Count),
-            outcomes.Where(o => o.Status == PrintStatus.Failed).Sum(o => o.Count));
+        return new SyncAccountTotals(month.Key, month.ZoneId, byStatus.Sum(o => o.Count), Grams(monthMg),
+            byStatus.Where(o => o.Status == PrintStatus.Success).Sum(o => o.Count),
+            byStatus.Where(o => o.Status == PrintStatus.Failed).Sum(o => o.Count));
     }
 
     /// <summary>

@@ -383,8 +383,9 @@ Assistant integration (#236) polls. The field rules are on the response records 
   user's saved setting, else UTC.
 - **`remainingGrams` is null for an untracked spool**, pending #230; never `BalanceMg`'s negative
   figure. Changing it is a contract change for the integration.
-- **A full miss is seven statements, whatever the printer count** (four for the core, three for the
-  totals; `SyncSnapshotQueryShapeTests`).
+- **A full miss is six statements, whatever the printer count** (four for the core, two for the
+  totals: month prints grouped by status, which gives the count and the success/failed split, then
+  grams; `SyncSnapshotQueryShapeTests`).
   The current and last print per printer are correlated `FirstOrDefault`s that EF turns into
   `ROW_NUMBER()` joins, one statement; the current prints' per-slot estimates are a fourth, one for all printers.
 - `schemaVersion` versions the shape. Adding a field is fine; renaming, removing or changing a
