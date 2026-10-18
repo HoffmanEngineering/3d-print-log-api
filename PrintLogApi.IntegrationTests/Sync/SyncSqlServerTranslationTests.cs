@@ -66,18 +66,20 @@ public class SyncSqlServerTranslationTests
 
     /// <summary>
     /// EF Core 10 turns each correlated <c>FirstOrDefault</c> into a LEFT JOIN over a
-    /// <c>ROW_NUMBER()</c> partitioned by printer, filtered to the user's prints: one statement,
+    /// <c>ROW_NUMBER()</c> partitioned by printer, filtered to the user's rows: one statement,
     /// one pass per subquery, however many printers there are.
     /// </summary>
     [Fact]
-    public void Printers_CurrentAndLastPrint_TranslateToTwoPerPrinterTopOneJoins()
+    public void Printers_CurrentAndLastPrint_TranslateToPerPrinterTopOneJoins()
     {
         using var db = SqlServerContext();
         var sql = SyncSnapshotService.PrintersQuery(db, 42).ToQueryString();
 
-        Assert.Equal(2, CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY [p0].[PrinterId]") + CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY [p1].[PrinterId]"));
-        Assert.Equal(2, CountOf(sql, "[row] <= 1"));
-        Assert.Equal(2, CountOf(sql, "].[CreatedById] = @userId"));
+        // Last maintenance, current print and last finished print: three joins. The print-time sum
+        // and the two open-maintenance figures are scalar subqueries, not joins.
+        Assert.Equal(3, CountOf(sql, "ROW_NUMBER() OVER(PARTITION BY"));
+        Assert.Equal(3, CountOf(sql, "[row] <= 1"));
+        Assert.Equal(3, CountOf(sql, "].[CreatedById] = @userId"));
         Assert.DoesNotContain("OUTER APPLY", sql);
     }
 

@@ -285,7 +285,10 @@ public sealed class SyncSnapshotService(
                     ? new SyncFinishedPrint(f.Id, f.Title, StatusName(f.Status), f.StartDate,
                         f.StartDate.HasValue && f.PrintSeconds.HasValue ? f.StartDate.Value.AddSeconds(f.PrintSeconds.Value) : null)
                     : null,
-                Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : []))
+                Loaded: loadedByPrinter.TryGetValue(p.Id, out var l) ? l : [],
+                PrintTimeSeconds: p.PrintSeconds,
+                LastMaintenance: p.LastMaintenance is { } m ? new SyncMaintenance(m.Id, m.Date, m.Category, m.Description) : null,
+                OpenMaintenance: new SyncOpenMaintenance(p.OpenMaintenanceCount, p.NextMaintenanceDate)))
             .ToList();
 
         // The body is a pure function of these two lists (ordered above), so their bytes name it.
@@ -301,8 +304,8 @@ public sealed class SyncSnapshotService(
     internal sealed record CoreEntry(IReadOnlyList<SyncPrinter> Printers, IReadOnlyList<SyncSpool> Spools, string Hash);
 
     /// <summary>
-    /// The user's printers with their newest Printing print and newest finished print, as two
-    /// correlated top-1 subqueries in one statement. Exposed for the translation tests.
+    /// The user's printers with their newest Printing print and newest finished print, all-time print
+    /// seconds, and last/open maintenance, as correlated subqueries in one statement. Exposed for the translation tests.
     /// </summary>
     internal static IQueryable<PrinterRow> PrintersQuery(PrintLogContext db, long userId) =>
         db.Printers
@@ -316,6 +319,26 @@ public sealed class SyncSnapshotService(
                 Model = p.Model,
                 IsActive = p.IsActive,
                 SlotCount = p.SlotCount,
+                // The analytics duration rule (PrinterAnalyticsService): recorded time, else estimate, else 0.
+                PrintSeconds = db.Prints
+                    .Where(pr => pr.PrinterId == p.Id && pr.CreatedById == userId)
+                    .Sum(pr =>
+                        (long)(pr.PrintTimeInSeconds.HasValue && pr.PrintTimeInSeconds > 0 ? pr.PrintTimeInSeconds.Value
+                        : pr.EstimatedPrintTimeInSeconds.HasValue && pr.EstimatedPrintTimeInSeconds > 0 ? pr.EstimatedPrintTimeInSeconds.Value
+                        : 0)),
+                LastMaintenance = db.PrinterMaintenance
+                    .Where(m => m.PrinterId == p.Id && m.Done)
+                    .OrderByDescending(m => m.Date)
+                    .ThenByDescending(m => m.Id)
+                    .Select(m => new MaintenanceRow { Id = m.Id, Date = m.Date, Category = m.Category, Description = m.Description })
+                    .FirstOrDefault(),
+                OpenMaintenanceCount = db.PrinterMaintenance.Count(m => m.PrinterId == p.Id && !m.Done),
+                // Top-1 rather than Min: SQLite cannot aggregate a DateTimeOffset.
+                NextMaintenanceDate = db.PrinterMaintenance
+                    .Where(m => m.PrinterId == p.Id && !m.Done)
+                    .OrderBy(m => m.Date)
+                    .Select(m => (DateTimeOffset?)m.Date)
+                    .FirstOrDefault(),
                 Current = db.Prints
                     .Where(pr => pr.PrinterId == p.Id && pr.CreatedById == userId && pr.Status == PrintStatus.Printing)
                     .OrderByDescending(pr => pr.StartDate)
@@ -433,6 +456,18 @@ public sealed class SyncSnapshotService(
         public int SlotCount { get; init; }
         public PrintRow? Current { get; init; }
         public PrintRow? LastFinished { get; init; }
+        public long PrintSeconds { get; init; }
+        public MaintenanceRow? LastMaintenance { get; init; }
+        public int OpenMaintenanceCount { get; init; }
+        public DateTimeOffset? NextMaintenanceDate { get; init; }
+    }
+
+    internal sealed class MaintenanceRow
+    {
+        public Guid Id { get; init; }
+        public DateTimeOffset Date { get; init; }
+        public string? Category { get; init; }
+        public string? Description { get; init; }
     }
 
     internal sealed class PrintRow

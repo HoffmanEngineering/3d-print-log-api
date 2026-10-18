@@ -33,6 +33,12 @@ public sealed record SyncSnapshot(
 /// </param>
 /// <param name="LastFinishedPrint">The newest finished print, or null.</param>
 /// <param name="Loaded">What is in each slot now, in slot order; unslotted spools last.</param>
+/// <param name="PrintTimeSeconds">
+/// All-time print time on this printer, the figure <c>GET /api/analytics/printers</c> reports as
+/// <c>printTimeSeconds</c> with no date filter: each print's recorded time, else its estimate, else 0.
+/// </param>
+/// <param name="LastMaintenance">The newest maintenance entry marked done, or null.</param>
+/// <param name="OpenMaintenance">Maintenance entries not yet done. Never null.</param>
 public sealed record SyncPrinter(
     long Id,
     string? Name,
@@ -43,7 +49,18 @@ public sealed record SyncPrinter(
     SyncConnection? Connection,
     SyncCurrentPrint? CurrentPrint,
     SyncFinishedPrint? LastFinishedPrint,
-    IReadOnlyList<SyncLoadedSpool> Loaded);
+    IReadOnlyList<SyncLoadedSpool> Loaded,
+    long PrintTimeSeconds,
+    SyncMaintenance? LastMaintenance,
+    SyncOpenMaintenance OpenMaintenance);
+
+/// <summary>A completed maintenance entry.</summary>
+/// <param name="Date">The entry's date.</param>
+public sealed record SyncMaintenance(Guid Id, DateTimeOffset Date, string? Category, string? Description);
+
+/// <param name="Count">How many entries are not done; 0 when none.</param>
+/// <param name="NextDate">The earliest date among them, or null when <see cref="Count"/> is 0.</param>
+public sealed record SyncOpenMaintenance(int Count, DateTimeOffset? NextDate);
 
 /// <summary>Connector health, computed per request against the clock.</summary>
 /// <param name="Kind">The connector type, such as <c>moonraker</c>.</param>

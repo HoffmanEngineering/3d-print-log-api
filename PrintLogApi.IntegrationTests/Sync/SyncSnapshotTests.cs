@@ -126,6 +126,14 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
             return Task.FromResult(0);
         });
 
+    private Task<PrinterMaintenance> AddMaintenanceAsync(User user, Printer printer, DateTimeOffset date, bool done, string? category = null, string? description = null) =>
+        WithDbAsync(db =>
+        {
+            var entry = new PrinterMaintenance { PrinterId = printer.Id, CreatedById = user.Id, UpdatedById = user.Id, CreatedDate = DateTime.UtcNow, UpdatedDate = DateTime.UtcNow, Date = date, Done = done, Category = category, Description = description };
+            db.PrinterMaintenance.Add(entry);
+            return Task.FromResult(entry);
+        });
+
     private static JsonElement Printer(JsonElement snapshot, long id) =>
         snapshot.GetProperty("printers").EnumerateArray().Single(p => p.GetProperty("id").GetInt64() == id);
 
@@ -505,5 +513,100 @@ public class SyncSnapshotTests(SyncTestFactory factory) : IClassFixture<SyncTest
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
         Assert.Contains(body.GetProperty("printers").EnumerateArray(), p => p.GetProperty("id").GetInt64() == IntegrationTestSeeder.TestPrinterId);
+    }
+
+    [Fact]
+    public async Task Snapshot_PrintTimeSeconds_MatchesAnalyticsAllTime()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, SyncTestFactory.Start.AddDays(-3), printSeconds: 3600);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Failed, SyncTestFactory.Start.AddDays(-2), printSeconds: 1800);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Printing, SyncTestFactory.Start.AddHours(-1), estimateSeconds: 600);
+        await AddPrintAsync(user, printer, Print.PrintStatus.Success, null);
+
+        var analytics = await _client.SendAsync(factory.Get(user, "/api/analytics/printers?timeZone=UTC"), Ct);
+        Assert.Equal(HttpStatusCode.OK, analytics.StatusCode);
+        var expected = JsonDocument.Parse(await analytics.Content.ReadAsStringAsync(Ct)).RootElement
+            .GetProperty("printers").EnumerateArray()
+            .Single(r => r.GetProperty("printerId").GetInt64() == printer.Id)
+            .GetProperty("printTimeSeconds").GetInt64();
+
+        var snapshot = await SnapshotAsync(user);
+
+        Assert.True(expected >= 5400);
+        Assert.Equal(expected, Printer(snapshot, printer.Id).GetProperty("printTimeSeconds").GetInt64());
+    }
+
+    [Fact]
+    public async Task Snapshot_PrintTimeSeconds_IsZeroForAPrinterWithNoPrints()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Idle");
+
+        var snapshot = await SnapshotAsync(user);
+
+        Assert.Equal(0, Printer(snapshot, printer.Id).GetProperty("printTimeSeconds").GetInt64());
+    }
+
+    [Fact]
+    public async Task Snapshot_LastMaintenance_IsNewestDone()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        var other = await AddPrinterAsync(user, "Other");
+        await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), done: true, "Lubrication", "January");
+        var newest = await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero), done: true, "Belts", "February");
+        await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero), done: false, "Nozzle", "March");
+
+        var snapshot = await SnapshotAsync(user);
+
+        var last = Printer(snapshot, printer.Id).GetProperty("lastMaintenance");
+        Assert.Equal(newest.Id, last.GetProperty("id").GetGuid());
+        Assert.Equal(new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero), last.GetProperty("date").GetDateTimeOffset());
+        Assert.Equal("Belts", last.GetProperty("category").GetString());
+        Assert.Equal("February", last.GetProperty("description").GetString());
+        Assert.Equal(JsonValueKind.Null, Printer(snapshot, other.Id).GetProperty("lastMaintenance").ValueKind);
+    }
+
+    [Fact]
+    public async Task Snapshot_OpenMaintenance_CountsNotDone()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        var none = await AddPrinterAsync(user, "None");
+        await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero), done: false);
+        await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero), done: false);
+        await AddMaintenanceAsync(user, printer, new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), done: true);
+
+        var snapshot = await SnapshotAsync(user);
+
+        var open = Printer(snapshot, printer.Id).GetProperty("openMaintenance");
+        Assert.Equal(2, open.GetProperty("count").GetInt32());
+        Assert.Equal(new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero), open.GetProperty("nextDate").GetDateTimeOffset());
+        var empty = Printer(snapshot, none.Id).GetProperty("openMaintenance");
+        Assert.Equal(0, empty.GetProperty("count").GetInt32());
+        Assert.Equal(JsonValueKind.Null, empty.GetProperty("nextDate").ValueKind);
+    }
+
+    [Fact]
+    public async Task Snapshot_ETag_ChangesWhenMaintenanceAdded()
+    {
+        var user = await factory.CreateUserAsync();
+        var printer = await AddPrinterAsync(user, "Voron");
+        var first = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot"), Ct);
+        var etag = first.Headers.ETag!.ToString();
+
+        var post = factory.Get(user, "/api/PrinterMaintenance");
+        post.Method = HttpMethod.Post;
+        post.Content = JsonContent.Create(new { printerId = printer.Id, done = false, date = new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero), category = "Nozzle" });
+        Assert.Equal(HttpStatusCode.Created, (await _client.SendAsync(post, Ct)).StatusCode);
+
+        var second = await _client.SendAsync(factory.Get(user, "/api/sync/snapshot", etag), Ct);
+
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.NotEqual(etag, second.Headers.ETag!.ToString());
+        var body = JsonDocument.Parse(await second.Content.ReadAsStringAsync(Ct)).RootElement;
+        Assert.Equal(1, Printer(body, printer.Id).GetProperty("openMaintenance").GetProperty("count").GetInt32());
     }
 }
