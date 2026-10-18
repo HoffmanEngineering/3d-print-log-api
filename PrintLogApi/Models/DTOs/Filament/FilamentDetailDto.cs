@@ -182,6 +182,12 @@ public class FilamentDetailDto
     [Range(0.0, 1.0)]
     public double? MaterialRefreshRatio { get; set; }
 
+    /// <summary>
+    /// Amounts added to (positive) or removed from (negative) the spool outside of prints.
+    /// Always a list in responses.
+    /// On PUT, the list replaces the spool's adjustments, and an empty list removes them all;
+    /// leave it out (or null) to keep them, which is what clients that never send adjustments do.
+    /// </summary>
     public ICollection<FilamentAdjustmentDto>? FilamentAdjustments { get; set; }
 
     public ColorPatternType ColorPattern { get; set; } = ColorPatternType.Solid;

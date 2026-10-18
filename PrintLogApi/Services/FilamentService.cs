@@ -1992,7 +1992,8 @@ public class FilamentService(
             await ThrowIfTagsHeldElsewhere(existingFilament.CreatedById, existingFilament.Id, tagUids);
         }
 
-        // Taken before the map, which replaces the adjustment list with the request's (#232).
+        // Taken before the map, which replaces the adjustment list with the request's when the
+        // request sends one (#232); a null list keeps the stored rows (#248).
         var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
         var storedAdjustments = existingFilament.FilamentAdjustments!.ToDictionary(
             a => a.Id,
