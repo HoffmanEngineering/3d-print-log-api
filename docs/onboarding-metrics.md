@@ -2,8 +2,9 @@
 
 How to tell whether new users get started. The funnel groups sign-ups by week and reports, for each
 group, the share who add a printer, add a material, log a first print within 24 hours and within 7
-days, and come back on a later day. The UI's `Auth_SignedUp` event carries a `source` (for example
-the sign-up page or an invite link), so each weekly group is split by where the user came from.
+days, and come back on a later day. The UI's `Auth_SignedUp` event carries a `source` (`home`,
+`slicer` or `direct`), so each weekly group is split by where the user came from.
+The printer and material percentages have no time bound: they count an add at any point up to now.
 The same query is the "New-user onboarding funnel" panel on the Usage tab of the monitoring
 workbook (`monitoring/build_workbook.py`).
 
