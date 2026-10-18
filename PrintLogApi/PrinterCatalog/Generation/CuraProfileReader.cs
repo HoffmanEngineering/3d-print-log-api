@@ -22,7 +22,12 @@ public static partial class CuraProfileReader
     public static IReadOnlyList<CatalogModel> Read(string curaDir, CatalogNormalizer normalizer, Action<string>? log = null)
     {
         var resources = Path.Combine(curaDir, "resources");
-        var definitions = LoadDefinitions(Path.Combine(resources, "definitions"), log);
+        var definitionsDir = Path.Combine(resources, "definitions");
+        if (!Directory.Exists(definitionsDir))
+        {
+            throw new InvalidDataException($"cura: {curaDir} has no resources/definitions folder; is it a Cura checkout?");
+        }
+        var definitions = LoadDefinitions(definitionsDir, log);
         var extruders = LoadDefinitions(Path.Combine(resources, "extruders"), log);
         var variants = LoadVariants(Path.Combine(resources, "variants"));
 

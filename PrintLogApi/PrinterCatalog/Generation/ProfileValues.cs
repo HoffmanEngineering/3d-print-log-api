@@ -14,18 +14,50 @@ internal static class ProfileValues
     {
         AllowTrailingCommas = true,
         CommentHandling = JsonCommentHandling.Skip,
+        AllowDuplicateProperties = false,
     };
 
+    /// <summary>
+    /// The file's top-level object, or null (logged) when it can't be read, isn't JSON, isn't an
+    /// object or repeats a property. One bad profile skips that file, never the whole run.
+    /// </summary>
     internal static JsonObject? ReadObject(string path, Action<string>? log)
     {
         try
         {
-            return JsonNode.Parse(File.ReadAllText(path), documentOptions: DocumentOptions) as JsonObject;
+            if (JsonNode.Parse(File.ReadAllText(path), documentOptions: DocumentOptions) is not JsonObject obj)
+            {
+                log?.Invoke($"skipping {path}: not a JSON object");
+                return null;
+            }
+            // JsonNode builds its children lazily, so a problem deep in the file would otherwise
+            // surface later, outside this try. Walk it all now.
+            Materialize(obj);
+            return obj;
         }
-        catch (Exception e) when (e is JsonException or IOException)
+        catch (Exception e) when (e is JsonException or IOException or ArgumentException or UnauthorizedAccessException or InvalidOperationException)
         {
             log?.Invoke($"skipping {path}: {e.Message}");
             return null;
+        }
+    }
+
+    private static void Materialize(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var (_, child) in obj)
+                {
+                    Materialize(child);
+                }
+                break;
+            case JsonArray array:
+                foreach (var child in array)
+                {
+                    Materialize(child);
+                }
+                break;
         }
     }
 

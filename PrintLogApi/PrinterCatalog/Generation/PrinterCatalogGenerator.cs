@@ -40,24 +40,35 @@ public static class PrinterCatalogGenerator
     {
         var normalizer = new CatalogNormalizer(inputs.MakeAliases);
 
-        IReadOnlyList<CatalogModel> cura = inputs.CuraDir is null ? [] : CuraProfileReader.Read(inputs.CuraDir, normalizer, inputs.Log);
-        IReadOnlyList<CatalogModel> orca = inputs.OrcaDir is null ? [] : OrcaProfileReader.Read(inputs.OrcaDir, normalizer, inputs.Log);
+        var cura = ReadSource("cura", inputs.CuraDir, dir => CuraProfileReader.Read(dir, normalizer, inputs.Log));
+        var orca = ReadSource("orca", inputs.OrcaDir, dir => OrcaProfileReader.Read(dir, normalizer, inputs.Log));
 
         var merged = CatalogMerger.Merge(cura, orca, normalizer, inputs.Log);
         var withIds = CatalogIds.Assign(merged, inputs.Previous, normalizer);
-        var models = CatalogMerger.ApplyOverrides(withIds, inputs.Overrides, inputs.Log)
+
+        // Ids a generated model held before but that no source produces now. An override for one
+        // is stale; it must not turn into an extra entry that takes the id over.
+        var generatedIds = withIds.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        var dormantIds = (inputs.Previous?.Models ?? []).Where(m => m.SourceKey is not null).Select(m => m.Id)
+            .Concat((inputs.Previous?.Reserved ?? []).Where(r => r.SourceKey is not null).Select(r => r.Id))
+            .Where(id => !generatedIds.Contains(id))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var models = CatalogMerger.ApplyOverrides(withIds, inputs.Overrides, inputs.Log, dormantIds)
             .OrderBy(m => m.Make, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Model, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Id, StringComparer.Ordinal)
             .ToList();
 
+        var reserved = Reserved(inputs.Previous, withIds, models);
         var version = CatalogFile.ComputeVersion(models);
 
         // An unchanged catalog keeps its timestamp, so a refresh that found nothing new leaves
         // the committed file byte-identical and opens no PR.
         var unchanged = inputs.Previous is { } previous
             && previous.Version == version
-            && previous.Sources.SequenceEqual(inputs.Sources);
+            && previous.Sources.SequenceEqual(inputs.Sources)
+            && previous.Reserved.SequenceEqual(reserved);
 
         return new CatalogFile
         {
@@ -66,6 +77,48 @@ public static class PrinterCatalogGenerator
             Attribution = CatalogFile.AttributionText,
             Sources = inputs.Sources,
             Models = models,
+            Reserved = reserved,
         };
+    }
+
+    /// <summary>A configured source must exist and produce models; an empty one fails the run (R3).</summary>
+    private static IReadOnlyList<CatalogModel> ReadSource(string name, string? dir, Func<string, IReadOnlyList<CatalogModel>> read)
+    {
+        if (dir is null)
+        {
+            return [];
+        }
+        var models = read(dir);
+        if (models.Count == 0)
+        {
+            throw new InvalidDataException($"{name}: {dir} yielded no printer models; is it the right checkout?");
+        }
+        return models;
+    }
+
+    /// <summary>
+    /// Every id ever issued that is not visible now: the previous reserved list, the previous
+    /// models, and this run's hidden ones, each with its latest known source key. Sorted by id.
+    /// </summary>
+    private static IReadOnlyList<ReservedId> Reserved(CatalogFile? previous, IReadOnlyList<CatalogModel> generated, IReadOnlyList<CatalogModel> visible)
+    {
+        var byId = new SortedDictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var r in previous?.Reserved ?? [])
+        {
+            byId[r.Id] = r.SourceKey;
+        }
+        foreach (var m in previous?.Models ?? [])
+        {
+            byId[m.Id] = m.SourceKey;
+        }
+        foreach (var m in generated)
+        {
+            byId[m.Id] = m.SourceKey;
+        }
+        foreach (var m in visible)
+        {
+            byId.Remove(m.Id);
+        }
+        return byId.Select(r => new ReservedId { Id = r.Key, SourceKey = r.Value }).ToList();
     }
 }

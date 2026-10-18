@@ -16,9 +16,16 @@ public static class OrcaProfileReader
     private static readonly HashSet<string> SkippedFiles = new(StringComparer.OrdinalIgnoreCase) { "blacklist.json" };
     private static readonly HashSet<string> SkippedVendors = new(StringComparer.Ordinal) { "Custom" };
 
+    // Orca's printer_structure values that name a kinematics; "undefine" and anything else don't.
+    private static readonly HashSet<string> KnownKinematics = new(StringComparer.Ordinal) { "corexy", "i3", "hbot", "delta", "corexz" };
+
     public static IReadOnlyList<CatalogModel> Read(string orcaDir, CatalogNormalizer normalizer, Action<string>? log = null)
     {
         var profiles = Path.Combine(orcaDir, "resources", "profiles");
+        if (!Directory.Exists(profiles))
+        {
+            throw new InvalidDataException($"orca: {orcaDir} has no resources/profiles folder; is it an OrcaSlicer checkout?");
+        }
         var models = new List<CatalogModel>();
         foreach (var vendorFile in Directory.EnumerateFiles(profiles, "*.json").Order(StringComparer.Ordinal))
         {
@@ -67,6 +74,10 @@ public static class OrcaProfileReader
             var modelFile = ProfileValues.ReadObject(Path.Combine(vendorDir, subPath), log);
             var mine = resolvedPresets.Where(p => ProfileValues.AsString(p["printer_model"]) == name).ToList();
             var preset = mine.FirstOrDefault(p => ProfileValues.AsString(p["printer_variant"])?.Trim() == "0.4") ?? mine.FirstOrDefault();
+            if (preset is null)
+            {
+                log?.Invoke($"orca: {vendorName} / {name} has no preset; listed without bed or nozzle facts");
+            }
             yield return ReadModel(make, model, modelFile, preset);
         }
     }
@@ -98,7 +109,7 @@ public static class OrcaProfileReader
             DefaultNozzleMm = nozzles?.FirstOrDefault(),
             ExtruderCount = nozzles is { Count: > 0 } ? nozzles.Count : null,
             FilamentDiameterMm = filaments is { Count: > 0 } ? ProfileValues.AsDouble(filaments[0]) : null,
-            Kinematics = string.IsNullOrEmpty(structure) || structure == "undefine" ? null : structure,
+            Kinematics = structure is not null && KnownKinematics.Contains(structure) ? structure : null,
         }, Source);
     }
 

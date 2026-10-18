@@ -62,6 +62,13 @@ internal static class PrinterCatalogCommand
         }
 
         var declared = JsonSerializer.Deserialize<List<CatalogSource>>(await File.ReadAllTextAsync(sources), SourcesJson) ?? [];
+        foreach (var (given, repo, flag) in new[] { (cura, CuraRepo, "--cura"), (orca, OrcaRepo, "--orca") })
+        {
+            if (given is not null && !declared.Any(s => s.Repo == repo))
+            {
+                Console.Error.WriteLine($"warning: {flag} is ignored: {sources} does not declare {repo}");
+            }
+        }
         var tempRoot = (cura is null || orca is null)
             ? Path.Combine(work ?? Path.GetTempPath(), $"printer-catalog-{Guid.NewGuid():N}")
             : null;
@@ -120,11 +127,25 @@ internal static class PrinterCatalogCommand
             Console.WriteLine($"  Version  {file.Version}");
             return 0;
         }
+        catch (InvalidDataException e)
+        {
+            // A source that is missing or yields nothing, or a bad data file: say so and fail.
+            Console.Error.WriteLine($"error: {e.Message}");
+            return 1;
+        }
         finally
         {
+            // A failed cleanup must not replace the exception that got us here.
             if (tempRoot is not null && Directory.Exists(tempRoot))
             {
-                DeleteTree(tempRoot);
+                try
+                {
+                    DeleteTree(tempRoot);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"warning: could not delete {tempRoot}: {e.Message}");
+                }
             }
         }
     }

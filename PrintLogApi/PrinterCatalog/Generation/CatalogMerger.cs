@@ -38,9 +38,9 @@ public static class CatalogMerger
         var merged = new List<CatalogModel>();
         foreach (var (key, c) in curaByKey)
         {
-            merged.Add(orcaByKey.TryGetValue(key, out var o) ? Combine(o, c) : c);
+            merged.Add((orcaByKey.TryGetValue(key, out var o) ? Combine(o, c) : c) with { SourceKey = key });
         }
-        merged.AddRange(orcaByKey.Where(o => !curaByKey.ContainsKey(o.Key)).Select(o => o.Value));
+        merged.AddRange(orcaByKey.Where(o => !curaByKey.ContainsKey(o.Key)).Select(o => o.Value with { SourceKey = o.Key }));
         return merged;
     }
 
@@ -96,9 +96,11 @@ public static class CatalogMerger
     /// generated id corrects its fields (recorded as <c>override</c>), adds <c>aliases</c>, sets
     /// <c>featured</c>, or drops it with <c>hidden: true</c>. An entry for an unknown id that names
     /// a <c>make</c> and <c>model</c> is a whole extra model; one that doesn't is stale and logged.
+    /// So is any entry for a <paramref name="reservedIds">reserved</paramref> id: that id belongs
+    /// to a generated model that is gone for now, and an extra entry would take it over.
     /// </summary>
     public static IReadOnlyList<CatalogModel> ApplyOverrides(
-        IReadOnlyList<CatalogModel> models, JsonObject overrides, Action<string>? log = null)
+        IReadOnlyList<CatalogModel> models, JsonObject overrides, Action<string>? log = null, IReadOnlySet<string>? reservedIds = null)
     {
         var byId = models.ToDictionary(m => m.Id, StringComparer.Ordinal);
         var result = new List<CatalogModel>(models);
@@ -118,7 +120,9 @@ public static class CatalogMerger
             {
                 result[result.IndexOf(existing)] = Override(existing, id, entry);
             }
-            else if (ProfileValues.AsString(entry["make"]) is { Length: > 0 } && ProfileValues.AsString(entry["model"]) is { Length: > 0 })
+            else if (reservedIds?.Contains(id) != true
+                && ProfileValues.AsString(entry["make"]) is { Length: > 0 }
+                && ProfileValues.AsString(entry["model"]) is { Length: > 0 })
             {
                 result.Add(Override(new CatalogModel { Id = id, Sources = new SortedDictionary<string, string>(StringComparer.Ordinal) }, id, entry));
             }

@@ -5,11 +5,12 @@ using System.Text.RegularExpressions;
 namespace PrintLogApi.PrinterCatalog.Generation;
 
 /// <summary>
-/// Stable catalog ids. A published id never changes: a model whose key (see
-/// <see cref="CatalogNormalizer.Key"/>) matches one in the previous file keeps that file's id,
-/// even after a rename. A new model gets the slug of its make and model, and every id the
-/// previous file published stays reserved, retired or not, so a new slug that collides gets a
-/// numeric suffix instead of inheriting someone else's links.
+/// Stable catalog ids. A published id never changes. Ids follow a model's source key (see
+/// <see cref="CatalogModel.SourceKey"/>, the normalized source make and model before any
+/// override), so a rename in the overrides or a punctuation change in the sources keeps the id.
+/// A model whose key matches one in the previous file's models or reserved list takes that id
+/// back. A new model gets the slug of its make and model, avoiding every id either list holds,
+/// with a numeric suffix on a collision.
 /// </summary>
 public static partial class CatalogIds
 {
@@ -19,7 +20,7 @@ public static partial class CatalogIds
         IEnumerable<CatalogModel> merged, CatalogFile? previous, CatalogNormalizer? normalizer = null)
     {
         normalizer ??= CatalogNormalizer.NoAliases;
-        var models = merged.ToList();
+        var models = merged.Select(m => m with { SourceKey = m.SourceKey ?? normalizer.Key(m.Make, m.Model) }).ToList();
         var ids = new string?[models.Count];
 
         var taken = new HashSet<string>(StringComparer.Ordinal);
@@ -27,14 +28,23 @@ public static partial class CatalogIds
         foreach (var old in previous?.Models ?? [])
         {
             taken.Add(old.Id);
-            previousByKey.TryAdd(normalizer.Key(old.Make, old.Model), old.Id);
+            // A file written before source keys existed: its names are the best key there is.
+            previousByKey.TryAdd(old.SourceKey ?? normalizer.Key(old.Make, old.Model), old.Id);
+        }
+        foreach (var reserved in previous?.Reserved ?? [])
+        {
+            taken.Add(reserved.Id);
+            if (reserved.SourceKey is not null)
+            {
+                previousByKey.TryAdd(reserved.SourceKey, reserved.Id);
+            }
         }
 
         // Keep published ids first, so a new model can never take one before its owner does.
         var reused = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < models.Count; i++)
         {
-            if (previousByKey.TryGetValue(normalizer.Key(models[i].Make, models[i].Model), out var id) && reused.Add(id))
+            if (previousByKey.TryGetValue(models[i].SourceKey!, out var id) && reused.Add(id))
             {
                 ids[i] = id;
             }
@@ -61,10 +71,13 @@ public static partial class CatalogIds
         return models.Select((m, i) => m with { Id = ids[i]! }).ToList();
     }
 
-    /// <summary><c>Bambu Lab</c> + <c>P1S</c> is <c>bambu-lab-p1s</c>. Accents are folded to ASCII.</summary>
+    /// <summary>
+    /// <c>Bambu Lab</c> + <c>P1S</c> is <c>bambu-lab-p1s</c>, and <c>MINI+</c> ends in
+    /// <c>-mini-plus</c>. Accents are folded to ASCII.
+    /// </summary>
     public static string Slug(string make, string model)
     {
-        var decomposed = $"{make} {model}".Normalize(NormalizationForm.FormD);
+        var decomposed = CatalogNormalizer.SpellPlus($"{make} {model}").Normalize(NormalizationForm.FormD);
         var ascii = new StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {

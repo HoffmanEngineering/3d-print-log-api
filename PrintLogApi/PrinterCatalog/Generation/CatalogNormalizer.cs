@@ -5,7 +5,8 @@ namespace PrintLogApi.PrinterCatalog.Generation;
 
 /// <summary>
 /// The dedupe key the UI's old <c>compare.ts</c> used, ported: lowercase, drop everything but
-/// ASCII letters, digits and whitespace, collapse whitespace. Makes go through
+/// ASCII letters, digits and whitespace, collapse whitespace. One change from the UI rule: "+"
+/// is the word "plus", so "MINI" and "MINI+" are different models. Makes go through
 /// <c>make-aliases.json</c> first, compared in normalized form, so "Creality3D" and "creality 3d"
 /// both become "Creality".
 /// </summary>
@@ -45,9 +46,12 @@ public sealed partial class CatalogNormalizer
 
     public static string Normalize(string value)
     {
-        var stripped = NotAlphanumericOrSpace().Replace(value.ToLowerInvariant(), "");
+        var stripped = NotAlphanumericOrSpace().Replace(SpellPlus(value).ToLowerInvariant(), "");
         return Whitespace().Replace(stripped, " ").Trim();
     }
+
+    /// <summary>"MINI+" is "MINI plus", in keys and in slugs alike.</summary>
+    public static string SpellPlus(string value) => value.Replace("+", " plus ", StringComparison.Ordinal);
 
     /// <summary>The normalized words of a name, for search.</summary>
     public static string[] Tokens(string value) => Normalize(value).Split(' ', StringSplitOptions.RemoveEmptyEntries);

@@ -27,6 +27,13 @@ public sealed record CatalogFile
     public IReadOnlyList<CatalogModel> Models { get; init; } = [];
 
     /// <summary>
+    /// Every id ever issued that is not a visible model now: retired (gone from the sources) or
+    /// hidden by an override. Kept forever, sorted by id, so no other model can take one. The
+    /// seeder and the UI ignore it.
+    /// </summary>
+    public IReadOnlyList<ReservedId> Reserved { get; init; } = [];
+
+    /// <summary>
     /// camelCase, unknown fields omitted, and LF line endings whatever the OS, so the file and its
     /// version hash come out byte-identical on a workstation and on CI. The relaxed encoder keeps
     /// names like "MINI+" readable in review diffs; the file is never embedded in HTML.
@@ -59,10 +66,26 @@ public sealed record CatalogSource
     public string? License { get; init; }
 }
 
+/// <summary>An id no new model may take, with the source key that reclaims it.</summary>
+public sealed record ReservedId
+{
+    public string Id { get; init; } = "";
+
+    /// <summary>Null for an id that was a whole extra entry from the overrides.</summary>
+    public string? SourceKey { get; init; }
+}
+
 /// <summary>One printer model. Every spec field is optional, and an unknown one is omitted.</summary>
 public sealed record CatalogModel
 {
     public string Id { get; init; } = "";
+
+    /// <summary>
+    /// The normalized key of the source make and model, before overrides. Ids follow it, so a
+    /// rename in the sources or in the overrides never changes an id. Null for an extra entry.
+    /// </summary>
+    public string? SourceKey { get; init; }
+
     public string Make { get; init; } = "";
     public string Model { get; init; } = "";
     public IReadOnlyList<string>? Aliases { get; init; }
