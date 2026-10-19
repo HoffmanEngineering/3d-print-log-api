@@ -56,8 +56,22 @@ public class PrinterModelDto
         Retired = model.Retired,
     };
 
-    private static T[] ParseArray<T>(string json) =>
-        string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<T[]>(json) ?? [];
+    /// <summary>A malformed column reads as empty: one bad row must not fail a whole search.</summary>
+    private static T[] ParseArray<T>(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<T[]>(json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 }
 
 /// <summary>A slicer printer name resolved to one catalog model.</summary>

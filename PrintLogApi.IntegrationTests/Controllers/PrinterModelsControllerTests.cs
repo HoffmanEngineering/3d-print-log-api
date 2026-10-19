@@ -60,11 +60,99 @@ public class PrinterModelsControllerTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
-    public async Task Popular_ClampsALargeLimit_ToFifty()
+    public async Task Popular_ClampsALargeLimit_ToTwentyFour()
     {
-        var models = await JsonAsync(await factory.CreateClient().GetAsync("/api/PrinterModels/popular?limit=999", Ct));
+        using var host = HostWith(Enumerable.Range(0, 40).Select(i => Model($"m-{i:00}", "Make", $"Model {i:00}", owners: 5)).ToArray());
+        var client = host.CreateClient();
 
-        Assert.InRange(models.GetArrayLength(), 1, 50);
+        foreach (var limit in new[] { 999, 25, 24 })
+        {
+            var models = await JsonAsync(await client.GetAsync($"/api/PrinterModels/popular?limit={limit}", Ct));
+            Assert.Equal(24, models.GetArrayLength());
+        }
+        Assert.Equal(10, (await JsonAsync(await client.GetAsync("/api/PrinterModels/popular?limit=10", Ct))).GetArrayLength());
+    }
+
+    [Fact]
+    public async Task ALimitThatIsNotANumber_Is400()
+    {
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/PrinterModels?search=p1s&limit=abc", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/PrinterModels/popular?limit=abc", Ct)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    public async Task AZeroOrNegativeLimit_FallsBackToTheDefault(string limit)
+    {
+        using var host = HostWith(Enumerable.Range(0, 40).Select(i => Model($"m-{i:00}", "Make", $"Model {i:00}", owners: 5)).ToArray());
+        var client = host.CreateClient();
+
+        Assert.Equal(8, (await JsonAsync(await client.GetAsync($"/api/PrinterModels/popular?limit={limit}", Ct))).GetArrayLength());
+        Assert.Equal(20, (await JsonAsync(await client.GetAsync($"/api/PrinterModels?search=make&limit={limit}", Ct))).GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData("/api/PrinterModels?search=")]
+    [InlineData("/api/PrinterModels/match?name=")]
+    public async Task AnOversizedQuery_Is400WithACode_BeforeAnyParsing(string url)
+    {
+        var response = await factory.CreateClient().GetAsync(url + new string('p', 10_000), Ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_too_long", (await JsonAsync(response)).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task QueriesAtTheirLimits_AreAccepted()
+    {
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/PrinterModels?search=" + new string('p', 100), Ct)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.BadRequest, (await client.GetAsync("/api/PrinterModels/match?name=" + new string('p', 200), Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A304_HasNoBody_AndKeepsItsValidators()
+    {
+        var client = factory.CreateClient();
+        var etag = (await client.GetAsync("/api/PrinterModels/popular", Ct)).Headers.ETag!;
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/PrinterModels/popular");
+        request.Headers.IfNoneMatch.Add(etag);
+
+        var response = await client.SendAsync(request, Ct);
+
+        Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
+        Assert.Empty(await response.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(etag, response.Headers.ETag);
+        Assert.True(response.Headers.CacheControl!.Public);
+    }
+
+    [Fact]
+    public async Task TheAttributionETag_DiffersFromTheCatalogOne_AndStillFollowsTheVersion()
+    {
+        var client = factory.CreateClient();
+
+        var attribution = (await client.GetAsync("/api/PrinterModels/attribution", Ct)).Headers.ETag!;
+        var popular = (await client.GetAsync("/api/PrinterModels/popular", Ct)).Headers.ETag!;
+
+        Assert.NotEqual(popular.Tag, attribution.Tag);
+        Assert.Contains(factory.Services.GetRequiredService<IPrinterCatalogIndex>().Version, attribution.Tag);
+    }
+
+    [Fact]
+    public void AMalformedJsonColumn_BecomesAnEmptyList_NotAnException()
+    {
+        var model = Model("bad", "Bad", "Json");
+        model.AliasesJson = "{not json";
+        model.NozzleOptionsJson = "[\"x\"]";
+
+        var dto = PrintLogApi.Models.DTOs.PrinterCatalog.PrinterModelDto.From(model);
+
+        Assert.Empty(dto.Aliases!);
+        Assert.Empty(dto.NozzleOptionsMm!);
     }
 
     [Fact]
@@ -209,30 +297,44 @@ public class PrinterModelsControllerTests(CustomWebApplicationFactory factory) :
     }
 
     [Fact]
-    public async Task BeforeTheFirstSeed_NothingIsCachedPublicly()
+    public async Task BeforeTheFirstSeed_EveryEndpointAnswers503_ThatNothingCaches()
     {
         using var host = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
             s.AddSingleton<IPrinterCatalogIndex>(new NotReadyIndex())));
+        var client = host.CreateClient();
 
-        var response = await host.CreateClient().GetAsync("/api/PrinterModels?search=p1s", Ct);
+        foreach (var url in new[]
+        {
+            "/api/PrinterModels?search=p1s", "/api/PrinterModels/popular", "/api/PrinterModels/bambu-lab-p1s",
+            "/api/PrinterModels/match?name=p1s", "/api/PrinterModels/attribution",
+        })
+        {
+            var response = await client.GetAsync(url, Ct);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Null(response.Headers.ETag);
-        Assert.True(response.Headers.CacheControl!.NoStore);
-        Assert.False(response.Headers.CacheControl.Public);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal(TimeSpan.FromSeconds(5), response.Headers.RetryAfter!.Delta);
+            Assert.Null(response.Headers.ETag);
+            Assert.True(response.Headers.CacheControl!.NoStore);
+            Assert.False(response.Headers.CacheControl.Public);
+        }
     }
 
-    [Fact]
-    public async Task APerAddressLimit_Answers429_OnceExceeded()
+    [Theory]
+    [InlineData("/api/PrinterModels?search=p1s")]
+    [InlineData("/api/PrinterModels/popular")]
+    [InlineData("/api/PrinterModels/bambu-lab-p1s")]
+    [InlineData("/api/PrinterModels/match?name=p1s")]
+    [InlineData("/api/PrinterModels/attribution")]
+    public async Task APerAddressLimit_Answers429_OnceExceeded(string url)
     {
         using var host = factory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, cfg) =>
             cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Catalog:RateLimitPerMinute"] = "1" })));
         var client = host.CreateClient();
 
-        var first = await client.GetAsync("/api/PrinterModels/popular", Ct);
-        var second = await client.GetAsync("/api/PrinterModels/popular", Ct);
+        var first = await client.GetAsync(url, Ct);
+        var second = await client.GetAsync(url, Ct);
 
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, first.StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, second.StatusCode);
     }
 

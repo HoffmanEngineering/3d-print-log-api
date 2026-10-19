@@ -336,7 +336,7 @@ public class Startup
             // The anonymous printer catalog: per socket peer, like the docs endpoint above.
             options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
             {
-                var limit = Configuration.GetValue("Catalog:RateLimitPerMinute", 120);
+                var limit = Configuration.GetValue("Catalog:RateLimitPerMinute", 600);
                 if (limit <= 0)
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("catalog-unlimited");
