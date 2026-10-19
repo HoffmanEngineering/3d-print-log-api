@@ -167,4 +167,18 @@ public class PrinterPopularityJobTests
         Assert.Equal(1, await host.Popularity.RunOnceAsync(Now.AddDays(266), Ct));
         Assert.Equal(0, await OwnersAsync(host, "a"));
     }
+
+    [Fact]
+    public async Task ACreatedAtOrPrintExactlyAtTheCutoff_Counts()
+    {
+        await using var host = await HostAsync();
+        var cutoff = Now.AddDays(-365);
+        await AddPrinterAsync(host, (await AddUserAsync(host)).Id, "a", cutoff);
+        await AddPrinterAsync(host, (await AddUserAsync(host)).Id, "b", Now.AddYears(-3), printStarts: cutoff);
+
+        await host.Popularity.RunOnceAsync(Now, Ct);
+
+        Assert.Equal(1, await OwnersAsync(host, "a"));
+        Assert.Equal(1, await OwnersAsync(host, "b"));
+    }
 }

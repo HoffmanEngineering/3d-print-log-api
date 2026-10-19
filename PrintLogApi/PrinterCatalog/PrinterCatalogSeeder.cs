@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.PrinterCatalog.Generation;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.PrinterCatalog;
 
@@ -70,7 +71,14 @@ public sealed class PrinterCatalogSeeder(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var result = await SeedAsync(db, LoadCatalog(), timeProvider.GetUtcNow(), ct, logger);
+            var repointedUsers = new List<long>();
+            var result = await SeedAsync(db, LoadCatalog(), timeProvider.GetUtcNow(), ct, logger, repointedUsers);
+            // After the commit: the cached printer lists carry catalogModelId.
+            var cacheVersions = scope.ServiceProvider.GetRequiredService<ICacheVersionService>();
+            foreach (var userId in repointedUsers)
+            {
+                cacheVersions.InvalidateUserCache(userId);
+            }
             changed = result.Inserted + result.Updated + result.Retired + result.Repointed > 0;
             logger.LogInformation(
                 "Printer catalog seed: {Inserted} inserted, {Updated} updated, {Retired} retired, {Unchanged} unchanged, {Repointed} printers moved off merged ids",
@@ -143,7 +151,8 @@ public sealed class PrinterCatalogSeeder(
     /// <see cref="PrinterModel.OwnerCount"/> are never written.
     /// </summary>
     public static async Task<SeedResult> SeedAsync(
-        PrintLogContext db, CatalogFile file, DateTimeOffset now, CancellationToken ct, ILogger? logger = null)
+        PrintLogContext db, CatalogFile file, DateTimeOffset now, CancellationToken ct, ILogger? logger = null,
+        ICollection<long>? repointedUserIds = null)
     {
         var duplicate = file.Models.GroupBy(m => m.Id, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate != null)
@@ -182,7 +191,7 @@ public sealed class PrinterCatalogSeeder(
                         return skipped;
                     }
                 }
-                var result = await ApplyAsync(db, file, now, logger, ct);
+                var result = await ApplyAsync(db, file, now, logger, repointedUserIds, ct);
                 await transaction.CommitAsync(ct);
                 return result;
             }
@@ -222,8 +231,10 @@ public sealed class PrinterCatalogSeeder(
     }
 
     private static async Task<SeedResult> ApplyAsync(
-        PrintLogContext db, CatalogFile file, DateTimeOffset now, ILogger? logger, CancellationToken ct)
+        PrintLogContext db, CatalogFile file, DateTimeOffset now, ILogger? logger, ICollection<long>? repointedUserIds, CancellationToken ct)
     {
+        // A retried attempt starts over, so it must not add to the previous one's list.
+        repointedUserIds?.Clear();
         var rows = await db.PrinterModels.ToDictionaryAsync(m => m.Id, StringComparer.Ordinal, ct);
         int inserted = 0, updated = 0, retired = 0, unchanged = 0;
 
@@ -255,7 +266,7 @@ public sealed class PrinterCatalogSeeder(
 
         // Saved before re-pointing, so a successor inserted in this pass exists for the foreign key.
         await db.SaveChangesAsync(ct);
-        var repointed = await RepointMergedAsync(db, file, listed, logger, ct);
+        var repointed = await RepointMergedAsync(db, file, listed, logger, repointedUserIds, ct);
 
         var marker = await db.PrinterCatalogVersions.SingleOrDefaultAsync(v => v.Id == PrinterCatalogVersion.SingletonId, ct);
         if (marker == null)
@@ -278,7 +289,7 @@ public sealed class PrinterCatalogSeeder(
     /// chain. A cycle, or a chain ending at an id that is not a current model, leaves the links alone.
     /// </summary>
     private static async Task<int> RepointMergedAsync(
-        PrintLogContext db, CatalogFile file, HashSet<string> current, ILogger? logger, CancellationToken ct)
+        PrintLogContext db, CatalogFile file, HashSet<string> current, ILogger? logger, ICollection<long>? repointedUserIds, CancellationToken ct)
     {
         var reserved = file.Reserved
             .GroupBy(r => r.Id, StringComparer.Ordinal)
@@ -311,6 +322,14 @@ public sealed class PrinterCatalogSeeder(
             }
 
             var id = merged.Id;
+            if (repointedUserIds != null)
+            {
+                var owners = await db.Printers.Where(p => p.CatalogModelId == id).Select(p => p.UserId).Distinct().ToListAsync(ct);
+                foreach (var owner in owners.Where(o => !repointedUserIds.Contains(o)))
+                {
+                    repointedUserIds.Add(owner);
+                }
+            }
             moved += await db.Printers
                 .Where(p => p.CatalogModelId == id)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.CatalogModelId, successor), ct);
