@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
 using Xunit;
@@ -218,6 +219,43 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var updated = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
         Assert.Equal(second, updated.CatalogModelId);
+    }
+
+    [Fact]
+    public async Task Post_ExplicitSlotCountOneOnAFourSlotModel_GetsFour()
+    {
+        // SlotCount has no unset value, so an explicit 1 reads as "left at the default".
+        var id = await SeedModelAsync(configure: FullSpecs);
+        var body = NewPrinter(id);
+        body.SlotCount = 1;
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(4, created.SlotCount);
+    }
+
+    [Fact]
+    public async Task Put_SameCatalogIdAndNullFields_KeepsTheStoredSpecs()
+    {
+        var id = await SeedModelAsync(configure: FullSpecs);
+        var body = NewPrinter(id);
+        body.BedWidthMm = 111;
+        var created = (await (await SendAsync(HttpMethod.Post, "/api/Printers", body)).Content
+            .ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(111, created.BedWidthMm);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, id));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var stored = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == created.Id!.Value, TestContext.Current.CancellationToken);
+        // The PUT body carried null for every spec, and a PUT overwrites: nothing is refilled from the catalog.
+        Assert.Null(stored.BedDepthMm);
+        Assert.Null(stored.NozzleDiameter);
+        Assert.Null(stored.HasHeatedBed);
+        Assert.Equal(id, stored.CatalogModelId);
     }
 
     private static void FullSpecs(PrinterModel m)

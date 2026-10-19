@@ -116,6 +116,23 @@ public class McpRequestFingerprintTests
         McpRequestFingerprint.ComputeCreatePrinter(input);
 
     [Fact]
+    public void CreatePrinter_WithoutACatalogModel_KeepsTheLegacyHash() =>
+        // Computed independently from the pre-catalogModelId byte layout. If the field were always
+        // written, every stored key would conflict after a deploy.
+        Assert.Equal("f2155323ca45ea1d7aed16d92b856d45d5a946e51ef9711172d4923415b2ba9c", FpPrn(new PrinterAttributesInput
+        {
+            Make = "Bambu",
+            Model = "X1C",
+            Name = "Workshop X1C",
+        }));
+
+    [Fact]
+    public void CreatePrinter_CatalogModelId_IsCaseInsensitive() =>
+        Assert.Equal(
+            FpPrn(BasicPrinter() with { CatalogModelId = "bambu-lab-p1s" }),
+            FpPrn(BasicPrinter() with { CatalogModelId = "Bambu-Lab-P1S" }));
+
+    [Fact]
     public void CreatePrinter_SameArguments_ProduceTheSameFingerprint()
     {
         Assert.Equal(FpPrn(BasicPrinter()), FpPrn(BasicPrinter()));

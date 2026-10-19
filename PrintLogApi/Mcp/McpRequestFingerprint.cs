@@ -172,7 +172,8 @@ public static class McpRequestFingerprint
             // is unchanged and a stored key still replays after this deploys.
             if (input.CatalogModelId is not null)
             {
-                WriteStr(w, input.CatalogModelId);
+                // Lowercased: ids match case-insensitively, so a retry in another case is the same call.
+                WriteStr(w, input.CatalogModelId.ToLowerInvariant());
             }
         }
         return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();

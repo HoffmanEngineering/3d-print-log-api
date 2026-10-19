@@ -16,7 +16,8 @@ public class PrinterService(
     IBlobStorageService blobStorage,
     ILogger<PrinterService> logger,
     ICacheVersionService cacheVersionService,
-    Spoolman.ISpoolmanCredentialCache spoolmanCredentials) : IPrinterService
+    Spoolman.ISpoolmanCredentialCache spoolmanCredentials,
+    TimeProvider timeProvider) : IPrinterService
 {
     /// <summary>
     /// The category a printer gets when none is named. Shared with PrintersController so the web
@@ -634,15 +635,6 @@ public class PrinterService(
         McpPrinterValidation.ValidateAttributes(input);
         idempotencyKey = RequireIdempotencyKey(idempotencyKey);
 
-        // Resolve the catalog model BEFORE hashing, for the same reason as Canonicalize: the
-        // fingerprint must see the stored (canonical-case) id, not whatever case the caller typed.
-        PrinterModel? catalogModel = null;
-        if (input.CatalogModelId is not null)
-        {
-            catalogModel = await RequireCatalogModel(input.CatalogModelId, ct);
-            input = input with { CatalogModelId = catalogModel.Id };
-        }
-
         string? fingerprint = null;
         if (idempotencyKey != null)
         {
@@ -654,6 +646,15 @@ public class PrinterService(
             }
         }
 
+        // Resolve the catalog model only after the replay lookup: the fingerprint hashes the id the
+        // caller sent (trimmed, lowercased), so a retry replays even if the model has since been
+        // hidden or retired. The canonical stored id is used only for persisting.
+        PrinterModel? catalogModel = null;
+        if (input.CatalogModelId is not null)
+        {
+            catalogModel = await RequireCatalogModel(input.CatalogModelId, ct);
+        }
+
         var printer = new Printer
         {
             UserId = userId,
@@ -663,6 +664,7 @@ public class PrinterService(
             Description = input.Description,
             CategoryNickname = input.CategoryNickname,
             CatalogModelId = catalogModel?.Id,
+            CreatedAt = timeProvider.GetUtcNow(),
             NozzleDiameter = input.NozzleDiameterMm,
             FilamentDiameter = input.FilamentDiameterMm,
             BeamDiameter = input.BeamDiameterMm,

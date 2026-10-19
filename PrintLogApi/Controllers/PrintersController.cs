@@ -251,7 +251,7 @@ public class PrintersController(
             return Forbid();
         }
 
-        var catalogProblem = await ValidateCatalogModelAsync(printer, existingPrinter.CatalogModelId);
+        var (catalogProblem, _) = await ValidateCatalogModelAsync(printer, existingPrinter.CatalogModelId);
         if (catalogProblem is not null)
         {
             return catalogProblem;
@@ -332,7 +332,7 @@ public class PrintersController(
             return Unauthorized();
         }
 
-        var catalogProblem = await ValidateCatalogModelAsync(printer, currentCatalogModelId: null);
+        var (catalogProblem, catalogModel) = await ValidateCatalogModelAsync(printer, currentCatalogModelId: null);
         if (catalogProblem is not null)
         {
             return catalogProblem;
@@ -342,11 +342,8 @@ public class PrintersController(
         newPrinter.CreatedAt = timeProvider.GetUtcNow();
 
         // Specs the caller left null come from the catalog model (create only; PUT never fills).
-        // The id was validated above, so the model exists.
-        if (newPrinter.CatalogModelId is { } catalogModelId)
+        if (catalogModel is not null)
         {
-            var catalogModel = await context.PrinterModels.AsNoTracking()
-                .SingleAsync(m => m.Id == catalogModelId, HttpContext.RequestAborted);
             PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel);
         }
 
@@ -390,19 +387,19 @@ public class PrintersController(
     /// Keeping the id a printer already has (any case) is always accepted, so editing a printer whose model
     /// was hidden or retired later never fails on a field the user did not touch.
     /// </summary>
-    private async Task<ObjectResult?> ValidateCatalogModelAsync(AddPrinterDTO printer, string? currentCatalogModelId)
+    private async Task<(ObjectResult? Problem, PrinterModel? Model)> ValidateCatalogModelAsync(AddPrinterDTO printer, string? currentCatalogModelId)
     {
         var catalogModelId = printer.CatalogModelId;
         if (catalogModelId is null)
         {
-            return null;
+            return (null, null);
         }
 
         if (string.Equals(catalogModelId, currentCatalogModelId, StringComparison.OrdinalIgnoreCase))
         {
             // Unchanged. The FK guarantees a stored id exists; save it in its stored case.
             printer.CatalogModelId = currentCatalogModelId;
-            return null;
+            return (null, null);
         }
 
         // ToLower rather than ==, so the match is case-insensitive on any provider.
@@ -410,19 +407,18 @@ public class PrintersController(
         var model = await context.PrinterModels
             .AsNoTracking()
             .Where(m => m.Id.ToLower() == lowered)
-            .Select(m => new { m.Id, m.Hidden, m.Retired })
             .SingleOrDefaultAsync(HttpContext.RequestAborted);
 
         if (model is not null && !model.Hidden && !model.Retired)
         {
             printer.CatalogModelId = model.Id;
-            return null;
+            return (null, model);
         }
 
-        return CodedProblem(
+        return (CodedProblem(
             StatusCodes.Status400BadRequest,
             "The printer model was not found in the catalog.",
-            "printer_model_not_found");
+            "printer_model_not_found"), null);
     }
 
     private ObjectResult CodedProblem(int status, string detail, string code)

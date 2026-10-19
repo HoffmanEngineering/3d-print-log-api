@@ -155,6 +155,63 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
     }
 
     [Fact]
+    public async Task Create_RetryAfterTheModelWasRetired_StillReplays()
+    {
+        var id = await SeedModelAsync();
+        var key = $"cat-retire-{Guid.NewGuid():N}";
+        using var scope = _factory.Services.CreateScope();
+        var first = await Create(scope, Basic("Catalog Replay") with { CatalogModelId = id }, key);
+
+        using (var s2 = _factory.Services.CreateScope())
+        {
+            var db = s2.ServiceProvider.GetRequiredService<PrintLogContext>();
+            (await db.PrinterModels.FindAsync([id], TestContext.Current.CancellationToken))!.Retired = true;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var scope3 = _factory.Services.CreateScope();
+        var retry = await Create(scope3, Basic("Catalog Replay") with { CatalogModelId = id }, key);
+
+        Assert.True(retry.WasReplayed);
+        Assert.Equal(first.Printer.Id, retry.Printer.Id);
+    }
+
+    [Fact]
+    public async Task Create_RetryWithTheIdInAnotherCaseOrPadded_Replays()
+    {
+        var id = await SeedModelAsync();
+        var key = $"cat-case-{Guid.NewGuid():N}";
+        using var scope = _factory.Services.CreateScope();
+        var first = await Create(scope, Basic("Catalog Case Replay") with { CatalogModelId = id }, key);
+
+        using var scope2 = _factory.Services.CreateScope();
+        var retry = await Create(scope2, Basic("Catalog Case Replay") with { CatalogModelId = $"  {id.ToUpperInvariant()} " }, key);
+
+        Assert.True(retry.WasReplayed);
+        Assert.Equal(first.Printer.Id, retry.Printer.Id);
+    }
+
+    [Fact]
+    public async Task Create_SetsCreatedAtFromTheClock_WithAndWithoutACatalogModel()
+    {
+        var clock = new Analytics.SettableTimeProvider(new DateTimeOffset(2031, 5, 6, 7, 8, 9, TimeSpan.Zero));
+        var id = await SeedModelAsync();
+        using var scope = _factory.Services.CreateScope();
+        // The real service, with only the clock swapped.
+        var service = ActivatorUtilities.CreateInstance<PrinterService>(scope.ServiceProvider, (TimeProvider)clock);
+
+        var plain = await service.CreatePrinterForMcp(IntegrationTestSeeder.TestUserId, Basic("Clock Plain"), null, CancellationToken.None);
+        var linked = await service.CreatePrinterForMcp(IntegrationTestSeeder.TestUserId, Basic("Clock Linked") with { CatalogModelId = id }, null, CancellationToken.None);
+
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        foreach (var printerId in new[] { plain.Printer.Id, linked.Printer.Id })
+        {
+            var stored = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == printerId, TestContext.Current.CancellationToken);
+            Assert.Equal(clock.GetUtcNow(), stored.CreatedAt);
+        }
+    }
+
+    [Fact]
     public async Task Create_UnknownCatalogModel_IsInvalidArguments()
     {
         using var scope = _factory.Services.CreateScope();
