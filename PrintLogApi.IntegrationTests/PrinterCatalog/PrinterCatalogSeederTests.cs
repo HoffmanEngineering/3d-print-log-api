@@ -320,4 +320,139 @@ public class PrinterCatalogSeederTests
         Assert.Equal(0, loads);
         Assert.False(host.Index.IsReady);
     }
+
+    [Fact]
+    public async Task RunOnce_WhenTheFirstSeedFails_OnAnEmptyTable_LeavesTheIndexNotReady()
+    {
+        await using var host = new PrinterCatalogTestHost();
+
+        var built = await host.Seeder(() => throw new InvalidDataException("broken file")).RunOnceAsync(TestContext.Current.CancellationToken);
+
+        // An empty index marked ready would answer every search with nothing; not ready answers 503.
+        Assert.False(built);
+        Assert.False(host.Index.IsReady);
+    }
+
+    [Fact]
+    public async Task RunOnce_WhenTheSeedFails_WithRowsPresent_RebuildsFromTheTable()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        await host.SeedAsync(File("v1", [Model("a")]));
+
+        var built = await host.Seeder(() => throw new InvalidDataException("broken file")).RunOnceAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(built);
+        Assert.True(host.Index.IsReady);
+        Assert.NotNull(host.Index.Get("a"));
+    }
+
+    [Fact]
+    public async Task TheHostedService_RetriesAFailedFirstSeed_EveryFiveMinutes_UntilItSucceeds()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var loads = 0;
+        var delays = new List<TimeSpan>();
+        var seeder = host.Seeder(
+            () => Interlocked.Increment(ref loads) < 3 ? throw new InvalidDataException("broken file") : File("v1", [Model("a")]),
+            (d, _) =>
+            {
+                delays.Add(d);
+                Assert.False(host.Index.IsReady);
+                return Task.CompletedTask;
+            });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+        host.Lifetime.Start();
+        await seeder.ExecuteTask!.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, loads);
+        Assert.Equal([TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5)], delays);
+        Assert.True(host.Index.IsReady);
+        Assert.NotNull(host.Index.Get("a"));
+        Assert.Equal("v1", await host.MarkerAsync());
+    }
+
+    [Fact]
+    public async Task TheHostedService_GivesUpAfterTwelveRetries()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var loads = 0;
+        var delays = 0;
+        var seeder = host.Seeder(
+            () =>
+            {
+                Interlocked.Increment(ref loads);
+                throw new InvalidDataException("broken file");
+            },
+            (_, _) =>
+            {
+                delays++;
+                return Task.CompletedTask;
+            });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+        host.Lifetime.Start();
+        await seeder.ExecuteTask!.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(13, loads);
+        Assert.Equal(12, delays);
+        Assert.False(host.Index.IsReady);
+    }
+
+    [Fact]
+    public async Task TheHostedService_StoppedWhileWaitingToRetry_StopsRetrying()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var loads = 0;
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var seeder = host.Seeder(
+            () =>
+            {
+                Interlocked.Increment(ref loads);
+                throw new InvalidDataException("broken file");
+            },
+            (d, ct) =>
+            {
+                waiting.TrySetResult();
+                return Task.Delay(d, ct);
+            });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+        host.Lifetime.Start();
+        await Task.WhenAny(waiting.Task, seeder.ExecuteTask!).WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(waiting.Task.IsCompleted, "the seeder should be waiting to retry");
+        await seeder.StopAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(seeder.ExecuteTask!.IsCompleted);
+        Assert.Equal(1, loads);
+        Assert.False(host.Index.IsReady);
+    }
+
+    [Fact]
+    public async Task TheHostedService_DoesNotRetry_WhenTheSeedFailsWithRowsPresent()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        await host.SeedAsync(File("v1", [Model("a")]));
+        var loads = 0;
+        var delays = 0;
+        var seeder = host.Seeder(
+            () =>
+            {
+                Interlocked.Increment(ref loads);
+                throw new InvalidDataException("broken file");
+            },
+            (_, _) =>
+            {
+                delays++;
+                return Task.CompletedTask;
+            });
+
+        await seeder.StartAsync(TestContext.Current.CancellationToken);
+        host.Lifetime.Start();
+        await seeder.ExecuteTask!.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, loads);
+        Assert.Equal(0, delays);
+        Assert.True(host.Index.IsReady);
+    }
 }

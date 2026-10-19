@@ -424,8 +424,9 @@ public class PrintLogWriteTools(
         "Dimensions are millimetres, wattage is watts, screen resolutions are pixels — all " +
         "stored exactly as given, with no conversion. A new printer is active unless you pass " +
         "isActive = false. This tool never loads or unloads filament: use the load/unload flow " +
-        "for that. Pass catalogModelId (an id from the anonymous GET /api/PrinterModels?search=) " +
-        "to fill any spec you leave out from the printer catalog; values you pass always win. " +
+        "for that. An optional catalogModelId fills any spec you leave out from the printer " +
+        "catalog; values you pass always win. If you can call the REST API, find an id with " +
+        "GET /api/PrinterModels?search=; otherwise omit it. " +
         "'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
         "SAME arguments returns the same printer (wasReplayed = true) and reusing it with " +
         "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND printer.")]
@@ -447,7 +448,7 @@ public class PrintLogWriteTools(
         [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
         [Description("Optional power draw in watts (>= 0).")] double? wattageW = null,
         [Description("Whether the printer is in use. Defaults to true.")] bool? isActive = null,
-        [Description("Catalog model id from GET /api/PrinterModels; fills specs left empty")] string? catalogModelId = null,
+        [Description("Optional printer catalog model id; fills specs left empty. If you can call the REST API, find an id with GET /api/PrinterModels?search=; otherwise omit it.")] string? catalogModelId = null,
         [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
         CancellationToken ct = default)
     {

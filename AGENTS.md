@@ -471,7 +471,27 @@ both. Which release each source is read at is `catalog-sources.json`.
 - **A monthly workflow** (`printer-catalog-refresh.yml`) resolves the latest stable release of each
   source, regenerates, and opens a `chore/printer-catalog-refresh-<yyyy-mm>` PR with the summary and
   the catalog test result. It skips while one is open and never merges. `GITHUB_TOKEN` opened the PR,
-  so CI does not run on it until you close and reopen it or push a commit.
+  so CI does not run on it until you close and reopen it or push a commit. **It needs a repository
+  setting:** GitHub refuses a PR from `GITHUB_TOKEN` until *Settings → Actions → General → Allow
+  GitHub Actions to create and approve pull requests* is on (or the workflow gets a PAT or GitHub App
+  token secret). Without it the run deletes the branch it pushed and fails with an `::error::` that
+  names the setting.
+- **The startup seeder** (`PrinterCatalogSeeder`, every environment, after ApplicationStarted)
+  writes the embedded file into `PrinterModels` when its version differs from the one in the
+  `PrinterCatalogVersions` marker row, in one transaction (an applock on SQL Server, so two instances
+  seed one after the other). **An older file is skipped** (its `generatedAt` is before the seeded
+  one's), so a rollback deploy never undoes a newer catalog. Rows are never deleted: a model the file
+  no longer lists, or one hidden by an override, is stored as **retired**, which still resolves by id
+  but is never offered.
+- **Until the index is built, the catalog endpoints answer 503 `catalog_not_ready`.** A seed that
+  fails with no visible model in the table leaves it that way and retries every 5 minutes, 12 times;
+  one that fails with models present rebuilds from the table as it is.
+- **The backfill runs on every start** once the index is built: it links printers with no
+  `CatalogModelId` by make and model (exact or alias match only). Owner counts are recomputed then
+  only when the seed changed something or the backfill linked a printer; otherwise daily.
+- **The anonymous endpoints are rate-limited per socket peer** (`Catalog:RateLimitPerMinute`, 600).
+  That is a client only with forwarded headers on (App Service sets
+  `ASPNETCORE_FORWARDEDHEADERS_ENABLED`); without them every caller shares one budget.
 
 ## Database
 

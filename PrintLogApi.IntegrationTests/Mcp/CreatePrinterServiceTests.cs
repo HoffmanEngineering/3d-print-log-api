@@ -109,7 +109,19 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         Assert.Equal(1.75, p.FilamentDiameterMm);
         Assert.True(p.HasHeatedBed);
         Assert.True(p.HasHeatedChamber);
+        // create_printer takes no slot count, so it is always "omitted" and the model's applies.
         Assert.Equal(4, p.SlotCount);
+    }
+
+    [Fact]
+    public async Task Create_WithAOneSlotCatalogModel_GetsOneSlot()
+    {
+        var id = await SeedModelAsync(slots: 1);
+        using var scope = _factory.Services.CreateScope();
+
+        var result = await Create(scope, Basic("Catalog One Slot") with { CatalogModelId = id });
+
+        Assert.Equal(1, result.Printer.SlotCount);
     }
 
     [Fact]

@@ -222,17 +222,50 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Post_ExplicitSlotCountOneOnAFourSlotModel_GetsFour()
+    public async Task Post_ExplicitSlotCountOneOnAFourSlotModel_KeepsOne()
     {
-        // SlotCount has no unset value, so an explicit 1 reads as "left at the default".
+        // A user who picks a 4-slot model and turns multi-material off sends 1, and keeps 1.
         var id = await SeedModelAsync(configure: FullSpecs);
         var body = NewPrinter(id);
         body.SlotCount = 1;
 
         var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
 
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(1, created.SlotCount);
+    }
+
+    [Fact]
+    public async Task Post_OmittedSlotCountOnAFourSlotModel_GetsFour()
+    {
+        var id = await SeedModelAsync(configure: FullSpecs);
+        var body = NewPrinter(id);
+        body.SlotCount = null;
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
         Assert.Equal(4, created.SlotCount);
+    }
+
+    [Fact]
+    public async Task Post_OmittedSlotCountOnAOneSlotModel_GetsOne()
+    {
+        var id = await SeedModelAsync(configure: m =>
+        {
+            FullSpecs(m);
+            m.DefaultSlotCount = 1;
+        });
+        var body = NewPrinter(id);
+        body.SlotCount = null;
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(1, created.SlotCount);
     }
 
     [Fact]

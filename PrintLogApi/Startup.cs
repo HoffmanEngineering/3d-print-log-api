@@ -333,10 +333,14 @@ public class Startup
                     });
             });
 
-            // The anonymous printer catalog: per socket peer, like the docs endpoint above.
+            // The anonymous printer catalog, like the docs endpoint above. The partition is the
+            // socket peer (RemoteIpAddress), which is a client only when forwarded headers are
+            // enabled (App Service sets ASPNETCORE_FORWARDEDHEADERS_ENABLED); without them every
+            // request behind the front end shares one partition.
             options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
             {
-                var limit = Configuration.GetValue("Catalog:RateLimitPerMinute", 600);
+                var limit = httpContext.RequestServices
+                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<PrinterCatalogOptions>>().Value.RateLimitPerMinute;
                 if (limit <= 0)
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("catalog-unlimited");

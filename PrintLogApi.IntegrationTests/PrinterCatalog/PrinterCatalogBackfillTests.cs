@@ -189,25 +189,47 @@ public class PrinterCatalogBackfillTests
     }
 
     [Fact]
-    public async Task SeederHook_RunsBackfillThenPopularity_OnlyAfterASeedThatChangedSomething()
+    public async Task SeederHook_RunsBackfillThenPopularity_AfterASeedThatChangedSomething()
     {
         await using var host = new PrinterCatalogTestHost();
         var user = await AddUserAsync(host);
         var id = await AddPrinterAsync(host, user.Id, null, host.Time.GetUtcNow().AddDays(-1), make: "Bambu Lab", model: "P1S");
+
+        await host.Seeder(() => File(P1S())).RunOnceAsync(Ct);
+
+        Assert.Equal("bambu-lab-p1s", (await GetPrinterAsync(host, id)).CatalogModelId);
+        Assert.Equal(1, (await host.RowsAsync())["bambu-lab-p1s"].OwnerCount);
+    }
+
+    [Fact]
+    public async Task SeederHook_UnchangedVersion_StillRunsTheBackfill_AndRecountsWhenItLinked()
+    {
+        await using var host = new PrinterCatalogTestHost();
         var file = File(P1S());
+        await host.Seeder(() => file).RunOnceAsync(Ct);
+
+        // Added after the seed, while the version stays the same: only the backfill can link it.
+        var user = await AddUserAsync(host);
+        var id = await AddPrinterAsync(host, user.Id, null, host.Time.GetUtcNow().AddDays(-1), make: "Bambu Lab", model: "P1S");
 
         await host.Seeder(() => file).RunOnceAsync(Ct);
 
         Assert.Equal("bambu-lab-p1s", (await GetPrinterAsync(host, id)).CatalogModelId);
         Assert.Equal(1, (await host.RowsAsync())["bambu-lab-p1s"].OwnerCount);
+    }
 
-        // The same version seeds nothing, so a printer unlinked in between stays unlinked.
-        await using (var scope = host.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<PrintLogContext>().Printers
-                .ExecuteUpdateAsync(s => s.SetProperty(p => p.CatalogModelId, (string?)null), Ct);
-        }
+    [Fact]
+    public async Task SeederHook_UnchangedVersion_AndNothingToLink_SkipsPopularity()
+    {
+        await using var host = new PrinterCatalogTestHost();
+        var file = File(P1S());
         await host.Seeder(() => file).RunOnceAsync(Ct);
-        Assert.Null((await GetPrinterAsync(host, id)).CatalogModelId);
+
+        // Already linked, so the backfill leaves it alone and nothing calls for a recount.
+        await AddPrinterAsync(host, (await AddUserAsync(host)).Id, "bambu-lab-p1s", host.Time.GetUtcNow().AddDays(-1));
+
+        await host.Seeder(() => file).RunOnceAsync(Ct);
+
+        Assert.Equal(0, (await host.RowsAsync())["bambu-lab-p1s"].OwnerCount);
     }
 }

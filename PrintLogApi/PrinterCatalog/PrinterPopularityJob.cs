@@ -76,8 +76,13 @@ public sealed class PrinterPopularityJob(
                 .ExecuteUpdateAsync(s => s.SetProperty(m => m.OwnerCount, owners), ct);
         }
 
-        // Read after the writes committed, and rebuilt once per run.
-        index.Rebuild(await db.PrinterModels.AsNoTracking().ToListAsync(ct));
+        // Read after the writes committed, and rebuilt once per run. Never from an empty table into
+        // an index that is not built yet: a failed first seed leaves it not ready (503) on purpose.
+        var models = await db.PrinterModels.AsNoTracking().ToListAsync(ct);
+        if (index.IsReady || models.Any(m => !m.Hidden && !m.Retired))
+        {
+            index.Rebuild(models);
+        }
         logger.LogInformation("Printer popularity: {Updated} models updated", updated);
         return updated;
     }

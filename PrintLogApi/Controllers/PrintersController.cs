@@ -344,7 +344,7 @@ public class PrintersController(
         // Specs the caller left null come from the catalog model (create only; PUT never fills).
         if (catalogModel is not null)
         {
-            PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel);
+            PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel, printer.SlotCount);
         }
 
         // The category the caller named wins; otherwise the model's technology, then the default.

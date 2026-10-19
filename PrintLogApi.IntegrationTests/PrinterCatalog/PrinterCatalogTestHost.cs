@@ -53,8 +53,11 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
 
     public AsyncServiceScope CreateScope() => _provider.CreateAsyncScope();
 
-    /// <summary>The hosted service, reading <paramref name="load"/> (the embedded file by default).</summary>
-    public PrinterCatalogSeeder Seeder(Func<CatalogFile>? load = null) => new(
+    /// <summary>
+    /// The hosted service, reading <paramref name="load"/> (the embedded file by default). A retry
+    /// waits through <paramref name="delay"/>, which defaults to a real delay on the test's token.
+    /// </summary>
+    public PrinterCatalogSeeder Seeder(Func<CatalogFile>? load = null, Func<TimeSpan, CancellationToken, Task>? delay = null) => new(
         _provider.GetRequiredService<IServiceScopeFactory>(),
         Index,
         Backfill,
@@ -64,6 +67,7 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
         _provider.GetRequiredService<ILogger<PrinterCatalogSeeder>>())
     {
         LoadCatalog = load ?? PrinterCatalogFileLoader.LoadEmbedded,
+        RetryDelay = delay ?? ((d, ct) => Task.Delay(d, ct)),
     };
 
     /// <summary>Seeds through a fresh context, as the hosted service does.</summary>

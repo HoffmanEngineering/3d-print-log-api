@@ -144,6 +144,17 @@ public class PrinterPopularityJobTests
     }
 
     [Fact]
+    public async Task Run_OnAnEmptyTable_LeavesAnUnbuiltIndexNotReady()
+    {
+        // A failed first seed leaves the table empty; the daily tick must not mark that ready.
+        await using var host = new PrinterCatalogTestHost();
+
+        await host.Popularity.RunOnceAsync(Now, Ct);
+
+        Assert.False(host.Index.IsReady);
+    }
+
+    [Fact]
     public async Task Run_RebuildsTheIndexWithTheNewCounts()
     {
         await using var host = await HostAsync();

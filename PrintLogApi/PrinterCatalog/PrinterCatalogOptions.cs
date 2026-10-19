@@ -16,4 +16,10 @@ public sealed class PrinterCatalogOptions
     /// owners (spec §6.5).
     /// </summary>
     public int PopularityWindowDays { get; set; } = 365;
+
+    /// <summary>
+    /// Requests a minute each client may make to the anonymous catalog endpoints. 0 or less turns
+    /// the limit off.
+    /// </summary>
+    public int RateLimitPerMinute { get; set; } = 600;
 }

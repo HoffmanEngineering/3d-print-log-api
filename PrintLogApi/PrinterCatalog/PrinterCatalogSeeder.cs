@@ -15,12 +15,14 @@ namespace PrintLogApi.PrinterCatalog;
 public sealed record SeedResult(int Inserted, int Updated, int Retired, int Unchanged, int Repointed);
 
 /// <summary>
-/// Runs once at startup, in every environment (spec §6.2). When the embedded
+/// Runs at startup, in every environment (spec §6.2). When the embedded
 /// <c>printer-catalog.json</c>'s version differs from the one recorded in
 /// <see cref="PrinterCatalogVersion"/>, it upserts every model, retires the rows the file no longer
-/// lists, and moves printers off merged ids. Then it builds the search index from the table,
-/// whether or not anything was seeded. A failure is logged and leaves the table as it was; the API
-/// starts regardless.
+/// lists, and moves printers off merged ids. Then it builds the search index from the table and
+/// links unlinked printers. A failure is logged and leaves the table as it was; the API starts
+/// regardless. A failed seed with no visible model to fall back on leaves the index not ready
+/// (the catalog endpoints answer 503) and is retried every <see cref="RetryInterval"/>, up to
+/// <see cref="MaxRetries"/> times.
 /// </summary>
 public sealed class PrinterCatalogSeeder(
     IServiceScopeFactory scopeFactory,
@@ -31,6 +33,12 @@ public sealed class PrinterCatalogSeeder(
     IHostApplicationLifetime lifetime,
     ILogger<PrinterCatalogSeeder> logger) : BackgroundService
 {
+    /// <summary>How long a failed first seed waits before it tries again.</summary>
+    internal static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>Retries after the first attempt, so an hour of trying in all.</summary>
+    internal const int MaxRetries = 12;
+
     /// <summary>Compact, camelCase and unescaped, so "MINI+" stays readable in the column.</summary>
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -41,10 +49,14 @@ public sealed class PrinterCatalogSeeder(
     /// <summary>The seam for tests. Read once per run; the parsed file is dropped when the run ends.</summary>
     internal Func<CatalogFile> LoadCatalog { get; init; } = PrinterCatalogFileLoader.LoadEmbedded;
 
+    /// <summary>The wait between retries; a seam so tests need no real five-minute wait.</summary>
+    internal Func<TimeSpan, CancellationToken, Task> RetryDelay { get; init; } = (delay, ct) => Task.Delay(delay, timeProvider, ct);
+
     /// <summary>
     /// Waits for ApplicationStarted first: in Development and E2ETesting, <c>Startup.Configure</c>
     /// migrates (and in E2ETesting recreates) the database, and a seed racing that would fail or
-    /// write into a database about to be dropped. Startup itself is never blocked.
+    /// write into a database about to be dropped. Startup itself is never blocked. Then runs until
+    /// the index is built, retrying while it is not.
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -60,13 +72,42 @@ public sealed class PrinterCatalogSeeder(
                 return;
             }
         }
-        await RunOnceAsync(stoppingToken);
+
+        for (var retry = 0; ; retry++)
+        {
+            if (await RunOnceAsync(stoppingToken))
+            {
+                return;
+            }
+            if (retry == MaxRetries)
+            {
+                logger.LogError(
+                    "The printer catalog is still not loaded after {Retries} retries; catalog endpoints answer 503 until the next restart",
+                    MaxRetries);
+                return;
+            }
+
+            logger.LogWarning("Retrying the printer catalog seed in {Delay}", RetryInterval);
+            try
+            {
+                await RetryDelay(RetryInterval, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
     }
 
-    /// <summary>Seeds when the version changed, then rebuilds the index. Never throws but on shutdown.</summary>
-    internal async Task RunOnceAsync(CancellationToken ct)
+    /// <summary>
+    /// Seeds when the version changed, then rebuilds the index, then backfills. Returns whether the
+    /// index was built. A failed seed rebuilds from the table only when the table has a visible
+    /// model: an empty index marked ready would answer every search with nothing, where not ready
+    /// answers 503 and the hosted service retries. Never throws but on shutdown.
+    /// </summary>
+    internal async Task<bool> RunOnceAsync(CancellationToken ct)
     {
-        var changed = false;
+        bool? changed = null;
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -93,31 +134,46 @@ public sealed class PrinterCatalogSeeder(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            index.Rebuild(await db.PrinterModels.AsNoTracking().ToListAsync(ct));
+            var models = await db.PrinterModels.AsNoTracking().ToListAsync(ct);
+            if (changed is null && !models.Any(m => !m.Hidden && !m.Retired))
+            {
+                logger.LogError("The printer catalog has no models to fall back on; catalog endpoints answer 503 until a seed succeeds");
+                return false;
+            }
+            index.Rebuild(models);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            logger.LogError(ex, "Building the printer catalog index failed; catalog search is empty until the next rebuild");
+            logger.LogError(ex, "Building the printer catalog index failed; catalog endpoints answer 503 until the next rebuild");
+            return false;
         }
         catch (OperationCanceledException)
         {
+            return false;
         }
 
-        if (changed)
+        // Only after a seed that ran, or found its version already seeded. A failed seed falls back
+        // on the table as it is, and the next start tries again.
+        if (changed is { } seedChanged)
         {
-            await AfterSeedAsync(ct);
+            await AfterIndexBuiltAsync(seedChanged, ct);
         }
+        return true;
     }
 
     /// <summary>
-    /// After a seed that changed something: links printers the new models now match, then recounts
-    /// owners (which rebuilds the index). Each step is best effort and logged; neither fails startup.
+    /// Once the index is built: links printers with no catalog model to one they now match (cheap to
+    /// repeat on every start, as it reads only unlinked printers), then recounts owners (which
+    /// rebuilds the index) when the seed changed something or the backfill linked anything. Each
+    /// step is best effort and logged; neither fails startup.
     /// </summary>
-    internal async Task AfterSeedAsync(CancellationToken ct)
+    internal async Task AfterIndexBuiltAsync(bool seedChanged, CancellationToken ct)
     {
+        var linked = 0;
         try
         {
             var result = await backfill.RunOnceAsync(ct);
+            linked = result.Linked;
             logger.LogInformation(
                 "Printer catalog backfill: {Linked} linked, {Ambiguous} ambiguous, {Unmatched} unmatched",
                 result.Linked, result.Ambiguous, result.Unmatched);
@@ -127,6 +183,11 @@ public sealed class PrinterCatalogSeeder(
             logger.LogError(ex, "Printer catalog backfill failed; printers stay as they were");
         }
         catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (!seedChanged && linked == 0)
         {
             return;
         }

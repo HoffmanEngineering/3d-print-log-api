@@ -584,7 +584,7 @@ public class PrinterService(
         {
             throw McpToolException.InvalidArguments(
                 $"catalogModelId '{catalogModelId}' is not a printer in the catalog. " +
-                "Find an id with GET /api/PrinterModels?search=<name>.");
+                "If you can call the REST API, find an id with GET /api/PrinterModels?search=<name>; otherwise omit it.");
         }
         return model;
     }
@@ -685,9 +685,10 @@ public class PrinterService(
         };
 
         // Specs the caller left out come from the catalog; a value they gave always wins.
+        // create_printer takes no slot count, so it is always omitted and the model's applies.
         if (catalogModel is not null)
         {
-            PrinterCatalogDefaults.ApplyOnCreate(printer, catalogModel);
+            PrinterCatalogDefaults.ApplyOnCreate(printer, catalogModel, requestedSlotCount: null);
         }
 
         // A category the caller named must exist (rejected otherwise). One taken from the model's

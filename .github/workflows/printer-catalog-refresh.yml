@@ -148,6 +148,12 @@ jobs:
             echo "- Nothing here merges automatically."
           } > "$RUNNER_TEMP/pr-body.md"
 
-          gh pr create --base main --head "$branch" \
+          # GITHUB_TOKEN can push but not open a PR until the repository allows it. Delete the
+          # pushed branch on failure, so the next run does not find a stale one, and say why.
+          if ! gh pr create --base main --head "$branch" \
             --title "chore(catalog): refresh printer catalog ${month}" \
-            --body-file "$RUNNER_TEMP/pr-body.md"
+            --body-file "$RUNNER_TEMP/pr-body.md"; then
+            git push origin --delete "$branch" || echo "::warning::Could not delete the branch $branch; delete it by hand."
+            echo "::error::Could not open the PR. If GITHUB_TOKEN may not create pull requests here, turn on Settings → Actions → General → Allow GitHub Actions to create and approve pull requests, or give the workflow a PAT or GitHub App token secret."
+            exit 1
+          fi

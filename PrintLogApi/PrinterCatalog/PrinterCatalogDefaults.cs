@@ -11,11 +11,13 @@ public static class PrinterCatalogDefaults
 {
     /// <summary>
     /// Fills every spec field that is still empty on <paramref name="printer"/> from
-    /// <paramref name="model"/>. <see cref="Printer.SlotCount"/> has no "unset" value, so it is filled
-    /// only while it is still the default 1 and the model has more than one. Make and model are filled
-    /// when blank, and the category when no category is named, from the model's technology.
+    /// <paramref name="model"/>. <see cref="Printer.SlotCount"/> has no "unset" value on the entity,
+    /// so <paramref name="requestedSlotCount"/> is what the caller sent: the model's slot count
+    /// applies only when it is null (omitted), never over an explicit value, so a 4-slot model
+    /// created with 1 slot keeps 1. Make and model are filled when blank, and the category when no
+    /// category is named, from the model's technology.
     /// </summary>
-    public static void ApplyOnCreate(Printer printer, PrinterModel model)
+    public static void ApplyOnCreate(Printer printer, PrinterModel model, int? requestedSlotCount)
     {
         if (string.IsNullOrWhiteSpace(printer.Make))
         {
@@ -35,7 +37,7 @@ public static class PrinterCatalogDefaults
         printer.HasHeatedBed ??= model.HasHeatedBed;
         printer.HasHeatedChamber ??= model.HasHeatedChamber;
 
-        if (printer.SlotCount == 1 && model.DefaultSlotCount is > 1 and var slots)
+        if (requestedSlotCount is null && model.DefaultSlotCount is >= 1 and var slots)
         {
             printer.SlotCount = Math.Min(slots, Printer.MaxSlotCount);
         }
