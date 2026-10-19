@@ -332,6 +332,85 @@ public class CatalogGeneratorTests
         Assert.Equal(CatalogFile.Serialize(first), CatalogFile.Serialize(second));
     }
 
+    // --- Summary ---
+
+    private static CatalogModel Model(string id, string make, string model, double? bedWidthMm = 220) =>
+        new() { Id = id, Make = make, Model = model, BedWidthMm = bedWidthMm };
+
+    [Fact]
+    public void Summary_AOneModelAddition_IsReportedAsAdded()
+    {
+        var previous = new CatalogFile { Models = [Model("foo-bar", "Foo", "Bar")] };
+        var current = new CatalogFile { Models = [Model("foo-bar", "Foo", "Bar"), Model("make-model", "Make", "Model")] };
+
+        var summary = CatalogSummary.Build(previous, current, new HashSet<string>());
+
+        Assert.Contains("Added: Make Model", summary);
+        Assert.DoesNotContain("Changed:", summary);
+        Assert.DoesNotContain("Retired:", summary);
+    }
+
+    [Fact]
+    public void Summary_AFieldChange_ListsTheField()
+    {
+        var previous = new CatalogFile { Models = [Model("foo-bar", "Foo", "Bar", 220)] };
+        var current = new CatalogFile { Models = [Model("foo-bar", "Foo", "Bar", 250)] };
+
+        var summary = CatalogSummary.Build(previous, current, new HashSet<string>());
+
+        Assert.Contains("Changed: Foo Bar", summary);
+        Assert.Contains("bedWidthMm", summary);
+        Assert.DoesNotContain("Added:", summary);
+    }
+
+    [Fact]
+    public void Summary_RetiredHiddenAndMergedModels_AreTold_ApartFromEachOther()
+    {
+        var previous = new CatalogFile
+        {
+            Models = [Model("gone-one", "Gone", "One"), Model("hid-den", "Hid", "Den"), Model("old-id", "Old", "Id"), Model("new-id", "New", "Id")],
+        };
+        var current = new CatalogFile
+        {
+            Models = [Model("new-id", "New", "Id")],
+            Reserved =
+            [
+                new() { Id = "gone-one" },
+                new() { Id = "hid-den" },
+                new() { Id = "old-id", MergedInto = "new-id" },
+            ],
+        };
+
+        var summary = CatalogSummary.Build(previous, current, new HashSet<string> { "hid-den" });
+
+        Assert.Contains("Retired: Gone One", summary);
+        Assert.Contains("Hidden: Hid Den", summary);
+        Assert.Contains("Merged: Old Id into new-id", summary);
+        Assert.DoesNotContain("Retired: Hid Den", summary);
+        Assert.DoesNotContain("Retired: Old Id", summary);
+    }
+
+    [Fact]
+    public void Summary_NothingChanged_SaysSo()
+    {
+        var file = new CatalogFile { Models = [Model("foo-bar", "Foo", "Bar")] };
+
+        var summary = CatalogSummary.Build(file, file, new HashSet<string>());
+
+        Assert.Contains("No changes", summary);
+    }
+
+    [Fact]
+    public void Summary_ASectionIsCapped_AndSaysHowManyMore()
+    {
+        var current = new CatalogFile { Models = Enumerable.Range(0, 130).Select(i => Model($"m-{i:000}", "M", $"{i:000}")).ToList() };
+
+        var summary = CatalogSummary.Build(new CatalogFile(), current, new HashSet<string>());
+
+        Assert.Equal(100, summary.Split('\n').Count(l => l.StartsWith("- Added:", StringComparison.Ordinal)));
+        Assert.Contains("and 30 more", summary);
+    }
+
     // --- Normalizer ---
 
     [Fact]

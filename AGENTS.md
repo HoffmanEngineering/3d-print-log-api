@@ -447,6 +447,32 @@ tried first and rejected — its `SetUtcNow` throws on any value earlier than th
 one provider registered per shared host the second test to run fails purely because the first moved
 the clock forward. The reasoning is written out at the type.
 
+## Printer catalog
+
+`PrintLogApi/PrinterCatalog/printer-catalog.json` is the list of printer models the quick-add and
+print form search. It is **generated** from Cura and OrcaSlicer printer profiles by
+`PrintLogApi.Tools` and embedded in the API. Never hand-edit it. Correct a model in
+`catalog-overrides.json`, and map a maker's spelling in `make-aliases.json`; the next run applies
+both. Which release each source is read at is `catalog-sources.json`.
+
+- **Ids are permanent.** A published id (`bambu-lab-p1s`) never changes and is never reused, because
+  printers store it. The generator reads the committed file to keep them. A model that leaves the
+  sources or is hidden stays in `reserved`; `mergedInto` marks an id folded into another when two
+  entries came to describe one model.
+- **Facts only.** The file holds names, aliases and the spec fields, with where each came from. Never
+  copy profile text, G-code, meshes or images into it or the repo. That is the license rule: Cura is
+  LGPL-3.0 and OrcaSlicer is AGPL-3.0, and the file carries their attribution.
+- **Run it locally** with `dotnet run --project PrintLogApi.Tools -- printer-catalog --out
+  <absolute path>`; the working directory is the project folder, so pass absolute paths. It clones
+  both sources shallowly into `--work`, which on Chris's machine must be on D: (C: is full). Add
+  `--summary <file>` for a Markdown diff of what changed.
+- **The golden list** (`PrinterCatalogGoldenTests`) pins the specs of well-known models. A refresh
+  that moves one fails it, which is a prompt to look at the change, not necessarily to revert it.
+- **A monthly workflow** (`printer-catalog-refresh.yml`) resolves the latest stable release of each
+  source, regenerates, and opens a `chore/printer-catalog-refresh-<yyyy-mm>` PR with the summary and
+  the catalog test result. It skips while one is open and never merges. `GITHUB_TOKEN` opened the PR,
+  so CI does not run on it until you close and reopen it or push a commit.
+
 ## Database
 
 Migrations are auto-applied on startup in `Development` and `E2ETesting` only. Production applies

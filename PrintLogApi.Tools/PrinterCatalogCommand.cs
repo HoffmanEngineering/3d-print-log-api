@@ -13,7 +13,7 @@ internal static class PrinterCatalogCommand
 {
     public const string Usage =
         "usage: printer-catalog [--cura <dir>] [--orca <dir>] [--sources <file>] [--overrides <file>] " +
-        "[--aliases <file>] [--previous <file>] [--work <dir>] --out <file>";
+        "[--aliases <file>] [--previous <file>] [--work <dir>] [--summary <file>] --out <file>";
 
     private const string CuraRepo = "Ultimaker/Cura";
     private const string OrcaRepo = "SoftFever/OrcaSlicer";
@@ -22,7 +22,7 @@ internal static class PrinterCatalogCommand
 
     public static async Task<int> RunAsync(string[] args)
     {
-        string? cura = null, orca = null, sources = null, overrides = null, aliases = null, previous = null, work = null, output = null;
+        string? cura = null, orca = null, sources = null, overrides = null, aliases = null, previous = null, work = null, summary = null, output = null;
         for (var i = 0; i < args.Length; i++)
         {
             if (i + 1 >= args.Length)
@@ -38,6 +38,7 @@ internal static class PrinterCatalogCommand
                 case "--aliases": aliases = args[++i]; break;
                 case "--previous": previous = args[++i]; break;
                 case "--work": work = args[++i]; break;
+                case "--summary": summary = args[++i]; break;
                 case "--out": output = args[++i]; break;
                 default: return Fail($"unknown or incomplete argument: {args[i]}");
             }
@@ -126,6 +127,10 @@ internal static class PrinterCatalogCommand
                 .Select(o => o.Key)
                 .Where(id => file.Reserved.Any(r => r.Id == id))
                 .ToHashSet();
+            if (summary is not null)
+            {
+                await File.WriteAllTextAsync(summary, CatalogSummary.Build(previousFile, file, hidden), new UTF8Encoding(false));
+            }
             Console.WriteLine($"Wrote {output}");
             Console.WriteLine($"  Models   {file.Models.Count,6}");
             Console.WriteLine($"  Added    {after.Count(id => !before.Contains(id)),6}");
