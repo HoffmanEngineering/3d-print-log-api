@@ -470,12 +470,13 @@ both. Which release each source is read at is `catalog-sources.json`.
   that moves one fails it, which is a prompt to look at the change, not necessarily to revert it.
 - **A monthly workflow** (`printer-catalog-refresh.yml`) resolves the latest stable release of each
   source, regenerates, and opens a `chore/printer-catalog-refresh-<yyyy-mm>` PR with the summary and
-  the catalog test result. It skips while one is open and never merges. `GITHUB_TOKEN` opened the PR,
-  so CI does not run on it until you close and reopen it or push a commit. **It needs a repository
-  setting:** GitHub refuses a PR from `GITHUB_TOKEN` until *Settings → Actions → General → Allow
-  GitHub Actions to create and approve pull requests* is on (or the workflow gets a PAT or GitHub App
-  token secret). Without it the run deletes the branch it pushed and fails with an `::error::` that
-  names the setting.
+  the catalog test result. It skips while one is open and never merges. It uses the
+  `CATALOG_REFRESH_TOKEN` secret (a fine-grained PAT: Contents and Pull requests, read/write) when one
+  exists, else `GITHUB_TOKEN`. A PR from `GITHUB_TOKEN` gets no CI until you close and reopen it or
+  push a commit; one from the PAT runs CI on its own. **`GITHUB_TOKEN` needs a setting:** GitHub
+  refuses its PR unless *Allow GitHub Actions to create and approve pull requests* is on. It is on
+  for the HoffmanEngineering organization (2026-10-18). Without it the run deletes the branch it
+  pushed and fails with an `::error::` that names the setting.
 - **The startup seeder** (`PrinterCatalogSeeder`, every environment, after ApplicationStarted)
   writes the embedded file into `PrinterModels` when its version differs from the one in the
   `PrinterCatalogVersions` marker row, in one transaction (an applock on SQL Server, so two instances

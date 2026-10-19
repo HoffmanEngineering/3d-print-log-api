@@ -20,7 +20,8 @@ concurrency:
 env:
   CATALOG_DIR: PrintLogApi/PrinterCatalog
   BRANCH_PREFIX: chore/printer-catalog-refresh-
-  GH_TOKEN: ${{ github.token }}
+  # An optional fine-grained token secret makes the PR's CI run on its own; GITHUB_TOKEN works too.
+  GH_TOKEN: ${{ secrets.CATALOG_REFRESH_TOKEN || github.token }}
 
 jobs:
   refresh:
@@ -43,6 +44,8 @@ jobs:
         if: steps.open.outputs.skip == 'false'
         with:
           ref: main
+          # The push uses this token, so a PAT here is what lets the PR trigger CI.
+          token: ${{ secrets.CATALOG_REFRESH_TOKEN || github.token }}
 
       - name: Setup .NET
         if: steps.open.outputs.skip == 'false'
