@@ -125,6 +125,7 @@ public class McpRequestFingerprintTests
     public void CreatePrinter_AnyChangedField_ChangesTheFingerprint()
     {
         var baseline = FpPrn(BasicPrinter());
+        Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { CatalogModelId = "bambu-lab-p1s" }));
         Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Make = "Prusa" }));
         Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Model = "MK4" }));
         Assert.NotEqual(baseline, FpPrn(BasicPrinter() with { Name = "Other" }));

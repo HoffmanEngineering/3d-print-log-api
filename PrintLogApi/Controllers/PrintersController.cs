@@ -10,6 +10,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers;
@@ -340,7 +341,22 @@ public class PrintersController(
         var newPrinter = mapper.Map<Printer>(printer);
         newPrinter.CreatedAt = timeProvider.GetUtcNow();
 
-        var printerType = await printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        // Specs the caller left null come from the catalog model (create only; PUT never fills).
+        // The id was validated above, so the model exists.
+        if (newPrinter.CatalogModelId is { } catalogModelId)
+        {
+            var catalogModel = await context.PrinterModels.AsNoTracking()
+                .SingleAsync(m => m.Id == catalogModelId, HttpContext.RequestAborted);
+            PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel);
+        }
+
+        // The category the caller named wins; otherwise the model's technology, then the default.
+        // A category taken from the model is a default, so a missing one falls back instead of failing.
+        var printerType = await printerCategoryService.get(printer.Category ?? newPrinter.CategoryNickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        if (printerType is null && printer.Category is null)
+        {
+            printerType = await printerCategoryService.get(DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        }
 
         if (printerType is null)
         {
@@ -348,6 +364,7 @@ public class PrintersController(
         }
 
         newPrinter.Category = printerType;
+        newPrinter.CategoryNickname = printerType.Nickname;
 
         newPrinter.UserId = userId.Value;
 

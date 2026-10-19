@@ -168,6 +168,12 @@ public static class McpRequestFingerprint
             WriteBool(w, input.HasHeatedChamber);
             WriteDbl(w, input.WattageW);
             WriteBool(w, input.IsActive);
+            // Appended only when set, so the hash of every call made before catalogModelId existed
+            // is unchanged and a stored key still replays after this deploys.
+            if (input.CatalogModelId is not null)
+            {
+                WriteStr(w, input.CatalogModelId);
+            }
         }
         return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
     }

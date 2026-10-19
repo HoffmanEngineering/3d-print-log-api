@@ -5,6 +5,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services;
@@ -448,6 +449,7 @@ public class PrinterService(
                 p.ScreenResolutionXPixels,
                 p.ScreenResolutionYPixels,
                 p.SlotCount,
+                p.CatalogModelId,
 
                 // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                 // without the UnloadedDateTime filter every spool ever mounted would be reported
@@ -539,7 +541,8 @@ public class PrinterService(
             BeamDiameterMm: row.BeamDiameter,
             ScreenResolutionXPixels: row.ScreenResolutionXPixels,
             ScreenResolutionYPixels: row.ScreenResolutionYPixels,
-            SlotCount: row.SlotCount);
+            SlotCount: row.SlotCount,
+            CatalogModelId: row.CatalogModelId);
     }
 
     /// <summary>
@@ -563,6 +566,26 @@ public class PrinterService(
                 $"'{requested}' is not a known printer category. Valid categories: {string.Join(", ", known)}.");
         }
         return category;
+    }
+
+    /// <summary>
+    /// Finds the catalog model a new printer points at. Unknown, hidden and retired ids are all
+    /// rejected, matching the website's create. The match is case-insensitive and the stored
+    /// (canonical) id is what the caller gets back.
+    /// </summary>
+    private async Task<PrinterModel> RequireCatalogModel(string catalogModelId, CancellationToken ct)
+    {
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id.ToLower() == lowered, ct);
+        if (model is null || model.Hidden || model.Retired)
+        {
+            throw McpToolException.InvalidArguments(
+                $"catalogModelId '{catalogModelId}' is not a printer in the catalog. " +
+                "Find an id with GET /api/PrinterModels?search=<name>.");
+        }
+        return model;
     }
 
     private static void RequireCreateFields(PrinterAttributesInput input)
@@ -611,6 +634,15 @@ public class PrinterService(
         McpPrinterValidation.ValidateAttributes(input);
         idempotencyKey = RequireIdempotencyKey(idempotencyKey);
 
+        // Resolve the catalog model BEFORE hashing, for the same reason as Canonicalize: the
+        // fingerprint must see the stored (canonical-case) id, not whatever case the caller typed.
+        PrinterModel? catalogModel = null;
+        if (input.CatalogModelId is not null)
+        {
+            catalogModel = await RequireCatalogModel(input.CatalogModelId, ct);
+            input = input with { CatalogModelId = catalogModel.Id };
+        }
+
         string? fingerprint = null;
         if (idempotencyKey != null)
         {
@@ -622,8 +654,6 @@ public class PrinterService(
             }
         }
 
-        var category = await RequirePrinterCategory(input.CategoryNickname, ct);
-
         var printer = new Printer
         {
             UserId = userId,
@@ -631,8 +661,8 @@ public class PrinterService(
             Model = input.Model,
             Name = input.Name,
             Description = input.Description,
-            Category = category,
-            CategoryNickname = category.Nickname,
+            CategoryNickname = input.CategoryNickname,
+            CatalogModelId = catalogModel?.Id,
             NozzleDiameter = input.NozzleDiameterMm,
             FilamentDiameter = input.FilamentDiameterMm,
             BeamDiameter = input.BeamDiameterMm,
@@ -651,6 +681,21 @@ public class PrinterService(
             // No LoadedFilaments, deliberately: an empty collection here would still be an
             // assertion about loaded state. Leaving it unset says nothing at all.
         };
+
+        // Specs the caller left out come from the catalog; a value they gave always wins.
+        if (catalogModel is not null)
+        {
+            PrinterCatalogDefaults.ApplyOnCreate(printer, catalogModel);
+        }
+
+        // A category the caller named must exist (rejected otherwise). One taken from the model's
+        // technology is a default, so a missing category falls back to FFF instead of failing.
+        var category = input.CategoryNickname is null && printer.CategoryNickname is { } derived
+            ? await context.PrinterCategories.FirstOrDefaultAsync(c => c.Nickname == derived, ct)
+                ?? await RequirePrinterCategory(null, ct)
+            : await RequirePrinterCategory(input.CategoryNickname, ct);
+        printer.Category = category;
+        printer.CategoryNickname = category.Nickname;
 
         if (idempotencyKey == null)
         {

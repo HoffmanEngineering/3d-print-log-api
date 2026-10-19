@@ -183,6 +183,9 @@ public sealed record PrinterAttributesInput
     public double? WattageW { get; init; }
     public bool? IsActive { get; init; }
 
+    /// <summary>Catalog model id (create only). Canonicalized to the stored id by the service before hashing.</summary>
+    public string? CatalogModelId { get; init; }
+
     /// <summary>
     /// Trims every string. Call this ONCE in the service, BEFORE both fingerprinting and
     /// persistence: the fingerprint decides whether two calls are the same request, so anything
@@ -196,6 +199,8 @@ public sealed record PrinterAttributesInput
         Name = Name?.Trim(),
         Description = Description?.Trim(),
         CategoryNickname = CategoryNickname?.Trim(),
+        // Blank means omitted, so "" cannot defeat the lookup or fork the fingerprint.
+        CatalogModelId = string.IsNullOrWhiteSpace(CatalogModelId) ? null : CatalogModelId.Trim(),
     };
 }
 

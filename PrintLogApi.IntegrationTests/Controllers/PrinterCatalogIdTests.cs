@@ -220,6 +220,113 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(second, updated.CatalogModelId);
     }
 
+    private static void FullSpecs(PrinterModel m)
+    {
+        m.Technology = "FFF";
+        m.BedWidthMm = 256;
+        m.BedDepthMm = 250;
+        m.BedHeightMm = 240;
+        m.DefaultNozzleMm = 0.4;
+        m.FilamentDiameterMm = 1.75;
+        m.HasHeatedBed = true;
+        m.HasHeatedChamber = true;
+        m.DefaultSlotCount = 4;
+    }
+
+    [Fact]
+    public async Task Post_WithCatalogModelAndNoSpecs_FillsThemFromTheModel()
+    {
+        var id = await SeedModelAsync(configure: FullSpecs);
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", NewPrinter(id));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(256, created.BedWidthMm);
+        Assert.Equal(250, created.BedDepthMm);
+        Assert.Equal(240, created.BedHeightMm);
+        Assert.Equal(0.4, created.NozzleDiameter);
+        Assert.Equal(1.75, created.FilamentDiameter);
+        Assert.True(created.HasHeatedBed);
+        Assert.True(created.HasHeatedChamber);
+        Assert.Equal(4, created.SlotCount);
+    }
+
+    [Fact]
+    public async Task Post_WithCatalogModelAndUserSpecs_KeepsTheUsersValues()
+    {
+        var id = await SeedModelAsync(configure: FullSpecs);
+        var body = NewPrinter(id);
+        body.BedWidthMm = 300;
+        body.HasHeatedBed = false;
+        body.SlotCount = 2;
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(300, created.BedWidthMm);
+        Assert.False(created.HasHeatedBed);
+        Assert.Equal(2, created.SlotCount);
+        Assert.Equal(250, created.BedDepthMm);
+    }
+
+    [Fact]
+    public async Task Post_WithCatalogModel_KeepsTheUsersMakeAndModel()
+    {
+        var id = await SeedModelAsync(configure: FullSpecs);
+        var body = NewPrinter(id);
+        body.Make = "Mine";
+        body.Model = "Custom";
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("Mine", created.Make);
+        Assert.Equal("Custom", created.Model);
+    }
+
+    [Fact]
+    public async Task Post_ResinModelWithoutCategory_UsesMsla()
+    {
+        var id = await SeedModelAsync(configure: m => m.Technology = "Resin");
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", NewPrinter(id));
+
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("MSLA", created.Category?.Nickname);
+    }
+
+    [Fact]
+    public async Task Post_ResinModelWithUserCategory_KeepsTheUsersCategory()
+    {
+        var id = await SeedModelAsync(configure: m => m.Technology = "Resin");
+        var body = NewPrinter(id);
+        body.Category = "FFF";
+
+        var response = await SendAsync(HttpMethod.Post, "/api/Printers", body);
+
+        var created = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("FFF", created.Category?.Nickname);
+    }
+
+    [Fact]
+    public async Task Put_WithCatalogModelAndNullSpecs_LeavesThemNull()
+    {
+        var created = await CreateAsync(null);
+        var id = await SeedModelAsync(configure: FullSpecs);
+
+        var response = await SendAsync(HttpMethod.Put, $"/api/Printers/{created.Id}", PutBody(created, id));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(id, updated.CatalogModelId);
+        Assert.Null(updated.BedWidthMm);
+        Assert.Null(updated.NozzleDiameter);
+        Assert.Null(updated.HasHeatedBed);
+        Assert.Equal(1, updated.SlotCount);
+    }
+
     private static AddPrinterDTO NewPrinter(string? catalogModelId) => new()
     {
         Name = $"Catalog printer {Guid.NewGuid():N}",
@@ -246,12 +353,12 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
         return (await response.Content.ReadFromJsonAsync<PrinterDetailDto>(TestContext.Current.CancellationToken))!;
     }
 
-    private async Task<string> SeedModelAsync(bool hidden = false, bool retired = false)
+    private async Task<string> SeedModelAsync(bool hidden = false, bool retired = false, Action<PrinterModel>? configure = null)
     {
         var id = $"test-model-{Guid.NewGuid():N}";
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        db.PrinterModels.Add(new PrinterModel
+        var seeded = new PrinterModel
         {
             Id = id,
             Make = "Bambu Lab",
@@ -263,7 +370,9 @@ public class PrinterCatalogIdTests : IClassFixture<CustomWebApplicationFactory>
             Hidden = hidden,
             Retired = retired,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        configure?.Invoke(seeded);
+        db.PrinterModels.Add(seeded);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         return id;
     }

@@ -219,6 +219,31 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
             created.ConfigBlock);
     }
 
+    [Fact]
+    public async Task ConfigBlock_ForAPrinterLinkedToTheU1CatalogModel_LeavesOutTheNotifier()
+    {
+        // The catalog link decides, whatever the free-text make and model say.
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: "Foo", model: "Bar", catalogModelId: "snapmaker-u1");
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Equal(
+            ServerOnlyBlock($"https://printer-{printer}:{created.Secret}@api.3dprintlog.test/spoolman"),
+            created.ConfigBlock);
+    }
+
+    [Fact]
+    public async Task ConfigBlock_ForAPrinterLinkedToAnotherCatalogModel_KeepsTheNotifier()
+    {
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user, make: "Foo", model: "Bar", catalogModelId: "spoolman-test-other-model");
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[notifier 3d_print_log]\n", created.ConfigBlock);
+    }
+
     [Theory]
     [InlineData("Snapmaker", "J1")]
     [InlineData("Snapmaker", "U10")]
@@ -820,11 +845,15 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         });
     }
 
-    private async Task<long> CreatePrinterAsync(User user, string? name = null, string? make = null, string? model = null)
+    private async Task<long> CreatePrinterAsync(User user, string? name = null, string? make = null, string? model = null, string? catalogModelId = null)
     {
         return await WithDbAsync(async db =>
         {
-            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM", Make = make, Model = model };
+            if (catalogModelId is not null && !await db.PrinterModels.AnyAsync(m => m.Id == catalogModelId, Ct))
+            {
+                db.PrinterModels.Add(new PrinterModel { Id = catalogModelId, Make = "Snapmaker", Model = "U1", Technology = "FFF", UpdatedAt = DateTimeOffset.UtcNow });
+            }
+            var printer = new Printer { Name = name ?? $"Printer {Guid.NewGuid():N}"[..20], UserId = user.Id, IsActive = true, CategoryNickname = "FDM", Make = make, Model = model, CatalogModelId = catalogModelId };
             db.Printers.Add(printer);
             await db.SaveChangesAsync(Ct);
             return printer.Id;

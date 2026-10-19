@@ -64,6 +64,120 @@ public class CreatePrinterServiceTests : IClassFixture<McpDataWebApplicationFact
         Assert.Equal(350, p.WattageW);
     }
 
+    private async Task<string> SeedModelAsync(
+        bool hidden = false, bool retired = false, string technology = "FFF", int? slots = 4)
+    {
+        var id = $"mcp-model-{Guid.NewGuid():N}";
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        db.PrinterModels.Add(new PrinterModel
+        {
+            Id = id,
+            Make = "Catalog Make",
+            Model = "Catalog Model",
+            Technology = technology,
+            BedWidthMm = 256,
+            BedDepthMm = 250,
+            BedHeightMm = 240,
+            DefaultNozzleMm = 0.4,
+            FilamentDiameterMm = 1.75,
+            HasHeatedBed = true,
+            HasHeatedChamber = true,
+            DefaultSlotCount = slots,
+            Hidden = hidden,
+            Retired = retired,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return id;
+    }
+
+    [Fact]
+    public async Task Create_WithCatalogModel_FillsEmptySpecsAndEchoesTheId()
+    {
+        var id = await SeedModelAsync();
+        using var scope = _factory.Services.CreateScope();
+
+        var result = await Create(scope, Basic("Catalog Fill") with { CatalogModelId = id });
+
+        var p = result.Printer;
+        Assert.Equal(id, p.CatalogModelId);
+        Assert.Equal(256, p.BedWidthMm);
+        Assert.Equal(250, p.BedDepthMm);
+        Assert.Equal(240, p.BedHeightMm);
+        Assert.Equal(0.4, p.NozzleDiameterMm);
+        Assert.Equal(1.75, p.FilamentDiameterMm);
+        Assert.True(p.HasHeatedBed);
+        Assert.True(p.HasHeatedChamber);
+        Assert.Equal(4, p.SlotCount);
+    }
+
+    [Fact]
+    public async Task Create_WithCatalogModel_KeepsTheCallersValues()
+    {
+        var id = await SeedModelAsync();
+        using var scope = _factory.Services.CreateScope();
+
+        var result = await Create(scope, Basic("Catalog Keep") with
+        {
+            CatalogModelId = id,
+            BedWidthMm = 300,
+            HasHeatedBed = false,
+            CategoryNickname = "FFF",
+        });
+
+        Assert.Equal(300, result.Printer.BedWidthMm);
+        Assert.False(result.Printer.HasHeatedBed);
+        Assert.Equal(250, result.Printer.BedDepthMm);
+    }
+
+    [Fact]
+    public async Task Create_WithResinCatalogModelAndNoCategory_UsesMsla()
+    {
+        var id = await SeedModelAsync(technology: "Resin", slots: null);
+        using var scope = _factory.Services.CreateScope();
+
+        var result = await Create(scope, Basic("Catalog Resin") with { CatalogModelId = id });
+
+        Assert.Equal("MSLA", result.Printer.CategoryNickname);
+        Assert.Equal(1, result.Printer.SlotCount);
+    }
+
+    [Fact]
+    public async Task Create_CatalogIdInOtherCase_StoresTheCanonicalId()
+    {
+        var id = await SeedModelAsync();
+        using var scope = _factory.Services.CreateScope();
+
+        var result = await Create(scope, Basic("Catalog Case") with { CatalogModelId = id.ToUpperInvariant() });
+
+        Assert.Equal(id, result.Printer.CatalogModelId);
+    }
+
+    [Fact]
+    public async Task Create_UnknownCatalogModel_IsInvalidArguments()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(() =>
+            Create(scope, Basic("Catalog Unknown") with { CatalogModelId = "no-such-model" }));
+
+        Assert.Contains("catalogModelId", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_HiddenOrRetiredCatalogModel_IsInvalidArguments()
+    {
+        var hidden = await SeedModelAsync(hidden: true);
+        var retired = await SeedModelAsync(retired: true);
+        using var scope = _factory.Services.CreateScope();
+
+        await Assert.ThrowsAsync<McpToolException>(() =>
+            Create(scope, Basic("Catalog Hidden") with { CatalogModelId = hidden }));
+        await Assert.ThrowsAsync<McpToolException>(() =>
+            Create(scope, Basic("Catalog Retired") with { CatalogModelId = retired }));
+    }
+
     // MCP-only semantic: the website DTO's IsActive is a non-nullable bool that defaults false,
     // but a freshly created printer is presumably in use.
     [Fact]
