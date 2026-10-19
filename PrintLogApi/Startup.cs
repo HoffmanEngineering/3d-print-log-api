@@ -333,6 +333,26 @@ public class Startup
                     });
             });
 
+            // The anonymous printer catalog: per socket peer, like the docs endpoint above.
+            options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
+            {
+                var limit = Configuration.GetValue("Catalog:RateLimitPerMinute", 120);
+                if (limit <= 0)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("catalog-unlimited");
+                }
+
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"catalog:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
             // The Spoolman API (#177), partitioned by connection rather than by user, so a user's
             // own REST traffic cannot spend the budget their printers need, and one printer's
             // retry loop cannot starve another's. Generous: Moonraker reports usage every 5 s

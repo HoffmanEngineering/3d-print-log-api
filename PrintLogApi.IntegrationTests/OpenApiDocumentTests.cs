@@ -221,6 +221,24 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     }
 
     [Theory]
+    [InlineData("/api/PrinterModels", "get")]
+    [InlineData("/api/PrinterModels/popular", "get")]
+    [InlineData("/api/PrinterModels/{id}", "get")]
+    [InlineData("/api/PrinterModels/match", "get")]
+    [InlineData("/api/PrinterModels/attribution", "get")]
+    public async Task PrinterCatalogEndpoints_AreFullyAnonymous(string path, string method)
+    {
+        // [AllowAnonymous] with no [Authorize] anywhere: the endpoint takes no credentials at all,
+        // so the document lists no security requirement and no 401, unlike the optional-auth rows above.
+        var document = await LoadDocument();
+        var operation = document.GetProperty("paths").GetProperty(path).GetProperty(method);
+
+        Assert.False(operation.TryGetProperty("security", out var security) && security.GetArrayLength() > 0);
+        Assert.False(operation.GetProperty("responses").TryGetProperty("401", out _));
+        Assert.True(operation.GetProperty("responses").TryGetProperty("429", out _));
+    }
+
+    [Theory]
     // The three the integrator spec named (#152); the filter covers every integer enum.
     [InlineData("PrintLogApi.Models.Print_PrintStatus", new[] { 1, 2, 3, 4, 5, 6 }, new[] { "Pending", "Printing", "Success", "Cancelled", "Failed", "PartialSuccess" })]
     [InlineData("PrintLogApi.Models.Print_PrintViewStatus", new[] { 1, 2, 3 }, new[] { "Public", "Unlisted", "Private" })]
