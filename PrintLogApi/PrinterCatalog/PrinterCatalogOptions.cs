@@ -10,4 +10,10 @@ public sealed class PrinterCatalogOptions
     /// Below it, the list is filled in the catalog's featured order.
     /// </summary>
     public int PopularityMinOwners { get; set; } = 5;
+
+    /// <summary>
+    /// How far back, in days, an added or printed-on printer still counts toward its model's
+    /// owners (spec §6.5).
+    /// </summary>
+    public int PopularityWindowDays { get; set; } = 365;
 }

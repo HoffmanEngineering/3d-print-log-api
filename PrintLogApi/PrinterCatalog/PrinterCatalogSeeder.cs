@@ -24,6 +24,8 @@ public sealed record SeedResult(int Inserted, int Updated, int Retired, int Unch
 public sealed class PrinterCatalogSeeder(
     IServiceScopeFactory scopeFactory,
     IPrinterCatalogIndex index,
+    PrinterCatalogBackfill backfill,
+    PrinterPopularityJob popularity,
     TimeProvider timeProvider,
     IHostApplicationLifetime lifetime,
     ILogger<PrinterCatalogSeeder> logger) : BackgroundService
@@ -63,11 +65,13 @@ public sealed class PrinterCatalogSeeder(
     /// <summary>Seeds when the version changed, then rebuilds the index. Never throws but on shutdown.</summary>
     internal async Task RunOnceAsync(CancellationToken ct)
     {
+        var changed = false;
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
             var result = await SeedAsync(db, LoadCatalog(), timeProvider.GetUtcNow(), ct, logger);
+            changed = result.Inserted + result.Updated + result.Retired + result.Repointed > 0;
             logger.LogInformation(
                 "Printer catalog seed: {Inserted} inserted, {Updated} updated, {Retired} retired, {Unchanged} unchanged, {Repointed} printers moved off merged ids",
                 result.Inserted, result.Updated, result.Retired, result.Unchanged, result.Repointed);
@@ -86,6 +90,46 @@ public sealed class PrinterCatalogSeeder(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex, "Building the printer catalog index failed; catalog search is empty until the next rebuild");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        if (changed)
+        {
+            await AfterSeedAsync(ct);
+        }
+    }
+
+    /// <summary>
+    /// After a seed that changed something: links printers the new models now match, then recounts
+    /// owners (which rebuilds the index). Each step is best effort and logged; neither fails startup.
+    /// </summary>
+    internal async Task AfterSeedAsync(CancellationToken ct)
+    {
+        try
+        {
+            var result = await backfill.RunOnceAsync(ct);
+            logger.LogInformation(
+                "Printer catalog backfill: {Linked} linked, {Ambiguous} ambiguous, {Unmatched} unmatched",
+                result.Linked, result.Ambiguous, result.Unmatched);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Printer catalog backfill failed; printers stay as they were");
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            await popularity.RunOnceAsync(timeProvider.GetUtcNow(), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Printer popularity after the seed failed; owner counts stay as they were");
         }
         catch (OperationCanceledException)
         {

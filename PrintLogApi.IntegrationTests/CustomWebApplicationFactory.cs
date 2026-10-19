@@ -173,7 +173,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
                 && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService)
                     || d.ImplementationType == typeof(SpoolTagMaintenanceService)
-                    || d.ImplementationType == typeof(PrinterCatalogSeeder))).ToList())
+                    || d.ImplementationType == typeof(PrinterCatalogSeeder)
+                    || d.ImplementationType == typeof(PrinterPopularityJob))).ToList())
             {
                 services.Remove(worker);
             }

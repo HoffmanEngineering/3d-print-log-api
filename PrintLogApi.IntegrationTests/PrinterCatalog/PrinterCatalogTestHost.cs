@@ -4,6 +4,7 @@ using PrintLogApi.IntegrationTests.Analytics;
 using PrintLogApi.Models;
 using PrintLogApi.PrinterCatalog;
 using PrintLogApi.PrinterCatalog.Generation;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.PrinterCatalog;
@@ -33,6 +34,8 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
         services.AddLogging();
         services.AddSingleton<TimeProvider>(Time);
         services.AddDbContext<PrintLogContext>(o => o.UseSqlite(_connection));
+        services.AddMemoryCache();
+        services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddPrinterCatalog(new ConfigurationBuilder().Build());
         _provider = services.BuildServiceProvider();
 
@@ -42,12 +45,20 @@ public sealed class PrinterCatalogTestHost : IAsyncDisposable
 
     public IPrinterCatalogIndex Index => _provider.GetRequiredService<IPrinterCatalogIndex>();
 
+    public PrinterCatalogBackfill Backfill => _provider.GetRequiredService<PrinterCatalogBackfill>();
+
+    public PrinterPopularityJob Popularity => _provider.GetRequiredService<PrinterPopularityJob>();
+
+    public ICacheVersionService CacheVersions => _provider.GetRequiredService<ICacheVersionService>();
+
     public AsyncServiceScope CreateScope() => _provider.CreateAsyncScope();
 
     /// <summary>The hosted service, reading <paramref name="load"/> (the embedded file by default).</summary>
     public PrinterCatalogSeeder Seeder(Func<CatalogFile>? load = null) => new(
         _provider.GetRequiredService<IServiceScopeFactory>(),
         Index,
+        Backfill,
+        Popularity,
         Time,
         Lifetime,
         _provider.GetRequiredService<ILogger<PrinterCatalogSeeder>>())
