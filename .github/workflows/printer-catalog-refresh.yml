@@ -117,6 +117,8 @@ jobs:
 
       - name: Open the PR
         if: steps.changes.outputs.changed == 'true'
+        env:
+          HAS_REFRESH_TOKEN: ${{ secrets.CATALOG_REFRESH_TOKEN != '' }}
         run: |
           month=$(date -u +%Y-%m)
           branch="${BRANCH_PREFIX}${month}"
@@ -146,7 +148,9 @@ jobs:
             echo
             echo "## Before merging"
             echo
-            echo "- This PR was opened with GITHUB_TOKEN, so CI does not run on its own. To run CI, close and reopen the PR or push a commit to the branch."
+            if [ "$HAS_REFRESH_TOKEN" != 'true' ]; then
+              echo "- This PR was opened with GITHUB_TOKEN, so CI does not run on its own. To run CI, close and reopen the PR or push a commit to the branch."
+            fi
             echo "- Review the Retired and Hidden sections. A retired model still resolves by id, but nobody can pick it for a new printer."
             echo "- Nothing here merges automatically."
           } > "$RUNNER_TEMP/pr-body.md"
