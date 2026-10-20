@@ -93,7 +93,7 @@
        consumes, so coverage.ps1 / coverage-check.sh keep their reportgenerator half unchanged. -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />
-    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
     <!-- Validates server.json against the vendored MCP Registry schema (ServerJsonTests). Draft-07,
          which is what the registry publishes; MIT licensed. -->
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
