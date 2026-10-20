@@ -35,7 +35,7 @@ public class McpEndpointTests : IClassFixture<CustomWebApplicationFactory>
                 TransportMode = HttpTransportMode.StreamableHttp,
             },
             httpClient);
-        return await McpClient.CreateAsync(transport);
+        return await McpClient.CreateAsync(transport, McpDataWebApplicationFactory.TestClientOptions);
     }
 
     private HttpRequestMessage RpcPost(string method, string? token)

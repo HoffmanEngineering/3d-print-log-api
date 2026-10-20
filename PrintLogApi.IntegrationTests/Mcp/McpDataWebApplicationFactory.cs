@@ -11,6 +11,14 @@ namespace PrintLogApi.IntegrationTests.Mcp;
 /// </summary>
 public class McpDataWebApplicationFactory : CustomWebApplicationFactory
 {
+    /// <summary>
+    /// Client options for every test connection. The SDK's <c>server/discover</c> probe gives up after
+    /// 5 s and falls back to <c>initialize</c>, which this server rejects (the fallback keeps the
+    /// 2026-07-28 header). A loaded CI runner can take longer than that on a host's first request, so
+    /// the probe is bounded only by the 60 s connect budget. The server always speaks 2026-07-28.
+    /// </summary>
+    public static McpClientOptions TestClientOptions => new() { DiscoverProbeTimeout = Timeout.InfiniteTimeSpan };
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         var host = base.CreateHost(builder);
@@ -39,7 +47,7 @@ public class McpDataWebApplicationFactory : CustomWebApplicationFactory
                 TransportMode = HttpTransportMode.StreamableHttp,
             },
             httpClient);
-        return await McpClient.CreateAsync(transport);
+        return await McpClient.CreateAsync(transport, TestClientOptions);
     }
 
     /// <summary>
@@ -60,7 +68,7 @@ public class McpDataWebApplicationFactory : CustomWebApplicationFactory
                 TransportMode = HttpTransportMode.StreamableHttp,
             },
             httpClient);
-        return await McpClient.CreateAsync(transport);
+        return await McpClient.CreateAsync(transport, TestClientOptions);
     }
 
     /// <summary>Returns true if the tool call surfaced an error (via IsError result or McpException).</summary>
