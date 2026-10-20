@@ -23,6 +23,7 @@ public sealed class EmailDispatcher(
     PrintLogContext db,
     IEnumerable<IEmailCampaign> campaigns,
     IEmailPreferenceService preferences,
+    IEmailVerificationRefresher verification,
     IEmailAddressHasher hasher,
     IEmailTransport transport,
     IEmailTokenService tokens,
@@ -215,12 +216,46 @@ public sealed class EmailDispatcher(
             return Skip(row, EmailSkipReasons.DisabledCampaign);
         }
 
-        if (string.IsNullOrWhiteSpace(user.Email) || !user.EmailVerified)
+        if (string.IsNullOrWhiteSpace(user.Email))
         {
             return Skip(row, EmailSkipReasons.Unverified);
         }
 
-        var hashes = hasher.CandidateHashes(user.Email);
+        var email = user.Email;
+        if (!user.EmailVerified)
+        {
+            // The welcome email goes out right after sign-up, before the Auth0 flag has reached our
+            // database (the token claim lags until the next sign-in). Ask Auth0 and, if the user
+            // still hasn't verified, wait: the row's lifetime bounds how long. Everything else skips.
+            if (row.Campaign != OnboardingCampaign.CampaignName)
+            {
+                return Skip(row, EmailSkipReasons.Unverified);
+            }
+
+            // Forced: GateRecheck already limits this to one Auth0 call per row an hour, and the
+            // refresher's own throttle (set by GET me/onboarding) would otherwise hold it longer.
+            if (!await verification.RefreshAsync(row.UserId, ct, force: true))
+            {
+                return Defer(row, now + GateRecheck, EmailSkipReasons.Unverified);
+            }
+
+            // The refresher saved through this same context and may have taken Auth0's address,
+            // while the projection above is untracked and stale. Read the address again, so the
+            // suppression check and the send both use the one Auth0 verified.
+            var refreshed = await db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == row.UserId)
+                .Select(u => u.Email)
+                .SingleOrDefaultAsync(ct);
+            if (string.IsNullOrWhiteSpace(refreshed))
+            {
+                return Skip(row, EmailSkipReasons.Unverified);
+            }
+
+            email = refreshed;
+        }
+
+        var hashes = hasher.CandidateHashes(email);
         if (await db.EmailSuppressions.AnyAsync(s => hashes.Contains(s.EmailHash), ct))
         {
             return Skip(row, EmailSkipReasons.Suppressed);
@@ -300,7 +335,7 @@ public sealed class EmailDispatcher(
             ["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click",
         };
 
-        return new Prepared(null, new EmailMessage(user.Email, rendered.Subject, rendered.Html, rendered.Text, headers, row.Campaign, row.Id));
+        return new Prepared(null, new EmailMessage(email, rendered.Subject, rendered.Html, rendered.Text, headers, row.Campaign, row.Id));
     }
 
     private async Task<Outcome> SendAsync(EmailOutbox row, EmailMessage message, DateTimeOffset now, CancellationToken ct)

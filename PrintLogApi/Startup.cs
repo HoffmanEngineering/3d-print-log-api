@@ -97,6 +97,7 @@ public class Startup
         services.AddPrintLogOpenApi(Configuration);
 
         services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
+        services.Configure<UserOnboardingOptions>(Configuration.GetSection(UserOnboardingOptions.SectionName));
 
         var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
         var pushConfigured = false;
@@ -968,7 +969,7 @@ public class Startup
 
         app.UseCors(builder =>
         {
-            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Request-Context");
         });
 
         // Both wrap routing, authentication and ApiKeyMiddleware, because that is where the

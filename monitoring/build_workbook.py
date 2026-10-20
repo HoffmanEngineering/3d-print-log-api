@@ -853,7 +853,7 @@ titles
             "tiles", resources=["{ApiResource}"], width=100, time_param="UsageTimeRange",
             tiles=tile_settings(palette="green", sort_field="Order", delta=False),
         ),
-    ] + spoolman_items()
+    ] + onboarding_items() + spoolman_items()
     return group("usage", items, tab="usage")
 
 
@@ -901,6 +901,58 @@ def spoolman_items() -> list[dict]:
 | top 20 by Connections desc
 """,
             "table", resources=["{ApiResource}"], width=50, time_param="UsageTimeRange",
+        ),
+    ]
+
+
+def onboarding_items() -> list[dict]:
+    # Users are matched on user_AuthenticatedId (the local user id) across the API's
+    # UserSignedUp event, the UI's Auth_SignedUp, the API's first-action events and requests.
+    # UserSignedUp carries UserId only from the onboarding release; older sign-ups drop out.
+    return [
+        query(
+            "onboarding-funnel", "New-user onboarding funnel (weekly sign-up groups)",
+            API_EVENTS + API_REQUESTS + window("UsageTimeRange") + """let signups = apiEvents
+| where name == 'UserSignedUp' and timestamp between (windowStart .. windowEnd)
+| extend UserId = tostring(customDimensions.UserId)
+| where isnotempty(UserId)
+| summarize SignedUpAt = min(timestamp) by UserId;
+let sources = app('{UiResource}').customEvents
+| where name == 'Auth_SignedUp' and timestamp >= windowStart and isnotempty(user_AuthenticatedId)
+| summarize arg_min(timestamp, customDimensions) by UserId = user_AuthenticatedId
+| project UserId, Source = tostring(customDimensions.source);
+let firsts = apiEvents
+| where timestamp >= windowStart and isnotempty(user_AuthenticatedId)
+| where tostring(customDimensions.AspNetCoreEnvironment) == 'Production'
+| summarize
+    PrinterAt = minif(timestamp, name in ('PrinterAdded', 'McpPrinterAdded')),
+    MaterialAt = minif(timestamp, name == 'FilamentAdd'),
+    PrintAt = minif(timestamp, name == 'PrintAdded')
+    by UserId = user_AuthenticatedId;
+let activity = apiRequests
+| where timestamp >= windowStart and isnotempty(user_AuthenticatedId)
+| summarize LastActiveAt = max(timestamp) by UserId = user_AuthenticatedId;
+signups
+| lookup kind=leftouter sources on UserId
+| lookup kind=leftouter firsts on UserId
+| lookup kind=leftouter activity on UserId
+| extend Cohort = startofweek(SignedUpAt), Source = coalesce(Source, 'unknown')
+| summarize SignedUp = count(),
+    Printers = countif(isnotnull(PrinterAt)),
+    Materials = countif(isnotnull(MaterialAt)),
+    Prints24h = countif(PrintAt <= SignedUpAt + 1d),
+    Prints7d = countif(PrintAt <= SignedUpAt + 7d),
+    Returned = countif(startofday(LastActiveAt) > startofday(SignedUpAt))
+    by Cohort, Source
+| project Cohort, Source, SignedUp,
+    PrinterPct = round(100.0 * Printers / SignedUp, 1),
+    MaterialPct = round(100.0 * Materials / SignedUp, 1),
+    Print24hPct = round(100.0 * Prints24h / SignedUp, 1),
+    Print7dPct = round(100.0 * Prints7d / SignedUp, 1),
+    ReturnedPct = round(100.0 * Returned / SignedUp, 1)
+| order by Cohort desc, SignedUp desc
+""",
+            "table", resources=["{ApiResource}", "{UiResource}"], width=100, time_param="UsageTimeRange",
         ),
     ]
 

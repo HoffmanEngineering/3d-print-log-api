@@ -1,4 +1,5 @@
-﻿using Microsoft.ApplicationInsights;
+﻿using System.Globalization;
+using Microsoft.ApplicationInsights;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
@@ -78,7 +79,12 @@ public class UserService(PrintLogContext context, TelemetryClient telemetry, Tim
             await context.SaveChangesAsync();
             // Only on the insert that won. The constraint-violation branch below returns a
             // user a concurrent request already created — and already counted.
-            telemetry.TrackEvent("UserSignedUp");
+            var separator = authUserId.IndexOf('|', StringComparison.Ordinal);
+            telemetry.TrackEvent("UserSignedUp", new Dictionary<string, string>
+            {
+                ["UserId"] = newUser.Id.ToString(CultureInfo.InvariantCulture),
+                ["identityProvider"] = separator > 0 ? authUserId[..separator] : "unknown",
+            });
         }
         catch (DbUpdateException dbUpdateEx)
         {

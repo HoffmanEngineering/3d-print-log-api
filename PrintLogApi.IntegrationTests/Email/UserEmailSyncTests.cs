@@ -49,6 +49,39 @@ public class UserEmailSyncTests : IClassFixture<CustomWebApplicationFactory>
         Assert.True((await ReloadAsync(db, user.Id)).EmailVerified);
     }
 
+    // The token claim lags until the next sign-in, so an old token still says unverified after the
+    // refresher has learned otherwise from Auth0. Same address: keep the verified flag.
+    [Fact]
+    public async Task Sync_SameAddressUnverifiedClaim_DoesNotDowngrade()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await EmailTestData.CreateUserAsync(db, email: "same@example.com", verified: true);
+
+        var wrote = await Sync(db).SyncAsync(user.Id, "same@example.com", false, TestContext.Current.CancellationToken);
+
+        Assert.False(wrote);
+        var stored = await ReloadAsync(db, user.Id);
+        Assert.True(stored.EmailVerified);
+        Assert.Null(stored.EmailUpdatedAt);
+    }
+
+    // A new address has not been verified yet, whatever the old one was.
+    [Fact]
+    public async Task Sync_ChangedAddressUnverifiedClaim_ClearsVerified()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await EmailTestData.CreateUserAsync(db, email: "old@example.com", verified: true);
+
+        var wrote = await Sync(db).SyncAsync(user.Id, "new@example.com", false, TestContext.Current.CancellationToken);
+
+        Assert.True(wrote);
+        var stored = await ReloadAsync(db, user.Id);
+        Assert.Equal("new@example.com", stored.Email);
+        Assert.False(stored.EmailVerified);
+    }
+
     [Fact]
     public async Task Sync_NoWriteWhenUnchanged()
     {

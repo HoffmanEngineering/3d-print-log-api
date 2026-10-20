@@ -120,6 +120,23 @@ public class TelemetryEventTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task Creating_a_user_without_a_provider_prefix_reports_identityProvider_unknown()
+    {
+        _factory.Telemetry.Clear();
+
+        using var scope = _factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<IUserService>();
+
+        var created = await users.CreateUserFromAuthId("telemetry-signup-no-provider");
+
+        var signedUp = Assert.Single(_factory.Telemetry.Events("UserSignedUp"));
+        Assert.Equal("unknown", signedUp.Properties["identityProvider"]);
+
+        var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        await context.Users.Where(u => u.Id == created.Id).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Creating_a_user_emits_UserSignedUp_once()
     {
         _factory.Telemetry.Clear();
@@ -127,10 +144,12 @@ public class TelemetryEventTests : IClassFixture<CustomWebApplicationFactory>
         using var scope = _factory.Services.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<IUserService>();
 
-        var created = await users.CreateUserFromAuthId("auth0|telemetry-signup");
+        var created = await users.CreateUserFromAuthId("google-oauth2|telemetry-signup");
 
         Assert.NotEqual(0, created.Id);
-        Assert.Single(_factory.Telemetry.Events("UserSignedUp"));
+        var signedUp = Assert.Single(_factory.Telemetry.Events("UserSignedUp"));
+        Assert.Equal(created.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), signedUp.Properties["UserId"]);
+        Assert.Equal("google-oauth2", signedUp.Properties["identityProvider"]);
 
         // Tidy so the seeded user counts other tests rely on are unchanged.
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();

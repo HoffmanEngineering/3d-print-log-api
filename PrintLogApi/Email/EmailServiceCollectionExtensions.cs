@@ -21,6 +21,7 @@ public static class EmailServiceCollectionExtensions
         services.AddSingleton<IEmailAddressHasher, EmailAddressHasher>();
         services.AddScoped<IEmailPreferenceService, EmailPreferenceService>();
         services.AddScoped<IUserEmailSyncService, UserEmailSyncService>();
+        services.AddScoped<IEmailVerificationRefresher, EmailVerificationRefresher>();
         services.AddSingleton<IEmailTokenService, EmailTokenService>();
         services.AddSingleton<IEmailTransport, SesEmailTransport>();
         services.AddSingleton<EmailLinkBuilder>();

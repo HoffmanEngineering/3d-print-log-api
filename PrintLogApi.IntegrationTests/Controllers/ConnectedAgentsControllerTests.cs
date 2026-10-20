@@ -36,6 +36,12 @@ public class ConnectedAgentsControllerTests
             return Task.CompletedTask;
         }
 
+        public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task SendVerificationEmail(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task DeleteUser(string? oauthUserId) => Task.CompletedTask;
         public Task<string> GetManagementApiBearerToken() => Task.FromResult(string.Empty);
         public Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct) => Task.FromResult<string?>(null);

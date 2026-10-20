@@ -2055,6 +2055,25 @@
             "customWidth": "100"
           },
           {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let apiEvents = customEvents\n| where cloud_RoleName == '{ApiRole}';\nlet apiRequests = requests\n| where cloud_RoleName == '{ApiRole}'\n| where not(name startswith 'OPTIONS ')\n| where name !in ('GET Notifications/GetUnreadCount', 'GET /metrics', 'GET /');\nlet windowStart = {UsageTimeRange:start};\nlet windowEnd = {UsageTimeRange:end};\nlet previousStart = windowStart - (windowEnd - windowStart);\nlet grain = {UsageTimeRange:grain};\nlet signups = apiEvents\n| where name == 'UserSignedUp' and timestamp between (windowStart .. windowEnd)\n| extend UserId = tostring(customDimensions.UserId)\n| where isnotempty(UserId)\n| summarize SignedUpAt = min(timestamp) by UserId;\nlet sources = app('{UiResource}').customEvents\n| where name == 'Auth_SignedUp' and timestamp >= windowStart and isnotempty(user_AuthenticatedId)\n| summarize arg_min(timestamp, customDimensions) by UserId = user_AuthenticatedId\n| project UserId, Source = tostring(customDimensions.source);\nlet firsts = apiEvents\n| where timestamp >= windowStart and isnotempty(user_AuthenticatedId)\n| where tostring(customDimensions.AspNetCoreEnvironment) == 'Production'\n| summarize\n    PrinterAt = minif(timestamp, name in ('PrinterAdded', 'McpPrinterAdded')),\n    MaterialAt = minif(timestamp, name == 'FilamentAdd'),\n    PrintAt = minif(timestamp, name == 'PrintAdded')\n    by UserId = user_AuthenticatedId;\nlet activity = apiRequests\n| where timestamp >= windowStart and isnotempty(user_AuthenticatedId)\n| summarize LastActiveAt = max(timestamp) by UserId = user_AuthenticatedId;\nsignups\n| lookup kind=leftouter sources on UserId\n| lookup kind=leftouter firsts on UserId\n| lookup kind=leftouter activity on UserId\n| extend Cohort = startofweek(SignedUpAt), Source = coalesce(Source, 'unknown')\n| summarize SignedUp = count(),\n    Printers = countif(isnotnull(PrinterAt)),\n    Materials = countif(isnotnull(MaterialAt)),\n    Prints24h = countif(PrintAt <= SignedUpAt + 1d),\n    Prints7d = countif(PrintAt <= SignedUpAt + 7d),\n    Returned = countif(startofday(LastActiveAt) > startofday(SignedUpAt))\n    by Cohort, Source\n| project Cohort, Source, SignedUp,\n    PrinterPct = round(100.0 * Printers / SignedUp, 1),\n    MaterialPct = round(100.0 * Materials / SignedUp, 1),\n    Print24hPct = round(100.0 * Prints24h / SignedUp, 1),\n    Print7dPct = round(100.0 * Prints7d / SignedUp, 1),\n    ReturnedPct = round(100.0 * Returned / SignedUp, 1)\n| order by Cohort desc, SignedUp desc\n",
+              "size": 0,
+              "title": "New-user onboarding funnel (weekly sign-up groups)",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "crossComponentResources": [
+                "{ApiResource}",
+                "{UiResource}"
+              ],
+              "visualization": "table",
+              "timeContextFromParameter": "UsageTimeRange"
+            },
+            "name": "onboarding-funnel",
+            "customWidth": "100"
+          },
+          {
             "type": 1,
             "content": {
               "json": "### Spoolman\nKlipper printers connected through Moonraker's `[spoolman]` component. **Scaling trigger: move the App Service plan to S1 or P0v3 at about 250 open sockets.** B1 allows 350 websockets per instance. Scale *up*, not out: socket state, `CacheVersionService` and the rate limiters are all in-process."

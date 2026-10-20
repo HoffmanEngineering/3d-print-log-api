@@ -110,6 +110,7 @@ public class EmailPipelineSqlServerTests : IClassFixture<EmailPipelineSqlServerT
                 db,
                 campaigns,
                 new EmailPreferenceService(db, telemetry),
+                new FakeVerificationRefresher(),
                 new EmailAddressHasher(options),
                 transport,
                 new EmailTokenService(options, clock),

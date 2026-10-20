@@ -170,7 +170,8 @@ public class Auth0Service(
     /// secret-free <see cref="Auth0ApiException"/>.
     /// </summary>
     private async Task<string> SendManagementAsync(
-        HttpMethod method, string url, CancellationToken ct, bool treat404AsSuccess = false)
+        HttpMethod method, string url, CancellationToken ct, bool treat404AsSuccess = false,
+        Func<HttpContent>? contentFactory = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -178,6 +179,11 @@ public class Auth0Service(
             using var client = CreateClient();
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Add("Authorization", $"Bearer {token}");
+            // Fresh content per attempt: a sent HttpContent cannot be reused for the 401 retry.
+            if (contentFactory != null)
+            {
+                request.Content = contentFactory();
+            }
 
             var response = await client.SendAsync(request, ct);
 
@@ -239,6 +245,34 @@ public class Auth0Service(
     private sealed class Auth0User
     {
         [JsonPropertyName("email")] public string? Email { get; set; }
+        [JsonPropertyName("email_verified")] public bool EmailVerified { get; set; }
+    }
+
+    /// <summary>
+    ///   Get a user's email address and verification flag from Auth0. Null on an empty body.
+    /// </summary>
+    public async Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}" +
+                         "?fields=email,email_verified&include_fields=true";
+        var json = await SendManagementAsync(HttpMethod.Get, requestUrl, ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        var user = JsonSerializer.Deserialize<Auth0User>(json);
+        return user == null ? null : new Auth0EmailStatus(user.Email, user.EmailVerified);
+    }
+
+    /// <summary>
+    ///   Ask Auth0 to send the user a verification email.
+    /// </summary>
+    public async Task SendVerificationEmail(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/jobs/verification-email";
+        await SendManagementAsync(HttpMethod.Post, requestUrl, ct,
+            contentFactory: () => JsonContent.Create(new { user_id = oauthUserId }));
     }
 
     /// <summary>

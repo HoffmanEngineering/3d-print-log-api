@@ -5,7 +5,11 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
+using PrintLogApi.Caching;
 using PrintLogApi.Email;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
@@ -29,7 +33,13 @@ public class UsersController(
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IBlobStorageService blobStorageService,
-    ISubscriptionService subscriptionService) : ControllerBase
+    ISubscriptionService subscriptionService,
+    IOptions<UserOnboardingOptions> onboardingOptions,
+    IEmailVerificationRefresher emailVerificationRefresher,
+    IAuth0Service auth0Service,
+    IMemoryCache cache,
+    TimeProvider clock,
+    ILogger<UsersController> logger) : ControllerBase
 {
     private readonly string profileImageContainerName = "userprofile";
 
@@ -100,6 +110,119 @@ public class UsersController(
             .Select(u => new AccountEmailDto(u.Email, u.EmailVerified))
             .AsNoTracking()
             .SingleAsync(ct);
+    }
+
+    /// <summary>
+    /// Whether the current user goes through onboarding. Interactive sessions only. Deliberately
+    /// not part of the public user detail, which is anonymous.
+    /// </summary>
+    [HttpGet("me/onboarding")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<ActionResult<OnboardingStatusDto>> GetOnboardingStatus(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var user = await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.CreatedDate, u.EmailVerified })
+            .AsNoTracking()
+            .SingleAsync(ct);
+
+        // The token claim lags until the next sign-in, so ask Auth0 (throttled) while unverified.
+        // Only for an onboarding user: nobody else is shown anything that reads this flag.
+        var eligible = onboardingOptions.Value.IsEligible(user.CreatedDate);
+        var emailVerified = user.EmailVerified
+            || (eligible && await emailVerificationRefresher.RefreshAsync(userId.Value, ct));
+
+        return new OnboardingStatusDto(
+            eligible,
+            user.CreatedDate,
+            emailVerified);
+    }
+
+    /// <summary>
+    /// Asks Auth0 to send the current user's verification email again. Interactive sessions only.
+    /// Limited to one send per user every five minutes.
+    /// </summary>
+    [HttpPost("me/verification-email")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<IActionResult> ResendVerificationEmail(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var throttleKey = $"verification_email_sent:{userId.Value}";
+        if (cache.TryGetValue(throttleKey, out DateTimeOffset expiresAt))
+        {
+            // Rounded up, never down: Retry-After is whole seconds, and truncating sends a
+            // client that honors the header back before the window has closed.
+            var seconds = Math.Max(1, (int)Math.Ceiling((expiresAt - clock.GetUtcNow()).TotalSeconds));
+            Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+            return CodedProblem(StatusCodes.Status429TooManyRequests, "A verification email was sent recently. Try again later.", "rate_limited");
+        }
+
+        // Forced, so a GET me/onboarding a moment ago (which set the refresher's throttle) cannot
+        // hide a verification that just happened. The rate limit above bounds the Auth0 calls.
+        if (await emailVerificationRefresher.RefreshAsync(userId.Value, ct, force: true))
+        {
+            return CodedProblem(StatusCodes.Status409Conflict, "The email address is already verified.", "already_verified");
+        }
+
+        var oauthUserId = await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.OAuthUserId)
+            .SingleOrDefaultAsync(ct);
+
+        // Without an Auth0 id there is nothing to resend to. Leave the throttle unset.
+        if (string.IsNullOrEmpty(oauthUserId))
+        {
+            return CodedProblem(StatusCodes.Status502BadGateway, "The verification email could not be sent right now.", "auth0_unavailable");
+        }
+
+        try
+        {
+            await auth0Service.SendVerificationEmail(oauthUserId, ct);
+        }
+        // HttpClient's own timeout is a TaskCanceledException while ct is still live.
+        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            // Logged so a missing update:users grant on the Management API client shows up.
+            logger.LogWarning(ex, "Resending the verification email failed for user {UserId}", userId.Value);
+            return CodedProblem(StatusCodes.Status502BadGateway, "The verification email could not be sent right now.", "auth0_unavailable");
+        }
+
+        // Deliberately IMemoryCache, not HybridCache: a throttle flag, not a computed value.
+        // The value is the expiry instant so a later call can report the time remaining.
+        var window = TimeSpan.FromMinutes(5);
+        cache.Set(throttleKey, clock.GetUtcNow().Add(window), new MemoryCacheEntryOptions()
+            .SetSize(CacheBudget.SmallEntryBytes)
+            .SetAbsoluteExpiration(window));
+
+        telemetry.TrackEvent("VerificationEmail_Sent", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+        });
+
+        return NoContent();
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 
     /// <summary>
