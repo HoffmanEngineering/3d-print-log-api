@@ -27,6 +27,7 @@ using PrintLogApi.Middleware;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
 using PrintLogApi.OpenApi;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Moonraker;
@@ -254,6 +255,7 @@ public class Startup
         services.AddTransient<IEmailSender, SmtpEmailSender>();
         services.AddEmail(Configuration);
         services.AddSpoolTags(Configuration);
+        services.AddPrinterCatalog(Configuration);
         services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
@@ -323,6 +325,30 @@ public class Startup
                 var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: $"mcp-docs:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // The anonymous printer catalog, like the docs endpoint above. The partition is the
+            // socket peer (RemoteIpAddress), which is a client only when forwarded headers are
+            // enabled (App Service sets ASPNETCORE_FORWARDEDHEADERS_ENABLED); without them every
+            // request behind the front end shares one partition.
+            options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
+            {
+                var limit = httpContext.RequestServices
+                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<PrinterCatalogOptions>>().Value.RateLimitPerMinute;
+                if (limit <= 0)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("catalog-unlimited");
+                }
+
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"catalog:{ip}",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         PermitLimit = limit,

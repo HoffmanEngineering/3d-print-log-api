@@ -1,0 +1,19 @@
+{
+    "name": "Foo Base Printer",
+    "version": 2,
+    "inherits": "fdmprinter",
+    "metadata":
+    {
+        "visible": false,
+        "manufacturer": "Foo B.V.",
+        "has_variants": true,
+        "preferred_variant_name": "0.6mm Nozzle"
+    },
+    "overrides":
+    {
+        "machine_width": { "default_value": 220 },
+        "machine_depth": { "default_value": 220 },
+        "machine_height": { "default_value": 250 },
+        "machine_heated_bed": { "value": true }
+    }
+}

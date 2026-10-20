@@ -1,0 +1,18 @@
+{
+    "type": "machine",
+    "name": "Zed Labs Z1 Mini 0.2 nozzle",
+    "inherits": "fdm_machine_common",
+    "from": "system",
+    "instantiation": "true",
+    "printer_model": "Zed Labs Z1 Mini",
+    "printer_variant": "0.2",
+    "nozzle_diameter": [
+        "0.2"
+    ],
+    "printable_area": [
+        "0x0",
+        "180x0",
+        "180x180",
+        "0x180"
+    ]
+}

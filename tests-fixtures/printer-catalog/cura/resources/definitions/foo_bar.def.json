@@ -1,0 +1,16 @@
+{
+    "name": "Foo Bar",
+    "version": 2,
+    "inherits": "foo_base",
+    "metadata":
+    {
+        "visible": true,
+        "platform": "foo_bar_platform.3mf",
+        "machine_extruder_trains": { "0": "foo_bar_extruder_0" }
+    },
+    "overrides":
+    {
+        "machine_height": { "value": "machine_width * 2" },
+        "machine_start_gcode": { "default_value": "G28 ; Foo Bar start" }
+    }
+}

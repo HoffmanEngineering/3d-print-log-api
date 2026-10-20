@@ -157,7 +157,9 @@ public sealed record PrinterDetailResult(
     double? ScreenResolutionXPixels,
     double? ScreenResolutionYPixels,
     // Appended: how many filament positions the printer has, 1 for a single-tool printer.
-    int SlotCount);
+    int SlotCount,
+    // Appended: the printer catalog model it is linked to, if any.
+    string? CatalogModelId = null);
 
 public sealed record SummaryMetrics(
     int Prints, double MaterialUsedGrams, int TotalPrintTimeSeconds,

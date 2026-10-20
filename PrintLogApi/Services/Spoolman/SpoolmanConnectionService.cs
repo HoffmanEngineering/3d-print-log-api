@@ -82,7 +82,7 @@ public sealed partial class SpoolmanConnectionService(
     {
         var printer = await context.Printers
             .Where(p => p.Id == printerId && p.UserId == userId)
-            .Select(p => new { p.Id, p.Name, p.Make, p.Model })
+            .Select(p => new { p.Id, p.Name, p.Make, p.Model, p.CatalogModelId })
             .SingleOrDefaultAsync(ct);
         if (printer is null)
         {
@@ -153,7 +153,7 @@ public sealed partial class SpoolmanConnectionService(
             Secret = secret,
             ServerUrl = serverUrl,
             ConfigBlock = ConfigBlock(serverUrl,
-                IsSnapmakerU1(printer.Make, printer.Model) || await HasBridgeAsync(userId, printer.Id, ct)
+                IsSnapmakerU1(printer.CatalogModelId, printer.Make, printer.Model) || await HasBridgeAsync(userId, printer.Id, ct)
                     ? null
                     : NotifierUrl(requestOrigin, printer.Id, secret)),
         };
@@ -492,12 +492,20 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
             c.UserId == userId && c.PrinterId == printerId && c.Kind == Connection.MoonrakerKind, ct);
 
     /// <summary>
-    /// Whether the printer is a Snapmaker U1, by the same rule as the web app's Spoolman panel.
+    /// Whether the printer is a Snapmaker U1: linked to the catalog model <c>snapmaker-u1</c>, or, for a
+    /// printer with no such link, by the same make and model rule as the web app's Spoolman panel.
     /// The U1's stock Moonraker ships without <c>apprise</c>, so a <c>[notifier]</c> section fails
     /// to load ("failed plugins: notifier") and logs nothing: the U1 logs prints with
     /// printlog-bridge instead.
     /// </summary>
-    private static bool IsSnapmakerU1(string? make, string? model) =>
+    private static bool IsSnapmakerU1(string? catalogModelId, string? make, string? model) =>
+        string.Equals(catalogModelId, SnapmakerU1CatalogId, StringComparison.OrdinalIgnoreCase)
+        || IsSnapmakerU1ByName(make, model);
+
+    /// <summary>The printer catalog id of the Snapmaker U1.</summary>
+    private const string SnapmakerU1CatalogId = "snapmaker-u1";
+
+    private static bool IsSnapmakerU1ByName(string? make, string? model) =>
         make?.Contains("snapmaker", StringComparison.OrdinalIgnoreCase) == true
         && model is not null
         && U1Model().IsMatch(model);

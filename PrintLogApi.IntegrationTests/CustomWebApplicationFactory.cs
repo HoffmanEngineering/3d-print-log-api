@@ -15,6 +15,8 @@ using PrintLogApi.IntegrationTests.Mcp;
 using PrintLogApi.IntegrationTests.Mcp.Docs;
 using PrintLogApi.IntegrationTests.SpoolTags;
 using PrintLogApi.IntegrationTests.Telemetry;
+using PrintLogApi.PrinterCatalog;
+using PrintLogApi.PrinterCatalog.Generation;
 using PrintLogApi.Services;
 using PrintLogApi.SpoolTags;
 using PrintLogApi.SpoolTags.Catalog;
@@ -29,6 +31,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 {
     private SqliteConnection _connection;
     private bool _seeded = false;
+    private bool _catalogSeeded;
+
+    private static readonly Lazy<CatalogFile> EmbeddedPrinterCatalog = new(PrinterCatalogFileLoader.LoadEmbedded);
+
+    /// <summary>
+    /// The real embedded printer catalog every host is seeded with, parsed once per test run rather
+    /// than once per host.
+    /// </summary>
+    public static CatalogFile PrinterCatalog => EmbeddedPrinterCatalog.Value;
 
     public CustomWebApplicationFactory()
     {
@@ -157,10 +168,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 
             // The email workers would tick on their own timers mid-test. Tests drive
             // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead. The same goes
-            // for the spool tag maintenance worker.
+            // for the spool tag maintenance worker. The printer catalog seeder is replaced by the
+            // synchronous seed in PrepareDatabase, so every test starts with the catalog in place.
             foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
                 && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService)
-                    || d.ImplementationType == typeof(SpoolTagMaintenanceService))).ToList())
+                    || d.ImplementationType == typeof(SpoolTagMaintenanceService)
+                    || d.ImplementationType == typeof(PrinterCatalogSeeder)
+                    || d.ImplementationType == typeof(PrinterPopularityJob))).ToList())
             {
                 services.Remove(worker);
             }
@@ -267,7 +281,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     {
         var host = base.CreateHost(builder);
 
-        // Seed the database using the actual host's service provider
+        // Seed the database using the actual host's service provider. WithWebHostBuilder children
+        // share this database (and run this method), so the database is prepared once, by
+        // whichever host is built first.
         if (!_seeded)
         {
             using (var scope = host.Services.CreateScope())
@@ -277,15 +293,72 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             _seeded = true;
         }
 
+        // Every host has its own index singleton, so each one is built, child or parent.
+        if (_catalogSeeded)
+        {
+            using var scope = host.Services.CreateScope();
+            RebuildPrinterCatalogIndex(scope.ServiceProvider);
+        }
+
         return host;
     }
 
     /// <summary>Creates and seeds the schema once, when the host first starts. A host on another provider overrides it.</summary>
     protected virtual void PrepareDatabase(PrintLogContext db)
     {
-        db.Database.EnsureCreated();
+        CopyCatalogTemplate(db);
         IntegrationTestSeeder.Seed(db);
+        _catalogSeeded = true;
     }
+
+    /// <summary>
+    /// Creates the schema with the real printer catalog already seeded, by copying a template
+    /// database. The template is created and seeded through <see cref="PrinterCatalogSeeder.SeedAsync"/>
+    /// once per test run. Seeding 930 models into every host's database took the full suite from
+    /// about 45 s to 57 s; copying the finished template (which also replaces each host's
+    /// EnsureCreated) brought it to about 36 s.
+    /// </summary>
+    private static void CopyCatalogTemplate(PrintLogContext db)
+    {
+        var target = (SqliteConnection)db.Database.GetDbConnection();
+        db.Database.OpenConnection();
+        try
+        {
+            lock (CatalogTemplate)
+            {
+                CatalogTemplate.Value.BackupDatabase(target);
+            }
+        }
+        finally
+        {
+            db.Database.CloseConnection();
+        }
+    }
+
+    private static readonly Lazy<SqliteConnection> CatalogTemplate = new(() =>
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        SqliteSearchCollation.Register(connection);
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
+        using var db = new PrintLogContext(options);
+        db.Database.EnsureCreated();
+        PrinterCatalogSeeder.SeedAsync(db, PrinterCatalog, new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero), CancellationToken.None)
+            .GetAwaiter().GetResult();
+        return connection;
+    });
+
+    /// <summary>
+    /// Builds a host's catalog index from its table, as the startup seeder does after seeding. Runs
+    /// for every host once the base <see cref="PrepareDatabase"/> has seeded the catalog; a host that
+    /// prepares its own database without it gets an empty index.
+    /// </summary>
+    private static void RebuildPrinterCatalogIndex(IServiceProvider services) =>
+        services.GetRequiredService<IPrinterCatalogIndex>().Rebuild(
+            services.GetRequiredService<PrintLogContext>().PrinterModels.AsNoTracking().ToList());
 
     protected override void Dispose(bool disposing)
     {

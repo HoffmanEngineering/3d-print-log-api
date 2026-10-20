@@ -237,12 +237,17 @@ public class SecurityRequirementsOperationFilter : IOperationFilter
     {
         var metadata = context.ApiDescription.ActionDescriptor.EndpointMetadata;
         var authorizeData = metadata.OfType<IAuthorizeData>().ToList();
+        var allowsAnonymous = metadata.OfType<IAllowAnonymous>().Any();
         if (authorizeData.Count == 0)
         {
+            // [AllowAnonymous] with no [Authorize]: the endpoint takes no credentials at all. A
+            // lone empty requirement says so; leaving security out fails the security-defined lint.
+            if (allowsAnonymous)
+            {
+                operation.Security = [new OpenApiSecurityRequirement()];
+            }
             return;
         }
-
-        var allowsAnonymous = metadata.OfType<IAllowAnonymous>().Any();
 
         // ApiKeyMiddleware signs an API key in under the "ApiUser" role, which this policy
         // rejects. Only an interactive (OAuth) session gets through.

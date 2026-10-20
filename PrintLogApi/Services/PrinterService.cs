@@ -5,6 +5,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services;
@@ -15,7 +16,8 @@ public class PrinterService(
     IBlobStorageService blobStorage,
     ILogger<PrinterService> logger,
     ICacheVersionService cacheVersionService,
-    Spoolman.ISpoolmanCredentialCache spoolmanCredentials) : IPrinterService
+    Spoolman.ISpoolmanCredentialCache spoolmanCredentials,
+    TimeProvider timeProvider) : IPrinterService
 {
     /// <summary>
     /// The category a printer gets when none is named. Shared with PrintersController so the web
@@ -448,6 +450,7 @@ public class PrinterService(
                 p.ScreenResolutionXPixels,
                 p.ScreenResolutionYPixels,
                 p.SlotCount,
+                p.CatalogModelId,
 
                 // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                 // without the UnloadedDateTime filter every spool ever mounted would be reported
@@ -539,7 +542,8 @@ public class PrinterService(
             BeamDiameterMm: row.BeamDiameter,
             ScreenResolutionXPixels: row.ScreenResolutionXPixels,
             ScreenResolutionYPixels: row.ScreenResolutionYPixels,
-            SlotCount: row.SlotCount);
+            SlotCount: row.SlotCount,
+            CatalogModelId: row.CatalogModelId);
     }
 
     /// <summary>
@@ -563,6 +567,26 @@ public class PrinterService(
                 $"'{requested}' is not a known printer category. Valid categories: {string.Join(", ", known)}.");
         }
         return category;
+    }
+
+    /// <summary>
+    /// Finds the catalog model a new printer points at. Unknown, hidden and retired ids are all
+    /// rejected, matching the website's create. The match is case-insensitive and the stored
+    /// (canonical) id is what the caller gets back.
+    /// </summary>
+    private async Task<PrinterModel> RequireCatalogModel(string catalogModelId, CancellationToken ct)
+    {
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id.ToLower() == lowered, ct);
+        if (model is null || model.Hidden || model.Retired)
+        {
+            throw McpToolException.InvalidArguments(
+                $"catalogModelId '{catalogModelId}' is not a printer in the catalog. " +
+                "If you can call the REST API, find an id with GET /api/PrinterModels?search=<name>; otherwise omit it.");
+        }
+        return model;
     }
 
     private static void RequireCreateFields(PrinterAttributesInput input)
@@ -622,7 +646,14 @@ public class PrinterService(
             }
         }
 
-        var category = await RequirePrinterCategory(input.CategoryNickname, ct);
+        // Resolve the catalog model only after the replay lookup: the fingerprint hashes the id the
+        // caller sent (trimmed, lowercased), so a retry replays even if the model has since been
+        // hidden or retired. The canonical stored id is used only for persisting.
+        PrinterModel? catalogModel = null;
+        if (input.CatalogModelId is not null)
+        {
+            catalogModel = await RequireCatalogModel(input.CatalogModelId, ct);
+        }
 
         var printer = new Printer
         {
@@ -631,8 +662,9 @@ public class PrinterService(
             Model = input.Model,
             Name = input.Name,
             Description = input.Description,
-            Category = category,
-            CategoryNickname = category.Nickname,
+            CategoryNickname = input.CategoryNickname,
+            CatalogModelId = catalogModel?.Id,
+            CreatedAt = timeProvider.GetUtcNow(),
             NozzleDiameter = input.NozzleDiameterMm,
             FilamentDiameter = input.FilamentDiameterMm,
             BeamDiameter = input.BeamDiameterMm,
@@ -651,6 +683,22 @@ public class PrinterService(
             // No LoadedFilaments, deliberately: an empty collection here would still be an
             // assertion about loaded state. Leaving it unset says nothing at all.
         };
+
+        // Specs the caller left out come from the catalog; a value they gave always wins.
+        // create_printer takes no slot count, so it is always omitted and the model's applies.
+        if (catalogModel is not null)
+        {
+            PrinterCatalogDefaults.ApplyOnCreate(printer, catalogModel, requestedSlotCount: null);
+        }
+
+        // A category the caller named must exist (rejected otherwise). One taken from the model's
+        // technology is a default, so a missing category falls back to FFF instead of failing.
+        var category = input.CategoryNickname is null && printer.CategoryNickname is { } derived
+            ? await context.PrinterCategories.FirstOrDefaultAsync(c => c.Nickname == derived, ct)
+                ?? await RequirePrinterCategory(null, ct)
+            : await RequirePrinterCategory(input.CategoryNickname, ct);
+        printer.Category = category;
+        printer.CategoryNickname = category.Nickname;
 
         if (idempotencyKey == null)
         {

@@ -10,6 +10,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers;
@@ -30,7 +31,8 @@ public class PrintersController(
     IPrinterCategoryService printerCategoryService,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    ICacheVersionService cacheVersionService,
+    TimeProvider timeProvider) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
     private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
@@ -89,6 +91,7 @@ public class PrintersController(
                 Make = item.Make,
                 Model = item.Model,
                 IsActive = item.IsActive,
+                CatalogModelId = item.CatalogModelId,
                 WattageW = item.WattageW,
                 SlotCount = item.SlotCount,
                 Category = item.Category,
@@ -212,12 +215,13 @@ public class PrintersController(
     /// <param name="printer">The updated printer details.</param>
     /// <returns></returns>
     /// <response code="201">Returned with the updated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -245,6 +249,12 @@ public class PrintersController(
         if (existingPrinter.UserId != userId)
         {
             return Forbid();
+        }
+
+        var (catalogProblem, _) = await ValidateCatalogModelAsync(printer, existingPrinter.CatalogModelId);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
         }
 
         existingPrinter = mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
@@ -304,12 +314,13 @@ public class PrintersController(
     /// </summary>
     /// <param name="printer">The printer details to create</param>
     /// <response code="201">Returned with the newly creeated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -321,9 +332,28 @@ public class PrintersController(
             return Unauthorized();
         }
 
-        var newPrinter = mapper.Map<Printer>(printer);
+        var (catalogProblem, catalogModel) = await ValidateCatalogModelAsync(printer, currentCatalogModelId: null);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
+        }
 
-        var printerType = await printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        var newPrinter = mapper.Map<Printer>(printer);
+        newPrinter.CreatedAt = timeProvider.GetUtcNow();
+
+        // Specs the caller left null come from the catalog model (create only; PUT never fills).
+        if (catalogModel is not null)
+        {
+            PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel, printer.SlotCount);
+        }
+
+        // The category the caller named wins; otherwise the model's technology, then the default.
+        // A category taken from the model is a default, so a missing one falls back instead of failing.
+        var printerType = await printerCategoryService.get(printer.Category ?? newPrinter.CategoryNickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        if (printerType is null && printer.Category is null)
+        {
+            printerType = await printerCategoryService.get(DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        }
 
         if (printerType is null)
         {
@@ -331,6 +361,7 @@ public class PrintersController(
         }
 
         newPrinter.Category = printerType;
+        newPrinter.CategoryNickname = printerType.Nickname;
 
         newPrinter.UserId = userId.Value;
 
@@ -348,6 +379,57 @@ public class PrintersController(
         cacheVersionService.InvalidateUserCache(userId.Value);
 
         return CreatedAtAction("GetPrinter", new { id = newPrinter.Id }, mapper.Map<PrinterDetailDto>(newPrinter));
+    }
+
+    /// <summary>
+    /// Checks a catalog model id on a printer write. Null is always fine. Otherwise the model must
+    /// exist and not be hidden, and a retired model is accepted only when the printer already has it.
+    /// Keeping the id a printer already has (any case) is always accepted, so editing a printer whose model
+    /// was hidden or retired later never fails on a field the user did not touch.
+    /// </summary>
+    private async Task<(ObjectResult? Problem, PrinterModel? Model)> ValidateCatalogModelAsync(AddPrinterDTO printer, string? currentCatalogModelId)
+    {
+        var catalogModelId = printer.CatalogModelId;
+        if (catalogModelId is null)
+        {
+            return (null, null);
+        }
+
+        if (string.Equals(catalogModelId, currentCatalogModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Unchanged. The FK guarantees a stored id exists; save it in its stored case.
+            printer.CatalogModelId = currentCatalogModelId;
+            return (null, null);
+        }
+
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels
+            .AsNoTracking()
+            .Where(m => m.Id.ToLower() == lowered)
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
+
+        if (model is not null && !model.Hidden && !model.Retired)
+        {
+            printer.CatalogModelId = model.Id;
+            return (null, model);
+        }
+
+        return (CodedProblem(
+            StatusCodes.Status400BadRequest,
+            "The printer model was not found in the catalog.",
+            "printer_model_not_found"), null);
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 
     /// <summary>

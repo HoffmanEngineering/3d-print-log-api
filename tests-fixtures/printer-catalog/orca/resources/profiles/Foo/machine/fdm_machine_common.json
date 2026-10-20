@@ -1,0 +1,22 @@
+{
+    "type": "machine",
+    "name": "fdm_machine_common",
+    "from": "system",
+    "instantiation": "false",
+    "printer_technology": "FFF",
+    "printer_structure": "undefine",
+    "nozzle_diameter": [
+        "0.4"
+    ],
+    "filament_diameter": [
+        "2.85"
+    ],
+    "printable_area": [
+        "0x0",
+        "100x0",
+        "100x100",
+        "0x100"
+    ],
+    "printable_height": "100",
+    "machine_start_gcode": "G28 ; common start"
+}

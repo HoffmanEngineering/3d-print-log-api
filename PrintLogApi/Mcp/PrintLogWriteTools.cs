@@ -424,7 +424,10 @@ public class PrintLogWriteTools(
         "Dimensions are millimetres, wattage is watts, screen resolutions are pixels — all " +
         "stored exactly as given, with no conversion. A new printer is active unless you pass " +
         "isActive = false. This tool never loads or unloads filament: use the load/unload flow " +
-        "for that. 'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
+        "for that. An optional catalogModelId fills any spec you leave out from the printer " +
+        "catalog; values you pass always win. If you can call the REST API, find an id with " +
+        "GET /api/PrinterModels?search=; otherwise omit it. " +
+        "'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
         "SAME arguments returns the same printer (wasReplayed = true) and reusing it with " +
         "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND printer.")]
     public async Task<CreatePrinterResult> CreatePrinter(
@@ -445,6 +448,7 @@ public class PrintLogWriteTools(
         [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
         [Description("Optional power draw in watts (>= 0).")] double? wattageW = null,
         [Description("Whether the printer is in use. Defaults to true.")] bool? isActive = null,
+        [Description("Optional printer catalog model id; fills specs left empty. If you can call the REST API, find an id with GET /api/PrinterModels?search=; otherwise omit it.")] string? catalogModelId = null,
         [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
         CancellationToken ct = default)
     {
@@ -452,7 +456,7 @@ public class PrintLogWriteTools(
             CurrentUserId, BuildPrinterInput(
                 make, model, name, description, categoryNickname, nozzleDiameterMm, filamentDiameterMm,
                 beamDiameterMm, bedWidthMm, bedDepthMm, bedHeightMm, screenResolutionXPixels,
-                screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive),
+                screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive, catalogModelId),
             idempotencyKey, ct);
     }
 
@@ -509,7 +513,8 @@ public class PrintLogWriteTools(
         double? nozzleDiameterMm, double? filamentDiameterMm, double? beamDiameterMm,
         double? bedWidthMm, double? bedDepthMm, double? bedHeightMm,
         double? screenResolutionXPixels, double? screenResolutionYPixels,
-        bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive) => new()
+        bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive,
+        string? catalogModelId = null) => new()
         {
             Make = make,
             Model = model,
@@ -528,6 +533,7 @@ public class PrintLogWriteTools(
             HasHeatedChamber = hasHeatedChamber,
             WattageW = wattageW,
             IsActive = isActive,
+            CatalogModelId = catalogModelId,
         };
 
     // Destructive = false: the change is a bounded, reversible delta on one quantity — the

@@ -17,6 +17,8 @@ public class PrintLogContext : DbContext
     public DbSet<CuraSetting> CuraSettings { get; set; }
 
     public DbSet<Printer> Printers { get; set; }
+    public DbSet<PrinterModel> PrinterModels { get; set; } = null!;
+    public DbSet<PrinterCatalogVersion> PrinterCatalogVersions { get; set; } = null!;
 
     public DbSet<PrinterCategory> PrinterCategories { get; set; }
 
@@ -858,6 +860,18 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<Printer>()
             .HasIndex(p => new { p.UserId, p.IsActive })
             .HasDatabaseName("IX_Printers_UserId_IsActive");
+
+        // Printer catalog. Models are only ever retired, never deleted, so a printer's reference
+        // is NoAction rather than SetNull: a removal that orphaned printers should fail loudly.
+        modelBuilder.Entity<Printer>(entity =>
+        {
+            entity.HasOne(p => p.CatalogModel)
+                .WithMany()
+                .HasForeignKey(p => p.CatalogModelId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasIndex(p => p.CatalogModelId);
+        });
 
         modelBuilder.Entity<ProjectImage>()
             .HasIndex(pi => pi.ProjectId)

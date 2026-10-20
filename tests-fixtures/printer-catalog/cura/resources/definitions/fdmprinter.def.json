@@ -1,0 +1,40 @@
+{
+    "name": "FDM Printer Base Description",
+    "version": 2,
+    "metadata":
+    {
+        "type": "machine",
+        "manufacturer": "Unknown",
+        "visible": false,
+        "has_variants": false,
+        "machine_extruder_trains": { "0": "fdmextruder" }
+    },
+    "settings":
+    {
+        "machine_settings":
+        {
+            "label": "Machine",
+            "type": "category",
+            "children":
+            {
+                "machine_width": { "type": "float", "default_value": 100 },
+                "machine_depth": { "type": "float", "default_value": 100 },
+                "machine_height": { "type": "float", "default_value": 100 },
+                "machine_heated_bed": { "type": "bool", "default_value": false },
+                "machine_heated_build_volume": { "type": "bool", "default_value": false },
+                "machine_extruder_count": { "type": "int", "default_value": 1 },
+                "machine_nozzle_size": { "type": "float", "default_value": 0.4 },
+                "machine_start_gcode": { "type": "str", "default_value": "G28 ; home" }
+            }
+        },
+        "material":
+        {
+            "label": "Material",
+            "type": "category",
+            "children":
+            {
+                "material_diameter": { "type": "float", "default_value": 2.85 }
+            }
+        }
+    }
+}

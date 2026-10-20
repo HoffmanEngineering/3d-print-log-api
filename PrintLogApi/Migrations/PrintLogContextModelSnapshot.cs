@@ -1554,10 +1554,17 @@ namespace PrintLogApi.Migrations
                     b.Property<double?>("BedWidthMm")
                         .HasColumnType("float");
 
+                    b.Property<string>("CatalogModelId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("CategoryNickname")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("nvarchar(50)")
                         .HasDefaultValue("FFF");
+
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
@@ -1607,6 +1614,8 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CatalogModelId");
+
                     b.HasIndex("CategoryNickname");
 
                     b.HasIndex("Id")
@@ -1618,6 +1627,27 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_Printers_UserId_IsActive");
 
                     b.ToTable("Printers");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.PrinterCatalogVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CatalogGeneratedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("SeededAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterCatalogVersions");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.PrinterCategory", b =>
@@ -1961,6 +1991,88 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("PrinterMaintenance");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.PrinterModel", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("AliasesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<double?>("BedDepthMm")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedHeightMm")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedWidthMm")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("DefaultNozzleMm")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("DefaultSlotCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExtruderCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Featured")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("FilamentDiameterMm")
+                        .HasColumnType("float");
+
+                    b.Property<bool?>("HasHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("HasHeatedChamber")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("Hidden")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kinematics")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Make")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("NozzleOptionsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("OwnerCount")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Retired")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SourcesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Technology")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterModels");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Project", b =>
@@ -3227,6 +3339,11 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
                 {
+                    b.HasOne("PrintLogApi.Models.PrinterModel", "CatalogModel")
+                        .WithMany()
+                        .HasForeignKey("CatalogModelId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("PrintLogApi.Models.PrinterCategory", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryNickname");
@@ -3236,6 +3353,8 @@ namespace PrintLogApi.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("CatalogModel");
 
                     b.Navigation("Category");
 

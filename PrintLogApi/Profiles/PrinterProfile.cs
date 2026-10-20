@@ -27,6 +27,12 @@ public class PrinterProfile : Profile
 
         CreateMap<AddPrinterDTO, Printer>()
             .ForMember(dest => dest.Category, opt => opt.Ignore())
+            // The id maps by name; the navigation is never loaded from a DTO, and CreatedAt is set once
+            // on create and must survive a PUT.
+            .ForMember(dest => dest.CatalogModel, opt => opt.Ignore())
+            // Omitted (null) keeps the printer's current model, like SlotCount. There is no unlink in v1.
+            .ForMember(dest => dest.CatalogModelId, opt => opt.PreCondition(src => src.CatalogModelId != null))
+            .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
             // Mapped over a tracked printer, the DTO rows overwrite the loaded rows with copies
             // that have no slot, label or loaded time. PostPrinter builds the rows itself, and
             // PutPrinter diffs the ids through setLoadedFilament.
