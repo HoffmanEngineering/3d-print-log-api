@@ -229,11 +229,13 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     public async Task PrinterCatalogEndpoints_AreFullyAnonymous(string path, string method)
     {
         // [AllowAnonymous] with no [Authorize] anywhere: the endpoint takes no credentials at all,
-        // so the document lists no security requirement and no 401, unlike the optional-auth rows above.
+        // so the document lists one empty security requirement (no credentials) and no 401, unlike the
+        // optional-auth rows above, which also offer the named schemes.
         var document = await LoadDocument();
         var operation = document.GetProperty("paths").GetProperty(path).GetProperty(method);
 
-        Assert.False(operation.TryGetProperty("security", out var security) && security.GetArrayLength() > 0);
+        var requirement = Assert.Single(operation.GetProperty("security").EnumerateArray());
+        Assert.Empty(requirement.EnumerateObject());
         Assert.False(operation.GetProperty("responses").TryGetProperty("401", out _));
         Assert.True(operation.GetProperty("responses").TryGetProperty("429", out _));
     }
