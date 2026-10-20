@@ -201,7 +201,9 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src => src.Colors))
-            .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
+            .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects))
+            // A missing/null list keeps existing adjustment history; an explicit empty list clears it.
+            .ForMember(dest => dest.FilamentAdjustments, opt => opt.PreCondition(src => src.FilamentAdjustments is not null));
 
         CreateMap<Filament, FilamentDetailDto>()
             // Ordered so a client diffing the list sees a stable order. GetFilamentById Includes Tags.
