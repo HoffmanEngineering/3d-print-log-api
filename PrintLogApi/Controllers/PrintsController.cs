@@ -600,6 +600,44 @@ public class PrintsController(
     }
 
     /// <summary>
+    /// Count and list your other prints of the same file.
+    /// </summary>
+    /// <remarks>
+    /// Two prints are of the same file when they are both yours and have the same `fileHash`:
+    /// the file's SHA-1 or a connector's file identity, compared only within your own prints.
+    /// Prints logged without one match nothing.
+    /// `count` is how many of your prints share the hash, this one included, or 0 when this print
+    /// has no hash. `prints` lists the others, newest first, at most `limit` of them. Only the
+    /// print's owner can ask; anyone else gets a `404`, public prints included.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="limit">The most other prints to list, 1 to 50. Defaults to 10. Does not cap `count`.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">The count and the other prints of the same file.</response>
+    /// <response code="400">Returned when `limit` is out of range.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="404">Returned when the print does not exist or is not yours.</response>
+    [HttpGet("{id}/same-file")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SameFilePrintsDto>> GetSameFilePrints(
+        long id,
+        [FromQuery, Range(1, 50)] int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        // Not cached: one seek on IX_Prints_User_FileHash, on a page that is not hot. Caching it
+        // would only add a key every print write already has to invalidate.
+        var result = await printService.GetSameFilePrints(id, userId, limit, cancellationToken);
+        return result == null ? NotFound() : result;
+    }
+
+    /// <summary>
     /// Largest body the slicer-settings action reads. The fields are capped separately, in bytes of
     /// text; this leaves room for JSON escaping, which can grow ASCII text up to sixfold
     /// (<c>\u0001</c>), so a block under its own cap is never refused by the server first.

@@ -910,6 +910,16 @@ public class PrintLogContext : DbContext
             .HasFilter("[ExternalSource] IS NOT NULL AND [ExternalId] IS NOT NULL")
             .HasDatabaseName("IX_Prints_User_ExternalSource_ExternalId");
 
+        // The reprint counter (UI #10): a user's prints of one file. Filtered, because most prints
+        // have no hash. An equality on FileHash implies IS NOT NULL, so SQL Server matches the
+        // filter even with the hash as a parameter (checked against SQL Server 2022). Built
+        // online, so the deploy does not hold a schema lock on Prints while the old app serves.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => new { p.CreatedById, p.FileHash })
+            .HasFilter("[FileHash] IS NOT NULL")
+            .IsCreatedOnline()
+            .HasDatabaseName("IX_Prints_User_FileHash");
+
         // MCP write idempotency: one created entity per (user, tool, key). The unique index is
         // the concurrency guard — a racing duplicate call fails here and is replayed.
         modelBuilder.Entity<McpIdempotencyRecord>()

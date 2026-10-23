@@ -1876,6 +1876,66 @@ public sealed class PrintService(
         }).ToList();
     }
 
+    public async Task<SameFilePrintsDto?> GetSameFilePrints(long id, long userId, int limit, CancellationToken ct)
+    {
+        // Owner-only, and a foreign id reads exactly like a missing one, so this is never an
+        // oracle on another user's prints or files.
+        var print = await context.Prints
+            .Where(p => p.Id == id && p.CreatedById == userId)
+            .Select(p => new { p.FileHash })
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct);
+
+        if (print == null)
+        {
+            return null;
+        }
+
+        if (print.FileHash is not { } hash)
+        {
+            return new SameFilePrintsDto { Count = 0, Prints = [] };
+        }
+
+        // hash is non-null here, so EF emits a plain "[FileHash] = @hash" with no null
+        // compensation, which SQL Server matches to the filtered IX_Prints_User_FileHash.
+        var sameFile = context.Prints.Where(p => p.CreatedById == userId && p.FileHash == hash);
+
+        var count = await sameFile.CountAsync(ct);
+
+        // Newest first, the same order as the print list's default.
+        var others = await sameFile
+            .Where(p => p.Id != id)
+            .OrderByDescending(p => p.StartDate)
+            .ThenByDescending(p => p.CreatedDate)
+            .ThenByDescending(p => p.Id)
+            .Take(limit)
+            .Select(p => new
+            {
+                p.Id,
+                p.Title,
+                p.Status,
+                p.StartDate,
+                p.CreatedDate,
+                DefaultPrintImageId = p.Images!.Where(i => i.IsDefault).Select(i => (int?)i.Id).FirstOrDefault(),
+            })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return new SameFilePrintsDto
+        {
+            Count = count,
+            Prints = others.Select(p => new SameFilePrintDto
+            {
+                Id = p.Id,
+                Title = p.Title,
+                Status = p.Status,
+                StartDate = p.StartDate,
+                CreatedDate = DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+                DefaultPrintImageId = p.DefaultPrintImageId,
+            }).ToList(),
+        };
+    }
+
     /// <summary>
     /// Writes actual usage onto the print's rows, matching by filament first. A row with a
     /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
