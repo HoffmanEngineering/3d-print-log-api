@@ -207,6 +207,59 @@ namespace PrintLogApi.Migrations
                     b.ToTable("CuraSettings");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.DeviceGrant", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ClientId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastUsedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("PairedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Scopes")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "DeviceId")
+                        .IsUnique();
+
+                    b.ToTable("DeviceGrants");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.DeviceToken", b =>
                 {
                     b.Property<long>("Id")
@@ -3006,6 +3059,17 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Print");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.DeviceGrant", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.DeviceToken", b =>

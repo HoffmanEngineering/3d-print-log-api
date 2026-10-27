@@ -66,6 +66,7 @@ public class PrintLogContext : DbContext
 
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<DeviceToken> DeviceTokens { get; set; }
+    public DbSet<DeviceGrant> DeviceGrants { get; set; }
     public DbSet<Connection> Connections { get; set; }
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
@@ -455,6 +456,24 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<DeviceToken>()
             .HasIndex(dt => dt.Token)
             .IsUnique();
+
+        // Device grants (#148). The token hash is what every device-authenticated request looks
+        // up. (UserId, DeviceId) is the re-pair key: pairing the same device again rotates the
+        // token on its row instead of adding one. The FK cascades from Users and is the only path
+        // there, so no 1785; UserDeletionService also deletes them explicitly.
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => g.TokenHash)
+            .IsUnique();
+
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => new { g.UserId, g.DeviceId })
+            .IsUnique();
+
+        modelBuilder.Entity<DeviceGrant>()
+            .HasOne(g => g.User)
+            .WithMany()
+            .HasForeignKey(g => g.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // Connections (#149). The agent upserts by its own instance id, so the pair is the key a
         // racing first heartbeat collides on. Scoped per user: re-pairing a bridge to another
