@@ -37,53 +37,8 @@ public class FirebaseFcmClient : IFcmClient
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
 
-        var payloads = messages.Select(m => new Message
-        {
-            Token = m.Token,
-            Notification = new Notification { Title = m.Title, Body = m.Body },
-            Data = m.Data,
-            Android = new AndroidConfig
-            {
-                Notification = new AndroidNotification
-                {
-                    // Without an explicit channel the notification lands in the default
-                    // channel and the user's per-category mute silently stops working.
-                    ChannelId = _options.ChannelId,
-                    // Tagging on the notification id means a redelivered duplicate replaces
-                    // the existing card instead of stacking a second one.
-                    Tag = m.Data.TryGetValue("notificationId", out var id) ? id : null,
-                    // Non-nullable, so an unset value is 0001-01-01 rather than absent: the
-                    // card then shows its age as roughly two thousand years. Android also
-                    // sorts the panel by this.
-                    EventTimestamp = m.EventTime.UtcDateTime
-                },
-                // A phone offline for a week should not announce on reconnect that a print
-                // "just failed".
-                TimeToLive = TimeSpan.FromHours(_options.TimeToLiveHours),
-                Priority = Priority.High
-            },
-            // The same staleness limit for APNs. AndroidConfig.TimeToLive governs Android
-            // only, so without this an iOS device — DevicePlatform.Ios is accepted at
-            // registration — has no expiry at all and can announce on reconnect that a print
-            // "just failed" days later. APNs takes an absolute Unix expiry, not a duration.
-            Apns = new ApnsConfig
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["apns-expiration"] = DateTimeOffset.UtcNow
-                        .AddHours(_options.TimeToLiveHours)
-                        .ToUnixTimeSeconds()
-                        .ToString(CultureInfo.InvariantCulture),
-                    ["apns-priority"] = "10"
-                },
-                Aps = new Aps
-                {
-                    // Mirrors the Android Tag above: same collapse identity, so a redelivered
-                    // duplicate replaces the existing notification instead of stacking.
-                    ThreadId = m.Data.TryGetValue("notificationId", out var apnsId) ? apnsId : null
-                }
-            }
-        }).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var payloads = messages.Select(m => BuildMessage(m, _options, now)).ToList();
 
         BatchResponse response;
         try
@@ -122,5 +77,69 @@ public class FirebaseFcmClient : IFcmClient
         }
 
         return new FcmSendResult(unregistered, response.SuccessCount, response.FailureCount);
+    }
+
+    /// <summary>
+    /// One FCM message for one device. Internal for the payload tests; <paramref name="now"/>
+    /// is read once per batch, so every message in it gets the same APNs expiry.
+    /// </summary>
+    internal static Message BuildMessage(FcmMessage m, PushOptions options, DateTimeOffset now)
+    {
+        return new Message
+        {
+            Token = m.Token,
+            Notification = new Notification { Title = m.Title, Body = m.Body },
+            Data = m.Data,
+            Android = new AndroidConfig
+            {
+                Notification = new AndroidNotification
+                {
+                    // Without an explicit channel the notification lands in the default
+                    // channel and the user's per-category mute silently stops working.
+                    ChannelId = options.ChannelId,
+                    // Tagging on the notification id means a redelivered duplicate replaces
+                    // the existing card instead of stacking a second one.
+                    Tag = m.Data.TryGetValue("notificationId", out var id) ? id : null,
+                    // Non-nullable, so an unset value is 0001-01-01 rather than absent: the
+                    // card then shows its age as roughly two thousand years. Android also
+                    // sorts the panel by this.
+                    EventTimestamp = m.EventTime.UtcDateTime
+                },
+                // A phone offline for a week should not announce on reconnect that a print
+                // "just failed".
+                TimeToLive = TimeSpan.FromHours(options.TimeToLiveHours),
+                Priority = Priority.High
+            },
+            // The same staleness limit for APNs. AndroidConfig.TimeToLive governs Android
+            // only, so without this an iOS device — DevicePlatform.Ios is accepted at
+            // registration — has no expiry at all and can announce on reconnect that a print
+            // "just failed" days later. APNs takes an absolute Unix expiry, not a duration.
+            Apns = new ApnsConfig
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["apns-expiration"] = now
+                        .AddHours(options.TimeToLiveHours)
+                        .ToUnixTimeSeconds()
+                        .ToString(CultureInfo.InvariantCulture),
+                    ["apns-priority"] = "10"
+                },
+                // firebasex shows a notification while the iOS app is in the foreground only
+                // when the payload carries this key: without it, its willPresentNotification
+                // never calls the completion handler and a print finishing with the app open
+                // shows nothing. Top-level APNs data reaches the app as userInfo, which is
+                // where it looks. APNs only, so the Android payload is unchanged.
+                CustomData = new Dictionary<string, object>
+                {
+                    ["notification_foreground"] = "true"
+                },
+                Aps = new Aps
+                {
+                    // Mirrors the Android Tag above: same collapse identity, so a redelivered
+                    // duplicate replaces the existing notification instead of stacking.
+                    ThreadId = m.Data.TryGetValue("notificationId", out var apnsId) ? apnsId : null
+                }
+            }
+        };
     }
 }
