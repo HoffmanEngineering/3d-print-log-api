@@ -35,8 +35,17 @@ public class BridgeMoveRaceTests(BridgeMoveRaceTests.Factory factory) : IClassFi
 
         public Func<Task>? Before { get; set; }
 
+        /// <summary>How many more move saves fail as a unique-index violation would.</summary>
+        public int FailMovesAsUniqueViolations { get; set; }
+
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
+            if (FailMovesAsUniqueViolations > 0 && IsMove(eventData.Context!))
+            {
+                FailMovesAsUniqueViolations--;
+                throw new DbUpdateException("A racing write took the index.", new Microsoft.Data.Sqlite.SqliteException("UNIQUE constraint failed", 19, 2067));
+            }
+
             if (Before is { } before && When is { } when && when(eventData.Context!))
             {
                 Before = null;
@@ -110,6 +119,25 @@ public class BridgeMoveRaceTests(BridgeMoveRaceTests.Factory factory) : IClassFi
         Assert.Equal("printer_moved", await CodeOf(loser));
         Assert.Equal(c.GrantId, await BridgeOfEntryAsync(entryId));
         Assert.Empty((await GetAsUserAsync(_client, a.Subject, $"/api/bridges/{b.GrantId}/printers")).EnumerateArray());
+    }
+
+    /// <summary>
+    /// A unique-index loss on every attempt (a racing connect that takes the identity, each time)
+    /// still answers what connect would, never a 500.
+    /// </summary>
+    [Fact]
+    public async Task AMoveThatLosesTheIndexOnEveryAttempt_IsAConflict()
+    {
+        var (a, b, _) = await ThreeBridgesAsync("race-unique");
+        var entryId = await ConnectAsync(a, "moonraker", "192.168.1.22");
+
+        factory.Interceptor.FailMovesAsUniqueViolations = 3;
+        var moved = await Send(UserJson(HttpMethod.Post, $"/api/bridges/{a.GrantId}/printers/{entryId}/move", a.Subject, new { toBridgeId = b.GrantId, host = "192.168.2.22" }));
+
+        Assert.Equal(0, factory.Interceptor.FailMovesAsUniqueViolations);
+        Assert.Equal(HttpStatusCode.Conflict, moved.StatusCode);
+        Assert.Equal("discovered_printer_already_connected", await CodeOf(moved));
+        Assert.Equal(a.GrantId, await BridgeOfEntryAsync(entryId));
     }
 
     /// <summary>A seal to the old bridge's key that commits during the move doesn't survive it: the move's own value for the new bridge does.</summary>

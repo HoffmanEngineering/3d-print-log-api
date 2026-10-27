@@ -12,14 +12,12 @@ public enum BridgePrintVerdict
     /// <summary>Go ahead as usual.</summary>
     Accept,
 
-    /// <summary>Another bridge is bound to the printer and evidently logging it: refuse (403) and count it.</summary>
-    Refuse,
-
-    /// <summary>The job is already logged by another bridge: answer with <see cref="BridgePrintDecision.PrintId"/>.</summary>
+    /// <summary>The job is already a print: answer with <see cref="BridgePrintDecision.PrintId"/> instead.</summary>
     UsePrint,
 }
 
-public sealed record BridgePrintDecision(BridgePrintVerdict Verdict, long? BoundBridgeId = null, long? PrintId = null, bool HandedOver = false)
+/// <param name="Shared">The caller reported a job for a printer another bridge is bound to (counted on the caller).</param>
+public sealed record BridgePrintDecision(BridgePrintVerdict Verdict, long? PrintId = null, bool HandedOver = false, bool Shared = false)
 {
     public static readonly BridgePrintDecision Accepted = new(BridgePrintVerdict.Accept);
 }
@@ -28,11 +26,11 @@ public interface IBridgePrintGuard
 {
     /// <summary>
     /// Decides a print create (<c>POST /api/Prints</c>) sent with bridge <paramref name="grantId"/>'s
-    /// device token. Writes the refusal counter, or the hand-off, itself.
+    /// device token. Writes the shared-job counter, or the hand-off, itself.
     /// </summary>
     Task<BridgePrintDecision> CheckCreateAsync(long userId, long grantId, AddPrintDTO print, CancellationToken ct);
 
-    /// <summary>Decides a claim (<c>POST /api/Prints/{id}/claim</c>): accepted or refused, never handed over.</summary>
+    /// <summary>Decides a claim (<c>POST /api/Prints/{id}/claim</c>): accepted, or answered with the bound bridge's print of the same job. Never handed over.</summary>
     Task<BridgePrintDecision> CheckClaimAsync(long userId, long grantId, long printId, ClaimPrintDto claim, CancellationToken ct);
 }
 
@@ -40,51 +38,62 @@ public interface IBridgePrintGuard
 /// The cross-bridge safety net (printlog-bridge#103, story 15a). Connect already refuses a second
 /// watcher, but bridges that identify one printer by different fields, or a printer in one
 /// bridge's config file and another's desired list, can still both watch it, and each logs every
-/// print under its own instance id. So a print a bridge starts for a printer bound (by a desired
-/// entry) to another of the user's bridges is refused, the way the Moonraker notifier is dropped
-/// for a live bridge (#150).
+/// job under its own instance id.
 /// <para>
-/// <b>A refusal loses the print for good</b> (printlog-bridge drops a 403 from its outbox), so it
-/// needs evidence that the bound bridge is logging the printer itself
-/// (<see cref="BoundBridgeIsWatchingAsync"/>): a live heartbeat for the printer without a recent
-/// error, no reported credential issue, and every credential the printer can't connect without
-/// sealed to the bridge's current key. Without it, the job is logged: a possible duplicate beats a
-/// lost print.
+/// <b>A duplicate print is acceptable; a lost print, or two jobs merged into one, is not.</b> So
+/// nothing is refused: printlog-bridge drops a 400/403 for good, and no state the API can see
+/// proves the bound bridge is logging the printer (an adapter that can't reach it still
+/// heartbeats without an error). A job is matched to an existing print only when it is
+/// evidently the same job: both file names present and equal, starts within the kind's
+/// <see cref="SameJobTolerance"/>, and neither print over before the other began.
 /// </para>
 /// <list type="bullet">
 /// <item>Only new prints are judged: a replay of an existing pair, and every write to a print that
 /// exists (complete, patch, images), go through.</item>
 /// <item>Only a bridge is judged: a device token whose grant checked in as a bridge. API keys and
 /// other devices name no bridge.</item>
-/// <item>A job that started before the printer was bound (<see cref="BridgePrinter.MovedAt"/>,
-/// else its <see cref="BridgePrinter.CreatedDate"/>) is the old bridge's: accepted, since its
-/// outbox may send it late, unless another bridge already logged it (any status), which it then
-/// gets back instead of a second print that would never finish.</item>
+/// <item>Another bridge's job for the printer, started since it was bound (<see cref="BridgePrinter.MovedAt"/>,
+/// else its <see cref="BridgePrinter.CreatedDate"/>): counted on that bridge
+/// (<see cref="Bridge.SharedJobCount"/>), and answered with the bound bridge's print of the same
+/// job when there is one, else logged.</item>
+/// <item>The old bridge's job from before the move: its outbox may send it late. It gets another
+/// bridge's print of the same job, in any status, that started no later than the move plus
+/// <see cref="MoveSlack"/>; else it is logged. Not counted.</item>
 /// <item>Hand-off: the old bridge stops watching within a minute of a move and never sees the
-/// running job end; the new bridge finds it running at first look. Its create, for a job that
-/// started within <see cref="HandOffGrace"/> of the move, takes over the old bridge's open print
-/// of the same file (both names present), started no later than the move plus
-/// <see cref="SameJobTolerance"/>: the one whose start is within that tolerance of its own, else
-/// the previous bridge's only open print, started before the move (for adapters that report
-/// their first look as the start).</item>
+/// running job end; the new bridge finds it running at first look. Its create for a job that
+/// started no later than the move plus <see cref="MoveSlack"/> takes over another bridge's
+/// Printing print of the same job that started before the move, and no more than
+/// <see cref="HandOffWindow"/> before it. A job that started after the move never takes a print
+/// over, so a reprint is never merged.</item>
 /// </list>
 /// </summary>
 public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock, ICacheVersionService cacheVersions) : IBridgePrintGuard
 {
-    /// <summary>How far apart two bridges' start times for one job may be (each reads the printer's, or its own clock).</summary>
-    public static readonly TimeSpan SameJobTolerance = TimeSpan.FromMinutes(10);
-
     /// <summary>
-    /// How long after the move a job the new bridge reports may have started and still be the one
-    /// running at the move: the bridge picks the printer up within a poll, and a bridge that can't
-    /// read the job's own start time stamps its first look.
+    /// How far apart two bridges' start times for one job may be. Both read the printer's own
+    /// figure: Moonraker's job history start time, PrusaLink's printing time (now less it, so
+    /// seconds apart plus clock skew), Bambu Lab's <c>gcode_start_time</c>. A Bambu Lab printer
+    /// without that field gives each bridge its own first look, so Bambu Lab gets 10 minutes;
+    /// every other kind 2.
     /// </summary>
-    public static readonly TimeSpan HandOffGrace = TimeSpan.FromMinutes(10);
+    public static TimeSpan SameJobTolerance(string kind) =>
+        string.Equals(kind, "bambu", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromMinutes(10) : TimeSpan.FromMinutes(2);
 
-    /// <summary>How long a refused job is remembered, so sending it again isn't counted again.</summary>
-    public static readonly TimeSpan DroppedJobRetention = TimeSpan.FromDays(30);
+    /// <summary>How long after the move a job may have started and still be the one running at the move (the move's own request and the bridges' clocks).</summary>
+    public static readonly TimeSpan MoveSlack = TimeSpan.FromMinutes(2);
 
-    private sealed record Binding(long EntryId, long BridgeId, string Kind, DateTime BoundSince, DateTime? MovedAt, long? MovedFromBridgeId, string? CredentialIssues, string? BridgeFingerprint);
+    /// <summary>How long before the move an open print may have started and still be the running job, not one left Printing.</summary>
+    public static readonly TimeSpan HandOffWindow = TimeSpan.FromHours(48);
+
+    /// <summary>How long a shared job is remembered, so sending it again isn't counted again.</summary>
+    public static readonly TimeSpan SharedJobRetention = TimeSpan.FromDays(30);
+
+    private sealed record Binding(long BridgeId, string Kind, DateTime BoundSince);
+
+    /// <summary>The job as the caller reports it.</summary>
+    private sealed record Job(long PrinterId, DateTime Started, DateTime? Ended, string? FileName);
+
+    private sealed record Candidate(long Id, DateTimeOffset? StartDate, int? PrintTimeInSeconds, PrintStatus Status, string? FileName, string? ExternalSource, string? ExternalId);
 
     public async Task<BridgePrintDecision> CheckCreateAsync(long userId, long grantId, AddPrintDTO print, CancellationToken ct)
     {
@@ -101,13 +110,20 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
 
         var now = clock.GetUtcNow().UtcDateTime;
         var started = print.StartDate?.UtcDateTime ?? now;
+        var job = new Job(print.PrinterId, started, print.PrintTimeInSeconds is { } seconds ? started.AddSeconds(seconds) : null, print.FileName);
+        var tolerance = SameJobTolerance(binding.Kind);
         if (binding.BridgeId == grantId)
         {
-            if (started <= binding.BoundSince + HandOffGrace
-                && await HandOffCandidateAsync(userId, binding, print.PrinterId, started, print.FileName, ct) is { } open
-                && await TakeOverAsync(userId, binding.BridgeId, print.PrinterId, open, print, ct))
+            if (started <= binding.BoundSince + MoveSlack)
             {
-                return new BridgePrintDecision(BridgePrintVerdict.UsePrint, PrintId: open.Id, HandedOver: true);
+                var open = Match(await CandidatesAsync(userId, job.PrinterId, c => c.BridgeId != grantId, ct), job, tolerance,
+                    c => c.Status == PrintStatus.Printing
+                        && c.StartDate!.Value.UtcDateTime <= binding.BoundSince
+                        && c.StartDate.Value.UtcDateTime >= binding.BoundSince - HandOffWindow);
+                if (open is not null && await TakeOverAsync(userId, grantId, job.PrinterId, open, print, ct))
+                {
+                    return new BridgePrintDecision(BridgePrintVerdict.UsePrint, open.Id, HandedOver: true);
+                }
             }
 
             return BridgePrintDecision.Accepted;
@@ -115,19 +131,20 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
 
         if (started < binding.BoundSince)
         {
-            return await LoggedElsewhereAsync(userId, grantId, print.PrinterId, started, print.FileName, ct) is { } logged
-                ? new BridgePrintDecision(BridgePrintVerdict.UsePrint, PrintId: logged)
-                : BridgePrintDecision.Accepted;
+            // The old bridge's job from before the move.
+            var logged = Match(await CandidatesAsync(userId, job.PrinterId, c => c.BridgeId != grantId, ct), job, tolerance,
+                c => c.StartDate!.Value.UtcDateTime <= binding.BoundSince + MoveSlack);
+            return logged is null ? BridgePrintDecision.Accepted : new BridgePrintDecision(BridgePrintVerdict.UsePrint, logged.Id);
         }
 
-        return await RefuseIfWatchedAsync(grantId, print.PrinterId, binding, pair, now, ct);
+        return await SharedAsync(userId, grantId, binding, job, pair, now, ct);
     }
 
     public async Task<BridgePrintDecision> CheckClaimAsync(long userId, long grantId, long printId, ClaimPrintDto claim, CancellationToken ct)
     {
         var target = await context.Prints.AsNoTracking()
             .Where(p => p.Id == printId && p.CreatedById == userId)
-            .Select(p => new { p.PrinterId, p.ExternalSource, p.ExternalId })
+            .Select(p => new { p.PrinterId, p.StartDate, p.FileName, p.ExternalSource, p.ExternalId })
             .SingleOrDefaultAsync(ct);
         if (target is null || await BindingAsync(userId, grantId, target.PrinterId, ct) is not { } binding || binding.BridgeId == grantId)
         {
@@ -144,12 +161,37 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
         }
 
         var now = clock.GetUtcNow().UtcDateTime;
-        if ((claim.StartDate?.UtcDateTime ?? now) < binding.BoundSince)
+        var started = (claim.StartDate ?? target.StartDate)?.UtcDateTime ?? now;
+        if (started < binding.BoundSince)
         {
             return BridgePrintDecision.Accepted;
         }
 
-        return await RefuseIfWatchedAsync(grantId, target.PrinterId, binding, pair, now, ct);
+        return await SharedAsync(userId, grantId, binding, new Job(target.PrinterId, started, null, target.FileName), pair, now, ct);
+    }
+
+    /// <summary>
+    /// Another bridge's job for a printer bound to <paramref name="binding"/>'s bridge: counted on
+    /// the caller, and answered with the bound bridge's print of the same job, if any.
+    /// </summary>
+    private async Task<BridgePrintDecision> SharedAsync(long userId, long grantId, Binding binding, Job job, ExternalPair? pair, DateTime now, CancellationToken ct)
+    {
+        var newJob = await RememberSharedJobAsync(grantId, pair, now, ct);
+
+        // One statement, so concurrent jobs can't lose an increment. No cache version: nothing
+        // cached reads bridges.
+        var increment = newJob ? 1 : 0;
+        await context.Bridges
+            .Where(b => b.Id == grantId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(b => b.SharedJobCount, b => b.SharedJobCount + increment)
+                .SetProperty(b => b.LastSharedJobAt, now)
+                .SetProperty(b => b.LastSharedJobPrinterId, job.PrinterId), ct);
+
+        var same = Match(await CandidatesAsync(userId, job.PrinterId, c => c.BridgeId == binding.BridgeId, ct), job, SameJobTolerance(binding.Kind), _ => true);
+        return same is null
+            ? new BridgePrintDecision(BridgePrintVerdict.Accept, Shared: true)
+            : new BridgePrintDecision(BridgePrintVerdict.UsePrint, same.Id, Shared: true);
     }
 
     private sealed record ExternalPair(string Source, string Id);
@@ -164,7 +206,7 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
     {
         var binding = await context.BridgePrinters.AsNoTracking()
             .Where(p => p.PrinterId == printerId && p.Printer.UserId == userId)
-            .Select(p => new Binding(p.Id, p.BridgeId, p.Kind, p.MovedAt ?? p.CreatedDate, p.MovedAt, p.MovedFromBridgeId, p.CredentialIssues, p.Bridge.PublicKeyFingerprint))
+            .Select(p => new Binding(p.BridgeId, p.Kind, p.MovedAt ?? p.CreatedDate))
             .SingleOrDefaultAsync(ct);
         if (binding is null || !await context.Bridges.AnyAsync(b => b.Id == grantId && b.Grant.UserId == userId, ct))
         {
@@ -175,84 +217,26 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
     }
 
     /// <summary>
-    /// Whether the bound bridge is evidently logging the printer: it can connect (no reported
-    /// credential issue, every credential the kind can't connect without sealed to its current key,
-    /// none stale) and it does (a heartbeat for the printer within <see cref="Connection.StaleAfter"/>
-    /// with no error reported in that window). A bridge that is online but can't watch the printer
-    /// is not evidence: refusing then would lose the print.
-    /// </summary>
-    private async Task<bool> BoundBridgeIsWatchingAsync(Binding binding, long printerId, DateTime now, CancellationToken ct)
-    {
-        if (binding.CredentialIssues is not null)
-        {
-            return false;
-        }
-
-        var secrets = await context.BridgePrinterSecrets.AsNoTracking()
-            .Where(s => s.BridgePrinterId == binding.EntryId)
-            .Select(s => new { s.Field, s.KeyFingerprint })
-            .ToListAsync(ct);
-        if (secrets.Any(s => s.KeyFingerprint != binding.BridgeFingerprint))
-        {
-            return false;
-        }
-
-        var sealedNow = secrets.Select(s => s.Field).ToHashSet(StringComparer.Ordinal);
-        if (!SealedCredentials.RequiredGroups(binding.Kind).All(group => group.Any(sealedNow.Contains)))
-        {
-            return false;
-        }
-
-        var liveSince = now - Connection.StaleAfter;
-        var connections = await context.Connections.AsNoTracking()
-            .Where(c => c.BridgeId == binding.BridgeId && c.PrinterId == printerId && c.LastSeenAt > liveSince)
-            .Select(c => new { c.LastError, c.LastErrorAt })
-            .ToListAsync(ct);
-        return connections.Any(c => c.LastError is null || (c.LastErrorAt is { } at && at <= liveSince));
-    }
-
-    private async Task<BridgePrintDecision> RefuseIfWatchedAsync(long grantId, long printerId, Binding binding, ExternalPair? pair, DateTime now, CancellationToken ct)
-    {
-        if (!await BoundBridgeIsWatchingAsync(binding, printerId, now, ct))
-        {
-            return BridgePrintDecision.Accepted;
-        }
-
-        var newJob = await RememberDroppedJobAsync(grantId, pair, now, ct);
-
-        // One statement, so concurrent refusals can't lose an increment. No cache version: nothing
-        // cached reads bridges.
-        var increment = newJob ? 1 : 0;
-        await context.Bridges
-            .Where(b => b.Id == grantId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(b => b.DroppedEventCount, b => b.DroppedEventCount + increment)
-                .SetProperty(b => b.LastDroppedEventAt, now)
-                .SetProperty(b => b.LastDroppedPrinterId, printerId), ct);
-        return new BridgePrintDecision(BridgePrintVerdict.Refuse, BoundBridgeId: binding.BridgeId);
-    }
-
-    /// <summary>
-    /// Records the refused job by its pair; false when it was already refused (the bridge sends a
+    /// Records the shared job by its pair; false when it was already recorded (the bridge sends a
     /// job at its start, again at its end, and may claim it). A job with no pair can't be told
     /// apart, so it counts each time. The unique index decides a race.
     /// </summary>
-    private async Task<bool> RememberDroppedJobAsync(long grantId, ExternalPair? pair, DateTime now, CancellationToken ct)
+    private async Task<bool> RememberSharedJobAsync(long grantId, ExternalPair? pair, DateTime now, CancellationToken ct)
     {
         if (pair is null)
         {
             return true;
         }
 
-        var forgetBefore = now - DroppedJobRetention;
-        await context.BridgeDroppedJobs.Where(j => j.BridgeId == grantId && j.DroppedAt < forgetBefore).ExecuteDeleteAsync(ct);
-        if (await context.BridgeDroppedJobs.AnyAsync(j => j.BridgeId == grantId && j.ExternalSource == pair.Source && j.ExternalId == pair.Id, ct))
+        var forgetBefore = now - SharedJobRetention;
+        await context.BridgeSharedJobs.Where(j => j.BridgeId == grantId && j.ReportedAt < forgetBefore).ExecuteDeleteAsync(ct);
+        if (await context.BridgeSharedJobs.AnyAsync(j => j.BridgeId == grantId && j.ExternalSource == pair.Source && j.ExternalId == pair.Id, ct))
         {
             return false;
         }
 
-        var row = new BridgeDroppedJob { BridgeId = grantId, ExternalSource = pair.Source, ExternalId = pair.Id, DroppedAt = now };
-        context.BridgeDroppedJobs.Add(row);
+        var row = new BridgeSharedJob { BridgeId = grantId, ExternalSource = pair.Source, ExternalId = pair.Id, ReportedAt = now };
+        context.BridgeSharedJobs.Add(row);
         try
         {
             await context.SaveChangesAsync(ct);
@@ -268,89 +252,47 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
         }
     }
 
-    private sealed record OpenPrint(long Id, string? ExternalSource, string? ExternalId);
-
-    /// <summary>
-    /// The open print the bound bridge's create is the same job as, or null. File names must both
-    /// be present and equal, and the print must have started no later than the move plus
-    /// <see cref="SameJobTolerance"/>, so a later job of the old bridge's is never merged. Then
-    /// the print whose start is closest, within the tolerance; else the previous bridge's only
-    /// open print, started before the move. Compared in memory: the candidates are the printer's
-    /// open prints, and SQLite can't compare <see cref="DateTimeOffset"/>.
-    /// </summary>
-    private async Task<OpenPrint?> HandOffCandidateAsync(long userId, Binding binding, long printerId, DateTime started, string? fileName, CancellationToken ct)
+    /// <summary>The printer's recent prints logged through a bridge connection that <paramref name="bridge"/> accepts, newest first.</summary>
+    private async Task<List<Candidate>> CandidatesAsync(long userId, long printerId, System.Linq.Expressions.Expression<Func<Connection, bool>> bridge, CancellationToken ct)
     {
-        if (BaseName(fileName) is not { } name)
-        {
-            return null;
-        }
-
-        var open = await context.Prints.AsNoTracking()
-            .Where(p => p.PrinterId == printerId
-                && p.CreatedById == userId
-                && p.Status == PrintStatus.Printing
-                && p.Connection != null
-                && p.Connection.BridgeId != null
-                && p.Connection.BridgeId != binding.BridgeId)
-            .Select(p => new { p.Id, p.StartDate, p.FileName, p.ExternalSource, p.ExternalId, p.Connection!.BridgeId })
-            .ToListAsync(ct);
-        var latestStart = binding.BoundSince + SameJobTolerance;
-        var sameFile = open
-            .Where(p => p.StartDate is { } start && start.UtcDateTime <= latestStart
-                && string.Equals(BaseName(p.FileName), name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        var byStart = sameFile
-            .Where(p => (p.StartDate!.Value.UtcDateTime - started).Duration() <= SameJobTolerance)
-            .OrderBy(p => (p.StartDate!.Value.UtcDateTime - started).Duration())
-            .FirstOrDefault();
-        if (byStart is not null)
-        {
-            return new OpenPrint(byStart.Id, byStart.ExternalSource, byStart.ExternalId);
-        }
-
-        // An adapter that can't read the job's start reports its first look. The previous bridge
-        // can have had one job running at the move; if it left exactly one open, that is it.
-        if (binding is { MovedAt: { } movedAt, MovedFromBridgeId: { } previous }
-            && open.Where(p => p.BridgeId == previous).ToList() is [var only]
-            && only.StartDate is { } onlyStart && onlyStart.UtcDateTime <= movedAt
-            && sameFile.Any(p => p.Id == only.Id))
-        {
-            return new OpenPrint(only.Id, only.ExternalSource, only.ExternalId);
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// For the old bridge's late create of a job from before the move: the print another bridge
-    /// logged for it, in any status (the new bridge may have finished it already), or null. Same
-    /// printer, start within <see cref="SameJobTolerance"/>, both file names present and equal.
-    /// </summary>
-    private async Task<long?> LoggedElsewhereAsync(long userId, long callerBridgeId, long printerId, DateTime started, string? fileName, CancellationToken ct)
-    {
-        if (BaseName(fileName) is not { } name)
-        {
-            return null;
-        }
-
-        var candidates = await context.Prints.AsNoTracking()
-            .Where(p => p.PrinterId == printerId
-                && p.CreatedById == userId
-                && p.Connection != null
-                && p.Connection.BridgeId != null
-                && p.Connection.BridgeId != callerBridgeId)
+        var connections = context.Connections.Where(c => c.UserId == userId && c.BridgeId != null).Where(bridge).Select(c => c.Id);
+        return await context.Prints.AsNoTracking()
+            .Where(p => p.PrinterId == printerId && p.CreatedById == userId && p.ConnectionId != null && connections.Contains(p.ConnectionId.Value))
             .OrderByDescending(p => p.Id)
             .Take(50)
-            .Select(p => new { p.Id, p.StartDate, p.FileName })
+            .Select(p => new Candidate(p.Id, p.StartDate, p.PrintTimeInSeconds, p.Status, p.FileName, p.ExternalSource, p.ExternalId))
             .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// The candidate that is evidently <paramref name="job"/>, closest start first, or null: both
+    /// file names present and equal, starts within <paramref name="tolerance"/>, and neither over
+    /// before the other began (a failed first attempt and its reprint share a file and nearly a
+    /// start). Compared in memory: SQLite can't compare <see cref="DateTimeOffset"/>.
+    /// </summary>
+    private static Candidate? Match(List<Candidate> candidates, Job job, TimeSpan tolerance, Func<Candidate, bool> also)
+    {
+        if (BaseName(job.FileName) is not { } name)
+        {
+            return null;
+        }
+
         return candidates
-            .Where(p => p.StartDate is { } start && (start.UtcDateTime - started).Duration() <= SameJobTolerance
-                && string.Equals(BaseName(p.FileName), name, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => (p.StartDate!.Value.UtcDateTime - started).Duration())
-            .Select(p => (long?)p.Id)
+            .Where(c => c.StartDate is { } start
+                && string.Equals(BaseName(c.FileName), name, StringComparison.OrdinalIgnoreCase)
+                && (start.UtcDateTime - job.Started).Duration() <= tolerance
+                && (job.Ended is not { } ended || start.UtcDateTime <= ended)
+                && !EndedBefore(c, job.Started)
+                && also(c))
+            .OrderBy(c => (c.StartDate!.Value.UtcDateTime - job.Started).Duration())
             .FirstOrDefault();
     }
+
+    /// <summary>Whether a finished candidate ended before <paramref name="started"/>.</summary>
+    private static bool EndedBefore(Candidate c, DateTime started) =>
+        c.Status != PrintStatus.Printing && c.Status != PrintStatus.Pending
+        && c.StartDate is { } start && c.PrintTimeInSeconds is { } seconds
+        && start.UtcDateTime.AddSeconds(seconds) < started;
 
     private static string? BaseName(string? fileName) =>
         string.IsNullOrWhiteSpace(fileName) ? null : fileName.Replace('\\', '/').Split('/')[^1].Trim() is { Length: > 0 } name ? name : null;
@@ -363,7 +305,7 @@ public sealed class BridgePrintGuard(PrintLogContext context, TimeProvider clock
     /// took it over), or when the bridge's pair is already a print: then the create runs as usual
     /// (and replays that one).
     /// </summary>
-    private async Task<bool> TakeOverAsync(long userId, long boundBridgeId, long printerId, OpenPrint open, AddPrintDTO print, CancellationToken ct)
+    private async Task<bool> TakeOverAsync(long userId, long boundBridgeId, long printerId, Candidate open, AddPrintDTO print, CancellationToken ct)
     {
         var source = print.ExternalSource is { } s ? ExternalPrintIds.NormalizeSource(s) : open.ExternalSource;
         var externalId = print.ExternalId is { } i ? ExternalPrintIds.NormalizeId(i) : open.ExternalId;

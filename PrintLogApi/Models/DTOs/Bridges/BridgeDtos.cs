@@ -433,16 +433,18 @@ public class BridgeDto
     public int DiscoveredNotConnectedCount { get; set; }
 
     /// <summary>
-    /// New jobs it tried to log for a printer another of your bridges watches, and that were
-    /// refused so the print isn't logged twice. Non-zero: remove that printer from this bridge
-    /// (most likely its config file).
+    /// Distinct jobs it reported for a printer another of your bridges watches: two bridges watch
+    /// that printer. Each was logged (as the other bridge's print when that one already logged
+    /// the job), so nothing is lost, but a job can be logged twice. Non-zero: remove that printer
+    /// from this bridge (most likely its config file). Never reset.
     /// </summary>
-    public int DroppedEventCount { get; set; }
+    public int SharedJobCount { get; set; }
 
-    public DateTimeOffset? LastDroppedEventAt { get; set; }
+    /// <summary>When such a job was last reported. A warning can be hidden once this is old: it stopped happening.</summary>
+    public DateTimeOffset? LastSharedJobAt { get; set; }
 
-    /// <summary>The printer of the last refused job.</summary>
-    public long? LastDroppedPrinterId { get; set; }
+    /// <summary>The printer of the last such job.</summary>
+    public long? LastSharedJobPrinterId { get; set; }
 }
 
 /// <summary>Where a discovered printer stands.</summary>

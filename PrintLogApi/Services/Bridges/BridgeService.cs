@@ -604,9 +604,9 @@ public sealed class BridgeService(
                 ConnectionCount = r.ConnectionCount,
                 DiscoveredCount = found.Count,
                 DiscoveredNotConnectedCount = found.Count(s => s.State == DiscoveredPrinterState.New),
-                DroppedEventCount = b.DroppedEventCount,
-                LastDroppedEventAt = Utc(b.LastDroppedEventAt),
-                LastDroppedPrinterId = b.LastDroppedPrinterId,
+                SharedJobCount = b.SharedJobCount,
+                LastSharedJobAt = Utc(b.LastSharedJobAt),
+                LastSharedJobPrinterId = b.LastSharedJobPrinterId,
             };
         }).ToList();
     }
@@ -965,6 +965,18 @@ public sealed class BridgeService(
                 // connect taking the identity on the new bridge: the rerun's checks say which.
                 context.ChangeTracker.Clear();
             }
+            catch (DbUpdateException ex) when (UniqueConstraintViolation.IsUniqueViolation(ex))
+            {
+                // Lost the index on every attempt: answer what connect would, never a 500.
+                context.ChangeTracker.Clear();
+                if (await context.BridgePrinters.SingleOrDefaultAsync(p => p.Id == entryId, ct) is { } entry && body.ToBridgeId is { } toId)
+                {
+                    await EnsureNotConnectedAsync(userId, await MovedEntryAsync(entry, toId, body, ct), ct, movingEntryId: entryId);
+                }
+
+                throw new BridgeProblemException(StatusCodes.Status409Conflict, "discovered_printer_already_connected",
+                    "The new bridge already has that printer or address.");
+            }
         }
     }
 
@@ -1021,7 +1033,6 @@ public sealed class BridgeService(
         entry.CredentialIssues = null;
         entry.IssuesStamp = Guid.NewGuid();
         entry.MovedAt = now;
-        entry.MovedFromBridgeId = bridgeId;
         from.DesiredRevision = Guid.NewGuid();
         to.DesiredRevision = Guid.NewGuid();
         try

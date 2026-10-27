@@ -11,24 +11,24 @@ namespace PrintLogApi.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<int>(
-                name: "DroppedEventCount",
-                table: "Bridges",
-                type: "int",
-                nullable: false,
-                defaultValue: 0);
-
             migrationBuilder.AddColumn<DateTime>(
-                name: "LastDroppedEventAt",
+                name: "LastSharedJobAt",
                 table: "Bridges",
                 type: "datetime2",
                 nullable: true);
 
             migrationBuilder.AddColumn<long>(
-                name: "LastDroppedPrinterId",
+                name: "LastSharedJobPrinterId",
                 table: "Bridges",
                 type: "bigint",
                 nullable: true);
+
+            migrationBuilder.AddColumn<int>(
+                name: "SharedJobCount",
+                table: "Bridges",
+                type: "int",
+                nullable: false,
+                defaultValue: 0);
 
             migrationBuilder.AddColumn<DateTime>(
                 name: "MovedAt",
@@ -36,14 +36,8 @@ namespace PrintLogApi.Migrations
                 type: "datetime2",
                 nullable: true);
 
-            migrationBuilder.AddColumn<long>(
-                name: "MovedFromBridgeId",
-                table: "BridgePrinters",
-                type: "bigint",
-                nullable: true);
-
             migrationBuilder.CreateTable(
-                name: "BridgeDroppedJobs",
+                name: "BridgeSharedJobs",
                 columns: table => new
                 {
                     Id = table.Column<long>(type: "bigint", nullable: false)
@@ -51,13 +45,13 @@ namespace PrintLogApi.Migrations
                     BridgeId = table.Column<long>(type: "bigint", nullable: false),
                     ExternalSource = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     ExternalId = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                    DroppedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    ReportedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_BridgeDroppedJobs", x => x.Id);
+                    table.PrimaryKey("PK_BridgeSharedJobs", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_BridgeDroppedJobs_Bridges_BridgeId",
+                        name: "FK_BridgeSharedJobs_Bridges_BridgeId",
                         column: x => x.BridgeId,
                         principalTable: "Bridges",
                         principalColumn: "Id",
@@ -65,8 +59,8 @@ namespace PrintLogApi.Migrations
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_BridgeDroppedJobs_BridgeId_ExternalSource_ExternalId",
-                table: "BridgeDroppedJobs",
+                name: "IX_BridgeSharedJobs_BridgeId_ExternalSource_ExternalId",
+                table: "BridgeSharedJobs",
                 columns: new[] { "BridgeId", "ExternalSource", "ExternalId" },
                 unique: true);
         }
@@ -75,26 +69,22 @@ namespace PrintLogApi.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "BridgeDroppedJobs");
+                name: "BridgeSharedJobs");
 
             migrationBuilder.DropColumn(
-                name: "DroppedEventCount",
+                name: "LastSharedJobAt",
                 table: "Bridges");
 
             migrationBuilder.DropColumn(
-                name: "LastDroppedEventAt",
+                name: "LastSharedJobPrinterId",
                 table: "Bridges");
 
             migrationBuilder.DropColumn(
-                name: "LastDroppedPrinterId",
+                name: "SharedJobCount",
                 table: "Bridges");
 
             migrationBuilder.DropColumn(
                 name: "MovedAt",
-                table: "BridgePrinters");
-
-            migrationBuilder.DropColumn(
-                name: "MovedFromBridgeId",
                 table: "BridgePrinters");
         }
     }
