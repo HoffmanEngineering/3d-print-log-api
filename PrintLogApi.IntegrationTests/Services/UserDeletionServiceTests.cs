@@ -298,6 +298,110 @@ public class UserDeletionServiceTests
         Assert.Equal(1, await context.FilamentCatalogEntries.CountAsync(ct));
     }
 
+    /// <summary>
+    /// A bridge's desired printers point at the user's printers with no database cascade (SQL
+    /// Server 1785), so the bridges have to go before the printers, and after the connections
+    /// that point at them.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAllDataForUser_DeletesBridgesBeforePrinters()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlite(connection).Options;
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|bridge-delete-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        var now = DateTime.UtcNow;
+        var printer = new Printer { Name = "Bridge printer", UserId = user.Id, IsActive = true };
+        var grant = new DeviceGrant
+        {
+            UserId = user.Id,
+            DeviceId = Guid.NewGuid(),
+            Name = "printlog-bridge",
+            TokenHash = new string('a', 64),
+            Scopes = "bridge:sync",
+            CreatedDate = now,
+            PairedDate = now,
+        };
+        context.AddRange(printer, grant);
+        await context.SaveChangesAsync(ct);
+
+        context.Bridges.Add(new Bridge { Id = grant.Id, CreatedDate = now, LastSeenAt = now, DesiredRevision = Guid.NewGuid() });
+        await context.SaveChangesAsync(ct);
+        context.BridgePrinters.Add(new BridgePrinter { BridgeId = grant.Id, PrinterId = printer.Id, Kind = "bambu", Host = "192.168.1.60", CreatedDate = now });
+        context.BridgeDiscoveredPrinters.Add(new BridgeDiscoveredPrinter
+        {
+            BridgeId = grant.Id,
+            IdentityKey = "bambu:sn:X",
+            Kind = "bambu",
+            Address = "192.168.1.60",
+            FirstSeenAt = now,
+            LastSeenAt = now,
+        });
+        context.Connections.Add(new Connection
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Kind = "bambu",
+            InstanceId = "i",
+            DisplayName = "X1C",
+            PrinterId = printer.Id,
+            BridgeId = grant.Id,
+            CreatedDate = now,
+            LastSeenAt = now,
+        });
+        await context.SaveChangesAsync(ct);
+
+        context.ChangeTracker.Clear();
+        var userToDelete = await context.Users.SingleAsync(u => u.Id == user.Id, ct);
+
+        await CreateService(context).DeleteAllDataForUser(userToDelete);
+
+        Assert.Equal(0, await context.Bridges.CountAsync(ct));
+        Assert.Equal(0, await context.BridgePrinters.CountAsync(ct));
+        Assert.Equal(0, await context.BridgeDiscoveredPrinters.CountAsync(ct));
+        Assert.Equal(0, await context.Printers.CountAsync(p => p.UserId == user.Id, ct));
+    }
+
+    /// <summary>
+    /// Device grants go first: deleting them kills the tokens (no heartbeat or check-in can link a
+    /// connection to a bridge afterwards) and cascades the bridges. Connections come after.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAllDataForUser_DeletesDeviceGrantsBeforeConnections()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlite(connection).AddInterceptors(commandInterceptor).Options;
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|grant-order-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        await CreateService(context).DeleteAllDataForUser(await context.Users.SingleAsync(u => u.Id == user.Id, ct));
+
+        var grants = commandInterceptor.Commands.FindIndex(c => c.Contains("DELETE FROM \"DeviceGrants\"", StringComparison.OrdinalIgnoreCase));
+        var connections = commandInterceptor.Commands.FindIndex(c => c.Contains("DELETE FROM \"Connections\"", StringComparison.OrdinalIgnoreCase));
+        Assert.True(grants >= 0 && connections >= 0, "expected both deletes");
+        Assert.True(grants < connections, "device grants must be deleted before connections");
+    }
+
     [Fact]
     public async Task DeleteAllDataForUser_InvalidatesTheUsersCacheVersion()
     {

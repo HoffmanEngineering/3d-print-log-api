@@ -190,7 +190,8 @@ how the integration suite opts out. Code: `Middleware/ConnectorWriteRateLimiting
   ones mark the bridge stale, the Moonraker notifier stops being suppressed, and its prints
   duplicate the bridge's. The per-user "api" policy still bounds it. Never put the attribute on a
   write that changes print data. `[DisableRateLimiting]` would not do: it also drops "api". The
-  same PUT also registers a new connection, so first registration is exempt too.
+  same PUT also registers a new connection, so first registration is exempt too. The bridge
+  check-in (`PUT /api/bridges/me`) is deliberately **not** exempt; see Bridges below.
 
 ## Device pairing and device tokens (#148)
 
@@ -428,6 +429,70 @@ adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceFo
   `hostSoftwareName`/`hostSoftwareVersion` sit beside `klipperVersion`/`moonrakerVersion`, each
   filling the other (`Klipper` and `Moonraker` by name, case-insensitive). Unlike the rest of the
   health, a missing, null or blank name or version keeps the stored one (#80).
+
+## Bridges, discovery and desired printers (printlog-bridge#100, #103)
+
+A paired printlog-bridge reports what it found on its LAN, and the user picks in the app which
+printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers/BridgesController.cs`.
+
+- **A `Bridge` row shares its `DeviceGrant`'s id** and is created by the grant's first check-in
+  (`PUT /api/bridges/me`, scope `bridge:sync`). It is a table of its own, not grant columns: the
+  grant is the credential every device request reads, check-ins write every few minutes, and Home
+  Assistant grants are not bridges. The bridge id is always the token's `device_grant_id`, never a
+  route or body value.
+- **Revoking the grant deletes the bridge** (database cascade) and with it its discovered, ignored
+  and desired printers. `Connection.BridgeId` has no cascade (1785), so `DeviceGrantService` nulls
+  it in the same transaction and retries if a heartbeat relinks one in between. Connections and
+  prints are kept. `PrinterService.DeletePrinter` removes a printer's desired entries and bumps
+  their bridges' version. `UserDeletionService` deletes device grants (so the tokens die and the
+  bridges cascade) before connections and printers, with the same unlink-and-retry.
+- **Nothing a device sends creates a desired printer.** `BridgePrinter` rows come only from
+  `POST /api/bridges/{id}/printers` (`InteractiveUserOnly`). Discovered printers are suggestions
+  (printlog-bridge#100 rejects auto-connect: a neighbor's printer on a shared network). Keep it so;
+  `ACheckIn_NeverConnectsAPrinter_WhateverItSends` is the guard.
+- **One watcher per printer, or every print is logged twice** (each watcher has its own instance
+  id, and nothing downstream dedupes). `BridgePrinters.PrinterId` is unique account-wide (409
+  `printer_connected_elsewhere`, with the other `bridgeId`); on one bridge the same identity or
+  kind and address is 409 `discovered_printer_already_connected`, and a hand entry gets an
+  identity key too (`kind:ip:host:port`); a stable identity (serial, mainboard id, MAC) is also
+  refused on the user's other bridges. A printer a bridge reported as in its config file is 409
+  `printer_configured_on_bridge` (with that `bridgeId`): on that bridge by identity or kind and
+  address, on the others by stable identity. It shows as Configured even when an app entry
+  matches. A missing port is the kind's default (`BridgeRules.DefaultPort`), so two instances on
+  one host stay apart. **Known limit, left for printlog-bridge#103:** across bridges only the
+  derived identity key is compared, so bridges that identify one printer by different fields
+  (MAC on one segment, address across a VLAN, a serial only one sees) are not caught, and two
+  concurrent connects of one serial to two bridges under different printers can both pass (no
+  unique constraint spans bridges).
+- **Validation is two-level** (`BridgeCheckInValidator`, `BridgeRules`): over a cap (16 networks,
+  50 printers, 8 MACs) or a malformed `agentVersion`/`mode`/`hostName` is a 400 `invalid_check_in`;
+  a network or printer that breaks a rule is dropped and named in `rejected`, so one odd printer
+  cannot lock a bridge out of its desired list. Addresses are IPv4 RFC 1918 + 169.254/16 and IPv6
+  fc00::/7 only, parsed strictly (no `10.1`, hex or zone ids); networks /24 (v4) or /64 (v6) and
+  smaller. Hosts the user types are those or a local host name; the bridge must still check what a
+  name resolves to.
+- **A check-in replaces the discovered list by identity** (`BridgeRules.IdentityKey`: serial, else
+  mainboard id, else lowest MAC plus port, else address plus port), so a printer keeps its row and
+  id across address changes. A missing or null field or list keeps what is stored; `{}` is a fetch.
+- **The desired list is versioned by `Bridge.DesiredRevision`**, a new GUID on every change
+  (connect, disconnect, printer delete, scan request), so concurrent edits need no counter.
+  `GET /api/bridges/me/desired` answers 304 on a matching weak `ETag` after one small read. A
+  poll also refreshes the bridge's last-seen time, at most every two minutes
+  (`BridgeService.PollSeenResolution`), so a bridge whose check-ins a backfill holds back stays
+  online.
+- **Check-ins are not exempt from the connector write budget**, unlike the heartbeat: starving one
+  only delays discovery and desired-list updates, never duplicates prints, and the poll is a read,
+  so the bridge still sees changes during a backfill. Nothing here bumps the cache version.
+- **`Connection.BridgeId` comes from the heartbeat's token**: a device whose grant has a bridge row
+  sets it, anything else (API key, a bridge that never checked in) sets null.
+- **No LAN secrets yet.** Credentials (Bambu access code, PrusaLink password) are entered on the
+  bridge until story 14 encrypts them to the bridge's key. Don't add a plaintext secret column.
+- **Release order for `bridge:sync`:** add the permission to the Auth0 device API first, then deploy
+  the API, then release a bridge that requests it. A bridge requests only the scopes the pairing
+  discovery lists, and on 403 `insufficient_scope` re-pairs once, then reports it instead of
+  looping.
+- Out of scope so far (printlog-bridge#103): moving a printer between bridges, cross-bridge event
+  dedupe.
 
 ## Integration polling (#234)
 

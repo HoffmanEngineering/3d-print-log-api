@@ -351,6 +351,17 @@ public class PrinterService(
         // PrintLogContext), and the connection outlives the printer until the user deletes it.
         await context.Connections.Where(c => c.PrinterId == printerId).LoadAsync();
 
+        // A bridge stops watching a printer that no longer exists (printlog-bridge#100): its
+        // entries go, and each bridge's desired list gets a new version. The FK has no database
+        // cascade (see PrintLogContext).
+        var bridgeEntries = await context.BridgePrinters.Where(p => p.PrinterId == printerId).ToListAsync();
+        context.BridgePrinters.RemoveRange(bridgeEntries);
+        var bridgeIds = bridgeEntries.Select(e => e.BridgeId).Distinct().ToList();
+        foreach (var bridge in await context.Bridges.Where(b => bridgeIds.Contains(b.Id)).ToListAsync())
+        {
+            bridge.DesiredRevision = Guid.NewGuid();
+        }
+
         // Spoolman connections (#175) are revoked as well as unbound: the credential was for this
         // printer, and a printer that no longer exists must not keep reading the user's spools.
         // Loaded for the same ClientSetNull reason as above.

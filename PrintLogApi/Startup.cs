@@ -174,6 +174,7 @@ public class Startup
         // Paired devices and their scoped tokens (#148); the scheme and policy are in ConfigureAuthentication.
         services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
         services.AddTransient<IConnectionService, ConnectionService>();
+        services.AddTransient<Services.Bridges.IBridgeService, Services.Bridges.BridgeService>();
         // The latest agent release a connection's check-in reports (printlog-bridge#39).
         // Singleton: it holds the versions read from GitHub.
         services.Configure<Services.AgentReleases.AgentReleaseOptions>(Configuration.GetSection(Services.AgentReleases.AgentReleaseOptions.SectionName));

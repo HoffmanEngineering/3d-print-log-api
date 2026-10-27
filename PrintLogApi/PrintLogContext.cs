@@ -69,6 +69,10 @@ public class PrintLogContext : DbContext
     public DbSet<DeviceGrant> DeviceGrants { get; set; }
     public DbSet<PairingTokenUse> PairingTokenUses { get; set; }
     public DbSet<Connection> Connections { get; set; }
+    public DbSet<Bridge> Bridges { get; set; }
+    public DbSet<BridgeDiscoveredPrinter> BridgeDiscoveredPrinters { get; set; }
+    public DbSet<BridgeIgnoredPrinter> BridgeIgnoredPrinters { get; set; }
+    public DbSet<BridgePrinter> BridgePrinters { get; set; }
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
     public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
@@ -506,6 +510,70 @@ public class PrintLogContext : DbContext
             .HasOne(c => c.Printer)
             .WithMany()
             .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Bridges (printlog-bridge#100, #103). A bridge shares its device grant's key and goes
+        // with it: Users -> DeviceGrants -> Bridges is the only cascade path into Bridges, and
+        // Bridges -> (discovered, ignored, desired printers) the only one into each of those.
+        modelBuilder.Entity<Bridge>()
+            .HasOne(b => b.Grant)
+            .WithOne()
+            .HasForeignKey<Bridge>(b => b.Id)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BridgeDiscoveredPrinter>()
+            .HasIndex(d => new { d.BridgeId, d.IdentityKey })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeDiscoveredPrinter>()
+            .HasOne(d => d.Bridge)
+            .WithMany(b => b.DiscoveredPrinters)
+            .HasForeignKey(d => d.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BridgeIgnoredPrinter>()
+            .HasIndex(i => new { i.BridgeId, i.IdentityKey })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeIgnoredPrinter>()
+            .HasOne(i => i.Bridge)
+            .WithMany()
+            .HasForeignKey(i => i.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One entry per 3D Print Log printer across all bridges (a printer belongs to one user,
+        // and two watchers would log every print twice), and one per identity on a bridge.
+        // BridgeService also refuses the same stable identity on another of the user's bridges.
+        modelBuilder.Entity<BridgePrinter>()
+            .HasIndex(p => p.PrinterId)
+            .IsUnique();
+
+        modelBuilder.Entity<BridgePrinter>()
+            .HasIndex(p => new { p.BridgeId, p.IdentityKey })
+            .IsUnique()
+            .HasFilter("[IdentityKey] IS NOT NULL");
+
+        modelBuilder.Entity<BridgePrinter>()
+            .HasOne(p => p.Bridge)
+            .WithMany(b => b.Printers)
+            .HasForeignKey(p => p.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // No database cascade: Printers cascade from Users, and so (through the grant) do
+        // Bridges, so a second path is SQL Server error 1785. PrinterService removes the entries
+        // before deleting a printer, and UserDeletionService deletes bridges before printers.
+        modelBuilder.Entity<BridgePrinter>()
+            .HasOne(p => p.Printer)
+            .WithMany()
+            .HasForeignKey(p => p.PrinterId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        // Not a database cascade or set-null either (Users -> Connections and Users -> DeviceGrants
+        // -> Bridges are two paths). Revoking a grant nulls it first, in the same transaction.
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.Bridge)
+            .WithMany()
+            .HasForeignKey(c => c.BridgeId)
             .OnDelete(DeleteBehavior.ClientSetNull);
 
         // Spoolman connections (#175). The secret hash is the lookup key every authenticated

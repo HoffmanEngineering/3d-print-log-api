@@ -91,6 +91,9 @@ public class ConnectionsController(
     /// and fill the generic fields, and a `Klipper` firmware or `Moonraker` host fills them back.
     /// Unlike the rest of the health, a name or version that is missing, null or blank keeps the
     /// one stored, so a check-in sent before the agent has read them does not clear them.
+    ///
+    /// A paired bridge that has checked in (`PUT /api/bridges/me`) is recorded as the
+    /// connection's `bridgeId`, from its device token; anything else records none.
     /// </remarks>
     /// <param name="instanceId">The agent's own stable id for the printer, at most 100 characters.</param>
     /// <param name="dto">The connection's details.</param>
@@ -119,7 +122,7 @@ public class ConnectionsController(
 
         try
         {
-            var (connection, created) = await connectionService.Upsert(userId, instanceId, dto);
+            var (connection, created) = await connectionService.Upsert(userId, instanceId, dto, DeviceGrantClaim.Get(User));
             var body = await ToDtoAsync(connection);
             if (!created)
             {
@@ -202,6 +205,7 @@ public class ConnectionsController(
             LatestAgentVersion = latestAgentVersion,
             UpdateAvailable = AgentVersion.IsOlder(connection.AgentVersion, latestAgentVersion),
             PrinterId = connection.PrinterId,
+            BridgeId = connection.BridgeId,
             CreatedDate = new DateTimeOffset(DateTime.SpecifyKind(connection.CreatedDate, DateTimeKind.Utc)),
             LastSeenAt = lastSeen,
             Status = clock.GetUtcNow() - lastSeen >= Connection.StaleAfter ? ConnectionStatus.Stale : ConnectionStatus.Online,

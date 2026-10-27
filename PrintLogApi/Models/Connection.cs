@@ -75,6 +75,14 @@ public class Connection
     [ForeignKey("PrinterId")]
     public Printer? Printer { get; set; }
 
+    /// <summary>
+    /// The paired bridge that sent the last heartbeat (printlog-bridge#103), taken from its device
+    /// token, never from the body. Null for an API-key agent, or a bridge that has not checked in.
+    /// </summary>
+    public long? BridgeId { get; set; }
+    [ForeignKey("BridgeId")]
+    public Bridge? Bridge { get; set; }
+
     public DateTime CreatedDate { get; set; }
 
     /// <summary>The last heartbeat, UTC.</summary>

@@ -47,6 +47,8 @@ public partial class DeviceAccessCoverageTests(CustomWebApplicationFactory facto
         "POST api/Prints/{id}/files/upload-url files:write",
         "POST api/Prints/{id}/files/confirm files:write",
         "PUT api/Connections/{instanceId} connections:write",
+        "PUT api/bridges/me bridge:sync",
+        "GET api/bridges/me/desired bridge:sync",
     };
 
     private IEnumerable<(RouteEndpoint Endpoint, string Method)> ApiEndpoints()

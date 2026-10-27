@@ -8,9 +8,11 @@ public interface IConnectionService
     /// <summary>
     /// Registers or refreshes the caller's connection for <paramref name="instanceId"/>, replacing
     /// its fields and stamping the heartbeat. Throws UserCannotAccessPrinterException when the
-    /// printer is not the caller's.
+    /// printer is not the caller's. <paramref name="deviceGrantId"/> is the device grant the
+    /// request authenticated with, or null: the connection records it as its bridge when that
+    /// grant has a bridge (printlog-bridge#103), and records none otherwise.
     /// </summary>
-    Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto);
+    Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null);
 
     /// <summary>The caller's connections, optionally only those bound to one printer.</summary>
     Task<IReadOnlyList<Connection>> List(long userId, long? printerId);
