@@ -36,9 +36,17 @@ public sealed record BridgeCheckInResult(DesiredPrintersDto Desired, bool Regist
 
     public string? PublicKeyFingerprint { get; init; }
 
-    /// <summary>Null when the key didn't change; otherwise whether the bridge had one before.</summary>
-    public bool? KeyReplaced { get; init; }
+    public string? PendingPublicKeyFingerprint { get; init; }
+
+    /// <summary>What this check-in did to the key: <c>first</c> (taken), <c>pending</c> (held for confirmation), or null.</summary>
+    public string? KeyChange { get; init; }
+
+    /// <summary>The bridge's key changes today, this one included, when <see cref="KeyChange"/> is set.</summary>
+    public int KeyChangesToday { get; init; }
 }
+
+/// <summary>The result of confirming a pending key, for the controller's telemetry.</summary>
+public sealed record BridgeKeyConfirmation(BridgeDto Bridge, int KeyChangesToday);
 
 public interface IBridgeService
 {
@@ -93,6 +101,13 @@ public interface IBridgeService
 
     /// <summary>Clears one sealed credential. False when the bridge or entry isn't the user's.</summary>
     Task<bool> ClearSecretAsync(long userId, long bridgeId, long entryId, string field, CancellationToken ct);
+
+    /// <summary>
+    /// Makes the bridge's pending key current, if <paramref name="fingerprint"/> is its
+    /// fingerprint: earlier values go stale and the desired version changes. Null when the user
+    /// has no such bridge; <see cref="BridgeProblemException"/> for a refusal.
+    /// </summary>
+    Task<BridgeKeyConfirmation?> ConfirmPendingKeyAsync(long userId, long bridgeId, string? fingerprint, CancellationToken ct);
 }
 
 /// <summary>
@@ -100,7 +115,7 @@ public interface IBridgeService
 /// here touches the user's cache version: no cached response reads bridges, and a check-in every
 /// few minutes must not flush the summaries.
 /// </summary>
-public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog agentReleases, TimeProvider clock) : IBridgeService
+public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog agentReleases, TimeProvider clock, INotificationService notifications) : IBridgeService
 {
     /// <summary>A second "Scan now" within this window is the same request.</summary>
     public static readonly TimeSpan ScanRequestWindow = TimeSpan.FromMinutes(1);
@@ -163,40 +178,98 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
 
         // Issues first: they describe the desired version as it was before this check-in.
         var rejected = new List<RejectedEntryDto>();
-        if (report.CredentialIssues is { } issues && !registered && report.CredentialIssuesVersion == Version(bridge.DesiredRevision))
+        if (report.CredentialIssues is { } issues && !registered && report.CredentialIssuesVersion is { } issuesVersion)
         {
-            await ReplaceCredentialIssuesAsync(bridge.Id, issues, rejected, ct);
+            await ReplaceCredentialIssuesAsync(bridge.Id, issuesVersion, issues, rejected, ct);
         }
 
-        // A new key makes every value sealed to the old one stale: derived from the fingerprint
-        // each value names, so nothing else is written and a concurrent seal to the old key is
-        // simply stale too. The version changes, so the bridge drops what it can't open.
-        bool? keyReplaced = null;
-        if (report.PublicKey is { } key && key != bridge.PublicKey)
-        {
-            keyReplaced = bridge.PublicKey is not null;
-            bridge.PublicKey = key;
-            bridge.PublicKeyFingerprint = report.PublicKeyFingerprint;
-            bridge.PublicKeyChangedAt = now;
-            bridge.DesiredRevision = Guid.NewGuid();
-        }
-
+        var keyChange = ApplyReportedKey(bridge, report, now);
         await context.SaveChangesAsync(ct);
+
+        if (keyChange == "pending")
+        {
+            // After the save, never inside a transaction (push can't be recalled). Best effort,
+            // like every notification: the pending key also shows on the Bridges screen.
+            var grant = await context.DeviceGrants.AsNoTracking().Where(g => g.Id == grantId).Select(g => new { g.UserId, g.Name }).SingleAsync(ct);
+            await notifications.CreateBridgeKeyPendingNotification(grant.UserId, bridge.Name ?? grant.Name);
+        }
+
         return new BridgeCheckInResult(await DesiredAsync(bridge, ct), registered)
         {
             Rejected = rejected,
             PublicKeyFingerprint = bridge.PublicKeyFingerprint,
-            KeyReplaced = keyReplaced,
+            PendingPublicKeyFingerprint = bridge.PendingPublicKeyFingerprint,
+            KeyChange = keyChange,
+            KeyChangesToday = bridge.KeyChangesToday,
         };
     }
 
     /// <summary>
-    /// Replaces what the bridge reported it can't use, on all its entries. An entry that isn't
-    /// its own, a field the entry's kind doesn't take, or an unknown code is dropped and named.
+    /// The first key a bridge reports is taken as is (trust on first use, at pairing). A
+    /// different key after that is held pending until the owner confirms it by its
+    /// fingerprint, because a stolen device token could report its own key and collect what the
+    /// user seals next. Reporting the current key again leaves a pending one alone; another new
+    /// key replaces it. Returns <c>first</c>, <c>pending</c>, or null when nothing changed.
     /// </summary>
-    private async Task ReplaceCredentialIssuesAsync(long bridgeId, IReadOnlyList<ReportedCredentialIssue> issues, List<RejectedEntryDto> rejected, CancellationToken ct)
+    private static string? ApplyReportedKey(Bridge bridge, ValidCheckIn report, DateTime now)
+    {
+        if (report.PublicKey is not { } key || key == bridge.PublicKey || key == bridge.PendingPublicKey)
+        {
+            return null;
+        }
+
+        string change;
+        if (bridge.PublicKey is null)
+        {
+            bridge.PublicKey = key;
+            bridge.PublicKeyFingerprint = report.PublicKeyFingerprint;
+            bridge.PublicKeyChangedAt = now;
+            bridge.DesiredRevision = Guid.NewGuid();
+            change = "first";
+        }
+        else
+        {
+            bridge.PendingPublicKey = key;
+            bridge.PendingPublicKeyFingerprint = report.PublicKeyFingerprint;
+            bridge.PendingPublicKeyAt = now;
+            change = "pending";
+        }
+
+        CountKeyChange(bridge, now);
+        return change;
+    }
+
+    private static void CountKeyChange(Bridge bridge, DateTime now)
+    {
+        if (bridge.KeyChangesDay != now.Date)
+        {
+            bridge.KeyChangesDay = now.Date;
+            bridge.KeyChangesToday = 0;
+        }
+
+        bridge.KeyChangesToday++;
+    }
+
+    /// <summary>
+    /// Replaces what the bridge reported it can't use, on all its entries, if the report is about
+    /// the current desired version. An entry that isn't its own, a field the entry's kind doesn't
+    /// take, or an unknown code is dropped and named.
+    /// <para>
+    /// Race with an owner's seal (which clears that field's issue and moves the version): the
+    /// version is read after the entries, so a seal committed before that read stops the report;
+    /// one committed after it changes the entry's <see cref="BridgePrinter.IssuesStamp"/>, so
+    /// this write fails its concurrency check and the check-in reruns against the new version.
+    /// </para>
+    /// </summary>
+    private async Task ReplaceCredentialIssuesAsync(long bridgeId, string reportedVersion, IReadOnlyList<ReportedCredentialIssue> issues, List<RejectedEntryDto> rejected, CancellationToken ct)
     {
         var entries = await context.BridgePrinters.Where(p => p.BridgeId == bridgeId).ToListAsync(ct);
+        var current = await context.Bridges.AsNoTracking().Where(b => b.Id == bridgeId).Select(b => b.DesiredRevision).SingleAsync(ct);
+        if (reportedVersion != Version(current))
+        {
+            return;
+        }
+
         var byEntry = entries.ToDictionary(e => e.Id, _ => new SortedDictionary<string, string>(StringComparer.Ordinal));
         foreach (var issue in issues)
         {
@@ -223,7 +296,12 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
         foreach (var entry in entries)
         {
             var found = byEntry[entry.Id];
-            entry.CredentialIssues = found.Count == 0 ? null : string.Join(' ', found.Select(i => $"{i.Key}:{i.Value}"));
+            var stored = found.Count == 0 ? null : string.Join(' ', found.Select(i => $"{i.Key}:{i.Value}"));
+            if (stored != entry.CredentialIssues)
+            {
+                entry.CredentialIssues = stored;
+                entry.IssuesStamp = Guid.NewGuid();
+            }
         }
     }
 
@@ -413,6 +491,9 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 PublicKey = b.PublicKey,
                 PublicKeyFingerprint = b.PublicKeyFingerprint,
                 PublicKeyChangedAt = Utc(b.PublicKeyChangedAt),
+                PendingPublicKey = b.PendingPublicKey,
+                PendingPublicKeyFingerprint = b.PendingPublicKeyFingerprint,
+                PendingPublicKeyAt = Utc(b.PendingPublicKeyAt),
                 Status = now - lastSeen >= Connection.StaleAfter ? ConnectionStatus.Stale : ConnectionStatus.Online,
                 LastSeenAt = lastSeen,
                 CreatedAt = Utc(b.CreatedDate),
@@ -733,17 +814,28 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
 
     public async Task<bool> DisconnectAsync(long userId, long bridgeId, long entryId, CancellationToken ct)
     {
-        var bridge = await Owned(userId).SingleOrDefaultAsync(b => b.Id == bridgeId, ct);
-        var entry = bridge is null ? null : await context.BridgePrinters.SingleOrDefaultAsync(p => p.Id == entryId && p.BridgeId == bridgeId, ct);
-        if (bridge is null || entry is null)
+        for (var attempt = 0; ; attempt++)
         {
-            return false;
-        }
+            var bridge = await Owned(userId).SingleOrDefaultAsync(b => b.Id == bridgeId, ct);
+            var entry = bridge is null ? null : await context.BridgePrinters.SingleOrDefaultAsync(p => p.Id == entryId && p.BridgeId == bridgeId, ct);
+            if (bridge is null || entry is null)
+            {
+                return false;
+            }
 
-        context.BridgePrinters.Remove(entry);
-        bridge.DesiredRevision = Guid.NewGuid();
-        await context.SaveChangesAsync(ct);
-        return true;
+            context.BridgePrinters.Remove(entry);
+            bridge.DesiredRevision = Guid.NewGuid();
+            try
+            {
+                await context.SaveChangesAsync(ct);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                // A check-in wrote the entry's issues (its concurrency stamp) meanwhile.
+                context.ChangeTracker.Clear();
+            }
+        }
     }
 
     public async Task<bool> SetIgnoredAsync(long userId, long bridgeId, long discoveredId, bool ignored, CancellationToken ct)
@@ -838,6 +930,15 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                     "This bridge hasn't reported a key to seal credentials to. Update printlog-bridge.");
             }
 
+            if (body.KeyFingerprint == bridge.PendingPublicKeyFingerprint)
+            {
+                throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_unconfirmed",
+                    "The bridge reported a new key that hasn't been confirmed. Compare its fingerprint with the bridge's and confirm it first.")
+                {
+                    KeyFingerprint = bridge.PublicKeyFingerprint,
+                };
+            }
+
             if (body.KeyFingerprint != bridge.PublicKeyFingerprint)
             {
                 throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_changed",
@@ -858,14 +959,18 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             secret.KeyFingerprint = body.KeyFingerprint!;
             secret.UpdatedDate = clock.GetUtcNow().UtcDateTime;
             entry.CredentialIssues = WithoutIssue(entry.CredentialIssues, field);
+            // Always, even when there was no issue to clear: a check-in that read this entry
+            // before now must fail its write instead of restoring an issue about the old value.
+            entry.IssuesStamp = Guid.NewGuid();
             bridge.DesiredRevision = Guid.NewGuid();
             try
             {
                 await context.SaveChangesAsync(ct);
             }
-            catch (DbUpdateException ex) when (attempt == 0 && UniqueConstraintViolation.IsUniqueViolation(ex))
+            catch (DbUpdateException ex) when (attempt < 2 && (ex is DbUpdateConcurrencyException || UniqueConstraintViolation.IsUniqueViolation(ex)))
             {
-                // A concurrent first seal of the same field inserted it; this one replaces it.
+                // A concurrent first seal of the same field inserted it (this one replaces it),
+                // or a check-in wrote the entry's issues meanwhile: read again and retry.
                 context.ChangeTracker.Clear();
                 continue;
             }
@@ -902,6 +1007,53 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
         }
 
         return true;
+    }
+
+    public async Task<BridgeKeyConfirmation?> ConfirmPendingKeyAsync(long userId, long bridgeId, string? fingerprint, CancellationToken ct)
+    {
+        var bridge = await Owned(userId).AsNoTracking().Where(b => b.Id == bridgeId)
+            .Select(b => new { b.PendingPublicKeyFingerprint, b.KeyChangesDay, b.KeyChangesToday })
+            .SingleOrDefaultAsync(ct);
+        if (bridge is null)
+        {
+            return null;
+        }
+
+        if (!SealedCredentials.IsFingerprint(fingerprint))
+        {
+            throw Bad("invalid_key_fingerprint", "fingerprint: the pending key's fingerprint you computed from pendingPublicKey, 64 lower-case hex characters.");
+        }
+
+        if (bridge.PendingPublicKeyFingerprint is null)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "no_pending_key", "This bridge has no new key waiting for confirmation.");
+        }
+
+        // One conditional statement: a check-in that replaced the pending key meanwhile makes
+        // this match nothing, so the key confirmed is always the one the owner checked.
+        var now = clock.GetUtcNow().UtcDateTime;
+        var changesToday = bridge.KeyChangesDay == now.Date ? bridge.KeyChangesToday + 1 : 1;
+        // Ownership was checked above, and a bridge never changes owner.
+        var revision = Guid.NewGuid();
+        var updated = await context.Bridges
+            .Where(b => b.Id == bridgeId && b.PendingPublicKeyFingerprint == fingerprint && b.PendingPublicKey != null)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(b => b.PublicKey, b => b.PendingPublicKey)
+                .SetProperty(b => b.PublicKeyFingerprint, b => b.PendingPublicKeyFingerprint)
+                .SetProperty(b => b.PublicKeyChangedAt, now)
+                .SetProperty(b => b.PendingPublicKey, (string?)null)
+                .SetProperty(b => b.PendingPublicKeyFingerprint, (string?)null)
+                .SetProperty(b => b.PendingPublicKeyAt, (DateTime?)null)
+                .SetProperty(b => b.KeyChangesDay, now.Date)
+                .SetProperty(b => b.KeyChangesToday, changesToday)
+                .SetProperty(b => b.DesiredRevision, revision), ct);
+        if (updated == 0)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "pending_key_changed",
+                "That isn't the bridge's pending key; it may have reported another. Reload the bridge and compare again.");
+        }
+
+        return new BridgeKeyConfirmation((await GetAsync(userId, bridgeId, ct))!, changesToday);
     }
 
     private static void EnsureField(BridgePrinter entry, string field)

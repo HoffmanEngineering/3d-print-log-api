@@ -506,7 +506,8 @@ reference sealer and opener are in the test project (`CredentialSealer`).
 
 - **The API never decrypts and holds nothing that could.** It parses the bridge's key strictly
   (`SealedCredentials.TryParsePublicKey`: exactly the 91-byte SPKI of an uncompressed P-256 point on
-  the curve, padded standard base64; anything else is a 400 `invalid_check_in`) and checks a sealed
+  the curve, padded standard base64; anything else is dropped as `rejected` `invalid_public_key`,
+  keeping the stored key and the rest of the check-in) and checks a sealed
   value's shape (prefix, canonical base64url, 94 to 349 bytes, ephemeral point on the curve). A
   change to either rule, or to the vectors, is a change to the other two repos' contract.
 - **Sealed values leave the API only through the owning bridge's device endpoints** (the check-in
@@ -514,22 +515,38 @@ reference sealer and opener are in the test project (`CredentialSealer`).
   fingerprints, times and `stale`, never `sealed` (the browser can't open them anyway). Never put
   one in a log, telemetry property, problem detail, the sync snapshot, MCP or a webhook.
   `SealedCredentialLeakTests` checks all of those at Trace.
-- **A key change makes values stale, derived, not written.** A value is stale when its
+- **The first key is trusted; a later different key waits for the owner.** A check-in with a new
+  key stores it as `PendingPublicKey` (the current key stays in use), notifies the owner through
+  `INotificationService`, and seals to it are 409 `bridge_key_unconfirmed`. Only
+  `POST /api/bridges/{id}/public-key/confirm` with the pending key's fingerprint makes it current,
+  in one conditional `ExecuteUpdate` (a newer pending key makes it 409 `pending_key_changed`). A
+  stolen device token can report its own key; this is what stops the next seal going to it. Never
+  let a device-reported key become current without that confirmation, except the first.
+  `BridgeKeyChanged` telemetry carries `Change` and the bridge's `ChangesToday` (UTC day,
+  `Bridge.KeyChangesToday`).
+- **The fingerprint the browser sends is its own.** The web app computes it from the SPKI it seals
+  to; the API's `publicKeyFingerprint`/`pendingPublicKeyFingerprint` are convenience only. A
+  malicious API could pair its own key with the real fingerprint, so the doc makes this normative.
+- **Confirming a key makes values stale, derived, not written.** A value is stale when its
   `KeyFingerprint` isn't the bridge's current one: the bridge isn't sent it, the owner sees it
-  marked. Nothing is deleted, so a bridge restored with its old key reads them again, and a seal
-  racing a key change is simply stale. The check-in that changes the key bumps the desired version.
+  marked. Nothing is deleted, and a seal racing a confirmation is simply stale (the web app checks
+  `stale` on the PUT response). Confirming bumps the desired version.
 - **Setting or clearing a value bumps the desired version** and clears that field's reported issue.
   A fingerprint that isn't the current key's is 409 `bridge_key_changed` (with `keyFingerprint`);
   no key yet is 409 `bridge_key_missing`.
 - **The bridge reports what it can't use** (`credentialIssues`: `missing`, `undecryptable`,
-  `rejected_by_printer`), applied only when `credentialIssuesVersion` is the current desired
-  version, so a report about a value the user has since replaced can't land on the new one.
+  `invalid_plaintext`, `rejected_by_printer`) on every check-in, applied only when
+  `credentialIssuesVersion` is the current desired version (read after the entries). The write is
+  guarded by `BridgePrinter.IssuesStamp` (`[ConcurrencyCheck]`), which every seal changes, so a
+  check-in that read an entry before a seal can't restore the issue that seal cleared
+  (`BridgeCredentialIssueRaceTests`). Anything that saves a `BridgePrinter` can now get a
+  `DbUpdateConcurrencyException`: seal and disconnect retry, and printer delete refreshes the stamp.
 - **Fields per kind** are printlog-bridge's adapters' `app_secrets` (`SealedCredentials.FieldsFor`);
   a new adapter with secrets adds its fields there and in the doc's table.
-- **Trust limits, documented in the doc:** the API (or a stolen device token reporting its own
-  key) can substitute the key the browser seals to, and anyone can seal a value the bridge accepts.
-  The defense is the fingerprint the web app and the bridge both show. Values cascade with their
-  entry, so disconnect, printer delete, revoke and account deletion take them.
+- **Trust limits, documented in the doc:** the API could substitute the key the browser seals to,
+  and anyone can seal a value the bridge accepts. The defense is the fingerprint the web app
+  computes and the bridge shows. Values cascade with their entry, so disconnect, printer delete,
+  revoke and account deletion take them.
 
 ## Integration polling (#234)
 

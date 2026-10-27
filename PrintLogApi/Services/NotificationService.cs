@@ -311,6 +311,13 @@ public class NotificationService(
             actionUrl);
     }
 
+    public Task<Notification> CreateBridgeKeyPendingNotification(long userId, string bridgeName) => CreateNotification(
+        userId,
+        NotificationType.SystemAnnouncement,
+        "Bridge encryption key changed",
+        $"{bridgeName} reported a new encryption key; confirm it on the Bridges screen",
+        "/printers/bridges");
+
     public async Task<Notification> CreateApiKeyDeletedNotification(long userId, string? keyDescription)
     {
         var title = "API key deleted";

@@ -96,8 +96,28 @@ public class Bridge
     [MaxLength(64)]
     public string? PublicKeyFingerprint { get; set; }
 
-    /// <summary>When the bridge first reported its current key, UTC.</summary>
+    /// <summary>When the current key became current (first reported, or confirmed), UTC.</summary>
     public DateTime? PublicKeyChangedAt { get; set; }
+
+    /// <summary>
+    /// A different key the bridge reported after it already had one: held until the owner
+    /// confirms it by its fingerprint, because a stolen device token could report its own key.
+    /// Nothing is sealed to it until then. Same format as <see cref="PublicKey"/>.
+    /// </summary>
+    [MaxLength(200)]
+    public string? PendingPublicKey { get; set; }
+
+    [MaxLength(64)]
+    public string? PendingPublicKeyFingerprint { get; set; }
+
+    /// <summary>When the pending key was first reported, UTC.</summary>
+    public DateTime? PendingPublicKeyAt { get; set; }
+
+    /// <summary>The UTC day <see cref="KeyChangesToday"/> counts.</summary>
+    public DateTime? KeyChangesDay { get; set; }
+
+    /// <summary>Key changes (first key, new pending key, confirmation) on <see cref="KeyChangesDay"/>, for telemetry.</summary>
+    public int KeyChangesToday { get; set; }
 
     public ICollection<BridgeDiscoveredPrinter>? DiscoveredPrinters { get; set; }
 
@@ -229,6 +249,14 @@ public class BridgePrinter
     /// </summary>
     [MaxLength(400)]
     public string? CredentialIssues { get; set; }
+
+    /// <summary>
+    /// Changes with every write of <see cref="CredentialIssues"/> or a sealed value, and is checked
+    /// on each: a check-in that read the entry before an owner sealed a new value can't then
+    /// overwrite the issue that seal cleared.
+    /// </summary>
+    [ConcurrencyCheck]
+    public Guid IssuesStamp { get; set; }
 
     public DateTime CreatedDate { get; set; }
 

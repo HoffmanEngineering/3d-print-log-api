@@ -28,6 +28,9 @@ public interface INotificationService
     // notification creation, add an outbox behind IPushDispatchService rather than moving this
     // call — see the spec's "Delivery is best-effort" section.
     Task<Notification> CreateNotification(long userId, NotificationType type, string title, string message, string? actionUrl = null, long? printId = null, long? commentId = null, long? triggeredByUserId = null, string? metadata = null);
+
+    /// <summary>A bridge reported a new key for sealed credentials, held until the owner confirms it (printlog-bridge#100).</summary>
+    Task<Notification> CreateBridgeKeyPendingNotification(long userId, string bridgeName);
     Task<Notification> CreateCommentNotification(long recipientUserId, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName, bool isRecipientPrintOwner);
     Task CreateCommentNotifications(IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName);
 

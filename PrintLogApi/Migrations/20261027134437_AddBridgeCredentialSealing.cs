@@ -11,6 +11,39 @@ namespace PrintLogApi.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<DateTime>(
+                name: "KeyChangesDay",
+                table: "Bridges",
+                type: "datetime2",
+                nullable: true);
+
+            migrationBuilder.AddColumn<int>(
+                name: "KeyChangesToday",
+                table: "Bridges",
+                type: "int",
+                nullable: false,
+                defaultValue: 0);
+
+            migrationBuilder.AddColumn<string>(
+                name: "PendingPublicKey",
+                table: "Bridges",
+                type: "nvarchar(200)",
+                maxLength: 200,
+                nullable: true);
+
+            migrationBuilder.AddColumn<DateTime>(
+                name: "PendingPublicKeyAt",
+                table: "Bridges",
+                type: "datetime2",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "PendingPublicKeyFingerprint",
+                table: "Bridges",
+                type: "nvarchar(64)",
+                maxLength: 64,
+                nullable: true);
+
             migrationBuilder.AddColumn<string>(
                 name: "PublicKey",
                 table: "Bridges",
@@ -37,6 +70,13 @@ namespace PrintLogApi.Migrations
                 type: "nvarchar(400)",
                 maxLength: 400,
                 nullable: true);
+
+            migrationBuilder.AddColumn<Guid>(
+                name: "IssuesStamp",
+                table: "BridgePrinters",
+                type: "uniqueidentifier",
+                nullable: false,
+                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
 
             migrationBuilder.CreateTable(
                 name: "BridgePrinterSecrets",
@@ -75,6 +115,26 @@ namespace PrintLogApi.Migrations
                 name: "BridgePrinterSecrets");
 
             migrationBuilder.DropColumn(
+                name: "KeyChangesDay",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
+                name: "KeyChangesToday",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
+                name: "PendingPublicKey",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
+                name: "PendingPublicKeyAt",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
+                name: "PendingPublicKeyFingerprint",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
                 name: "PublicKey",
                 table: "Bridges");
 
@@ -88,6 +148,10 @@ namespace PrintLogApi.Migrations
 
             migrationBuilder.DropColumn(
                 name: "CredentialIssues",
+                table: "BridgePrinters");
+
+            migrationBuilder.DropColumn(
+                name: "IssuesStamp",
                 table: "BridgePrinters");
         }
     }

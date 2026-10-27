@@ -98,32 +98,35 @@ public class BridgeSealedCredentialTests(CustomWebApplicationFactory factory) : 
 
     [Theory]
     [MemberData(nameof(BadKeys))]
-    public async Task AMalformedKey_RefusesTheCheckIn_AndStoresNothing(string badKey)
+    public async Task AMalformedKey_IsDroppedAndNamed_AndTheRestOfTheCheckInIsStored(string badKey)
     {
         var bridge = await PairBridgeAsync(_client, "badkey");
         using var key = new BridgeKey();
         await CheckInOkAsync(_client, bridge.Token, new { publicKey = key.PublicKey });
 
-        var response = await Send(CheckIn(bridge.Token, new { publicKey = badKey, hostName = "changed" }));
+        var checkIn = await CheckInOkAsync(_client, bridge.Token, new { publicKey = badKey, hostName = "changed" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("invalid_check_in", await CodeOf(response));
+        Assert.Contains(checkIn.GetProperty("rejected").EnumerateArray(),
+            r => r.GetProperty("field").GetString() == "publicKey" && r.GetProperty("code").GetString() == "invalid_public_key");
+        Assert.Equal(key.Fingerprint, checkIn.GetProperty("publicKeyFingerprint").GetString());
         var dto = await GetAsUserAsync(_client, bridge.Subject, $"/api/bridges/{bridge.GrantId}");
         Assert.Equal(key.PublicKey, dto.GetProperty("publicKey").GetString());
-        Assert.NotEqual("changed", dto.GetProperty("hostName").GetString());
+        Assert.Equal(JsonValueKind.Null, dto.GetProperty("pendingPublicKey").ValueKind);
+        Assert.Equal("changed", dto.GetProperty("hostName").GetString());
     }
 
     [Fact]
-    public async Task AFingerprintThatDoesNotMatchTheKey_RefusesTheCheckIn()
+    public async Task AFingerprintThatDoesNotMatchTheKey_DropsTheKey()
     {
         var bridge = await PairBridgeAsync(_client, "badfp");
         using var key = new BridgeKey();
         using var other = new BridgeKey();
 
-        var response = await Send(CheckIn(bridge.Token, new { publicKey = key.PublicKey, publicKeyFingerprint = other.Fingerprint }));
+        var checkIn = await CheckInOkAsync(_client, bridge.Token, new { publicKey = key.PublicKey, publicKeyFingerprint = other.Fingerprint });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("invalid_check_in", await CodeOf(response));
+        Assert.Contains(checkIn.GetProperty("rejected").EnumerateArray(),
+            r => r.GetProperty("field").GetString() == "publicKeyFingerprint" && r.GetProperty("code").GetString() == "invalid_public_key");
+        Assert.Equal(JsonValueKind.Null, checkIn.GetProperty("publicKeyFingerprint").ValueKind);
     }
 
     [Fact]
@@ -286,43 +289,126 @@ public class BridgeSealedCredentialTests(CustomWebApplicationFactory factory) : 
         Assert.Equal(HttpStatusCode.Forbidden, delete.StatusCode);
     }
 
+    private static string ConfirmUrl(Setup s) => $"/api/bridges/{s.Bridge.GrantId}/public-key/confirm";
+
+    private Task<HttpResponseMessage> Confirm(Setup s, string fingerprint)
+        => Send(UserJson(HttpMethod.Post, ConfirmUrl(s), s.Bridge.Subject, new { fingerprint }));
+
     [Fact]
-    public async Task ANewKey_MakesEarlierSecretsStale_UntilTheOwnerSealsAgain_AndTheOldKeyBringsThemBack()
+    public async Task ANewKey_IsHeldPending_UntilTheOwnerConfirmsItsFingerprint()
     {
         var s = await BambuWithKey("rotate");
         using var _ = s.Key;
         Assert.Equal(HttpStatusCode.OK, (await PutSecret(s, "access_code", Seal(s, "11111111"))).StatusCode);
         var before = (await DesiredAsDeviceAsync(s.Bridge)).GetProperty("version").GetString();
+        var userId = await UserIdAsync(factory, s.Bridge.Subject);
 
         using var rotated = new BridgeKey();
         var checkIn = await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = rotated.PublicKey });
 
-        Assert.Equal(rotated.Fingerprint, checkIn.GetProperty("publicKeyFingerprint").GetString());
-        Assert.NotEqual(before, checkIn.GetProperty("desired").GetProperty("version").GetString());
-        Assert.Empty(Entry(checkIn.GetProperty("desired"), s.EntryId).GetProperty("secrets").EnumerateArray());
+        // Held: the current key stays, nothing goes stale, the version doesn't move.
+        Assert.Equal(s.Key.Fingerprint, checkIn.GetProperty("publicKeyFingerprint").GetString());
+        Assert.Equal(rotated.Fingerprint, checkIn.GetProperty("pendingPublicKeyFingerprint").GetString());
+        Assert.Equal(before, checkIn.GetProperty("desired").GetProperty("version").GetString());
+        Assert.Single(Entry(checkIn.GetProperty("desired"), s.EntryId).GetProperty("secrets").EnumerateArray());
+        var dto = await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}");
+        Assert.Equal(s.Key.PublicKey, dto.GetProperty("publicKey").GetString());
+        Assert.Equal(rotated.PublicKey, dto.GetProperty("pendingPublicKey").GetString());
+        Assert.Equal(rotated.Fingerprint, dto.GetProperty("pendingPublicKeyFingerprint").GetString());
+        Assert.NotEqual(JsonValueKind.Null, dto.GetProperty("pendingPublicKeyAt").ValueKind);
+
+        // The owner hears about it, once.
+        await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = rotated.PublicKey });
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var notes = await db.Notifications.Where(n => n.UserId == userId).ToListAsync(TestContext.Current.CancellationToken);
+            var note = Assert.Single(notes, n => n.Message != null && n.Message.Contains("new encryption key", StringComparison.Ordinal));
+            Assert.Equal("/printers/bridges", note.ActionUrl);
+        }
+
+        // Nothing can be sealed to it yet.
+        var toPending = CredentialSealer.Seal(rotated.PublicKey, CredentialSealer.AssociatedData(s.Bridge.GrantId, s.EntryId, "access_code"), "33333333");
+        var refused = await PutSecret(s, "access_code", toPending, rotated.Fingerprint);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal("bridge_key_unconfirmed", await CodeOf(refused));
+
+        // Reporting the current key again leaves the pending one as it is.
+        var back = await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = s.Key.PublicKey });
+        Assert.Equal(rotated.Fingerprint, back.GetProperty("pendingPublicKeyFingerprint").GetString());
+
+        // Confirming needs the pending key's own fingerprint.
+        var wrong = await Confirm(s, s.Key.Fingerprint);
+        Assert.Equal(HttpStatusCode.Conflict, wrong.StatusCode);
+        Assert.Equal("pending_key_changed", await CodeOf(wrong));
+        Assert.Equal("invalid_key_fingerprint", await CodeOf(await Confirm(s, "nope")));
+
+        var confirmed = await Confirm(s, rotated.Fingerprint);
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        var after = await confirmed.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal(rotated.PublicKey, after.GetProperty("publicKey").GetString());
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("pendingPublicKey").ValueKind);
+
+        // Now earlier values are stale: not sent, marked for the owner, and the version moved.
+        var desired = await DesiredAsDeviceAsync(s.Bridge);
+        Assert.NotEqual(before, desired.GetProperty("version").GetString());
+        Assert.Empty(Entry(desired, s.EntryId).GetProperty("secrets").EnumerateArray());
         var owner = (await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}/printers")).EnumerateArray().Single();
         var staleSecret = Assert.Single(owner.GetProperty("secrets").EnumerateArray());
         Assert.True(staleSecret.GetProperty("stale").GetBoolean());
         Assert.Equal(s.Key.Fingerprint, staleSecret.GetProperty("keyFingerprint").GetString());
+        Assert.Equal("no_pending_key", await CodeOf(await Confirm(s, rotated.Fingerprint)));
 
-        // The same key again changes nothing.
-        var again = await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = rotated.PublicKey });
-        Assert.Equal(checkIn.GetProperty("desired").GetProperty("version").GetString(), again.GetProperty("desired").GetProperty("version").GetString());
-
-        // A bridge restored with its old key reads the old value again.
-        var restored = await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = s.Key.PublicKey });
-        Assert.Single(Entry(restored.GetProperty("desired"), s.EntryId).GetProperty("secrets").EnumerateArray());
-
-        // Sealing again to the current key makes it fresh.
-        await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = rotated.PublicKey });
-        var resealed = CredentialSealer.Seal(rotated.PublicKey, CredentialSealer.AssociatedData(s.Bridge.GrantId, s.EntryId, "access_code"), "33333333");
-        Assert.Equal(HttpStatusCode.Conflict, (await PutSecret(s, "access_code", resealed, s.Key.Fingerprint)).StatusCode);
-        var ok = await PutSecret(s, "access_code", resealed, rotated.Fingerprint);
+        // Sealing again to the confirmed key makes it fresh.
+        Assert.Equal(HttpStatusCode.Conflict, (await PutSecret(s, "access_code", toPending, s.Key.Fingerprint)).StatusCode);
+        var ok = await PutSecret(s, "access_code", toPending, rotated.Fingerprint);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         var fresh = Assert.Single((await ok.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("secrets").EnumerateArray());
         Assert.False(fresh.GetProperty("stale").GetBoolean());
         var forBridge = Assert.Single(Entry(await DesiredAsDeviceAsync(s.Bridge), s.EntryId).GetProperty("secrets").EnumerateArray());
         Assert.Equal("33333333", CredentialSealer.Open(rotated.Key, forBridge.GetProperty("sealed").GetString()!, CredentialSealer.AssociatedData(s.Bridge.GrantId, s.EntryId, "access_code")));
+
+        // Key changes are counted per bridge per day: the first key, the pending one, the confirmation.
+        var counts = factory.Telemetry.Events("BridgeKeyChanged")
+            .Where(e => e.Properties["GrantId"] == s.Bridge.GrantId.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Select(e => (e.Properties["Change"], e.Properties["ChangesToday"]))
+            .ToList();
+        Assert.Equal([("first", "1"), ("pending", "2"), ("confirmed", "3")], counts);
+    }
+
+    [Fact]
+    public async Task ConfirmingAKey_IsTheOwnersAlone()
+    {
+        var s = await BambuWithKey("confirmauth");
+        using var _ = s.Key;
+        using var rotated = new BridgeKey();
+        await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = rotated.PublicKey });
+        var stranger = (await PairBridgeAsync(_client, "stranger2")).Subject;
+
+        var foreign = await Send(UserJson(HttpMethod.Post, ConfirmUrl(s), stranger, new { fingerprint = rotated.Fingerprint }));
+        var device = await Send(WithDevice(new HttpRequestMessage(HttpMethod.Post, ConfirmUrl(s)) { Content = JsonContent.Create(new { fingerprint = rotated.Fingerprint }) }, s.Bridge.Token));
+
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, device.StatusCode);
+        Assert.Equal("device_endpoint_not_allowed", await CodeOf(device));
+        var dto = await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}");
+        Assert.Equal(s.Key.PublicKey, dto.GetProperty("publicKey").GetString());
+    }
+
+    [Fact]
+    public async Task ASecondNewKey_ReplacesThePendingOne()
+    {
+        var s = await BambuWithKey("twopending");
+        using var _ = s.Key;
+        using var first = new BridgeKey();
+        using var second = new BridgeKey();
+        await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = first.PublicKey });
+
+        var checkIn = await CheckInOkAsync(_client, s.Bridge.Token, new { publicKey = second.PublicKey });
+
+        Assert.Equal(second.Fingerprint, checkIn.GetProperty("pendingPublicKeyFingerprint").GetString());
+        Assert.Equal("pending_key_changed", await CodeOf(await Confirm(s, first.Fingerprint)));
+        Assert.Equal(HttpStatusCode.OK, (await Confirm(s, second.Fingerprint)).StatusCode);
     }
 
     [Fact]
@@ -377,6 +463,13 @@ public class BridgeSealedCredentialTests(CustomWebApplicationFactory factory) : 
         });
         owner = (await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}/printers")).EnumerateArray().Single();
         Assert.Equal("rejected_by_printer", Assert.Single(owner.GetProperty("credentialIssues").EnumerateArray()).GetProperty("code").GetString());
+        await CheckInOkAsync(_client, s.Bridge.Token, new
+        {
+            credentialIssuesVersion = current,
+            credentialIssues = new[] { new { entryId = s.EntryId, field = "access_code", code = "invalid_plaintext" } },
+        });
+        owner = (await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}/printers")).EnumerateArray().Single();
+        Assert.Equal("invalid_plaintext", Assert.Single(owner.GetProperty("credentialIssues").EnumerateArray()).GetProperty("code").GetString());
         await CheckInOkAsync(_client, s.Bridge.Token, new { credentialIssuesVersion = current, credentialIssues = Array.Empty<object>() });
         owner = (await GetAsUserAsync(_client, s.Bridge.Subject, $"/api/bridges/{s.Bridge.GrantId}/printers")).EnumerateArray().Single();
         Assert.Empty(owner.GetProperty("credentialIssues").EnumerateArray());

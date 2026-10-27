@@ -12,7 +12,7 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    [Migration("20261027131404_AddBridgeCredentialSealing")]
+    [Migration("20261027134437_AddBridgeCredentialSealing")]
     partial class AddBridgeCredentialSealing
     {
         /// <inheritdoc />
@@ -44,6 +44,12 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<DateTime?>("KeyChangesDay")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("KeyChangesToday")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
 
@@ -65,6 +71,17 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("Networks")
                         .HasMaxLength(800)
                         .HasColumnType("nvarchar(800)");
+
+                    b.Property<string>("PendingPublicKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("PendingPublicKeyAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PendingPublicKeyFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("PublicKey")
                         .HasMaxLength(200)
@@ -204,6 +221,10 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("IdentityKey")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("IssuesStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Kind")
                         .IsRequired()

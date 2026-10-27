@@ -82,15 +82,9 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             telemetry.TrackEvent("BridgeRegistered", new Dictionary<string, string> { ["GrantId"] = Id(grantId) });
         }
 
-        // Never the key itself, nor anything sealed: the fingerprint is not secret, but the
-        // event needs no more than that it changed.
-        if (result.KeyReplaced is { } replaced)
+        if (result.KeyChange is { } change)
         {
-            telemetry.TrackEvent("BridgeKeyChanged", new Dictionary<string, string>
-            {
-                ["GrantId"] = Id(grantId),
-                ["Replaced"] = replaced.ToString(),
-            });
+            TrackKeyChange(grantId, change, result.KeyChangesToday);
         }
 
         List<RejectedEntryDto> rejected = [.. report.Rejected, .. result.Rejected];
@@ -111,8 +105,22 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             Desired = result.Desired,
             Rejected = rejected,
             PublicKeyFingerprint = result.PublicKeyFingerprint,
+            PendingPublicKeyFingerprint = result.PendingPublicKeyFingerprint,
         };
     }
+
+    /// <summary>
+    /// One event per key change (<c>first</c>, <c>pending</c>, <c>confirmed</c>) with the bridge's
+    /// count for the UTC day, so a bridge whose key flips is visible. Never the key itself, nor
+    /// anything sealed.
+    /// </summary>
+    private void TrackKeyChange(long grantId, string change, int changesToday)
+        => telemetry.TrackEvent("BridgeKeyChanged", new Dictionary<string, string>
+        {
+            ["GrantId"] = Id(grantId),
+            ["Change"] = change,
+            ["ChangesToday"] = changesToday.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        });
 
     /// <summary>
     /// A bridge reads the printers you connected to it (device token with `bridge:sync`). Send
@@ -384,7 +392,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// <response code="200">Stored. The body is the entry, with its secrets' fields, fingerprints and times.</response>
     /// <response code="400">`code`: `invalid_secret_field`, `invalid_sealed_value` or `invalid_key_fingerprint`.</response>
     /// <response code="404">You have no such bridge, or it has no such printer.</response>
-    /// <response code="409">`code`: `bridge_key_missing` (the bridge has reported no key; it needs updating) or `bridge_key_changed` (`keyFingerprint` is the current key: check it and seal again).</response>
+    /// <response code="409">`code`: `bridge_key_missing` (the bridge has reported no key; it needs updating), `bridge_key_unconfirmed` (sealed to the bridge's pending key: confirm it first) or `bridge_key_changed` (not the current key: reload the bridge, compare the fingerprint and seal again).</response>
     [HttpPut("{id:long}/printers/{entryId:long}/secrets/{field}")]
     [Authorize(Policy = "InteractiveUserOnly")]
     [RequestSizeLimit(4 * 1024)]
@@ -455,6 +463,53 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
 
         telemetry.TrackEvent("BridgePrinterSecretCleared", new Dictionary<string, string> { ["GrantId"] = Id(id), ["Field"] = field });
         return NoContent();
+    }
+
+    /// <summary>
+    /// Confirms the new encryption key a bridge reported, after you compared its fingerprint with
+    /// the one the bridge shows. Values sealed to the old key become stale and need sealing again.
+    /// </summary>
+    /// <remarks>
+    /// A bridge's first key is taken as is; a different one later is held as `pendingPublicKey`
+    /// until this call, because a stolen device token could report its own key. Send the
+    /// fingerprint you computed from `pendingPublicKey` (lower-case hex SHA-256 of its SPKI bytes),
+    /// not the API's `pendingPublicKeyFingerprint`.
+    /// </remarks>
+    /// <response code="200">Confirmed. The body is the bridge.</response>
+    /// <response code="400">`code`: `invalid_key_fingerprint`.</response>
+    /// <response code="404">You have no bridge with that id.</response>
+    /// <response code="409">`code`: `no_pending_key`, or `pending_key_changed` (the fingerprint isn't the pending key's: the bridge may have reported another; reload and compare again).</response>
+    [HttpPost("{id:long}/public-key/confirm")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BridgeDto>> ConfirmKey(long id, ConfirmBridgeKeyDto body, CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        BridgeKeyConfirmation? confirmed;
+        try
+        {
+            confirmed = await bridges.ConfirmPendingKeyAsync(userId, id, body.Fingerprint, ct);
+        }
+        catch (BridgeProblemException problem)
+        {
+            return CodedProblem(problem.Status, problem.Message, problem.Code);
+        }
+
+        if (confirmed is null)
+        {
+            return NotFound();
+        }
+
+        TrackKeyChange(id, "confirmed", confirmed.KeyChangesToday);
+        return confirmed.Bridge;
     }
 
     /// <summary>
