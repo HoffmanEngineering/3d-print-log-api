@@ -40,7 +40,7 @@ public static partial class SealedCredentials
     /// <summary>What a bridge may report about a credential it can't use.</summary>
     public static readonly IReadOnlySet<string> IssueCodes = new HashSet<string>(StringComparer.Ordinal)
     {
-        "missing", "undecryptable", "rejected_by_printer",
+        "missing", "undecryptable", "invalid_plaintext", "rejected_by_printer",
     };
 
     /// <summary>

@@ -63,17 +63,6 @@ namespace PrintLogApi.Migrations
                         .HasMaxLength(800)
                         .HasColumnType("nvarchar(800)");
 
-                    b.Property<string>("PublicKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("PublicKeyChangedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PublicKeyFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<DateTime?>("ScanRequestedAt")
                         .HasColumnType("datetime2");
 
@@ -189,10 +178,6 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("CreatedDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("CredentialIssues")
-                        .HasMaxLength(400)
-                        .HasColumnType("nvarchar(400)");
-
                     b.Property<string>("Host")
                         .IsRequired()
                         .HasMaxLength(253)
@@ -231,43 +216,6 @@ namespace PrintLogApi.Migrations
                         .HasFilter("[IdentityKey] IS NOT NULL");
 
                     b.ToTable("BridgePrinters");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.BridgePrinterSecret", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("BridgePrinterId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Field")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("KeyFingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SealedValue")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<DateTime>("UpdatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BridgePrinterId", "Field")
-                        .IsUnique();
-
-                    b.ToTable("BridgePrinterSecrets");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Comment", b =>
@@ -3346,17 +3294,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("Printer");
                 });
 
-            modelBuilder.Entity("PrintLogApi.Models.BridgePrinterSecret", b =>
-                {
-                    b.HasOne("PrintLogApi.Models.BridgePrinter", "BridgePrinter")
-                        .WithMany("Secrets")
-                        .HasForeignKey("BridgePrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("BridgePrinter");
-                });
-
             modelBuilder.Entity("PrintLogApi.Models.Comment", b =>
                 {
                     b.HasOne("PrintLogApi.Models.User", "CreatedBy")
@@ -4187,11 +4124,6 @@ namespace PrintLogApi.Migrations
                     b.Navigation("DiscoveredPrinters");
 
                     b.Navigation("Printers");
-                });
-
-            modelBuilder.Entity("PrintLogApi.Models.BridgePrinter", b =>
-                {
-                    b.Navigation("Secrets");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>

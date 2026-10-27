@@ -75,6 +75,11 @@ public class BridgeCredentialSealingTests
         using var key = BridgeKey();
         Assert.Equal(S(v, "plaintext"), CredentialSealer.Open(key, S(v, "sealed"), ad));
         Assert.Equal(S(v, "plaintextUtf8Hex"), Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(S(v, "plaintext"))).ToLowerInvariant());
+        if (v.TryGetProperty("typed", out var typed))
+        {
+            // Trimmed per field, never normalized.
+            Assert.Equal(S(v, "plaintext"), CredentialSealer.Prepare(S(v, "field"), typed.GetString()!));
+        }
         Assert.True(SealedCredentials.IsSealedValue(S(v, "sealed")));
     }
 
@@ -111,7 +116,10 @@ public class BridgeCredentialSealingTests
         var n = Vectors.GetProperty("mustNotOpen")[index];
         using var key = BridgeKey();
 
-        Assert.ThrowsAny<CryptographicException>(() => CredentialSealer.Open(key, S(n, "sealed"), S(n, "associatedData")));
+        // It fails the tag (undecryptable), or opens to something that is not a credential
+        // (invalid_plaintext): a control character or invalid UTF-8.
+        var error = Assert.ThrowsAny<CryptographicException>(() => CredentialSealer.Open(key, S(n, "sealed"), S(n, "associatedData")));
+        Assert.Equal(S(n, "reason") == "plaintext", error is CredentialSealer.InvalidPlaintextException);
         // The API cannot tell: it checks the shape only.
         Assert.True(SealedCredentials.IsSealedValue(S(n, "sealed")));
     }
@@ -128,6 +136,15 @@ public class BridgeCredentialSealingTests
     [MemberData(nameof(InvalidSealedValues))]
     public void AnInvalidSealedValue_IsRefused(string why, string value)
         => Assert.False(SealedCredentials.IsSealedValue(value), why);
+
+    [Theory]
+    [InlineData("a\nb")]
+    [InlineData("a\u0000b")]
+    [InlineData("a\u007fb")]
+    [InlineData("a\u0085b")]
+    [InlineData("")]
+    public void TheSealer_RefusesWhatIsNotACredential(string plaintext)
+        => Assert.Throws<CredentialSealer.InvalidPlaintextException>(() => CredentialSealer.Seal(S(Recipient, "publicKey"), "ad", plaintext));
 
     [Fact]
     public void ANullOrOverlongValue_IsRefused()

@@ -12,6 +12,49 @@ public static class CredentialSealer
 {
     public static readonly byte[] Info = Encoding.ASCII.GetBytes("printlog-credential:v1:aes-256-gcm");
 
+    /// <summary>Fields trimmed before sealing (U+0020 and U+00A0 at either end); a password never is.</summary>
+    private static readonly HashSet<string> TrimmedFields = ["access_code", "username", "api_key", "moonraker_api_key"];
+
+    /// <summary>It opened, but is not a credential (the bridge reports <c>invalid_plaintext</c>).</summary>
+    public sealed class InvalidPlaintextException(string message) : CryptographicException(message);
+
+    /// <summary>
+    /// The plaintext rules: 1 to 256 bytes of strict UTF-8 with no C0 control, DEL or C1 control
+    /// (U+0000–U+001F, U+007F–U+009F).
+    /// </summary>
+    public static string CheckPlaintext(byte[] bytes)
+    {
+        if (bytes.Length is < 1 or > 256)
+        {
+            throw new InvalidPlaintextException("length");
+        }
+
+        string text;
+        try
+        {
+            text = new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (ArgumentException)
+        {
+            throw new InvalidPlaintextException("utf-8");
+        }
+
+        if (text.Any(c => c <= '\u001f' || c is >= '\u007f' and <= '\u009f'))
+        {
+            throw new InvalidPlaintextException("control character");
+        }
+
+        return text;
+    }
+
+    /// <summary>What the sender seals for what the user typed: trimmed for every field but <c>password</c>, never normalized.</summary>
+    public static string Prepare(string field, string typed)
+    {
+        var text = TrimmedFields.Contains(field) ? typed.Trim(' ', ' ') : typed;
+        CheckPlaintext(Encoding.UTF8.GetBytes(text));
+        return text;
+    }
+
     public static string AssociatedData(long bridgeId, long entryId, string field) => $"printlog-credential:v1:{bridgeId}:{entryId}:{field}";
 
     public static byte[] Raw(ECDiffieHellman key)
@@ -39,6 +82,7 @@ public static class CredentialSealer
             var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, shared, 32, [.. ephRaw, .. Raw(recipient)], Info);
             nonce ??= RandomNumberGenerator.GetBytes(12);
             var pt = Encoding.UTF8.GetBytes(plaintext);
+            CheckPlaintext(pt);
             var ct = new byte[pt.Length];
             var tag = new byte[16];
             using (var gcm = new AesGcm(key, 16))
@@ -82,7 +126,8 @@ public static class CredentialSealer
             gcm.Decrypt(blob[65..77], ct, body[^16..], pt, Encoding.ASCII.GetBytes(associatedData));
         }
 
-        return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(pt);
+        // Used exactly as opened: no trimming, no normalization.
+        return CheckPlaintext(pt);
     }
 
     /// <summary>A P-256 key from its private scalar and its uncompressed public point, both hex.</summary>
