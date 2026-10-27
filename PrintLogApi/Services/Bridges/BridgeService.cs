@@ -323,7 +323,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             var entry = desired.FirstOrDefault(p => p.BridgeId == d.BridgeId
                 && (string.Equals(p.IdentityKey, d.IdentityKey, StringComparison.OrdinalIgnoreCase)
                     || (p.Kind == d.Kind && string.Equals(p.Host, d.Address, StringComparison.OrdinalIgnoreCase)
-                        && (p.Port is null || d.Port is null || p.Port == d.Port))));
+                        && BridgeRules.SamePort(p.Kind, p.Port, d.Port))));
             // The bridge's config file wins over the app on the bridge, so Configured wins here
             // too; printerEntryId still names a matching app entry, so the UI can offer to
             // remove it.
@@ -451,8 +451,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 ?? throw Bad("discovered_printer_not_found", "This bridge has not found a printer with that id.");
             if (found.Configured)
             {
-                throw new BridgeProblemException(StatusCodes.Status409Conflict, "printer_configured_on_bridge",
-                    "The bridge already watches this printer from its config file.");
+                throw ConfiguredOn(bridgeId);
             }
         }
 
@@ -509,8 +508,16 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
     /// Refuses every way the same printer could end up watched twice, since each watcher has its
     /// own instance id and nothing downstream dedupes their prints: the 3D Print Log printer on
     /// any bridge, the same identity or address on this bridge, and the same stable identity
-    /// (serial, mainboard id, MAC) on another of the user's bridges. Moving a printer between
-    /// bridges is printlog-bridge#103's; until then the 409 names the bridge that has it.
+    /// (serial, mainboard id, MAC) on another of the user's bridges, and a printer a bridge
+    /// reported as in its config file. Moving a printer between bridges is printlog-bridge#103's;
+    /// until then the 409 names the bridge that has it.
+    /// <para>
+    /// Known limit (left for printlog-bridge#103): across bridges only the derived identity key
+    /// is compared, so two bridges that identify one printer by different fields (a MAC on one
+    /// segment, an address across a VLAN, a serial only one of them sees) are not caught; and
+    /// two concurrent connects of one serial to two bridges under different printers can both
+    /// pass, since no unique constraint spans bridges.
+    /// </para>
     /// </summary>
     private async Task EnsureNotConnectedAsync(long userId, BridgePrinter entry, CancellationToken ct)
     {
@@ -536,7 +543,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
         if (onThisBridge.Any(p =>
                 string.Equals(p.IdentityKey, entry.IdentityKey, StringComparison.OrdinalIgnoreCase)
                 || (p.Kind == entry.Kind && string.Equals(p.Host, entry.Host, StringComparison.OrdinalIgnoreCase)
-                    && (p.Port is null || entry.Port is null || p.Port == entry.Port))))
+                    && BridgeRules.SamePort(p.Kind, p.Port, entry.Port))))
         {
             throw new BridgeProblemException(StatusCodes.Status409Conflict, "discovered_printer_already_connected",
                 "That printer is already connected to this bridge.");
@@ -554,7 +561,36 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 throw ConnectedElsewhere(other);
             }
         }
+
+        // A bridge watching the printer from its config file is a watcher too. On this bridge it
+        // is matched like an app entry; across bridges, by a stable identity only.
+        var configuredHere = await context.BridgeDiscoveredPrinters.AsNoTracking()
+            .Where(d => d.BridgeId == entry.BridgeId && d.Configured)
+            .Select(d => new { d.Kind, d.Address, d.Port, d.IdentityKey })
+            .ToListAsync(ct);
+        if (configuredHere.Any(d =>
+                string.Equals(d.IdentityKey, entry.IdentityKey, StringComparison.OrdinalIgnoreCase)
+                || (d.Kind == entry.Kind && string.Equals(d.Address, entry.Host, StringComparison.OrdinalIgnoreCase)
+                    && BridgeRules.SamePort(d.Kind, d.Port, entry.Port))))
+        {
+            throw ConfiguredOn(entry.BridgeId);
+        }
+
+        if (entry.IdentityKey is { } stable && !stable.Contains(":ip:", StringComparison.Ordinal))
+        {
+            var configuredElsewhere = await context.BridgeDiscoveredPrinters
+                .Where(d => d.Configured && d.IdentityKey == stable && d.BridgeId != entry.BridgeId && d.Bridge.Grant.UserId == userId)
+                .Select(d => (long?)d.BridgeId)
+                .FirstOrDefaultAsync(ct);
+            if (configuredElsewhere is { } other)
+            {
+                throw ConfiguredOn(other);
+            }
+        }
     }
+
+    private static BridgeProblemException ConfiguredOn(long bridgeId) => new(StatusCodes.Status409Conflict,
+        "printer_configured_on_bridge", "A bridge already watches this printer from its config file.", bridgeId);
 
     private static BridgeProblemException ConnectedElsewhere(long bridgeId) => new(StatusCodes.Status409Conflict,
         "printer_connected_elsewhere", "That printer is already watched by another of your bridges.", bridgeId);

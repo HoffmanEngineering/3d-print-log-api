@@ -291,7 +291,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// <response code="201">Connected.</response>
     /// <response code="400">`code`: `printer_not_found`, `discovered_printer_not_found`, `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial` or `serial_required`.</response>
     /// <response code="404">You have no bridge with that id.</response>
-    /// <response code="409">`code`: `printer_already_connected`, `discovered_printer_already_connected` (the same printer or address is already on this bridge), `printer_connected_elsewhere` (another of your bridges watches it; `bridgeId` names it), `printer_configured_on_bridge` (the bridge watches it from its config file) or `bridge_printer_limit` (50).</response>
+    /// <response code="409">`code`: `printer_already_connected`, `discovered_printer_already_connected` (the same printer or address is already on this bridge), `printer_connected_elsewhere` (another of your bridges watches it; `bridgeId` names it), `printer_configured_on_bridge` (a bridge watches it from its config file; `bridgeId` names it) or `bridge_printer_limit` (50).</response>
     [HttpPost("{id:long}/printers")]
     [Authorize(Policy = "InteractiveUserOnly")]
     [ProducesResponseType(StatusCodes.Status201Created)]

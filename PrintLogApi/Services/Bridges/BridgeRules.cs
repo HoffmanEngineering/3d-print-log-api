@@ -162,6 +162,25 @@ public static partial class BridgeRules
 
     public static bool IsPort(int? port) => port is null or (>= 1 and <= 65535);
 
+    /// <summary>
+    /// The port an adapter uses when none is given, so "no port" and the default name the same
+    /// printer while two instances on one host (Moonraker on 7125 and 7126) stay apart. Moonraker,
+    /// Bambu (MQTT) and PrusaLink follow printlog-bridge's adapters; OctoPrint and SDCP have no
+    /// adapter yet and take their usual ports. 0 for anything else.
+    /// </summary>
+    public static int DefaultPort(string? kind) => kind switch
+    {
+        Connection.MoonrakerKind => 7125,
+        "bambu" => 8883,
+        "prusalink" => 80,
+        "octoprint" => 80,
+        "sdcp" => 3030,
+        _ => 0,
+    };
+
+    /// <summary>Whether two ports of one kind name the same endpoint, a missing port being the default.</summary>
+    public static bool SamePort(string? kind, int? a, int? b) => (a ?? DefaultPort(kind)) == (b ?? DefaultPort(kind));
+
     /// <summary>The adapter kind, lower-case, or null when it is not one of <see cref="Connection.BridgeKinds"/>.</summary>
     public static string? Kind(string? kind) => Connection.IsBridgeKind(kind?.Trim()) ? kind!.Trim().ToLowerInvariant() : null;
 
@@ -201,11 +220,12 @@ public static partial class BridgeRules
     /// <summary>
     /// The stable identity of a discovered printer, so the same printer is one row across
     /// check-ins and address changes: its serial, else its mainboard id, else its lowest MAC with
-    /// the port (two Moonraker instances on one host share MACs), else its address and port.
+    /// the port (two Moonraker instances on one host share MACs), else its address and port. A
+    /// missing port is the kind's default.
     /// </summary>
     public static string IdentityKey(string kind, string? serial, string? mainboardId, IReadOnlyList<string> macs, string? address, int? port)
     {
-        var portText = (port ?? 0).ToString(CultureInfo.InvariantCulture);
+        var portText = (port ?? DefaultPort(kind)).ToString(CultureInfo.InvariantCulture);
         if (serial is not null)
         {
             return $"{kind}:sn:{serial.ToUpperInvariant()}";

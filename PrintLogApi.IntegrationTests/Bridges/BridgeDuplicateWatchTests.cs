@@ -77,7 +77,7 @@ public class BridgeDuplicateWatchTests(CustomWebApplicationFactory factory) : IC
         }
 
         var entry = Assert.Single((await GetAsUserAsync(_client, bridge.Subject, $"/api/bridges/{bridge.GrantId}/printers")).EnumerateArray());
-        Assert.Equal("moonraker:ip:192.168.1.50:0", entry.GetProperty("identityKey").GetString());
+        Assert.Equal("moonraker:ip:192.168.1.50:7125", entry.GetProperty("identityKey").GetString());
     }
 
     [Fact]
@@ -154,6 +154,65 @@ public class BridgeDuplicateWatchTests(CustomWebApplicationFactory factory) : IC
         await Poll();
         Assert.InRange((await GetAsUserAsync(_client, bridge.Subject, $"/api/bridges/{bridge.GrantId}")).GetProperty("lastSeenAt").GetDateTimeOffset(),
             new DateTimeOffset(recent.AddSeconds(-1), TimeSpan.Zero), new DateTimeOffset(recent.AddSeconds(1), TimeSpan.Zero));
+    }
+
+    private static Dictionary<string, object?> Configured(object discovered)
+        => new(JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(discovered))!) { ["configured"] = true };
+
+    /// <summary>A printer another bridge watches from its config file is just as taken as one it watches from the app.</summary>
+    [Fact]
+    public async Task APrinterInAnotherBridgesConfigFile_CannotBeConnected_FromDiscoveryOrByHand()
+    {
+        var (a, b) = await TwoBridgesAsync("configured-elsewhere");
+        await CheckInOkAsync(_client, a.Token, CheckInBody(Configured(Bambu())));
+        await CheckInOkAsync(_client, b.Token, CheckInBody(Bambu(address: "192.168.2.61")));
+
+        var fromDiscovery = await Connect(b, new
+        {
+            discoveredPrinterId = Assert.Single(await DiscoveredAsync(_client, b)).GetProperty("id").GetInt64(),
+            printerId = await CreatePrinterAsync(_client, b.Subject),
+        });
+        Assert.Equal(HttpStatusCode.Conflict, fromDiscovery.StatusCode);
+        Assert.Equal("printer_configured_on_bridge", await CodeOf(fromDiscovery));
+
+        var byHand = await Connect(b, new { kind = "bambu", host = "192.168.2.62", serial = "01P00A123456789", printerId = await CreatePrinterAsync(_client, b.Subject) });
+        Assert.Equal(HttpStatusCode.Conflict, byHand.StatusCode);
+        Assert.Equal(a.GrantId, await BridgeIdOf(await Connect(b, new { kind = "bambu", host = "192.168.2.62", serial = "01P00A123456789", printerId = await CreatePrinterAsync(_client, b.Subject) })));
+    }
+
+    [Fact]
+    public async Task AHandEntry_ToAConfiguredPrintersAddressOrSerial_IsRefused()
+    {
+        var bridge = await PairBridgeAsync(_client, "configured-hand");
+        await CheckInOkAsync(_client, bridge.Token, CheckInBody(Configured(Moonraker()), Configured(Bambu())));
+
+        foreach (var body in new object[]
+        {
+            new { kind = "moonraker", host = "192.168.1.50", printerId = await CreatePrinterAsync(_client, bridge.Subject) },
+            new { kind = "bambu", host = "192.168.1.99", serial = "01P00A123456789", printerId = await CreatePrinterAsync(_client, bridge.Subject) },
+        })
+        {
+            var response = await Connect(bridge, body);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("printer_configured_on_bridge", await CodeOf(response));
+        }
+    }
+
+    /// <summary>Two Moonraker instances on one host differ by port; no port means the adapter's default.</summary>
+    [Fact]
+    public async Task TwoInstancesOnOneHost_CanBothBeConnected()
+    {
+        var bridge = await PairBridgeAsync(_client, "two-instances");
+        await CheckInOkAsync(_client, bridge.Token, CheckInBody());
+
+        Assert.Equal(HttpStatusCode.Created,
+            (await Connect(bridge, new { kind = "moonraker", host = "pi.local", printerId = await CreatePrinterAsync(_client, bridge.Subject) })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created,
+            (await Connect(bridge, new { kind = "moonraker", host = "pi.local", port = 7126, printerId = await CreatePrinterAsync(_client, bridge.Subject) })).StatusCode);
+
+        // The default port is the same instance as no port.
+        var same = await Connect(bridge, new { kind = "moonraker", host = "pi.local", port = 7125, printerId = await CreatePrinterAsync(_client, bridge.Subject) });
+        Assert.Equal(HttpStatusCode.Conflict, same.StatusCode);
     }
 
     private async Task<(PairedBridge A, PairedBridge B)> TwoBridgesAsync(string label)

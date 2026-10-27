@@ -455,8 +455,15 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   `printer_connected_elsewhere`, with the other `bridgeId`); on one bridge the same identity or
   kind and address is 409 `discovered_printer_already_connected`, and a hand entry gets an
   identity key too (`kind:ip:host:port`); a stable identity (serial, mainboard id, MAC) is also
-  refused on the user's other bridges. A printer the bridge reported as in its config file is 409
-  `printer_configured_on_bridge`, and shows as Configured even when an app entry matches.
+  refused on the user's other bridges. A printer a bridge reported as in its config file is 409
+  `printer_configured_on_bridge` (with that `bridgeId`): on that bridge by identity or kind and
+  address, on the others by stable identity. It shows as Configured even when an app entry
+  matches. A missing port is the kind's default (`BridgeRules.DefaultPort`), so two instances on
+  one host stay apart. **Known limit, left for printlog-bridge#103:** across bridges only the
+  derived identity key is compared, so bridges that identify one printer by different fields
+  (MAC on one segment, address across a VLAN, a serial only one sees) are not caught, and two
+  concurrent connects of one serial to two bridges under different printers can both pass (no
+  unique constraint spans bridges).
 - **Validation is two-level** (`BridgeCheckInValidator`, `BridgeRules`): over a cap (16 networks,
   50 printers, 8 MACs) or a malformed `agentVersion`/`mode`/`hostName` is a 400 `invalid_check_in`;
   a network or printer that breaks a rule is dropped and named in `rejected`, so one odd printer
