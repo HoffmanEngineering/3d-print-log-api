@@ -59,6 +59,43 @@ public static class DevicePairingAuthentication
         services.AddSingleton<IAuthorizationHandler, DevicePairingHandler>();
         return services;
     }
+
+    /// <summary>
+    /// Whether a pairing token's <c>scope</c> includes <c>offline_access</c>. Such a token came with
+    /// a refresh token, or from one (Auth0 keeps the scope on refreshed access tokens), and that
+    /// refresh token could mint fresh pairing tokens after the user revokes the device. Revoking
+    /// in this API cannot reach it, so those tokens may not pair at all.
+    /// </summary>
+    public static bool CarriesOfflineAccess(string? scope) =>
+        (scope ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("offline_access", StringComparer.Ordinal);
+
+    /// <summary>
+    /// What spending this pairing token records: a hash of its <c>jti</c> when it has one (Auth0's
+    /// identifier, unique per token), else of the whole token, which is just as unique per
+    /// issuance. Remembered until the token's own <c>exp</c> (plus the bearer handler's default
+    /// five-minute clock skew), after which it cannot authenticate whatever the configuration
+    /// says; a token without <c>exp</c> (the handler requires one) falls back to its age limit.
+    /// </summary>
+    public static Services.DeviceGrants.PairingTokenSpend SpendOf(ClaimsPrincipal user, string authorizationHeader, DevicePairingOptions options)
+    {
+        var jti = user.FindFirst("jti")?.Value;
+        var key = string.IsNullOrEmpty(jti)
+            ? "token:" + DeviceTokenFormat.BearerValue(authorizationHeader)
+            : "jti:" + jti;
+
+        DateTime expiresAt;
+        if (long.TryParse(user.FindFirst("exp")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var exp))
+        {
+            expiresAt = DateTimeOffset.FromUnixTimeSeconds(exp).UtcDateTime.AddMinutes(5);
+        }
+        else
+        {
+            var iat = long.TryParse(user.FindFirst("iat")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var issued) ? issued : 0;
+            expiresAt = DateTimeOffset.FromUnixTimeSeconds(iat).UtcDateTime.AddMinutes(options.MaxPairingTokenAgeMinutes + 1);
+        }
+
+        return new Services.DeviceGrants.PairingTokenSpend(DeviceTokenFormat.Hash(key), expiresAt);
+    }
 }
 
 public sealed class DevicePairingRequirement : IAuthorizationRequirement;

@@ -13,16 +13,32 @@ public sealed record DeviceGrantIdentity(long GrantId, long UserId, IReadOnlyLis
 /// <summary>The outcome of pairing: the grant, the token (shown this once), and whether the row is new.</summary>
 public sealed record PairedDevice(DeviceGrant Grant, string Token, bool Created);
 
+/// <summary>
+/// The Auth0 token a pairing spends: the hash it is remembered by (<see cref="PairingTokenUse"/>)
+/// and when that memory may be dropped.
+/// </summary>
+public sealed record PairingTokenSpend(string KeyHash, DateTime ExpiresAt);
+
+/// <summary>A grant that was revoked, for the audit event.</summary>
+public sealed record RevokedDeviceGrant(long Id, string? ClientId, string Scopes);
+
 public sealed class DeviceGrantLimitException : Exception;
+
+public sealed class PairingTokenUsedException : Exception;
 
 public interface IDeviceGrantService
 {
-    Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, CancellationToken ct);
+    /// <summary>
+    /// Pairs (or re-pairs) a device and spends <paramref name="pairingToken"/> in the same save.
+    /// Throws <see cref="PairingTokenUsedException"/> when that token was spent before, and
+    /// <see cref="DeviceGrantLimitException"/> when the user has too many devices.
+    /// </summary>
+    Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct);
 
     Task<IReadOnlyList<DeviceGrant>> ListAsync(long userId, CancellationToken ct);
 
-    /// <summary>Deletes the user's grant. False when there is none with that id for this user.</summary>
-    Task<bool> RevokeAsync(long userId, long grantId, CancellationToken ct);
+    /// <summary>Deletes the user's grant and returns what it was, or null when there is none with that id for this user.</summary>
+    Task<RevokedDeviceGrant?> RevokeAsync(long userId, long grantId, CancellationToken ct);
 
     /// <summary>The grant a token belongs to, or null.</summary>
     Task<DeviceGrantIdentity?> AuthenticateAsync(string token, CancellationToken ct);
@@ -47,12 +63,23 @@ public sealed class DeviceGrantService(
 
     private static string LastUsedThrottleKey(long grantId) => $"devicegrant_lastused:{grantId}";
 
-    public Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, CancellationToken ct)
-        => PairAsync(userId, deviceId, name, scopes, clientId, ct, retried: false);
+    public Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct)
+        => PairAsync(userId, deviceId, name, scopes, clientId, pairingToken, ct, retried: false);
 
-    private async Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, CancellationToken ct, bool retried)
+    private async Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct, bool retried)
     {
         var now = clock.GetUtcNow().UtcDateTime;
+
+        // Spent tokens are only worth remembering while they could still pass the age check, so
+        // the table holds about ten minutes of pairings. One indexed delete per pairing keeps it
+        // there with no background job.
+        await context.PairingTokenUses.Where(u => u.ExpiresAt < now).ExecuteDeleteAsync(ct);
+
+        if (await IsSpentAsync(pairingToken, ct))
+        {
+            throw new PairingTokenUsedException();
+        }
+
         var token = DeviceTokenFormat.NewToken();
 
         var grant = await context.DeviceGrants.SingleOrDefaultAsync(g => g.UserId == userId && g.DeviceId == deviceId, ct);
@@ -78,21 +105,40 @@ public sealed class DeviceGrantService(
         grant.ClientId = clientId;
         grant.PairedDate = now;
 
+        // Spent in the same save as the grant: a pairing that fails leaves the token unspent, and
+        // two exchanges of one token cannot both commit, whichever instance serves them.
+        context.PairingTokenUses.Add(new PairingTokenUse { TokenKeyHash = pairingToken.KeyHash, ExpiresAt = pairingToken.ExpiresAt });
+
         try
         {
             await context.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException) when (created && !retried)
+        catch (DbUpdateException)
         {
-            // Two first pairings of one device raced (a bridge retrying a timed-out request) and
-            // the other one inserted the (UserId, DeviceId) row. Pair again, which now rotates
-            // that row: the device keeps whichever token it receives last.
             context.ChangeTracker.Clear();
-            return await PairAsync(userId, deviceId, name, scopes, clientId, ct, retried: true);
+
+            // The unique key on the spent token is what loses a race between two exchanges of it.
+            if (await IsSpentAsync(pairingToken, ct))
+            {
+                throw new PairingTokenUsedException();
+            }
+
+            if (!created || retried)
+            {
+                throw;
+            }
+
+            // Two first pairings of one device, with two different tokens, raced and the other
+            // inserted the (UserId, DeviceId) row. Pair again, which now rotates that row: the
+            // device keeps whichever token it receives last.
+            return await PairAsync(userId, deviceId, name, scopes, clientId, pairingToken, ct, retried: true);
         }
 
         return new PairedDevice(grant, token, created);
     }
+
+    private Task<bool> IsSpentAsync(PairingTokenSpend pairingToken, CancellationToken ct) =>
+        context.PairingTokenUses.AnyAsync(u => u.TokenKeyHash == pairingToken.KeyHash, ct);
 
     public async Task<IReadOnlyList<DeviceGrant>> ListAsync(long userId, CancellationToken ct) =>
         await context.DeviceGrants
@@ -102,15 +148,21 @@ public sealed class DeviceGrantService(
             .ThenByDescending(g => g.Id)
             .ToListAsync(ct);
 
-    public async Task<bool> RevokeAsync(long userId, long grantId, CancellationToken ct)
+    public async Task<RevokedDeviceGrant?> RevokeAsync(long userId, long grantId, CancellationToken ct)
     {
+        var grant = await context.DeviceGrants
+            .AsNoTracking()
+            .Where(g => g.Id == grantId && g.UserId == userId)
+            .Select(g => new RevokedDeviceGrant(g.Id, g.ClientId, g.Scopes))
+            .SingleOrDefaultAsync(ct);
+
         var deleted = await context.DeviceGrants
             .Where(g => g.Id == grantId && g.UserId == userId)
             .ExecuteDeleteAsync(ct);
 
         // Nothing caches the grant itself; the throttle flag only suppresses a last-used write.
         cache.Remove(LastUsedThrottleKey(grantId));
-        return deleted > 0;
+        return deleted > 0 ? grant : null;
     }
 
     public async Task<DeviceGrantIdentity?> AuthenticateAsync(string token, CancellationToken ct)

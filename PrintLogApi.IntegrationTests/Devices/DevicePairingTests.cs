@@ -119,7 +119,7 @@ public class DevicePairingTests(CustomWebApplicationFactory factory) : IClassFix
     [Fact]
     public async Task Pair_RefusesATokenWithNoDeviceScope()
     {
-        var token = PairingToken(NewSubject("noscope"), scopes: ["openid", "offline_access"]);
+        var token = PairingToken(NewSubject("noscope"), scopes: ["openid", "profile"]);
 
         var response = await _client.SendAsync(PairRequest(token, Guid.NewGuid()), TestContext.Current.CancellationToken);
 

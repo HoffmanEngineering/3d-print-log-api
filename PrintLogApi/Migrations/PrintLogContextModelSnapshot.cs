@@ -1280,6 +1280,32 @@ namespace PrintLogApi.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.PairingTokenUse", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TokenKeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenKeyHash")
+                        .IsUnique();
+
+                    b.ToTable("PairingTokenUses");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>
                 {
                     b.Property<long>("Id")

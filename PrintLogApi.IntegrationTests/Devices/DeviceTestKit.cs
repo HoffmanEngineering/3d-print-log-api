@@ -20,19 +20,34 @@ public static class DeviceTestKit
         DeviceScopes.PrintersSlots, DeviceScopes.FilamentsRead, DeviceScopes.ConnectionsWrite,
     ];
 
-    /// <summary>An access token as Auth0 issues it to the bridge's Native app for the device audience.</summary>
+    /// <summary>
+    /// An access token as Auth0 issues it to the bridge's Native app for the device audience. Each
+    /// gets its own <c>jti</c> unless <paramref name="jti"/> names one (or <paramref name="withJti"/>
+    /// is false): two tokens minted in the same second with the same claims are otherwise
+    /// byte-identical, and pairing tokens are single-use.
+    /// </summary>
     public static string PairingToken(
         string subject,
         IEnumerable<string>? scopes = null,
         string audience = TestJwt.DeviceAudience,
         string? clientId = TestJwt.DeviceClientId,
-        DateTime? issuedAt = null)
-        => TestJwt.Create(
-            audience,
-            subject,
-            scopes ?? BridgeScopes,
-            extraClaims: clientId is null ? null : [new Claim("azp", clientId)],
-            issuedAt: issuedAt);
+        DateTime? issuedAt = null,
+        string? jti = null,
+        bool withJti = true)
+    {
+        var claims = new List<Claim>();
+        if (clientId is not null)
+        {
+            claims.Add(new Claim("azp", clientId));
+        }
+
+        if (withJti)
+        {
+            claims.Add(new Claim("jti", jti ?? Guid.NewGuid().ToString("N")));
+        }
+
+        return TestJwt.Create(audience, subject, scopes ?? BridgeScopes, extraClaims: claims, issuedAt: issuedAt);
+    }
 
     public static HttpRequestMessage PairRequest(string pairingToken, Guid deviceId, string? name = "printlog-bridge on voron")
     {

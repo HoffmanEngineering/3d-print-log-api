@@ -11,6 +11,21 @@ public static class DeviceTokenErrors
     /// <summary>401: no grant has this token (never issued, rotated by a re-pair, or revoked).</summary>
     public const string InvalidToken = "invalid_device_token";
 
+    /// <summary>
+    /// 429: too many unknown device tokens from this address. Not <see cref="InvalidToken"/>, so a
+    /// bridge behind a busy NAT backs off instead of concluding it must re-pair.
+    /// </summary>
+    public const string Throttled = "device_token_throttled";
+
+    /// <summary>
+    /// 403 at pairing: the Auth0 token carries <c>offline_access</c>, so it came with (or from) a
+    /// refresh token that could pair again after a revoke. Run the device flow without it.
+    /// </summary>
+    public const string OfflineAccessNotAllowed = "offline_access_not_allowed";
+
+    /// <summary>403 at pairing: this Auth0 token (or its <c>jti</c>) was already exchanged. Run the device flow again.</summary>
+    public const string PairingTokenUsed = "pairing_token_used";
+
     /// <summary>403: a device token is not accepted on this endpoint at all.</summary>
     public const string EndpointNotAllowed = "device_endpoint_not_allowed";
 

@@ -55,12 +55,13 @@ public class DeviceGrantsController(
     /// Pairs a device: exchanges an Auth0 device-flow access token (in `Authorization: Bearer`,
     /// for the pairing audience, at most a few minutes old) for a device token. The grant gets the
     /// device scopes the access token carries. Pairing the same `deviceId` again replaces its
-    /// token and keeps the grant.
+    /// token and keeps the grant. Each access token pairs once, and one requested with
+    /// `offline_access` (or refreshed) is refused.
     /// </summary>
     /// <response code="201">A new device was paired. The body carries its token, shown only this once.</response>
     /// <response code="200">The device was already paired; its token was replaced.</response>
     /// <response code="400">`deviceId` or `name` is missing or invalid.</response>
-    /// <response code="403">The token is not a pairing token, or carries no device scope (`code`: `insufficient_scope`).</response>
+    /// <response code="403">The token is not a pairing token, or carries no device scope (`code`: `insufficient_scope`), carries `offline_access` (`offline_access_not_allowed`), or was already exchanged (`pairing_token_used`).</response>
     /// <response code="409">The account has as many paired devices as allowed (`code`: `device_grant_limit`).</response>
     [HttpPost]
     [Authorize(Policy = DevicePairingAuthentication.Policy)]
@@ -87,16 +88,30 @@ public class DeviceGrantsController(
                 $"name is required: 1 to {DeviceGrant.NameMaxLength} characters, no control characters.", "invalid_request");
         }
 
-        var scopes = DeviceScopes.FromScopeClaim(User.FindFirst("scope")?.Value);
+        var scopeClaim = User.FindFirst("scope")?.Value;
+        if (DevicePairingAuthentication.CarriesOfflineAccess(scopeClaim))
+        {
+            return CodedProblem(StatusCodes.Status403Forbidden,
+                "Pairing tokens must not carry offline_access: run the device flow without it.", DeviceTokenErrors.OfflineAccessNotAllowed);
+        }
+
+        var scopes = DeviceScopes.FromScopeClaim(scopeClaim);
         if (scopes.Count == 0)
         {
             return CodedProblem(StatusCodes.Status403Forbidden, "The token carries no device scope.", DeviceTokenErrors.InsufficientScope);
         }
 
+        var clientId = User.FindFirst("azp")?.Value;
         PairedDevice paired;
         try
         {
-            paired = await grants.PairAsync(userId, deviceId, name, scopes, User.FindFirst("azp")?.Value, ct);
+            paired = await grants.PairAsync(userId, deviceId, name, scopes, clientId,
+                DevicePairingAuthentication.SpendOf(User, Request.Headers.Authorization.ToString(), options.Value), ct);
+        }
+        catch (PairingTokenUsedException)
+        {
+            return CodedProblem(StatusCodes.Status403Forbidden,
+                "This pairing token was already used. Run the device flow again.", DeviceTokenErrors.PairingTokenUsed);
         }
         catch (DeviceGrantLimitException)
         {
@@ -104,9 +119,9 @@ public class DeviceGrantsController(
                 "This account has as many paired devices as allowed. Revoke one to pair another.", DeviceTokenErrors.GrantLimit);
         }
 
-        telemetry.TrackEvent(paired.Created ? "DevicePaired" : "DeviceRepaired");
-
         var grant = paired.Grant;
+        telemetry.TrackEvent(paired.Created ? "DevicePaired" : "DeviceRepaired", GrantProperties(grant.Id, clientId, grant.Scopes));
+
         var dto = new PairedDeviceDto(grant.Id, grant.DeviceId, grant.Name, DeviceScopes.Split(grant.Scopes),
             AsUtc(grant.CreatedDate), paired.Token, "Bearer");
 
@@ -148,14 +163,22 @@ public class DeviceGrantsController(
             return Unauthorized();
         }
 
-        if (!await grants.RevokeAsync(userId, id, ct))
+        if (await grants.RevokeAsync(userId, id, ct) is not { } revoked)
         {
             return NotFound();
         }
 
-        telemetry.TrackEvent("DeviceGrantRevoked");
+        telemetry.TrackEvent("DeviceGrantRevoked", GrantProperties(revoked.Id, revoked.ClientId, revoked.Scopes));
         return NoContent();
     }
+
+    /// <summary>What the pairing and revoke events carry: which grant, through which app, with what. Never the token.</summary>
+    private static Dictionary<string, string> GrantProperties(long grantId, string? clientId, string scopes) => new()
+    {
+        ["GrantId"] = grantId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["ClientId"] = clientId ?? string.Empty,
+        ["Scopes"] = scopes,
+    };
 
     private static DateTimeOffset AsUtc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 

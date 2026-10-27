@@ -34,13 +34,16 @@ public static class DeviceTokenFormat
     /// </summary>
     public static string? FromAuthorizationHeader(string? header)
     {
-        const string bearer = "Bearer ";
-        if (header is null || !header.StartsWith(bearer, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var value = header[bearer.Length..].Trim();
+        var value = BearerValue(header);
         return LooksLikeDeviceToken(value) ? value : null;
+    }
+
+    /// <summary>The credential in a <c>Bearer</c> <c>Authorization</c> header, or null for any other scheme.</summary>
+    public static string? BearerValue(string? header)
+    {
+        const string bearer = "Bearer ";
+        return header is not null && header.StartsWith(bearer, StringComparison.OrdinalIgnoreCase)
+            ? header[bearer.Length..].Trim()
+            : null;
     }
 }

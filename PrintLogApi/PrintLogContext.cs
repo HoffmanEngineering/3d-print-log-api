@@ -67,6 +67,7 @@ public class PrintLogContext : DbContext
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<DeviceToken> DeviceTokens { get; set; }
     public DbSet<DeviceGrant> DeviceGrants { get; set; }
+    public DbSet<PairingTokenUse> PairingTokenUses { get; set; }
     public DbSet<Connection> Connections { get; set; }
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
@@ -468,6 +469,15 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<DeviceGrant>()
             .HasIndex(g => new { g.UserId, g.DeviceId })
             .IsUnique();
+
+        // Spent pairing tokens: the unique key is what refuses a second exchange, on any
+        // instance; ExpiresAt is what the cleanup on each pairing deletes by.
+        modelBuilder.Entity<PairingTokenUse>()
+            .HasIndex(u => u.TokenKeyHash)
+            .IsUnique();
+
+        modelBuilder.Entity<PairingTokenUse>()
+            .HasIndex(u => u.ExpiresAt);
 
         modelBuilder.Entity<DeviceGrant>()
             .HasOne(g => g.User)
