@@ -46,6 +46,11 @@ public class CatalogMatchDto
     public int? ExtruderTempC { get; set; }
     public int? BedTempC { get; set; }
 
+    /// <summary>The product's material, net weight (g) and diameter (mm), for a form a barcode alone filled.</summary>
+    public string? Material { get; set; }
+    public int? WeightG { get; set; }
+    public double? DiameterMm { get; set; }
+
     public static CatalogMatchDto? From(PrintLogApi.SpoolTags.Matching.CatalogMatch? match) => match is null ? null : new()
     {
         Id = match.Id,
@@ -60,6 +65,9 @@ public class CatalogMatchDto
         ExtruderTempMaxC = match.ExtruderTempMaxC,
         ExtruderTempC = match.ExtruderTempC,
         BedTempC = match.BedTempC,
+        Material = match.Material,
+        WeightG = match.WeightG,
+        DiameterMm = match.DiameterMm,
     };
 }
 

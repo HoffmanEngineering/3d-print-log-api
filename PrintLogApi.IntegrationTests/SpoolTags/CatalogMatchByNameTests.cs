@@ -144,6 +144,10 @@ public class CatalogMatchEndpointTests : IClassFixture<CustomWebApplicationFacto
         Assert.Equal("PLA+ Silver", match!.Name);
         Assert.Equal(230, match.ExtruderTempMaxC);
         Assert.Equal(60, match.BedTempC);
+        // A barcode-only read has no OCR text, so the form takes these from the match.
+        Assert.Equal("PLA+", match.Material);
+        Assert.Equal(1000, match.WeightG);
+        Assert.Equal(1.75, match.DiameterMm);
     }
 
     private Task<HttpResponseMessage> PostAsync(CatalogMatchRequestDto body)
