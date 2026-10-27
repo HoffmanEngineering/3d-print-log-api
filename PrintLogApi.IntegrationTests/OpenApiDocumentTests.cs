@@ -194,9 +194,15 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
 
     [Theory]
     // Authenticated: a bearer token or either form of API key.
-    [InlineData("/api/Printers/summary", "get", new[] { "oauth2", "apikey", "apikeyQuery" }, false)]
+    [InlineData("/api/Printers/thumbnails", "get", new[] { "oauth2", "apikey", "apikeyQuery" }, false)]
     // [AllowAnonymous]: public data without credentials, the owner's data with them.
-    [InlineData("/api/Prints/{id}", "get", new[] { "oauth2", "apikey", "apikeyQuery" }, true)]
+    [InlineData("/api/Prints/public", "get", new[] { "oauth2", "apikey", "apikeyQuery" }, true)]
+    // [DeviceAccess] (#148): a device token too.
+    [InlineData("/api/Printers/summary", "get", new[] { "oauth2", "apikey", "apikeyQuery", "deviceToken" }, false)]
+    [InlineData("/api/Prints/{id}", "get", new[] { "oauth2", "apikey", "apikeyQuery", "deviceToken" }, true)]
+    // Pairing takes only the Auth0 device-flow token.
+    [InlineData("/api/device-grants", "post", new[] { "devicePairing" }, false)]
+    [InlineData("/api/device-grants", "get", new[] { "oauth2" }, false)]
     // InteractiveUserOnly rejects API keys, so the document must not offer them.
     [InlineData("/api/Devices", "post", new[] { "oauth2" }, false)]
     [InlineData("/api/Users/me/email", "get", new[] { "oauth2" }, false)]

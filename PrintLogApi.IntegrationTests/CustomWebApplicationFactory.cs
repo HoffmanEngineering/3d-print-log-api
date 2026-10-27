@@ -220,6 +220,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             services.PostConfigure<JwtBearerOptions>(
                 "McpBearer",
                 o => ConfigureLocalJwt(o, TestJwt.McpAudience));
+            services.PostConfigure<JwtBearerOptions>(
+                PrintLogApi.Authentication.Devices.DevicePairingAuthentication.Scheme,
+                o => ConfigureLocalJwt(o, TestJwt.DeviceAudience));
 
             // Map the MCP auth probe endpoint (test-only) guarded by the McpAccess policy.
             services.AddSingleton<IStartupFilter, McpAuthProbeStartupFilter>();
