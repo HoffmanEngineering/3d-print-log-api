@@ -72,6 +72,39 @@ public class UserDeletionService : IUserDeletionService
 
     }
 
+    /// <summary>
+    /// Deletes the user's device grants, and with them (a database cascade) their bridges. A
+    /// connection's link to a bridge has no cascade (SQL Server 1785), so the links are cleared in
+    /// the same transaction; a heartbeat that relinks one in between fails the delete, which is
+    /// then retried, the same as a single revoke (DeviceGrantService).
+    /// </summary>
+    private async Task DeleteDeviceGrantsAsync(long userId)
+    {
+        const int attempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var strategy = _context.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction = await _context.Database.BeginTransactionAsync();
+                    await _context.Connections
+                        .Where(c => c.UserId == userId && c.BridgeId != null)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.BridgeId, (long?)null));
+                    await _context.DeviceGrants
+                        .Where(g => g.UserId == userId)
+                        .ExecuteDeleteAsync();
+                    await transaction.CommitAsync();
+                });
+                return;
+            }
+            catch (System.Data.Common.DbException) when (attempt < attempts)
+            {
+            }
+        }
+    }
+
     public async Task DeleteAllDataForUser(User user)
     {
         if (user is null)
@@ -364,18 +397,16 @@ public class UserDeletionService : IUserDeletionService
                 .Where(a => a.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete paired devices (#148) before Connections: their tokens stop working at once
+            // (nothing caches them), so no heartbeat or check-in can link a connection to a bridge
+            // after this, and their bridges (printlog-bridge#100) cascade with them, desired
+            // printers included, before Printers.
+            await DeleteDeviceGrantsAsync(userId);
+
             // Delete Connections. After Prints, whose FK to them does not cascade, and before
             // Printers, which their own FK would otherwise block.
             await _context.Connections
                 .Where(c => c.UserId == userId)
-                .ExecuteDeleteAsync();
-
-            // Bridges (printlog-bridge#100) cascade from their device grants, but their desired
-            // printers point at Printers with no cascade, so they go first: after the connections
-            // that point at them, before Printers. Their child rows cascade from them.
-            var grantIds = _context.DeviceGrants.Where(g => g.UserId == userId).Select(g => g.Id);
-            await _context.Bridges
-                .Where(b => grantIds.Contains(b.Id))
                 .ExecuteDeleteAsync();
 
             // Delete Printers
@@ -460,12 +491,6 @@ public class UserDeletionService : IUserDeletionService
             // Delete API Keys
             await _context.UserApiKeys
                 .Where(key => key.UserId == userId)
-                .ExecuteDeleteAsync();
-
-            // Delete paired devices (#148). The FK cascades too; listed here so this method stays
-            // the one list of what a user owns. Their tokens stop working at once: nothing caches them.
-            await _context.DeviceGrants
-                .Where(g => g.UserId == userId)
                 .ExecuteDeleteAsync();
 
             // Delete remaining Files

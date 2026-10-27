@@ -12,7 +12,7 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    [Migration("20261027102815_AddBridges")]
+    [Migration("20261027105547_AddBridges")]
     partial class AddBridges
     {
         /// <inheritdoc />
@@ -211,14 +211,12 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("PrinterId")
+                        .IsUnique();
 
                     b.HasIndex("BridgeId", "IdentityKey")
                         .IsUnique()
                         .HasFilter("[IdentityKey] IS NOT NULL");
-
-                    b.HasIndex("BridgeId", "PrinterId")
-                        .IsUnique();
 
                     b.ToTable("BridgePrinters");
                 });

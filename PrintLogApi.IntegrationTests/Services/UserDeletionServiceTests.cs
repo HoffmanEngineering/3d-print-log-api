@@ -371,6 +371,37 @@ public class UserDeletionServiceTests
         Assert.Equal(0, await context.Printers.CountAsync(p => p.UserId == user.Id, ct));
     }
 
+    /// <summary>
+    /// Device grants go first: deleting them kills the tokens (no heartbeat or check-in can link a
+    /// connection to a bridge afterwards) and cascades the bridges. Connections come after.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAllDataForUser_DeletesDeviceGrantsBeforeConnections()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var commandInterceptor = new CommandRecordingInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSearchCollation.Register(connection);
+
+        var options = new DbContextOptionsBuilder<PrintLogContext>().UseSqlite(connection).AddInterceptors(commandInterceptor).Options;
+        await using var context = new PrintLogContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+
+        var user = new User { OAuthUserId = $"auth0|grant-order-{Guid.NewGuid()}", ViewStatus = ProfileViewStatus.Public };
+        context.Users.Add(user);
+        await context.SaveChangesAsync(ct);
+
+        commandInterceptor.Clear();
+        context.ChangeTracker.Clear();
+        await CreateService(context).DeleteAllDataForUser(await context.Users.SingleAsync(u => u.Id == user.Id, ct));
+
+        var grants = commandInterceptor.Commands.FindIndex(c => c.Contains("DELETE FROM \"DeviceGrants\"", StringComparison.OrdinalIgnoreCase));
+        var connections = commandInterceptor.Commands.FindIndex(c => c.Contains("DELETE FROM \"Connections\"", StringComparison.OrdinalIgnoreCase));
+        Assert.True(grants >= 0 && connections >= 0, "expected both deletes");
+        Assert.True(grants < connections, "device grants must be deleted before connections");
+    }
+
     [Fact]
     public async Task DeleteAllDataForUser_InvalidatesTheUsersCacheVersion()
     {

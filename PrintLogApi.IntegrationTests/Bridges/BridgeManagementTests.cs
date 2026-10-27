@@ -71,7 +71,7 @@ public class BridgeManagementTests(CustomWebApplicationFactory factory) : IClass
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var entry = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
         Assert.Equal("mk4.local", entry.GetProperty("host").GetString());
-        Assert.Equal(JsonValueKind.Null, entry.GetProperty("identityKey").ValueKind);
+        Assert.Equal("prusalink:ip:mk4.local:80", entry.GetProperty("identityKey").GetString());
     }
 
     public static TheoryData<string, string> BadConnects() => new()

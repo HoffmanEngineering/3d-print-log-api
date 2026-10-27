@@ -154,15 +154,10 @@ namespace PrintLogApi.Migrations
                 filter: "[IdentityKey] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
-                name: "IX_BridgePrinters_BridgeId_PrinterId",
-                table: "BridgePrinters",
-                columns: new[] { "BridgeId", "PrinterId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_BridgePrinters_PrinterId",
                 table: "BridgePrinters",
-                column: "PrinterId");
+                column: "PrinterId",
+                unique: true);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_Connections_Bridges_BridgeId",

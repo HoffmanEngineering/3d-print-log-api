@@ -8,11 +8,14 @@ using PrintLogApi.Services.AgentReleases;
 namespace PrintLogApi.Services.Bridges;
 
 /// <summary>A refusal with an HTTP status and a machine-readable code, for the controller to answer.</summary>
-public sealed class BridgeProblemException(int status, string code, string detail) : Exception(detail)
+public sealed class BridgeProblemException(int status, string code, string detail, long? bridgeId = null) : Exception(detail)
 {
     public int Status { get; } = status;
 
     public string Code { get; } = code;
+
+    /// <summary>The other bridge involved, for <c>printer_connected_elsewhere</c>.</summary>
+    public long? BridgeId { get; } = bridgeId;
 }
 
 /// <summary>The device grant behind a check-in was revoked while the check-in ran.</summary>
@@ -30,8 +33,12 @@ public interface IBridgeService
     /// </summary>
     Task<BridgeCheckInResult> CheckInAsync(long grantId, ValidCheckIn report, CancellationToken ct);
 
-    /// <summary>The bridge's desired-list version, or null before its first check-in. One small read.</summary>
-    Task<string?> GetDesiredVersionAsync(long grantId, CancellationToken ct);
+    /// <summary>
+    /// The bridge's desired-list version, or null before its first check-in. One small read,
+    /// plus a write of its last-seen time when that is older than <see cref="BridgeService.PollSeenResolution"/>,
+    /// so a bridge whose check-ins a backfill holds back still shows as online while it polls.
+    /// </summary>
+    Task<string?> PollDesiredVersionAsync(long grantId, CancellationToken ct);
 
     /// <summary>The bridge's desired printers, or null before its first check-in.</summary>
     Task<DesiredPrintersDto?> GetDesiredAsync(long grantId, CancellationToken ct);
@@ -71,6 +78,9 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
 {
     /// <summary>A second "Scan now" within this window is the same request.</summary>
     public static readonly TimeSpan ScanRequestWindow = TimeSpan.FromMinutes(1);
+
+    /// <summary>A poll refreshes the bridge's last-seen time at most this often.</summary>
+    public static readonly TimeSpan PollSeenResolution = TimeSpan.FromMinutes(2);
 
     public async Task<BridgeCheckInResult> CheckInAsync(long grantId, ValidCheckIn report, CancellationToken ct)
     {
@@ -158,13 +168,28 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
         context.BridgeDiscoveredPrinters.RemoveRange(existing.Values);
     }
 
-    public async Task<string?> GetDesiredVersionAsync(long grantId, CancellationToken ct)
+    public async Task<string?> PollDesiredVersionAsync(long grantId, CancellationToken ct)
     {
-        var revision = await context.Bridges.AsNoTracking()
+        var stamp = await context.Bridges.AsNoTracking()
             .Where(b => b.Id == grantId)
-            .Select(b => (Guid?)b.DesiredRevision)
+            .Select(b => new { b.DesiredRevision, b.LastSeenAt })
             .SingleOrDefaultAsync(ct);
-        return revision is { } r ? Version(r) : null;
+        if (stamp is null)
+        {
+            return null;
+        }
+
+        // Liveness only: no cache version, and conditional so concurrent polls write once.
+        var now = clock.GetUtcNow().UtcDateTime;
+        var staleBefore = now - PollSeenResolution;
+        if (stamp.LastSeenAt < staleBefore)
+        {
+            await context.Bridges
+                .Where(b => b.Id == grantId && b.LastSeenAt < staleBefore)
+                .ExecuteUpdateAsync(s => s.SetProperty(b => b.LastSeenAt, now), ct);
+        }
+
+        return Version(stamp.DesiredRevision);
     }
 
     public async Task<DesiredPrintersDto?> GetDesiredAsync(long grantId, CancellationToken ct)
@@ -299,8 +324,11 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 && (string.Equals(p.IdentityKey, d.IdentityKey, StringComparison.OrdinalIgnoreCase)
                     || (p.Kind == d.Kind && string.Equals(p.Host, d.Address, StringComparison.OrdinalIgnoreCase)
                         && (p.Port is null || d.Port is null || p.Port == d.Port))));
-            var state = entry is not null ? DiscoveredPrinterState.Connected
-                : d.Configured ? DiscoveredPrinterState.Configured
+            // The bridge's config file wins over the app on the bridge, so Configured wins here
+            // too; printerEntryId still names a matching app entry, so the UI can offer to
+            // remove it.
+            var state = d.Configured ? DiscoveredPrinterState.Configured
+                : entry is not null ? DiscoveredPrinterState.Connected
                 : ignored.Contains((d.BridgeId, d.IdentityKey.ToLowerInvariant())) ? DiscoveredPrinterState.Ignored
                 : DiscoveredPrinterState.New;
             return new DiscoveredState(d, state, entry?.Id);
@@ -386,7 +414,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 $"A bridge watches at most {Bridge.MaxPrinters} printers from the app.");
         }
 
-        await EnsureNotConnectedAsync(entry, ct);
+        await EnsureNotConnectedAsync(userId, entry, ct);
 
         entry.CreatedDate = clock.GetUtcNow().UtcDateTime;
         context.BridgePrinters.Add(entry);
@@ -400,7 +428,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             // A concurrent connect of the same printer won the unique index, or the printer was
             // deleted meanwhile. Either way, say which.
             context.ChangeTracker.Clear();
-            await EnsureNotConnectedAsync(entry, ct);
+            await EnsureNotConnectedAsync(userId, entry, ct);
             if (!await context.Printers.AnyAsync(p => p.Id == printerId && p.UserId == userId, ct))
             {
                 throw Bad("printer_not_found", "The printer does not exist or is not yours.");
@@ -421,6 +449,11 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             found = await context.BridgeDiscoveredPrinters.AsNoTracking()
                 .SingleOrDefaultAsync(d => d.Id == discoveredId && d.BridgeId == bridgeId, ct)
                 ?? throw Bad("discovered_printer_not_found", "This bridge has not found a printer with that id.");
+            if (found.Configured)
+            {
+                throw new BridgeProblemException(StatusCodes.Status409Conflict, "printer_configured_on_bridge",
+                    "The bridge already watches this printer from its config file.");
+            }
         }
 
         string kind;
@@ -465,25 +498,66 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             Host = host,
             Port = port,
             Serial = serial,
-            IdentityKey = found?.IdentityKey ?? (serial is null ? null : BridgeRules.IdentityKey(kind, serial, null, [], null, null)),
+            // A hand entry gets an identity in the same form as a discovery, so the same address
+            // (or serial) cannot be connected twice.
+            IdentityKey = found?.IdentityKey ?? BridgeRules.IdentityKey(kind, serial, null, [], host, port),
             Macs = found?.Macs,
         };
     }
 
-    private async Task EnsureNotConnectedAsync(BridgePrinter entry, CancellationToken ct)
+    /// <summary>
+    /// Refuses every way the same printer could end up watched twice, since each watcher has its
+    /// own instance id and nothing downstream dedupes their prints: the 3D Print Log printer on
+    /// any bridge, the same identity or address on this bridge, and the same stable identity
+    /// (serial, mainboard id, MAC) on another of the user's bridges. Moving a printer between
+    /// bridges is printlog-bridge#103's; until then the 409 names the bridge that has it.
+    /// </summary>
+    private async Task EnsureNotConnectedAsync(long userId, BridgePrinter entry, CancellationToken ct)
     {
-        if (await context.BridgePrinters.AnyAsync(p => p.BridgeId == entry.BridgeId && p.PrinterId == entry.PrinterId, ct))
+        var printerOn = await context.BridgePrinters
+            .Where(p => p.PrinterId == entry.PrinterId)
+            .Select(p => (long?)p.BridgeId)
+            .FirstOrDefaultAsync(ct);
+        if (printerOn == entry.BridgeId)
         {
             throw new BridgeProblemException(StatusCodes.Status409Conflict, "printer_already_connected",
                 "That printer is already connected to this bridge.");
         }
 
-        if (entry.IdentityKey is { } key && await context.BridgePrinters.AnyAsync(p => p.BridgeId == entry.BridgeId && p.IdentityKey == key, ct))
+        if (printerOn is { } elsewhere)
+        {
+            throw ConnectedElsewhere(elsewhere);
+        }
+
+        var onThisBridge = await context.BridgePrinters.AsNoTracking()
+            .Where(p => p.BridgeId == entry.BridgeId)
+            .Select(p => new { p.Kind, p.Host, p.Port, p.IdentityKey })
+            .ToListAsync(ct);
+        if (onThisBridge.Any(p =>
+                string.Equals(p.IdentityKey, entry.IdentityKey, StringComparison.OrdinalIgnoreCase)
+                || (p.Kind == entry.Kind && string.Equals(p.Host, entry.Host, StringComparison.OrdinalIgnoreCase)
+                    && (p.Port is null || entry.Port is null || p.Port == entry.Port))))
         {
             throw new BridgeProblemException(StatusCodes.Status409Conflict, "discovered_printer_already_connected",
                 "That printer is already connected to this bridge.");
         }
+
+        // An address means nothing across networks; a serial, mainboard id or MAC does.
+        if (entry.IdentityKey is { } key && !key.Contains(":ip:", StringComparison.Ordinal))
+        {
+            var otherBridge = await context.BridgePrinters
+                .Where(p => p.IdentityKey == key && p.BridgeId != entry.BridgeId && p.Bridge.Grant.UserId == userId)
+                .Select(p => (long?)p.BridgeId)
+                .FirstOrDefaultAsync(ct);
+            if (otherBridge is { } other)
+            {
+                throw ConnectedElsewhere(other);
+            }
+        }
     }
+
+    private static BridgeProblemException ConnectedElsewhere(long bridgeId) => new(StatusCodes.Status409Conflict,
+        "printer_connected_elsewhere", "That printer is already watched by another of your bridges.", bridgeId);
 
     private static BridgeProblemException Bad(string code, string detail) => new(StatusCodes.Status400BadRequest, code, detail);
 

@@ -541,20 +541,17 @@ public class PrintLogContext : DbContext
             .HasForeignKey(i => i.BridgeId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // One entry per 3D Print Log printer per bridge (two would log every print twice), and
-        // one per physical printer. printlog-bridge#103's one-active-bridge rule will widen the
-        // first to the whole account.
+        // One entry per 3D Print Log printer across all bridges (a printer belongs to one user,
+        // and two watchers would log every print twice), and one per identity on a bridge.
+        // BridgeService also refuses the same stable identity on another of the user's bridges.
         modelBuilder.Entity<BridgePrinter>()
-            .HasIndex(p => new { p.BridgeId, p.PrinterId })
+            .HasIndex(p => p.PrinterId)
             .IsUnique();
 
         modelBuilder.Entity<BridgePrinter>()
             .HasIndex(p => new { p.BridgeId, p.IdentityKey })
             .IsUnique()
             .HasFilter("[IdentityKey] IS NOT NULL");
-
-        modelBuilder.Entity<BridgePrinter>()
-            .HasIndex(p => p.PrinterId);
 
         modelBuilder.Entity<BridgePrinter>()
             .HasOne(p => p.Bridge)

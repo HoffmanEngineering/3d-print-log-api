@@ -208,14 +208,12 @@ namespace PrintLogApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("PrinterId")
+                        .IsUnique();
 
                     b.HasIndex("BridgeId", "IdentityKey")
                         .IsUnique()
                         .HasFilter("[IdentityKey] IS NOT NULL");
-
-                    b.HasIndex("BridgeId", "PrinterId")
-                        .IsUnique();
 
                     b.ToTable("BridgePrinters");
                 });

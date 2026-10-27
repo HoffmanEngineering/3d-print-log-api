@@ -104,7 +104,8 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// <summary>
     /// A bridge reads the printers you connected to it (device token with `bridge:sync`). Send
     /// the last `ETag` in `If-None-Match`: an unchanged list answers 304, so polling costs one
-    /// small read and no write.
+    /// small read. A poll also keeps the bridge's last-seen time fresh (at most every two
+    /// minutes), so the bridge shows online while a backfill holds back its check-ins.
     /// </summary>
     /// <response code="200">The desired printers, with an `ETag`.</response>
     /// <response code="304">Unchanged since the `ETag` sent.</response>
@@ -124,7 +125,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             return DeviceTokenRequired();
         }
 
-        if (await bridges.GetDesiredVersionAsync(grantId, ct) is not { } version)
+        if (await bridges.PollDesiredVersionAsync(grantId, ct) is not { } version)
         {
             return NotRegistered();
         }
@@ -255,7 +256,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
         }
         catch (BridgeProblemException problem)
         {
-            return CodedProblem(problem.Status, problem.Message, problem.Code);
+            return CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId);
         }
     }
 
@@ -290,7 +291,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// <response code="201">Connected.</response>
     /// <response code="400">`code`: `printer_not_found`, `discovered_printer_not_found`, `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial` or `serial_required`.</response>
     /// <response code="404">You have no bridge with that id.</response>
-    /// <response code="409">`code`: `printer_already_connected`, `discovered_printer_already_connected` or `bridge_printer_limit` (50).</response>
+    /// <response code="409">`code`: `printer_already_connected`, `discovered_printer_already_connected` (the same printer or address is already on this bridge), `printer_connected_elsewhere` (another of your bridges watches it; `bridgeId` names it), `printer_configured_on_bridge` (the bridge watches it from its config file) or `bridge_printer_limit` (50).</response>
     [HttpPost("{id:long}/printers")]
     [Authorize(Policy = "InteractiveUserOnly")]
     [ProducesResponseType(StatusCodes.Status201Created)]
@@ -312,7 +313,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
         }
         catch (BridgeProblemException problem)
         {
-            return CodedProblem(problem.Status, problem.Message, problem.Code);
+            return CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId);
         }
 
         if (entry is null)
@@ -387,10 +388,14 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     private ObjectResult NotRegistered() => CodedProblem(StatusCodes.Status404NotFound,
         "This bridge has not checked in yet: PUT /api/bridges/me first.", "bridge_not_registered");
 
-    private ObjectResult CodedProblem(int status, string detail, string code)
+    private ObjectResult CodedProblem(int status, string detail, string code, long? bridgeId = null)
     {
         var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
         problem.Extensions["code"] = code;
+        if (bridgeId is { } other)
+        {
+            problem.Extensions["bridgeId"] = other;
+        }
         return new ObjectResult(problem)
         {
             StatusCode = status,
