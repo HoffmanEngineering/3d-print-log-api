@@ -186,13 +186,44 @@ public sealed class DeviceGrantService(
             .Select(g => new RevokedDeviceGrant(g.Id, g.ClientId, g.Scopes))
             .SingleOrDefaultAsync(ct);
 
-        var deleted = await context.DeviceGrants
-            .Where(g => g.Id == grantId && g.UserId == userId)
-            .ExecuteDeleteAsync(ct);
+        var deleted = await DeleteGrantAsync(userId, grantId, ct);
 
         // Nothing caches the grant itself; the throttle flag only suppresses a last-used write.
         cache.Remove(LastUsedThrottleKey(grantId));
         return deleted > 0 ? grant : null;
+    }
+
+    /// <summary>
+    /// Deletes the grant, and with it (a database cascade) its bridge and everything the bridge
+    /// found or was told to watch (printlog-bridge#100). Its connections are kept, unlinked first:
+    /// their FK has no cascade (SQL Server 1785). A heartbeat can link a connection again between
+    /// the two statements, which fails the delete on that FK; the whole step is then retried.
+    /// </summary>
+    private async Task<int> DeleteGrantAsync(long userId, long grantId, CancellationToken ct)
+    {
+        const int attempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var strategy = context.Database.CreateExecutionStrategy();
+                return await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction = await context.Database.BeginTransactionAsync(ct);
+                    await context.Connections
+                        .Where(c => c.BridgeId == grantId && c.UserId == userId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.BridgeId, (long?)null), ct);
+                    var deleted = await context.DeviceGrants
+                        .Where(g => g.Id == grantId && g.UserId == userId)
+                        .ExecuteDeleteAsync(ct);
+                    await transaction.CommitAsync(ct);
+                    return deleted;
+                });
+            }
+            catch (System.Data.Common.DbException) when (attempt < attempts)
+            {
+            }
+        }
     }
 
     public async Task<DeviceGrantIdentity?> AuthenticateAsync(string token, CancellationToken ct)

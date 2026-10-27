@@ -370,6 +370,14 @@ public class UserDeletionService : IUserDeletionService
                 .Where(c => c.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Bridges (printlog-bridge#100) cascade from their device grants, but their desired
+            // printers point at Printers with no cascade, so they go first: after the connections
+            // that point at them, before Printers. Their child rows cascade from them.
+            var grantIds = _context.DeviceGrants.Where(g => g.UserId == userId).Select(g => g.Id);
+            await _context.Bridges
+                .Where(b => grantIds.Contains(b.Id))
+                .ExecuteDeleteAsync();
+
             // Delete Printers
             await _context.Printers
                 .Where(p => p.UserId == userId)
