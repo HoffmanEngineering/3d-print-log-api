@@ -27,6 +27,7 @@ public partial class DeviceAccessCoverageTests(CustomWebApplicationFactory facto
         "GET api/Users/me/user-settings *",
         "GET api/Subscription/me *",
         "GET api/Printers/summary printers:read",
+        "POST api/Printers printers:create",
         "GET api/Printers/{id} printers:read",
         "GET api/Printers/{id}/filament printers:read",
         "PUT api/Printers/{id} printers:slots",

@@ -322,6 +322,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersCreate)]
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

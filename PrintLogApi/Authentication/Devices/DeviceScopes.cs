@@ -12,6 +12,9 @@ public static class DeviceScopes
     public const string PrintsWrite = "prints:write";
     public const string PrintersRead = "printers:read";
 
+    /// <summary>Adding a printer, which the bridge offers while pairing ("create new").</summary>
+    public const string PrintersCreate = "printers:create";
+
     /// <summary>Loading and unloading spools, including the whole-printer <c>PUT</c> the bridge falls back to.</summary>
     public const string PrintersSlots = "printers:slots";
 
@@ -25,7 +28,7 @@ public static class DeviceScopes
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        PrintsRead, PrintsWrite, PrintersRead, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite,
+        PrintsRead, PrintsWrite, PrintersRead, PrintersCreate, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite,
     };
 
     /// <summary>
