@@ -158,6 +158,7 @@ public class Startup
         services.AddTransient<IPrinterCategoryService, PrinterCategoryService>();
         services.AddTransient<ICommentService, CommentService>();
         services.AddTransient<IPrintImageService, PrintImageService>();
+        services.AddScoped<IProcessedImageWriter, ProcessedImageWriter>();
         services.AddTransient<IFilamentService, FilamentService>();
         services.AddTransient<IMediaStorageQuotaService, MediaStorageQuotaService>();
         services.AddTransient<IFilamentImageService, FilamentImageService>();

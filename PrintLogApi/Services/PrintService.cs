@@ -2286,6 +2286,21 @@ public sealed class PrintService(
             context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
         }
 
+        // The derivative File rows (thumbnail, social) are not loaded with the images, and their
+        // FKs are Restrict, so read them by id. Like the originals above, their blobs stay.
+        var derivativeFileIds = prints
+            .SelectMany(p => p.Images!)
+            .SelectMany(i => new[] { i.ThumbnailFileId, i.SocialFileId })
+            .OfType<Guid>()
+            .ToList();
+        if (derivativeFileIds.Count > 0)
+        {
+            var derivativeFiles = await context.Files
+                .Where(f => derivativeFileIds.Contains(f.Id))
+                .ToListAsync(ct);
+            context.Files.RemoveRange(derivativeFiles);
+        }
+
         // Remove Print Attachments.
         var attachments = await context.PrintAttachments
             .Include(a => a.File)

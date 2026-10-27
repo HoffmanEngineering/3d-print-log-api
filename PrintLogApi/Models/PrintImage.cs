@@ -16,6 +16,30 @@ public class PrintImage : TimestampEntity
     public Guid FileId { get; set; }
     public File File { get; set; } = null!;
 
+    /// <summary>
+    /// The list-view derivative (320px WebP). Null for images uploaded before uploads were
+    /// processed, and when thumbnail generation failed.
+    /// </summary>
+    public Guid? ThumbnailFileId { get; set; }
+    public File? ThumbnailFile { get; set; }
+
+    /// <summary>The link-preview derivative. Not generated yet (#281 fills it).</summary>
+    public Guid? SocialFileId { get; set; }
+    public File? SocialFile { get; set; }
+
+    /// <summary>
+    /// MIME type of the original, from the server-side decode. Null for images uploaded before
+    /// uploads were processed; those are served by file extension, raster types only.
+    /// </summary>
+    [StringLength(64)]
+    public string? ContentType { get; set; }
+
+    /// <summary>Pixel width of the stored original, after orientation was applied.</summary>
+    public int? Width { get; set; }
+
+    /// <summary>Pixel height of the stored original, after orientation was applied.</summary>
+    public int? Height { get; set; }
+
     public bool IsDefault { get; set; }
 
     public int DisplayOrder { get; set; }
