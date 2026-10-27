@@ -481,7 +481,9 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
     }
 
     /// <summary>
-    /// Whether the printer has a printlog-bridge connection, live or stale. Any registered one
+    /// Whether the printer has a printlog-bridge connection of any adapter kind
+    /// (<see cref="Connection.BridgeKinds"/>), live or stale: any bridge logs the printer's prints
+    /// itself, so a notifier would only duplicate them (printlog-bridge#82). Any registered one
     /// counts, not only one seen in the last <see cref="Connection.StaleAfter"/>: the block is
     /// pasted once and kept, so it should follow whether the printer runs the bridge, not whether
     /// the bridge happened to be up at that moment. A bridge that is down for good is removed in
@@ -489,7 +491,7 @@ Nothing has been blocked. Contact the account holder before capping anything.<br
     /// </summary>
     private Task<bool> HasBridgeAsync(long userId, long printerId, CancellationToken ct) =>
         context.Connections.AnyAsync(c =>
-            c.UserId == userId && c.PrinterId == printerId && c.Kind == Connection.MoonrakerKind, ct);
+            c.UserId == userId && c.PrinterId == printerId && Connection.BridgeKinds.Contains(c.Kind), ct);
 
     /// <summary>
     /// Whether the printer is a Snapmaker U1: linked to the catalog model <c>snapmaker-u1</c>, or, for a

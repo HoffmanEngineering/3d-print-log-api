@@ -15,7 +15,12 @@ public sealed class AgentReleaseOptions
     /// </summary>
     public Dictionary<string, string> Repositories { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
+        // One entry per printlog-bridge adapter (Connection.BridgeKinds).
         ["moonraker"] = "HoffmanEngineering/printlog-bridge",
+        ["octoprint"] = "HoffmanEngineering/printlog-bridge",
+        ["prusalink"] = "HoffmanEngineering/printlog-bridge",
+        ["bambu"] = "HoffmanEngineering/printlog-bridge",
+        ["sdcp"] = "HoffmanEngineering/printlog-bridge",
     };
 
     /// <summary>How long a version read from GitHub is served before it is read again.</summary>

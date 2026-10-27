@@ -19,6 +19,33 @@ public class Connection
     /// <summary>The <see cref="Kind"/> the printlog-bridge registers for a Moonraker printer.</summary>
     public const string MoonrakerKind = "moonraker";
 
+    /// <summary>
+    /// The kinds printlog-bridge registers, one per adapter (printlog-bridge#82): Moonraker,
+    /// OctoPrint, PrusaLink, Bambu Lab and Elegoo's SDCP. A connection of any of them is a bridge
+    /// that logs its printer's prints itself.
+    /// </summary>
+    public static readonly string[] BridgeKinds = [MoonrakerKind, "octoprint", "prusalink", "bambu", "sdcp"];
+
+    /// <summary>Whether <paramref name="kind"/> is one of <see cref="BridgeKinds"/>, ignoring case.</summary>
+    public static bool IsBridgeKind(string? kind) =>
+        kind is not null && BridgeKinds.Contains(kind, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The source a print created through a connection of this kind records, or null to keep the
+    /// caller's. <c>moonraker</c> has none on purpose: its bridge prints have always been
+    /// <see cref="PrintSource.ApiKey"/>, and <see cref="PrintSource.Moonraker"/> means the
+    /// notifier. Moving them would change what existing users' new prints count toward
+    /// (achievements, the sync snapshot, the silent-printer email), which needs its own decision.
+    /// </summary>
+    public static PrintSource? PrintSourceForKind(string? kind) => kind?.ToLowerInvariant() switch
+    {
+        "octoprint" => PrintSource.OctoPrint,
+        "prusalink" => PrintSource.PrusaLink,
+        "bambu" => PrintSource.Bambu,
+        "sdcp" => PrintSource.Sdcp,
+        _ => null,
+    };
+
     [Key]
     public Guid Id { get; set; }
 
