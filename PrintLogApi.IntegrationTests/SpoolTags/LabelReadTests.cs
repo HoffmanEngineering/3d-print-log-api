@@ -79,6 +79,8 @@ public class LabelReadTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.Equal(entryId, response.CatalogMatch?.Id);
         Assert.Equal(1.0, response.CatalogMatch!.Confidence);
+        Assert.Equal("SpoolmanDB", response.CatalogMatch.Source);
+        Assert.Equal(1.24, response.CatalogMatch.DensityGramPerCubicCm);
     }
 
     [Fact]

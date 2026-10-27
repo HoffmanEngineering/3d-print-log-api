@@ -222,7 +222,7 @@ public class FilamentsController(
     /// <response code="200">The best catalog entry, with its temperatures.</response>
     /// <response code="204">No entry matches well enough.</response>
     [HttpPost("catalog-match")]
-    [ProducesResponseType<CatalogMatch>(StatusCodes.Status200OK)]
+    [ProducesResponseType<CatalogMatchDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> MatchCatalog([FromBody] CatalogMatchRequestDto request, CancellationToken ct)
     {
@@ -233,7 +233,7 @@ public class FilamentsController(
 
         var match = await catalogMatcher.MatchByNameAsync(
             new LabelReading(request.Brand, request.MaterialType, request.ColorName, request.NetWeightG, request.DiameterMm, null, null, null, null), ct);
-        return match is null ? NoContent() : Ok(match);
+        return match is null ? NoContent() : Ok(CatalogMatchDto.From(match));
     }
 
     /// <summary>

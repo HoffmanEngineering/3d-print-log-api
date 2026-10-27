@@ -63,7 +63,7 @@ public sealed class LabelReadService(
         }
         catalogMatch ??= await matcher.MatchByNameAsync(reading, ct);
 
-        return new LabelReadResponse(reading, catalogMatch, own.Take(TagSuggestionRanker.MaxSuggestions).ToList(), barcodes);
+        return new LabelReadResponse(reading, CatalogMatchDto.From(catalogMatch), own.Take(TagSuggestionRanker.MaxSuggestions).ToList(), barcodes);
     }
 
     private async Task<LabelReading> ReadAsync(long userId, string text, LabelFieldsDto? fields, CancellationToken ct)

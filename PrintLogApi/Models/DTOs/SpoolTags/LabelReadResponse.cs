@@ -1,12 +1,11 @@
 ﻿using PrintLogApi.SpoolTags.Labels;
-using PrintLogApi.SpoolTags.Matching;
 
 namespace PrintLogApi.Models.DTOs.SpoolTags;
 
 /// <summary>A label read, resolved: what it says, the user's spools it may be, and the catalog entry it may be.</summary>
 public sealed record LabelReadResponse(
     LabelReading Reading,
-    CatalogMatch? CatalogMatch,
+    CatalogMatchDto? CatalogMatch,
     IReadOnlyList<LabelOwnMatch> OwnMatches,
     IReadOnlyList<LabelBarcode> Barcodes);
 

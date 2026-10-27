@@ -136,9 +136,14 @@ public class CatalogMatchEndpointTests : IClassFixture<CustomWebApplicationFacto
         var response = await PostAsync(new CatalogMatchRequestDto { Brand = brand, MaterialType = "PLA+", ColorName = "silver", NetWeightG = 1000 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var match = await response.Content.ReadFromJsonAsync<CatalogMatch>(Ct);
+        var json = await response.Content.ReadAsStringAsync(Ct);
+        // The same shape a tag read's catalogMatch has, which the web app already reads.
+        Assert.Contains("\"densityGramPerCubicCm\":1.24", json);
+        Assert.Contains("\"source\":\"SpoolmanDB\"", json);
+        var match = System.Text.Json.JsonSerializer.Deserialize<CatalogMatchDto>(json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         Assert.Equal("PLA+ Silver", match!.Name);
         Assert.Equal(230, match.ExtruderTempMaxC);
+        Assert.Equal(60, match.BedTempC);
     }
 
     private Task<HttpResponseMessage> PostAsync(CatalogMatchRequestDto body)
