@@ -49,6 +49,9 @@
   <ItemGroup>
     <None Include="..\tests-fixtures\cost-fixtures.json" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\cost-fixtures.json" />
     <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
+    <!-- GIF (two frames) and BMP images in the formats older uploads accepted (ImageBackfillTests). -->
+    <None Include="..\tests-fixtures\legacy-animated.gif" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\legacy-animated.gif" />
+    <None Include="..\tests-fixtures\legacy.bmp" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\legacy.bmp" />
     <!-- Notifier and OctoPrint webhook bodies in the shape real traffic has (PrintEventPipelineTests). -->
     <None Include="..\tests-fixtures\print-events\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\print-events" />
     <!-- Raw tag dumps (signature region zeroed) for the spool tag decoders. -->

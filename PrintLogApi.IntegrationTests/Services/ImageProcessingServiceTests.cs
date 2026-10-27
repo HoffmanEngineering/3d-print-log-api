@@ -185,4 +185,57 @@ public class ImageProcessingServiceTests
             System.Text.Encoding.ASCII.GetString(result.Original),
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Gif_IsRejectedForUploads()
+    {
+        await using var gif = Fixture("legacy-animated.gif");
+
+        var ex = await Assert.ThrowsAsync<InvalidImageException>(
+            () => _service.ProcessAsync(gif, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Unsupported image format", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LegacyFormats_AcceptBmp_AndReportTheSourceType()
+    {
+        using var bmp = Bmp24(50, 40);
+
+        var result = await _service.ProcessAsync(
+            bmp, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/jpeg", result.ContentType);
+        Assert.Equal("image/bmp", result.SourceContentType);
+        Assert.Equal(50, result.Width);
+        Assert.Equal(40, result.Height);
+        Assert.NotNull(result.Thumbnail);
+    }
+
+    [Fact]
+    public async Task LegacyFormats_TakeTheFirstFrameOfAnAnimatedGif()
+    {
+        // Two frames: red, then blue.
+        await using var gif = Fixture("legacy-animated.gif");
+
+        var result = await _service.ProcessAsync(
+            gif, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/gif", result.SourceContentType);
+        Assert.Equal(64, result.Width);
+        Assert.Equal(48, result.Height);
+        using var decoded = SKBitmap.Decode(result.Original);
+        var pixel = decoded.GetPixel(32, 24);
+        Assert.True(pixel.Red > 200 && pixel.Blue < 60, $"expected the red first frame, got {pixel}");
+    }
+
+    [Fact]
+    public async Task UploadOptions_ReportTheSourceType()
+    {
+        using var png = Encode(100, 50, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", result.SourceContentType);
+    }
 }
