@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Security.Claims;
+using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Caching.Memory;
 using PrintLogApi.Caching;
 using PrintLogApi.Services.DeviceGrants;
@@ -30,7 +31,7 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
 
     private readonly int _maxFailedAttemptsPerMinute = configuration.GetValue("Api:InvalidDeviceTokenAttemptsPerMinute", 20);
 
-    public async Task InvokeAsync(HttpContext context, IDeviceGrantService grants)
+    public async Task InvokeAsync(HttpContext context, IDeviceGrantService grants, TelemetryClient telemetry)
     {
         var token = context.Request.Path.StartsWithSegments(ApiPath)
             ? DeviceTokenFormat.FromAuthorizationHeader(context.Request.Headers.Authorization.ToString())
@@ -44,6 +45,7 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
 
         if (context.Request.Headers.ContainsKey("X-Api-Key") || context.Request.Query.ContainsKey("api_key"))
         {
+            TrackRejected(telemetry, "multiple_credentials", null);
             await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status400BadRequest, DeviceTokenErrors.MultipleCredentials,
                 "Send a device token or an API key, not both.");
             return;
@@ -54,12 +56,14 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
         {
             if (RegisterFailedAttempt(context))
             {
+                TrackRejected(telemetry, "throttled", null);
                 context.Response.Headers.RetryAfter = "60";
-                await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status429TooManyRequests, DeviceTokenErrors.InvalidToken,
+                await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status429TooManyRequests, DeviceTokenErrors.Throttled,
                     "Too many invalid device token attempts.");
                 return;
             }
 
+            TrackRejected(telemetry, "invalid_token", null);
             await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status401Unauthorized, DeviceTokenErrors.InvalidToken,
                 "The device token is not valid. It may have been revoked or replaced; pair the device again.",
                 "Bearer error=\"invalid_token\"");
@@ -73,6 +77,7 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
             var access = endpoint.Metadata.GetMetadata<DeviceAccessAttribute>();
             if (access is null)
             {
+                TrackRejected(telemetry, "endpoint_not_allowed", identity.GrantId);
                 await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status403Forbidden, DeviceTokenErrors.EndpointNotAllowed,
                     "Device tokens cannot be used on this endpoint.");
                 return;
@@ -80,6 +85,7 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
 
             if (access.Scope is not null && !identity.Scopes.Contains(access.Scope))
             {
+                TrackRejected(telemetry, "insufficient_scope", identity.GrantId);
                 await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status403Forbidden, DeviceTokenErrors.InsufficientScope,
                     $"This device was not granted the {access.Scope} scope.",
                     $"Bearer error=\"insufficient_scope\", scope=\"{access.Scope}\"");
@@ -91,6 +97,22 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
         }
 
         await next(context);
+    }
+
+    /// <summary>
+    /// One event per refused device-token request, by reason, with the grant when the token was
+    /// valid. Never the token or its hash. A flood of guesses shows up as <c>throttled</c>; the SDK's
+    /// default adaptive sampling keeps it from costing more than any other request flood.
+    /// </summary>
+    private static void TrackRejected(TelemetryClient telemetry, string reason, long? grantId)
+    {
+        var properties = new Dictionary<string, string> { ["Reason"] = reason };
+        if (grantId is { } id)
+        {
+            properties["GrantId"] = id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        telemetry.TrackEvent("DeviceTokenRejected", properties);
     }
 
     private static ClaimsPrincipal CreatePrincipal(DeviceGrantIdentity grant)

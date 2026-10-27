@@ -62,8 +62,10 @@ public static class RestProtectedResource
         {
             // /spoolman too (#176): its credential is HTTP Basic, not an OAuth token, so pointing
             // its 401 at OAuth metadata would send a client looking for a flow that does not exist.
+            // A device token's 401 neither (#148): the remedy is pairing again, not an OAuth sign-in.
             if (!context.Request.Path.StartsWithSegments(McpPath)
-                && !Spoolman.SpoolmanAuthentication.IsSpoolmanPath(context))
+                && !Spoolman.SpoolmanAuthentication.IsSpoolmanPath(context)
+                && Devices.DeviceTokenFormat.FromAuthorizationHeader(context.Request.Headers.Authorization.ToString()) is null)
             {
                 context.Response.OnStarting(() =>
                 {
