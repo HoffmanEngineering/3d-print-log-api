@@ -208,6 +208,17 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   `MaxPairingTokenAgeMinutes` old, and the token must carry a `DeviceScopes` scope. Blank client
   or audience fails closed (discovery 503, pairing refused); issued device tokens keep working.
   `(UserId, DeviceId)` is unique: re-pairing a device rotates its token on the same row.
+- **A pairing token never carries `offline_access`** (403 `offline_access_not_allowed`). One that
+  does came with a refresh token, or from one (refreshed access tokens keep the scope), and that
+  refresh token could mint fresh pairing tokens after the user revoked the device, silently
+  re-pairing it. Revoking here cannot reach a refresh token in Auth0, so the API refuses them, and
+  the Auth0 API for devices must have Allow Offline Access off.
+- **Each pairing token pairs once** (403 `pairing_token_used`). `PairingTokenUses` holds a hash of
+  its `jti`, or of the whole token when there is no `jti`, until the token's `exp` plus 5 minutes.
+  It is spent in the same `SaveChanges` as the grant, so a refused pairing leaves it unspent, and
+  the unique index decides a race on any instance. Each pairing deletes expired rows first (one
+  indexed delete); there is no background job. A bridge whose pairing response was lost runs the
+  device flow again.
 - **Where a device token works is an allow-list.** `DeviceTokenMiddleware` (after
   `UseAuthentication`, before `ApiKeyMiddleware`) sets a principal only on an endpoint whose action
   carries `[DeviceAccess(scope)]` and only if the grant holds that scope; everywhere else it answers
@@ -224,7 +235,12 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   `auth_method=device` (prints get `PrintSource.ApiKey`, as bridge prints always have) and
   `ConnectorCredentialClaim` `device:<id>`, so #151's budget applies unchanged.
 - The `/api` error `code`s in `DeviceTokenErrors` are the bridge's contract: `invalid_device_token`
-  (401) means "re-pair".
+  (401) means "re-pair", and nothing else may use it; the per-address guess limit answers 429
+  `device_token_throttled`. A 401 for a `pld_` bearer carries no `resource_metadata` (the remedy
+  is pairing, not OAuth).
+- Telemetry: `DevicePaired`/`DeviceRepaired`/`DeviceGrantRevoked` carry `GrantId`, `ClientId` and
+  `Scopes`; `DeviceTokenRejected` carries `Reason` (and `GrantId` for a valid token). Never the
+  token or its hash.
 
 ## Claiming a print (#165)
 
