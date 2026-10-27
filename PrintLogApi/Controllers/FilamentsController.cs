@@ -3,6 +3,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -105,6 +106,7 @@ public class FilamentsController(
     /// <response code="200">The spool carrying the tag.</response>
     /// <response code="400">The UID is not hex bytes.</response>
     /// <response code="404">None of the user's spools carries the tag.</response>
+    [DeviceAccess(DeviceScopes.FilamentsRead)]
     [HttpGet("by-tag/{uid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -187,6 +189,7 @@ public class FilamentsController(
     /// <param name="spoolNumber">The spool number.</param>
     /// <response code="200">The spool with that number.</response>
     /// <response code="404">None of the user's spools has that number.</response>
+    [DeviceAccess(DeviceScopes.FilamentsRead)]
     [HttpGet("by-number/{spoolNumber:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

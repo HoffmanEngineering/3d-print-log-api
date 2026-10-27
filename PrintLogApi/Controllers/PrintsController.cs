@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
 using PrintLogApi.Authentication;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -236,6 +237,7 @@ public class PrintsController(
     ///     Normally when the print is marked as private, and the current user cannot access it.
     /// </response>
     /// <response code="404">Returned when a print with that ID does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
     [HttpGet("{id}")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -448,6 +450,7 @@ public class PrintsController(
     /// <response code="401">Returned when no user is authenticated.</response>
     /// <response code="403">Returned when the caller may not edit this print.</response>
     /// <response code="404">Returned when the print, or the project named, does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPatch("{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -485,6 +488,7 @@ public class PrintsController(
     /// <response code="403">Returned when the caller may not edit this print.</response>
     /// <response code="404">Returned when the print does not exist.</response>
     /// <response code="409">Overlapping requests kept finishing the print first. Retrying replays against the finished print.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/complete")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -522,6 +526,7 @@ public class PrintsController(
     /// <response code="403">Returned when the print is not yours.</response>
     /// <response code="404">Returned when the print does not exist.</response>
     /// <response code="409">The print is linked to another job or not Printing, or the job is already another print.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/claim")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -590,6 +595,7 @@ public class PrintsController(
     /// <response code="200">The claimable prints. Empty when there are none, or the printer is not yours.</response>
     /// <response code="400">Returned when `printerId` is missing or `limit` is out of range.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
     [HttpGet("claimable")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -648,6 +654,7 @@ public class PrintsController(
     /// <response code="404">Returned when the print does not exist or is not yours.</response>
     /// <response code="409">The print's settings came from a slicer plugin.</response>
     /// <response code="413">`configBlock` is over 512 KiB or `header` over 64 KiB.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/slicer-settings")]
     [RequestSizeLimit(MaxSlicerSettingsRequestBytes)]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -939,6 +946,7 @@ public class PrintsController(
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
     /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
@@ -954,7 +962,8 @@ public class PrintsController(
 
         try
         {
-            var sourceCandidate = AuthMethodClaim.IsApiKey(User) ? PrintSource.ApiKey : PrintSource.Web;
+            // A device token (#148) records what the bridge recorded with an API key before it.
+            var sourceCandidate = AuthMethodClaim.IsApiKey(User) || AuthMethodClaim.IsDevice(User) ? PrintSource.ApiKey : PrintSource.Web;
             var (newPrint, wasReplayed) = await printService.CreatePrint(print, userId.Value, sourceCandidate);
             var body = mapper.Map<PrintDetailDTO>(newPrint);
 
@@ -1330,6 +1339,7 @@ public class PrintsController(
     /// <param name="image">The image file to save.</param>
     /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
     /// <returns>The created PrintImage with its ID.</returns>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/image")]
     public async Task<ActionResult<PrintImageDto>> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
     {
@@ -1668,6 +1678,7 @@ public class PrintsController(
     /// <response code="401">If the user is not authenticated.</response>
     /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.FilesWrite)]
     [HttpPost("{id}/files/upload-url")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1704,6 +1715,7 @@ public class PrintsController(
     /// <response code="401">If the user is not authenticated.</response>
     /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.FilesWrite)]
     [HttpPost("{id}/files/confirm")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1743,6 +1755,7 @@ public class PrintsController(
     /// <response code="200">Returns the list of file attachments (may be empty).</response>
     /// <response code="403">If the print is private and the requesting user is not the owner.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
     [HttpGet("{id}/files")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]

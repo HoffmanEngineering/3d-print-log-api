@@ -3,6 +3,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Subscription;
@@ -20,6 +21,7 @@ public class SubscriptionController(
     /// <summary>
     /// Get the current user's subscription status.
     /// </summary>
+    [DeviceAccess]
     [HttpGet("me")]
     public async Task<ActionResult<SubscriptionDto>> GetCurrentUserSubscription()
     {

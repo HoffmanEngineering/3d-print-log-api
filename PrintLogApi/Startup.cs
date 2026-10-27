@@ -17,6 +17,7 @@ using ModelContextProtocol.Authentication;
 using PrintLogApi.Achievements;
 using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Authentication.Handlers;
 using PrintLogApi.Authentication.Spoolman;
 using PrintLogApi.Caching;
@@ -170,6 +171,8 @@ public class Startup
         services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
         services.AddTransient<INotificationService, NotificationService>();
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
+        // Paired devices and their scoped tokens (#148); the scheme and policy are in ConfigureAuthentication.
+        services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
         services.AddTransient<IConnectionService, ConnectionService>();
         // The latest agent release a connection's check-in reports (printlog-bridge#39).
         // Singleton: it holds the versions read from GitHub.
@@ -813,6 +816,21 @@ public class Startup
             {
                 jwtOptions.Authority = domain;
                 jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
+                // A device token (#148) is also sent as a bearer, and is DeviceTokenMiddleware's
+                // to judge. Stepping aside keeps this scheme from logging a parse failure for
+                // every bridge request; it would reject the value anyway.
+                jwtOptions.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        if (Authentication.Devices.DeviceTokenFormat.FromAuthorizationHeader(ctx.Request.Headers.Authorization.ToString()) is not null)
+                        {
+                            ctx.NoResult();
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                };
             })
             // Isolated MCP bearer accepts ONLY the dedicated MCP audience. Never accept
             // MCP-audience tokens through the default scheme, nor app tokens through this one.
@@ -851,6 +869,10 @@ public class Startup
             });
         }
 
+        // Device pairing (#148): the DevicePairing scheme and policy, in every environment. Off
+        // (fails closed) until the DevicePairing section names a client and an audience.
+        services.AddDevicePairing(Configuration);
+
         // The Spoolman-compatible API's own credential (#176), in every environment: the dev
         // bypass does not reach /spoolman, because the policy below pins this scheme.
         services.AddAuthentication()
@@ -876,13 +898,14 @@ public class Startup
             // phones a user receives push notifications on.
             //
             // The scheme is pinned rather than only blacklisting the role, so a future
-            // authentication scheme does not silently gain access. The role check stays as
-            // defence in depth.
+            // authentication scheme does not silently gain access. The role checks stay as
+            // defence in depth; device tokens (#148) are refused the same way.
             options.AddPolicy("InteractiveUserOnly", policy =>
             {
                 policy.AuthenticationSchemes.Add(interactiveScheme);
                 policy.RequireAuthenticatedUser();
-                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser"));
+                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser")
+                    && !ctx.User.IsInRole(Authentication.Devices.DeviceTokenMiddleware.Role));
             });
 
             options.AddPolicy("ViewPrint", policy =>
@@ -1028,6 +1051,10 @@ public class Startup
         app.UseRouting();
 
         app.UseAuthentication();
+        // Device tokens (#148) before API keys: it refuses a request carrying both, and on an
+        // endpoint without [DeviceAccess] it answers 403 itself, so a device principal never
+        // reaches authorization there.
+        app.UseMiddleware<Authentication.Devices.DeviceTokenMiddleware>();
         app.UseApiKeyAuthentication();
         app.UseAuthorization();
         // After authorization so the /mcp partition key sees the authenticated MCP user and

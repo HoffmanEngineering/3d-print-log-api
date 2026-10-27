@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.OpenApi.Models;
+using PrintLogApi.Authentication.Devices;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace PrintLogApi.OpenApi;
@@ -21,6 +22,8 @@ public static class OpenApiSetup
     public const string OAuthScheme = "oauth2";
     public const string ApiKeyHeaderScheme = "apikey";
     public const string ApiKeyQueryScheme = "apikeyQuery";
+    public const string DeviceTokenScheme = "deviceToken";
+    public const string DevicePairingScheme = "devicePairing";
 
     /// <summary>
     /// A second route on <c>MaterialTypesController</c>, kept for the web app. Documenting it
@@ -138,6 +141,23 @@ Writes made with a personal API key (`POST`, `PUT`, `PATCH` and `DELETE`) have t
                 Name = "api_key"
             });
 
+            c.AddSecurityDefinition(DeviceTokenScheme, new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                Description = "A device token (`pld_...`) from pairing a device at `POST /api/device-grants`. "
+                    + "Accepted only by the operations that list this scheme, and only with the scope each one names in its description.",
+            });
+
+            c.AddSecurityDefinition(DevicePairingScheme, new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                Description = "An access token from the Auth0 device authorization flow described by `GET /api/device-grants/pairing`. "
+                    + "Accepted only by `POST /api/device-grants`, which exchanges it for a device token.",
+            });
+
             c.OperationFilter<SecurityRequirementsOperationFilter>();
             c.OperationFilter<OpenApiRequestBodyOperationFilter>();
             c.OperationFilter<JsonFormPartsOperationFilter>();
@@ -249,6 +269,15 @@ public class SecurityRequirementsOperationFilter : IOperationFilter
             return;
         }
 
+        // Pairing takes the device-flow token and nothing else (#148).
+        if (authorizeData.Any(a => a.Policy == DevicePairingAuthentication.Policy))
+        {
+            operation.Responses.TryAdd("401", new OpenApiResponse { Description = "Unauthorized" });
+            operation.Responses.TryAdd("403", new OpenApiResponse { Description = "Forbidden" });
+            operation.Security = [Requirement(OpenApiSetup.DevicePairingScheme)];
+            return;
+        }
+
         // ApiKeyMiddleware signs an API key in under the "ApiUser" role, which this policy
         // rejects. Only an interactive (OAuth) session gets through.
         var interactiveOnly = authorizeData.Any(a => a.Policy == "InteractiveUserOnly");
@@ -274,6 +303,16 @@ public class SecurityRequirementsOperationFilter : IOperationFilter
         {
             requirements.Add(Requirement(OpenApiSetup.ApiKeyHeaderScheme));
             requirements.Add(Requirement(OpenApiSetup.ApiKeyQueryScheme));
+        }
+
+        // The allow-list DeviceTokenMiddleware enforces (#148).
+        if (metadata.OfType<DeviceAccessAttribute>().FirstOrDefault() is { } device)
+        {
+            requirements.Add(Requirement(OpenApiSetup.DeviceTokenScheme));
+            operation.Description = (operation.Description is { Length: > 0 } d ? d + "\n\n" : string.Empty)
+                + (device.Scope is null
+                    ? "A device token may call this with any scope."
+                    : $"A device token needs the `{device.Scope}` scope.");
         }
 
         operation.Security = requirements;

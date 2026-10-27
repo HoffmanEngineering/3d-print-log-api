@@ -454,6 +454,12 @@ public class UserDeletionService : IUserDeletionService
                 .Where(key => key.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Delete paired devices (#148). The FK cascades too; listed here so this method stays
+            // the one list of what a user owns. Their tokens stop working at once: nothing caches them.
+            await _context.DeviceGrants
+                .Where(g => g.UserId == userId)
+                .ExecuteDeleteAsync();
+
             // Delete remaining Files
             await _context.Files
                 .Where(f => f.CreatedById == userId)

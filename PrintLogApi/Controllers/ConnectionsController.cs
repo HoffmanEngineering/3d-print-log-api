@@ -1,6 +1,7 @@
 ﻿using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Middleware;
@@ -96,6 +97,7 @@ public class ConnectionsController(
     /// <response code="200">The connection existed and was refreshed.</response>
     /// <response code="201">The connection was registered.</response>
     /// <response code="400">Returned when a field is missing or too long, or the printer is not yours.</response>
+    [DeviceAccess(DeviceScopes.ConnectionsWrite)]
     [HttpPut("{instanceId}")]
     [ExemptFromConnectorWriteBudget]
     [ProducesResponseType(StatusCodes.Status200OK)]

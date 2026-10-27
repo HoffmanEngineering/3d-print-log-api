@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
 using PrintLogApi.Email;
 using PrintLogApi.Exceptions;
@@ -73,6 +74,7 @@ public class UsersController(
     /// Gets the user details for the currently authenticated user.
     /// </summary>
     /// <returns></returns>
+    [DeviceAccess]
     [HttpGet("me")]
     public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
     {

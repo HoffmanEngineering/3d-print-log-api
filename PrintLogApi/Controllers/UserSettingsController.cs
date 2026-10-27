@@ -4,6 +4,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.UserSetting;
@@ -27,6 +28,7 @@ public class UserSettingsController(
     /// Returns the list of the current user's UserSettings.
     /// </summary>
     /// <returns></returns>
+    [DeviceAccess]
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserSettingDto>>> GetCurrentUsersSettings()
     {

@@ -11,10 +11,10 @@ namespace PrintLogApi.Authentication;
 /// an interactive sign-in never carries it, which is how web and mobile app traffic stays out of
 /// that budget.
 ///
-/// Today the connector credentials are a personal API key, added by <c>ApiKeyMiddleware</c>, and
-/// a Spoolman connection secret, added by <c>SpoolmanBasicAuthenticationHandler</c> (#176).
-/// Scoped device tokens (#148) are meant to plug in by adding this claim with a <c>device:</c>
-/// value from their own handler; the limiter needs no change for that.
+/// The connector credentials are a personal API key, added by <c>ApiKeyMiddleware</c>, a Spoolman
+/// connection secret, added by <c>SpoolmanBasicAuthenticationHandler</c> (#176), and a device
+/// token, added by <c>DeviceTokenMiddleware</c> with a <c>device:</c> value (#148). The limiter
+/// treats them all alike.
 /// </summary>
 public static class ConnectorCredentialClaim
 {
@@ -36,6 +36,14 @@ public static class ConnectorCredentialClaim
     /// </summary>
     public static string ForSpoolman(string secret)
         => "spoolman:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("connector-credential:spoolman:" + secret)));
+
+    /// <summary>
+    /// The value for a device token (#148): the grant's id, which is not a secret. Keyed on the
+    /// grant rather than the token, so a re-pair (which rotates the token on the same grant) keeps
+    /// the device in its bucket.
+    /// </summary>
+    public static string ForDeviceGrant(long grantId)
+        => "device:" + grantId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>The credential the request authenticated with, or null for an interactive user.</summary>
     public static string? Get(ClaimsPrincipal user) => user.FindFirst(Type)?.Value;
