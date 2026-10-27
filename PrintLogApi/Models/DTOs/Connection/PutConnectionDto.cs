@@ -8,7 +8,10 @@ namespace PrintLogApi.Models.DTOs.Connection;
 /// </summary>
 public class PutConnectionDto : IValidatableObject
 {
-    /// <summary>The connector type, e.g. <c>moonraker</c>. Stored lower-case.</summary>
+    /// <summary>
+    /// The connector type, stored lower-case. printlog-bridge sends <c>moonraker</c>,
+    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> (Elegoo).
+    /// </summary>
     [StringLength(50)]
     public string? Kind { get; set; }
 
@@ -28,11 +31,39 @@ public class PutConnectionDto : IValidatableObject
     /// <summary>How the agent reaches the printer: <c>local</c> or <c>remote</c>. At most 20 characters.</summary>
     public string? Mode { get; set; }
 
-    /// <summary>Klipper's version, at most 50 characters.</summary>
+    /// <summary>
+    /// Klipper's version, at most 50 characters. Also stored as the firmware (<c>Klipper</c>) when
+    /// <see cref="FirmwareVersion"/> is not sent. Missing or null keeps the stored version.
+    /// </summary>
     public string? KlipperVersion { get; set; }
 
-    /// <summary>Moonraker's version, at most 50 characters.</summary>
+    /// <summary>
+    /// Moonraker's version, at most 50 characters. Also stored as the host software
+    /// (<c>Moonraker</c>) when <see cref="HostSoftwareVersion"/> is not sent. Missing or null keeps
+    /// the stored version.
+    /// </summary>
     public string? MoonrakerVersion { get; set; }
+
+    /// <summary>
+    /// The printer's firmware, such as <c>Klipper</c>, <c>Prusa-Firmware-Buddy</c> or <c>Bambu</c>,
+    /// at most 50 characters. <c>Klipper</c> also fills <see cref="KlipperVersion"/>. Missing or
+    /// null keeps the stored name.
+    /// </summary>
+    public string? FirmwareName { get; set; }
+
+    /// <summary>The firmware's version, at most 50 characters. Missing or null keeps the stored version.</summary>
+    public string? FirmwareVersion { get; set; }
+
+    /// <summary>
+    /// The software the agent talks to on the printer's host, such as <c>Moonraker</c>,
+    /// <c>OctoPrint</c> or <c>PrusaLink</c>, at most 50 characters. <c>Moonraker</c> also fills
+    /// <see cref="MoonrakerVersion"/>. Leave it out when there is none (a Bambu printer). Missing or
+    /// null keeps the stored name.
+    /// </summary>
+    public string? HostSoftwareName { get; set; }
+
+    /// <summary>The host software's version, at most 50 characters. Missing or null keeps the stored version.</summary>
+    public string? HostSoftwareVersion { get; set; }
 
     /// <summary>The printer model the slicer wrote in the last job's file. At most 100 characters.</summary>
     public string? PrinterModel { get; set; }
