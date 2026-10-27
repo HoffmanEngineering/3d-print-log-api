@@ -38,6 +38,12 @@ public class ConnectionDto
     /// <summary>Whether <see cref="AgentVersion"/> is older than <see cref="LatestAgentVersion"/>.</summary>
     public bool UpdateAvailable { get; set; }
 
+    /// <summary>
+    /// The paired bridge whose device token sent the last heartbeat (<c>GET /api/bridges/{id}</c>),
+    /// or null for an API-key agent or a bridge that has not checked in.
+    /// </summary>
+    public long? BridgeId { get; set; }
+
     /// <summary>The printer this connection logs prints for, or null when it is not bound to one.</summary>
     public long? PrinterId { get; set; }
 

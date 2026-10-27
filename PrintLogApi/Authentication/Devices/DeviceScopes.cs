@@ -26,9 +26,15 @@ public static class DeviceScopes
     /// <summary>Registering a connection and its heartbeat (#149).</summary>
     public const string ConnectionsWrite = "connections:write";
 
+    /// <summary>
+    /// The bridge's own check-in (printlog-bridge#100): it reports itself and the printers it
+    /// found on its network, and reads the printers the user chose for it. Never adds one.
+    /// </summary>
+    public const string BridgeSync = "bridge:sync";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        PrintsRead, PrintsWrite, PrintersRead, PrintersCreate, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite,
+        PrintsRead, PrintsWrite, PrintersRead, PrintersCreate, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite, BridgeSync,
     };
 
     /// <summary>

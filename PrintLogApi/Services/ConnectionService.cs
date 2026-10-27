@@ -8,13 +8,13 @@ namespace PrintLogApi.Services;
 
 public class ConnectionService(PrintLogContext context, TimeProvider clock) : IConnectionService
 {
-    public async Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto)
+    public async Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null)
     {
         await RequirePrinter(userId, dto.PrinterId);
 
         try
         {
-            return await UpsertOnce(userId, instanceId, dto);
+            return await UpsertOnce(userId, instanceId, dto, deviceGrantId);
         }
         catch (DbUpdateException ex)
         {
@@ -24,7 +24,10 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
             // FK on PrinterId (#201). Re-checking turns that into the documented 400, not a 500.
             await RequirePrinter(userId, dto.PrinterId);
 
-            if (!UniqueConstraintViolation.IsUniqueViolation(ex))
+            // The bridge can be revoked between reading it and the save, which fails the FK on
+            // BridgeId; the retry reads it again and records none.
+            var bridgeGone = deviceGrantId is { } grantId && !await context.Bridges.AnyAsync(b => b.Id == grantId);
+            if (!UniqueConstraintViolation.IsUniqueViolation(ex) && !bridgeGone)
             {
                 throw;
             }
@@ -33,7 +36,7 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
             // while the first was still in flight. The row exists now, so take the update path.
             try
             {
-                return await UpsertOnce(userId, instanceId, dto);
+                return await UpsertOnce(userId, instanceId, dto, deviceGrantId);
             }
             catch (DbUpdateException)
             {
@@ -54,7 +57,7 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         }
     }
 
-    private async Task<(Connection, bool)> UpsertOnce(long userId, string instanceId, PutConnectionDto dto)
+    private async Task<(Connection, bool)> UpsertOnce(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId)
     {
         var now = clock.GetUtcNow().UtcDateTime;
         var connection = await context.Connections
@@ -77,6 +80,9 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         connection.DisplayName = dto.DisplayName!.Trim();
         connection.AgentVersion = dto.AgentVersion?.Trim();
         connection.PrinterId = dto.PrinterId;
+
+        // From the token, never the body: a device whose grant has checked in as a bridge.
+        connection.BridgeId = deviceGrantId is { } grantId && await context.Bridges.AnyAsync(b => b.Id == grantId) ? grantId : null;
         connection.LastSeenAt = now;
         ApplyHealth(connection, dto, now);
 
