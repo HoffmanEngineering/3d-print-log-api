@@ -1,4 +1,4 @@
-using PrintLogApi.Models;
+﻿using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
 using PrintLogApi.Services.Analytics;
 using Xunit;
