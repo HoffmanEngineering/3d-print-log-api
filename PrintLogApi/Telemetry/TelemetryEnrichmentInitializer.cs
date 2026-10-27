@@ -27,6 +27,7 @@ public sealed class TelemetryEnrichmentInitializer(IHttpContextAccessor httpCont
     public const string AuthMethodProperty = "authMethod";
 
     public const string ApiKey = "apiKey";
+    public const string Device = "device";
     public const string Mcp = "mcp";
     public const string Spoolman = "spoolman";
     public const string Jwt = "jwt";
@@ -66,6 +67,11 @@ public sealed class TelemetryEnrichmentInitializer(IHttpContextAccessor httpCont
         if (user.IsInRole("ApiUser"))
         {
             return ApiKey;
+        }
+
+        if (user.IsInRole(Authentication.Devices.DeviceTokenMiddleware.Role))
+        {
+            return Device;
         }
 
         if (httpContext.Request.Path.StartsWithSegments("/mcp"))

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
@@ -49,6 +50,7 @@ public class PrintersController(
     /// <param name="includeInactive">By default, only returns active printers. Set this to true to return both active and inactive printers.</param>
     /// <response code="200">Returned with a paged list of printer summaries.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("summary")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -159,6 +161,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -219,6 +222,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -437,6 +441,7 @@ public class PrintersController(
     /// </summary>
     /// <param name="id"></param>
     /// <returns></returns>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("{id}/filament")]
     public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
     {
@@ -487,6 +492,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the printer or the spool.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
     [HttpPut("{id}/slots/{slot}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -548,6 +554,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
     [HttpDelete("{id}/slots/{slot}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
