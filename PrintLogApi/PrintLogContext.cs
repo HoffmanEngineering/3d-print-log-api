@@ -74,6 +74,7 @@ public class PrintLogContext : DbContext
     public DbSet<BridgeIgnoredPrinter> BridgeIgnoredPrinters { get; set; }
     public DbSet<BridgePrinter> BridgePrinters { get; set; }
     public DbSet<BridgePrinterSecret> BridgePrinterSecrets { get; set; }
+    public DbSet<BridgeSharedJob> BridgeSharedJobs { get; set; }
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
     public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
@@ -580,6 +581,18 @@ public class PrintLogContext : DbContext
             .HasOne(s => s.BridgePrinter)
             .WithMany(p => p.Secrets)
             .HasForeignKey(s => s.BridgePrinterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Jobs a bridge reported for a printer bound to another, once each (story 15a): it goes
+        // with the bridge, the only cascade path into the table.
+        modelBuilder.Entity<BridgeSharedJob>()
+            .HasIndex(j => new { j.BridgeId, j.ExternalSource, j.ExternalId })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeSharedJob>()
+            .HasOne(j => j.Bridge)
+            .WithMany()
+            .HasForeignKey(j => j.BridgeId)
             .OnDelete(DeleteBehavior.Cascade);
 
         // Not a database cascade or set-null either (Users -> Connections and Users -> DeviceGrants

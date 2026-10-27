@@ -20,6 +20,7 @@ using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Bridges;
 using PrintLogApi.Services.SlicerSettings;
 using static PrintLogApi.Models.Print;
 
@@ -45,7 +46,8 @@ public class PrintsController(
     IFileAttachmentService fileAttachmentService,
     IImageProcessingService imageProcessing,
     IProcessedImageWriter imageWriter,
-    SocialImageLookup socialImages) : ControllerBase
+    SocialImageLookup socialImages,
+    IBridgePrintGuard bridgePrintGuard) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
@@ -520,7 +522,7 @@ public class PrintsController(
     /// </remarks>
     /// <param name="id">The ID of the print.</param>
     /// <param name="claim">The job claiming it.</param>
-    /// <response code="200">The claimed print.</response>
+    /// <response code="200">The claimed print. When a paired bridge claims for a printer another of your bridges watches, and that bridge already logged the same job, it is that print instead, unchanged.</response>
     /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source, or `fileHash` is malformed.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
     /// <response code="403">Returned when the print is not yours.</response>
@@ -538,6 +540,17 @@ public class PrintsController(
         if (User.GetUserId() is not { } userId)
         {
             return Unauthorized();
+        }
+
+        if (DeviceGrantClaim.Get(User) is { } grantId)
+        {
+            var decision = await bridgePrintGuard.CheckClaimAsync(userId, grantId, id, claim, HttpContext.RequestAborted);
+            TrackSharedJob(grantId, decision, "claim");
+            if (decision is { Verdict: BridgePrintVerdict.UsePrint, PrintId: { } sameJob }
+                && await printService.GetPrintById(sameJob) is { } logged)
+            {
+                return Ok(mapper.Map<PrintDetailDTO>(logged));
+            }
         }
 
         try
@@ -943,7 +956,7 @@ public class PrintsController(
     /// SHA-1 or a connector's own identity for it. A replay never changes it.
     /// </remarks>
     /// <param name="print">The print details to create.</param>
-    /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
+    /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print. Also, for a paired bridge, when the job is evidently one another of your bridges already logged (same file, nearly the same start): a printer two bridges watch, or a job running when the printer moved. That print is returned, and the bridge finishes it with its own `complete`.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
     /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
     [DeviceAccess(DeviceScopes.PrintsWrite)]
@@ -958,6 +971,23 @@ public class PrintsController(
         if (!userId.HasValue)
         {
             return Unauthorized();
+        }
+
+        if (DeviceGrantClaim.Get(User) is { } grantId)
+        {
+            var decision = await bridgePrintGuard.CheckCreateAsync(userId.Value, grantId, print, HttpContext.RequestAborted);
+            TrackSharedJob(grantId, decision, "create");
+            if (decision is { Verdict: BridgePrintVerdict.UsePrint, PrintId: { } sameJob }
+                && await printService.GetPrintById(sameJob) is { } logged)
+            {
+                telemetry.TrackEvent("BridgePrintSameJob", new Dictionary<string, string>
+                {
+                    ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+                    ["HandedOver"] = decision.HandedOver.ToString(),
+                });
+                Response.Headers.Location = Url.Action("GetPrintById", null, new { id = logged.Id }, Request.Scheme);
+                return Ok(mapper.Map<PrintDetailDTO>(logged));
+            }
         }
 
         try
@@ -1917,4 +1947,18 @@ public class PrintsController(
     // EstimateCacheSize is gone: HybridCache charges the entry's real serialized byte length
     // against the shared budget, so the "~2KB per item" guess is both unnecessary and less
     // accurate than what replaces it. See PrintLogApi.Caching.CacheBudget.
+
+    /// <summary>A bridge's job for a printer another bridge watches (printlog-bridge#103): logged, and counted on the bridge.</summary>
+    private void TrackSharedJob(long grantId, BridgePrintDecision decision, string what)
+    {
+        if (decision.Shared)
+        {
+            telemetry.TrackEvent("BridgeSharedJob", new Dictionary<string, string>
+            {
+                ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+                ["Event"] = what,
+                ["SamePrint"] = (decision.Verdict == BridgePrintVerdict.UsePrint).ToString(),
+            });
+        }
+    }
 }

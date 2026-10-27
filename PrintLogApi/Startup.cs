@@ -175,6 +175,7 @@ public class Startup
         services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<Services.Bridges.IBridgeService, Services.Bridges.BridgeService>();
+        services.AddTransient<Services.Bridges.IBridgePrintGuard, Services.Bridges.BridgePrintGuard>();
         // The latest agent release a connection's check-in reports (printlog-bridge#39).
         // Singleton: it holds the versions read from GitHub.
         services.Configure<Services.AgentReleases.AgentReleaseOptions>(Configuration.GetSection(Services.AgentReleases.AgentReleaseOptions.SectionName));

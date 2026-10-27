@@ -122,6 +122,24 @@ public class Bridge
     /// <summary>The UTC day the owner was last told about a pending key; at most one notice a day.</summary>
     public DateTime? KeyNotifiedDay { get; set; }
 
+    /// <summary>
+    /// Distinct jobs this bridge reported for a printer another of the user's bridges is bound to:
+    /// jobs that bridge also reports, so two bridges watch one printer (printlog-bridge#103). They
+    /// are logged, never refused (the job gets the bound bridge's print when that bridge already
+    /// logged it). A job counts once however often it is sent (start, finish, claim), by its
+    /// external pair (<see cref="BridgeSharedJob"/>); a job sent without a pair counts each time.
+    /// A job that started before the printer moved away from this bridge isn't counted. Never
+    /// reset; <see cref="LastSharedJobAt"/> says whether it is still happening. Non-zero means this
+    /// bridge also watches a printer it shouldn't (its config file, most likely).
+    /// </summary>
+    public int SharedJobCount { get; set; }
+
+    /// <summary>When such a job was last reported, UTC, including a job already counted.</summary>
+    public DateTime? LastSharedJobAt { get; set; }
+
+    /// <summary>The 3D Print Log printer of the last such job. A value, not a key: the printer may be deleted.</summary>
+    public long? LastSharedJobPrinterId { get; set; }
+
     public ICollection<BridgeDiscoveredPrinter>? DiscoveredPrinters { get; set; }
 
     public ICollection<BridgePrinter>? Printers { get; set; }
@@ -263,6 +281,13 @@ public class BridgePrinter
 
     public DateTime CreatedDate { get; set; }
 
+    /// <summary>
+    /// When the user last moved it here from another bridge, UTC, or null. The bridge has watched
+    /// the printer since this (or <see cref="CreatedDate"/>): a job that started before it belongs
+    /// to the bridge that watched it then.
+    /// </summary>
+    public DateTime? MovedAt { get; set; }
+
     public ICollection<BridgePrinterSecret>? Secrets { get; set; }
 }
 
@@ -298,4 +323,31 @@ public class BridgePrinterSecret
     public string KeyFingerprint { get; set; } = null!;
 
     public DateTime UpdatedDate { get; set; }
+}
+
+/// <summary>
+/// A job this bridge reported for a printer another bridge is bound to (printlog-bridge#103,
+/// story 15a), by the bridge's external pair, so the bridge sending it again (when it ends, or as
+/// a claim) isn't counted again in <see cref="Bridge.SharedJobCount"/>. Kept for
+/// <c>BridgePrintGuard.SharedJobRetention</c>; each new one prunes older rows of its bridge.
+/// </summary>
+public class BridgeSharedJob
+{
+    [Key]
+    public long Id { get; set; }
+
+    public long BridgeId { get; set; }
+    [ForeignKey("BridgeId")]
+    public Bridge Bridge { get; set; } = null!;
+
+    [Required]
+    [MaxLength(50)]
+    public string ExternalSource { get; set; } = null!;
+
+    [Required]
+    [MaxLength(200)]
+    public string ExternalId { get; set; } = null!;
+
+    /// <summary>When the job was first reported, UTC.</summary>
+    public DateTime ReportedAt { get; set; }
 }

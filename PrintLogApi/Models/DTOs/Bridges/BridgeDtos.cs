@@ -285,6 +285,57 @@ public class ConnectBridgePrinterDto
     public string? Serial { get; set; }
 }
 
+/// <summary>
+/// The body of <c>POST /api/bridges/{id}/printers/{entryId}/move</c>. Without
+/// <c>discoveredPrinterId</c> or <c>host</c> the printer keeps its address, which suits a bridge
+/// on the same network.
+/// </summary>
+public class MoveBridgePrinterDto
+{
+    /// <summary>Another of your bridges, to watch the printer from now on.</summary>
+    public long? ToBridgeId { get; set; }
+
+    /// <summary>
+    /// The printer as the new bridge found it: its address, port, serial and identity are taken.
+    /// It must be the same kind. <c>host</c> and <c>port</c> here override them.
+    /// </summary>
+    public long? DiscoveredPrinterId { get; set; }
+
+    /// <summary>The address the new bridge reaches it at, when it differs: a private IP address or a local host name.</summary>
+    public string? Host { get; set; }
+
+    public int? Port { get; set; }
+
+    /// <summary>
+    /// The printer's credentials for the new bridge, by field: each sealed in the browser to the
+    /// new bridge's current key with associated data
+    /// <c>printlog-credential:v1:{toBridgeId}:{entryId}:{field}</c>, exactly as for
+    /// <c>PUT …/secrets/{field}</c>. A field the printer needs to connect, and that was set, must
+    /// be here (<c>secrets_required</c> otherwise); others that aren't sent are dropped.
+    /// </summary>
+    public Dictionary<string, string?>? Secrets { get; set; }
+
+    /// <summary>The new bridge's key fingerprint the values were sealed to, computed in the browser. Required with <c>secrets</c>.</summary>
+    public string? KeyFingerprint { get; set; }
+}
+
+/// <summary>The answer to a move.</summary>
+public class MovedBridgePrinterDto
+{
+    /// <summary>The entry, as the new bridge has it. Its id is unchanged.</summary>
+    public BridgePrinterDto? Printer { get; set; }
+
+    public long FromBridgeId { get; set; }
+
+    public long ToBridgeId { get; set; }
+
+    /// <summary>
+    /// The credentials that were set and are now gone because the move didn't send them (they were
+    /// sealed to the old bridge's key). Seal one again to the new bridge if the printer needs it.
+    /// </summary>
+    public List<string>? DroppedSecretFields { get; set; }
+}
+
 /// <summary>The body of <c>PATCH /api/bridges/{id}</c>. Null keeps a field; an empty string clears it.</summary>
 public class UpdateBridgeDto
 {
@@ -380,6 +431,20 @@ public class BridgeDto
 
     /// <summary>Printers it found that are not connected, not in its config file and not ignored.</summary>
     public int DiscoveredNotConnectedCount { get; set; }
+
+    /// <summary>
+    /// Distinct jobs it reported for a printer another of your bridges watches: two bridges watch
+    /// that printer. Each was logged (as the other bridge's print when that one already logged
+    /// the job), so nothing is lost, but a job can be logged twice. Non-zero: remove that printer
+    /// from this bridge (most likely its config file). Never reset.
+    /// </summary>
+    public int SharedJobCount { get; set; }
+
+    /// <summary>When such a job was last reported. A warning can be hidden once this is old: it stopped happening.</summary>
+    public DateTimeOffset? LastSharedJobAt { get; set; }
+
+    /// <summary>The printer of the last such job.</summary>
+    public long? LastSharedJobPrinterId { get; set; }
 }
 
 /// <summary>Where a discovered printer stands.</summary>

@@ -58,6 +58,30 @@ public static partial class SealedCredentials
 
     public static IReadOnlyList<string> FieldsFor(string? kind) => kind is not null && Fields.TryGetValue(kind, out var fields) ? fields : [];
 
+    /// <summary>
+    /// The credentials an adapter can't connect without, as groups of which one value is enough
+    /// (printlog-bridge's <c>app_options</c> raise <c>NeedsCredentials</c> without them): a Bambu
+    /// Lab access code; a PrusaLink password or API key; an OctoPrint API key. A Moonraker key is
+    /// only needed with <c>[authorization]</c>, so it isn't here (see <see cref="CarriedGroups"/>).
+    /// </summary>
+    private static readonly Dictionary<string, string[][]> ConnectGroups = new(StringComparer.Ordinal)
+    {
+        ["bambu"] = [["access_code"]],
+        ["prusalink"] = [["password", "api_key"]],
+        ["octoprint"] = [["api_key"]],
+    };
+
+    /// <summary>The groups a printer of this kind can't connect without. One value in each is enough.</summary>
+    public static IReadOnlyList<string[]> RequiredGroups(string? kind) => kind is not null && ConnectGroups.TryGetValue(kind, out var groups) ? groups : [];
+
+    /// <summary>
+    /// The groups a move must carry when a value in them was set: the ones a printer can't connect
+    /// without, and a Moonraker API key (set only for a Moonraker with <c>[authorization]</c>, which
+    /// then refuses the bridge without it). A PrusaLink user name only goes with the password, so it
+    /// is never required.
+    /// </summary>
+    public static IReadOnlyList<string[]> CarriedGroups(string? kind) => kind == "moonraker" ? [["moonraker_api_key"]] : RequiredGroups(kind);
+
     public static bool IsField(string? kind, string? field) => field is not null && FieldsFor(kind).Contains(field, StringComparer.Ordinal);
 
     /// <summary>The associated data that binds a value to its bridge, desired-printer entry and field.</summary>
