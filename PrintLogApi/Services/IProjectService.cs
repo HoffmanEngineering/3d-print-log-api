@@ -51,8 +51,12 @@ public interface IProjectService
     Task DeleteImageAsync(Guid projectId, int imageId, long userId);
     Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
     Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);
-    Task<ProjectImageContent?> GetImageAsync(Guid projectId, int imageId, long? userId);
-}
 
-/// <summary>A project image's bytes, its blob name, and its stored content type (null on old rows).</summary>
-public sealed record ProjectImageContent(Stream Stream, string FileName, string? ContentType);
+    /// <summary>
+    /// The blob to serve for a project image (its thumbnail when <paramref name="thumbnail"/> and
+    /// it has one), or null when the image does not exist or the caller may not see it: a private
+    /// project's images are its owner's only, and look missing to everyone else.
+    /// </summary>
+    Task<StoredImageRef?> GetImageRefAsync(
+        Guid projectId, int imageId, long? userId, bool thumbnail, CancellationToken ct = default);
+}

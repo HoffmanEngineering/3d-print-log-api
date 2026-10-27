@@ -377,7 +377,7 @@ public class PrintEventService(
         try
         {
             await using var uploadFileStream = image.OpenReadStream();
-            processed = await imageProcessing.ProcessAsync(uploadFileStream);
+            processed = await imageProcessing.ProcessAsync(uploadFileStream, ImageProcessingOptions.PrintUploads);
         }
         catch (InvalidImageException ex)
         {
@@ -397,19 +397,16 @@ public class PrintEventService(
             throw;
         }
 
-        context.PrintImages.Add(new PrintImage
+        var snapshot = new PrintImage
         {
-            File = files.Original,
-            ThumbnailFile = files.Thumbnail,
-            ContentType = processed.ContentType,
-            Width = processed.Width,
-            Height = processed.Height,
             CreatedById = userId,
             UpdatedById = userId,
             Print = print,
             IsDefault = true,
             DisplayOrder = displayOrder,
-        });
+        };
+        files.ApplyTo(snapshot, processed);
+        context.PrintImages.Add(snapshot);
         return new StoredSnapshot(files.Original.Id, uploadedBlobNames);
     }
 

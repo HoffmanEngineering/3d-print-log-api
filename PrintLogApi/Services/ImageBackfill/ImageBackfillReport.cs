@@ -26,13 +26,16 @@ public sealed class ImageBackfillReport
     /// <summary>Of <see cref="Processed"/>, originals converted from GIF or BMP.</summary>
     public int ConvertedFromLegacyFormat { get; set; }
 
-    /// <summary>Of <see cref="Processed"/>, rows whose original was already canonical and only gained a thumbnail.</summary>
-    public int ThumbnailOnly { get; set; }
+    /// <summary>
+    /// Of <see cref="Processed"/>, rows whose original was already canonical and only gained
+    /// derivatives (a thumbnail, the social image, or both).
+    /// </summary>
+    public int DerivativesOnly { get; set; }
 
     /// <summary>Stored bytes before, for the processed rows: the original as it was.</summary>
     public long BytesBefore { get; set; }
 
-    /// <summary>Stored bytes after, for the processed rows: the original plus any new thumbnail.</summary>
+    /// <summary>Stored bytes after, for the processed rows: the original plus any new derivatives.</summary>
     public long BytesAfter { get; set; }
 
     /// <summary>Images that could not be decoded. They are left as they are.</summary>
@@ -56,7 +59,7 @@ public sealed class ImageBackfillReport
         output.WriteLine($"  Examined              {Examined,10}");
         output.WriteLine($"  {(Applied ? "Processed" : "Would process"),-21} {Processed,10}");
         output.WriteLine($"    from GIF or BMP     {ConvertedFromLegacyFormat,10}");
-        output.WriteLine($"    thumbnail only      {ThumbnailOnly,10}");
+        output.WriteLine($"    derivatives only    {DerivativesOnly,10}");
         output.WriteLine($"  Skipped, undecodable  {Undecodable.Count,10}");
         output.WriteLine($"  Skipped, blob missing {Missing.Count,10}");
         output.WriteLine($"  Failed                {Failed.Count,10}");

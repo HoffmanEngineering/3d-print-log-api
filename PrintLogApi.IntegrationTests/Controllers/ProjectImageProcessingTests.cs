@@ -83,6 +83,7 @@ public class ProjectImageProcessingTests(CustomWebApplicationFactory factory)
         return await context.ProjectImages
             .Include(pi => pi.File)
             .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .AsNoTracking()
             .SingleAsync(pi => pi.Id == imageId, TestContext.Current.CancellationToken);
     }
@@ -158,6 +159,11 @@ public class ProjectImageProcessingTests(CustomWebApplicationFactory factory)
         Assert.NotNull(image.ThumbnailFile);
         Assert.EndsWith(".webp", image.ThumbnailFile!.Path, StringComparison.Ordinal);
         Assert.True(Blobs().BlobExists(image.ThumbnailFile.Path!));
+        Assert.NotNull(image.SocialFile);
+        Assert.EndsWith(".jpg", image.SocialFile!.Path, StringComparison.Ordinal);
+        Assert.True(Blobs().BlobExists(image.SocialFile.Path!));
+        Assert.Equal(image.Width, image.SocialWidth); // small upload: not upscaled
+        Assert.Equal(image.Height, image.SocialHeight);
     }
 
     [Fact]
@@ -247,10 +253,12 @@ public class ProjectImageProcessingTests(CustomWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(Blobs().BlobExists(image.File.Path!));
         Assert.False(Blobs().BlobExists(image.ThumbnailFile!.Path!));
+        Assert.False(Blobs().BlobExists(image.SocialFile!.Path!));
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         Assert.False(await context.Files.AnyAsync(
-            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId, TestContext.Current.CancellationToken));
+            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId || f.Id == image.SocialFileId,
+            TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -266,9 +274,11 @@ public class ProjectImageProcessingTests(CustomWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(Blobs().BlobExists(image.File.Path!));
         Assert.False(Blobs().BlobExists(image.ThumbnailFile!.Path!));
+        Assert.False(Blobs().BlobExists(image.SocialFile!.Path!));
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         Assert.False(await context.Files.AnyAsync(
-            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId, TestContext.Current.CancellationToken));
+            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId || f.Id == image.SocialFileId,
+            TestContext.Current.CancellationToken));
     }
 }

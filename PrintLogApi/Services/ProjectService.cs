@@ -496,7 +496,7 @@ public class ProjectService(
         ProcessedImage processed;
         await using (var stream = file.OpenReadStream())
         {
-            processed = await imageProcessing.ProcessAsync(stream);
+            processed = await imageProcessing.ProcessAsync(stream, ImageProcessingOptions.PrintUploads);
         }
 
         var uploadedBlobNames = new List<string>();
@@ -509,16 +509,12 @@ public class ProjectService(
             var image = new ProjectImage
             {
                 ProjectId = projectId,
-                File = files.Original,
-                ThumbnailFile = files.Thumbnail,
-                ContentType = processed.ContentType,
-                Width = processed.Width,
-                Height = processed.Height,
                 IsDefault = existingCount == 0,
                 DisplayOrder = existingCount,
                 CreatedById = userId,
                 UpdatedById = userId
             };
+            files.ApplyTo(image, processed);
             context.ProjectImages.Add(image);
             await context.SaveChangesAsync();
             return image;
@@ -581,31 +577,32 @@ public class ProjectService(
         await context.SaveChangesAsync();
     }
 
-    public async Task<ProjectImageContent?> GetImageAsync(Guid projectId, int imageId, long? userId)
+    public async Task<StoredImageRef?> GetImageRefAsync(
+        Guid projectId, int imageId, long? userId, bool thumbnail, CancellationToken ct = default)
     {
         var data = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId && pi.Id == imageId)
             .Select(pi => new
             {
-                pi.File.Path,
+                OriginalPath = pi.File.Path,
                 pi.ContentType,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
                 ProjectViewStatus = pi.Project.ViewStatus,
                 ProjectCreatedById = pi.Project.CreatedById,
             })
             .AsNoTracking()
-            .SingleOrDefaultAsync();
+            .SingleOrDefaultAsync(ct);
 
         if (data == null) return null;
 
-        if (data.ProjectViewStatus == Project.ProjectViewStatus.Private &&
-            (!userId.HasValue || userId.Value != data.ProjectCreatedById))
+        var isPrivate = !Project.IsViewableByNonOwner(data.ProjectViewStatus);
+        if (isPrivate && (!userId.HasValue || userId.Value != data.ProjectCreatedById))
             return null;
 
-        var blobName = Path.GetFileName(data.Path!);
-        var download = await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
-        return download is { } found
-            ? new ProjectImageContent(found.stream, found.fileName, data.ContentType)
-            : null;
+        return thumbnail
+            ? StoredImageRef.ThumbnailOrOriginal(
+                data.ThumbnailPath, data.OriginalPath, data.ContentType, sharedCacheable: !isPrivate)
+            : new StoredImageRef(data.OriginalPath, data.ContentType, SharedCacheable: !isPrivate);
     }
 
     /// <summary>

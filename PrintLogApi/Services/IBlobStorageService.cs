@@ -20,6 +20,10 @@ public class BlobUploadResult
     public Uri BlobUri { get; set; } = null!;
 }
 
+/// <summary>A blob opened for reading, and its full length in bytes.</summary>
+/// <remarks>The caller owns <see cref="Content"/> and must dispose it.</remarks>
+public sealed record BlobContent(Stream Content, long Length);
+
 /// <summary>
 /// Service for managing blob storage operations (file uploads).
 /// </summary>
@@ -74,6 +78,17 @@ public interface IBlobStorageService
     /// Returns null if the blob does not exist.
     /// </summary>
     Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName);
+
+    /// <summary>
+    /// Opens a blob for streaming to a response, without buffering it and without a separate
+    /// existence check. Returns null if the blob does not exist.
+    /// </summary>
+    /// <param name="seekable">
+    /// True when the caller needs to seek (a range request). That costs a properties read
+    /// before the first byte; otherwise the stream is a single forward-only download.
+    /// </param>
+    Task<BlobContent?> OpenReadAsync(
+        string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a blob from storage. Does nothing if the blob does not exist.

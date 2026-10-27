@@ -106,6 +106,56 @@ public class InMemoryBlobStorageService : IBlobStorageService
         return Task.FromResult<(Stream, string)?>((ms, blobName));
     }
 
+    /// <summary>How many times <see cref="OpenReadAsync"/> was called.</summary>
+    public int OpenReadCount { get; private set; }
+
+    /// <summary>
+    /// Opens a blob from in-memory storage, forward-only unless <paramref name="seekable"/>, as
+    /// the Azure implementation's single streaming download is.
+    /// </summary>
+    public Task<BlobContent?> OpenReadAsync(
+        string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
+    {
+        OpenReadCount++;
+        if (!Blobs.TryGetValue($"{containerName}/{blobName}", out var bytes))
+            return Task.FromResult<BlobContent?>(null);
+
+        Stream stream = new MemoryStream(bytes, writable: false);
+        if (!seekable)
+            stream = new ForwardOnlyStream(stream);
+        return Task.FromResult<BlobContent?>(new BlobContent(stream, bytes.LongLength));
+    }
+
+    /// <summary>A read-only stream that cannot seek or report its length.</summary>
+    private sealed class ForwardOnlyStream(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => inner.ReadAsync(buffer, cancellationToken);
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     /// <summary>
     /// Removes the blob from in-memory storage. No-op if it does not exist.
     /// </summary>
@@ -125,6 +175,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
         UploadedBlobNames.Clear();
         DeletedBlobNames.Clear();
         SignCallCount = 0;
+        OpenReadCount = 0;
         LastSignedContentType = null;
         NextSignature = "fake-inline";
     }

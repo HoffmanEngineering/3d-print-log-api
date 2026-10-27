@@ -151,6 +151,7 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         return await context.PrintImages
             .Include(pi => pi.File)
             .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .AsNoTracking()
             .SingleAsync(pi => pi.Id == imageId, Ct);
     }
@@ -162,6 +163,7 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         return await context.ProjectImages
             .Include(pi => pi.File)
             .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .AsNoTracking()
             .SingleAsync(pi => pi.Id == imageId, Ct);
     }
@@ -239,11 +241,20 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         Assert.EndsWith(".webp", image.ThumbnailFile!.Path, StringComparison.Ordinal);
         Assert.True(Blobs().BlobExists(image.ThumbnailFile.Path!));
 
+        Assert.NotNull(image.SocialFile);
+        Assert.EndsWith(".jpg", image.SocialFile!.Path, StringComparison.Ordinal);
+        Assert.True(Blobs().BlobExists(image.SocialFile.Path!));
+        Assert.Equal(50, image.SocialWidth);
+        Assert.Equal(100, image.SocialHeight);
+
         // The untouched bytes are archived, and the old blob is gone.
         Assert.Equal(original, Blobs().Blobs[$"{BlobContainers.PrintImagesArchive}/{blobName}"]);
         Assert.False(Blobs().BlobExists($"{BlobContainers.PrintImages}/{blobName}"));
         Assert.Equal(original.LongLength, report.BytesBefore);
-        Assert.Equal(stored.LongLength + Blobs().Blobs[image.ThumbnailFile.Path!].LongLength, report.BytesAfter);
+        Assert.Equal(
+            stored.LongLength + Blobs().Blobs[image.ThumbnailFile.Path!].LongLength
+                + Blobs().Blobs[image.SocialFile.Path!].LongLength,
+            report.BytesAfter);
     }
 
     [Fact]
@@ -256,7 +267,7 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         await RunAsync(ApplyTo(printId));
 
         var uploads = Blobs().UploadedBlobNames.Skip(firstNewUpload).ToList();
-        Assert.Equal(3, uploads.Count);
+        Assert.Equal(4, uploads.Count); // archive, original, thumbnail, social
         Assert.Equal($"{BlobContainers.PrintImagesArchive}/{blobName}", uploads[0]);
     }
 
@@ -450,6 +461,7 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
     {
         Assert.Null(image.ContentType);
         Assert.Null(image.ThumbnailFileId);
+        Assert.Null(image.SocialFileId);
         Assert.Null(image.Width);
         Assert.Equal($"{BlobContainers.PrintImages}/{blobName}", image.File.Path);
         Assert.True(Blobs().BlobExists($"{BlobContainers.PrintImages}/{blobName}"));
@@ -514,7 +526,57 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         Assert.True(Blobs().BlobExists(image.File.Path!));
         Assert.NotNull(image.ThumbnailFile);
         Assert.True(Blobs().BlobExists(image.ThumbnailFile!.Path!));
+        Assert.NotNull(image.SocialFile);
         Assert.False(Blobs().BlobExists($"{BlobContainers.PrintImagesArchive}/{blobName}"));
+    }
+
+    [Fact]
+    public async Task ProcessedRowWithAThumbnail_GetsOnlyASocialImage()
+    {
+        // Rows uploaded after uploads were processed but before the social derivative existed:
+        // canonical original and thumbnail, no social file. Only the social file is added.
+        var printId = await CreatePrintAsync();
+        var (imageId, blobName) = await SeedLegacyPrintImageAsync(printId, ".jpg", Fixture("exif-orientation-6.jpg"));
+        Guid thumbnailId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var row = await context.PrintImages.SingleAsync(pi => pi.Id == imageId, Ct);
+            var thumbnail = new Models.File
+            {
+                Id = Guid.NewGuid(),
+                Path = $"{BlobContainers.PrintImages}/{Guid.NewGuid()}.webp",
+                Size = 1,
+                CreatedById = row.CreatedById,
+                UpdatedById = row.CreatedById,
+            };
+            context.Files.Add(thumbnail);
+            row.ThumbnailFile = thumbnail;
+            row.ContentType = "image/jpeg";
+            row.Width = 50;
+            row.Height = 100;
+            await context.SaveChangesAsync(Ct);
+            thumbnailId = thumbnail.Id;
+        }
+        var firstNewUpload = Blobs().UploadedBlobNames.Count;
+
+        var report = await RunAsync(ApplyTo(printId));
+
+        Assert.Equal(1, report.Processed);
+        Assert.Equal(1, report.DerivativesOnly);
+        var image = await LoadPrintImageAsync(imageId);
+        Assert.Equal($"{BlobContainers.PrintImages}/{blobName}", image.File.Path);
+        Assert.Equal(thumbnailId, image.ThumbnailFileId);
+        Assert.NotNull(image.SocialFile);
+        Assert.Equal(50, image.SocialWidth);
+        Assert.Equal(100, image.SocialHeight);
+        var social = Blobs().Blobs[image.SocialFile!.Path!];
+        using var codec = SKCodec.Create(new MemoryStream(social));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec.EncodedFormat);
+        Assert.Equal(image.SocialFile.Path, Assert.Single(Blobs().UploadedBlobNames.Skip(firstNewUpload)));
+
+        // And the row is now complete, so a re-run leaves it alone.
+        Assert.Equal(0, (await RunAsync(ApplyTo(printId))).Examined);
     }
 
     [Fact]
@@ -549,6 +611,7 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
 
         Assert.Contains("[ContentType] IS NULL", batch, StringComparison.Ordinal);
         Assert.Contains("[ThumbnailFileId] IS NULL", batch, StringComparison.Ordinal);
+        Assert.Contains("[SocialFileId] IS NULL", batch, StringComparison.Ordinal);
         Assert.Contains("[Files]", row, StringComparison.Ordinal);
     }
 
@@ -574,6 +637,9 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
 
         public Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)
             => inner.DownloadAsync(containerName, blobName);
+
+        public Task<BlobContent?> OpenReadAsync(string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
+            => inner.OpenReadAsync(containerName, blobName, seekable, cancellationToken);
 
         public Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry)
             => inner.GenerateSasUploadUrlAsync(containerName, blobName, expiry);

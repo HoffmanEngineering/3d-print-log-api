@@ -1,17 +1,32 @@
 ﻿namespace PrintLogApi.Services;
 
 /// <summary>The File rows written for one processed upload. Added to the context, not saved.</summary>
-public sealed record StoredImageFiles(Models.File Original, Models.File? Thumbnail);
+public sealed record StoredImageFiles(Models.File Original, Models.File? Thumbnail, Models.File? Social = null)
+{
+    /// <summary>
+    /// Points a new image row at these files and records what the decode found: the content
+    /// type, the original's size, and the social derivative's size when there is one.
+    /// </summary>
+    public void ApplyTo(Models.IStoredImage image, ProcessedImage processed)
+    {
+        image.File = Original;
+        image.ThumbnailFile = Thumbnail;
+        image.ContentType = processed.ContentType;
+        image.Width = processed.Width;
+        image.Height = processed.Height;
+        ProcessedImageWriter.SetSocial(image, Social, processed);
+    }
+}
 
 /// <summary>
 /// Stores a <see cref="ProcessedImage"/> for print and project images: the re-encoded original
-/// and its thumbnail as blobs named with the canonical extension for their decoded type, plus a
+/// and its derivatives (thumbnail, and the social image when one was produced) as blobs named with the canonical extension for their decoded type, plus a
 /// File row for each. Printer and material images keep their own copy of this in their services.
 /// </summary>
 public interface IProcessedImageWriter
 {
     /// <summary>
-    /// Uploads both blobs and adds (does not save) their File rows. Every blob name written is
+    /// Uploads every blob and adds (does not save) their File rows. Every blob name written is
     /// appended to <paramref name="uploadedBlobNames"/> as soon as its upload succeeds, so a
     /// caller whose save then fails can remove them with <see cref="DeleteBlobsQuietlyAsync"/>.
     /// </summary>
@@ -24,6 +39,14 @@ public interface IProcessedImageWriter
     /// produced no thumbnail. Appends the blob name as <see cref="WriteAsync"/> does.
     /// </summary>
     Task<Models.File?> WriteThumbnailAsync(
+        string containerName, ProcessedImage processed, long userId,
+        List<string> uploadedBlobNames, CancellationToken ct = default);
+
+    /// <summary>
+    /// Uploads only the social image and adds (does not save) its File row. Null when the
+    /// processor produced none. Appends the blob name as <see cref="WriteAsync"/> does.
+    /// </summary>
+    Task<Models.File?> WriteSocialAsync(
         string containerName, ProcessedImage processed, long userId,
         List<string> uploadedBlobNames, CancellationToken ct = default);
 
@@ -49,6 +72,15 @@ public interface IProcessedImageWriter
 public class ProcessedImageWriter(PrintLogContext context, IBlobStorageService blobStorage) : IProcessedImageWriter
 {
     public const string ThumbnailContentType = "image/webp";
+    public const string SocialContentType = "image/jpeg";
+
+    /// <summary>Sets the social file and its size on a row; both sizes are null without one.</summary>
+    public static void SetSocial(Models.IStoredImage image, Models.File? social, ProcessedImage processed)
+    {
+        image.SocialFile = social;
+        image.SocialWidth = social is null ? null : processed.SocialWidth;
+        image.SocialHeight = social is null ? null : processed.SocialHeight;
+    }
 
     public async Task<StoredImageFiles> WriteAsync(
         string containerName, ProcessedImage processed, long userId,
@@ -59,8 +91,9 @@ public class ProcessedImageWriter(PrintLogContext context, IBlobStorageService b
             userId, uploadedBlobNames, ct);
 
         var thumbnail = await WriteThumbnailAsync(containerName, processed, userId, uploadedBlobNames, ct);
+        var social = await WriteSocialAsync(containerName, processed, userId, uploadedBlobNames, ct);
 
-        return new StoredImageFiles(original, thumbnail);
+        return new StoredImageFiles(original, thumbnail, social);
     }
 
     public async Task<Models.File?> WriteThumbnailAsync(
@@ -70,6 +103,15 @@ public class ProcessedImageWriter(PrintLogContext context, IBlobStorageService b
             ? null
             : await UploadAndRecordAsync(
                 containerName, processed.Thumbnail, ImageContentTypes.ExtensionFor(ThumbnailContentType),
+                userId, uploadedBlobNames, ct);
+
+    public async Task<Models.File?> WriteSocialAsync(
+        string containerName, ProcessedImage processed, long userId,
+        List<string> uploadedBlobNames, CancellationToken ct = default)
+        => processed.Social is null
+            ? null
+            : await UploadAndRecordAsync(
+                containerName, processed.Social, ImageContentTypes.ExtensionFor(SocialContentType),
                 userId, uploadedBlobNames, ct);
 
     public async Task ReplaceOriginalAsync(

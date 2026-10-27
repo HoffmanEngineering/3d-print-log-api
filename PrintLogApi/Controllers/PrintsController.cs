@@ -36,7 +36,6 @@ public class PrintsController(
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IPrintService printService,
-    IPrintImageService printImageService,
     ICommentService commentService,
     HybridCache cache,
     CachedComputation computation,
@@ -44,7 +43,8 @@ public class PrintsController(
     IBlobStorageService blobStorageService,
     IFileAttachmentService fileAttachmentService,
     IImageProcessingService imageProcessing,
-    IProcessedImageWriter imageWriter) : ControllerBase
+    IProcessedImageWriter imageWriter,
+    SocialImageLookup socialImages) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
@@ -1094,52 +1094,122 @@ public class PrintsController(
     /// <summary>
     /// Gets an image attached to a print.
     /// </summary>
+    /// <remarks>
+    /// Anyone can read an image of a public or unlisted print; an image of a private print only its
+    /// creator. Responses carry a strong `ETag` (answering `If-None-Match` with 304) and support
+    /// `Range`. An image anyone can read is `Cache-Control: public, max-age=3600`, so shared
+    /// caches drop it within an hour of the print being made private; a private print's image is
+    /// `private`.
+    /// </remarks>
     /// <param name="printId">The Id of the print.</param>
     /// <param name="imageId">The id of the image to retrieve.</param>
-    /// <returns></returns>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range of the image.</response>
+    /// <response code="304">The image has not changed since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="403">The print is private and the caller is not its creator.</response>
+    /// <response code="404">No such print image.</response>
     [AllowAnonymous]
     [HttpGet("{printId}/image/{imageId}")]
-    [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [MediaEndpoint]
-    public async Task<IActionResult> GetImage(long printId, int imageId)
+    public Task<IActionResult> GetImage(long printId, int imageId)
+        => ServePrintImageAsync(printId, imageId, thumbnail: false);
+
+    /// <summary>
+    /// Gets the 320px thumbnail of an image attached to a print, for list views.
+    /// </summary>
+    /// <remarks>
+    /// Same access, caching and headers as the image itself. An image stored before thumbnails
+    /// existed returns the original instead, so this URL always shows something.
+    /// </remarks>
+    /// <param name="printId">The Id of the print.</param>
+    /// <param name="imageId">The id of the image.</param>
+    /// <response code="200">The thumbnail, or the original when the image has none.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="403">The print is private and the caller is not its creator.</response>
+    /// <response code="404">No such print image.</response>
+    [AllowAnonymous]
+    [HttpGet("{printId}/image/{imageId}/thumbnail")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public Task<IActionResult> GetImageThumbnail(long printId, int imageId)
+        => ServePrintImageAsync(printId, imageId, thumbnail: true);
+
+    /// <summary>
+    /// Gets the link-preview image of a public print: its default image, about 1200px on the long edge.
+    /// </summary>
+    /// <remarks>
+    /// This is the `og:image` the print's `/seo` metadata points at, with a `?v=` that changes
+    /// when the image does; the parameter is otherwise ignored. Returns the original when the
+    /// image has no social derivative yet. 404, never 403, for a print that is not public (even
+    /// to its creator) or has no image, so the endpoint does not reveal which private prints exist.
+    /// </remarks>
+    /// <param name="id">The Id of the print.</param>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">The print does not exist, is not public, or has no image.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/social-image")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public async Task<IActionResult> GetSocialImage(long id)
     {
-        // Optimized query: only load the specific image and minimal print data needed for authorization
+        var image = await socialImages.ForPrintAsync(id, HttpContext.RequestAborted);
+        if (image is null)
+            return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorageService, printImageContainerName, image.Served, HttpContext.RequestAborted);
+    }
+
+    private async Task<IActionResult> ServePrintImageAsync(long printId, int imageId, bool thumbnail)
+    {
+        // Only the one image row and the print's visibility, not the print entity.
         var imageData = await context.PrintImages
             .Where(pi => pi.PrintId == printId && pi.Id == imageId)
             .Select(pi => new
             {
-                pi.File,
+                OriginalPath = pi.File.Path,
                 pi.ContentType,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
                 PrintViewStatus = pi.Print.ViewStatus,
                 PrintCreatedById = pi.Print.CreatedById
             })
             .AsNoTracking()
-            .SingleOrDefaultAsync();
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
 
         if (imageData == null)
         {
             return NotFound();
         }
 
-        // Simplified authorization check without loading full print entity
+        var isPrivate = imageData.PrintViewStatus == Print.PrintViewStatus.Private;
         var userId = User.GetUserId();
-        if (imageData.PrintViewStatus == Print.PrintViewStatus.Private &&
-            (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
+        if (isPrivate && (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
         {
             return Forbid();
         }
 
-        try
-        {
-            var printImageDto = await printImageService.DownloadPrintFile(imageData.File);
+        var image = thumbnail
+            ? StoredImageRef.ThumbnailOrOriginal(
+                imageData.ThumbnailPath, imageData.OriginalPath, imageData.ContentType, sharedCacheable: !isPrivate)
+            : new StoredImageRef(imageData.OriginalPath, imageData.ContentType, SharedCacheable: !isPrivate);
 
-            return ImageFileResult.Create(this, printImageDto.File!, imageData.ContentType, printImageDto.FileName);
-
-        }
-        catch (DoesNotExistException)
-        {
-            return NotFound();
-        }
+        return await ImageFileResult.ServeAsync(
+            this, blobStorageService, printImageContainerName, image, HttpContext.RequestAborted);
     }
 
     /// <summary>
@@ -1314,7 +1384,8 @@ public class PrintsController(
         try
         {
             await using var uploadFileStream = image.OpenReadStream();
-            processed = await imageProcessing.ProcessAsync(uploadFileStream, HttpContext.RequestAborted);
+            processed = await imageProcessing.ProcessAsync(
+                uploadFileStream, ImageProcessingOptions.PrintUploads, HttpContext.RequestAborted);
         }
         catch (InvalidImageException ex)
         {
@@ -1336,17 +1407,13 @@ public class PrintsController(
 
             printImage = new PrintImage()
             {
-                File = files.Original,
-                ThumbnailFile = files.Thumbnail,
-                ContentType = processed.ContentType,
-                Width = processed.Width,
-                Height = processed.Height,
                 CreatedById = userId.Value,
                 UpdatedById = userId.Value,
                 Print = print,
                 IsDefault = isDefault,
                 DisplayOrder = maxDisplayOrder + 1,
             };
+            files.ApplyTo(printImage, processed);
             context.PrintImages.Add(printImage);
 
             if (isDefault)
@@ -1371,6 +1438,7 @@ public class PrintsController(
         var printImageDto = new PrintImageDto
         {
             Id = printImage.Id,
+            PrintId = id,
             IsDefault = printImage.IsDefault,
             DisplayOrder = printImage.DisplayOrder
         };

@@ -17,6 +17,8 @@ public interface IStoredImage
 
     Guid? SocialFileId { get; }
     File? SocialFile { get; set; }
+    int? SocialWidth { get; set; }
+    int? SocialHeight { get; set; }
 
     string? ContentType { get; set; }
     int? Width { get; set; }

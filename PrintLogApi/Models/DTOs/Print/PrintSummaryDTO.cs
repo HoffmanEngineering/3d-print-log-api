@@ -1,4 +1,5 @@
 ﻿using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Models.DTOs.Print;
@@ -31,6 +32,12 @@ public class PrintSummaryDTO
     public long CreatedByUserId { get; set; }
 
     public int DefaultPrintImageId { get; set; }
+
+    /// <summary>
+    /// Path of the default image's thumbnail, relative to the API base URL. Null when the print
+    /// has no default image (<see cref="DefaultPrintImageId"/> is 0).
+    /// </summary>
+    public string? DefaultPrintImageThumbnailUrl => ImageUrls.PrintThumbnailOrNull(Id, DefaultPrintImageId);
 
     public int CommentCount { get; set; }
 

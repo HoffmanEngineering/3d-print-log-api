@@ -186,8 +186,8 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var project = await CreateProject("Blob Image Deletion Test");
         var imageId = await UploadImage(project.Id);
-        // The original and its thumbnail.
-        Assert.Equal(initialBlobCount + 2, blobService.Blobs.Count);
+        // The original, its thumbnail and its social image.
+        Assert.Equal(initialBlobCount + 3, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}/images/{imageId}");
         var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
@@ -204,8 +204,8 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var project = await CreateProject("Blob Project Deletion Test");
         await UploadImage(project.Id);
-        // The original and its thumbnail.
-        Assert.Equal(initialBlobCount + 2, blobService.Blobs.Count);
+        // The original, its thumbnail and its social image.
+        Assert.Equal(initialBlobCount + 3, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}");
         var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);

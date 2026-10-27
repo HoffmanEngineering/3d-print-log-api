@@ -1,4 +1,5 @@
-﻿using static PrintLogApi.Models.Project;
+﻿using PrintLogApi.Services;
+using static PrintLogApi.Models.Project;
 
 namespace PrintLogApi.Models.DTOs.Project;
 
@@ -15,6 +16,12 @@ public class ProjectSummaryDto : IProjectDates
     public int TotalEstimatedPrintTimeInSeconds { get; set; }
     public long TotalFilamentWeightMg { get; set; }
     public int DefaultImageId { get; set; }
+
+    /// <summary>
+    /// Path of the default image's thumbnail, relative to the API base URL. Null when the project
+    /// has no default image (<see cref="DefaultImageId"/> is 0).
+    /// </summary>
+    public string? DefaultImageThumbnailUrl => ImageUrls.ProjectThumbnailOrNull(Id, DefaultImageId);
 
     /// <inheritdoc />
     public DateOnly StartDate { get; set; }

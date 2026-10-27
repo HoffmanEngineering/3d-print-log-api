@@ -5,13 +5,13 @@ using PrintLogApi.Models;
 namespace PrintLogApi.Services.ImageBackfill;
 
 /// <summary>
-/// Re-processes legacy print and project images to the canonical format with thumbnails: the
-/// shape <c>ProcessedImageWriter</c> gives a new upload. Run by <c>PrintLogApi.Tools
+/// Re-processes legacy print and project images to the canonical format with thumbnails and
+/// social images: the shape <c>ProcessedImageWriter</c> gives a new upload. Run by <c>PrintLogApi.Tools
 /// image-backfill</c>; the runbook is docs/image-backfill.md.
 ///
 /// <para>Per row, in this order: download the original; process it (an undecodable image stops
 /// here, untouched); copy the untouched bytes to the private archive container; upload the new
-/// original and thumbnail under new names; point the row at them in one save; only then delete
+/// original and its derivatives under new names; point the row at them in one save; only then delete
 /// the old original. A failure before the save commits deletes the blobs that row wrote and
 /// leaves the row as it was, so the next run picks it up again.</para>
 /// </summary>
@@ -148,29 +148,35 @@ public sealed class ImageBackfillRunner(
                 return true;
             }
 
-            if (!plan.ReplaceOriginal && processed.Thumbnail is null)
+            var addsThumbnail = plan.AddThumbnail && processed.Thumbnail is not null;
+            var addsSocial = plan.AddSocial && processed.Social is not null;
+            if (!plan.ReplaceOriginal && !addsThumbnail && !addsSocial)
             {
-                report.Failed.Add(new ImageIssue(row, "no thumbnail could be generated"));
+                report.Failed.Add(new ImageIssue(row, "no derivative could be generated"));
                 return true;
             }
 
-            var thumbnailBytes = plan.AddThumbnail ? processed.Thumbnail?.LongLength ?? 0 : 0;
-            var bytesAfter = (plan.ReplaceOriginal ? processed.Original.LongLength : original.LongLength) + thumbnailBytes;
+            var thumbnailBytes = addsThumbnail ? processed.Thumbnail!.LongLength : 0;
+            var socialBytes = addsSocial ? processed.Social!.LongLength : 0;
+            var bytesAfter = (plan.ReplaceOriginal ? processed.Original.LongLength : original.LongLength)
+                + thumbnailBytes + socialBytes;
 
             if (apply && !await ApplyAsync(kind, image, plan, blobName, original, processed, row, report, ct))
                 return true;
 
             report.Processed++;
-            if (!plan.ReplaceOriginal) report.ThumbnailOnly++;
+            if (!plan.ReplaceOriginal) report.DerivativesOnly++;
             var converted = plan.ReplaceOriginal && processed.SourceContentType is { } source
                 && LegacySourceTypes.Contains(source);
             if (converted) report.ConvertedFromLegacyFormat++;
             report.BytesBefore += original.LongLength;
             report.BytesAfter += bytesAfter;
 
+            var derivatives = string.Join(" + ",
+                new[] { addsThumbnail ? "thumbnail" : null, addsSocial ? "social" : null }.OfType<string>());
             var what = plan.ReplaceOriginal
-                ? $"{processed.SourceContentType ?? "unknown"} -> {processed.ContentType}{(thumbnailBytes > 0 ? " + thumbnail" : "")}"
-                : "thumbnail only";
+                ? $"{processed.SourceContentType ?? "unknown"} -> {processed.ContentType}{(derivatives.Length > 0 ? " + " + derivatives : "")}"
+                : $"{derivatives} only";
             // The old name is what an operator needs to put one image back from the archive.
             var archived = apply && plan.ReplaceOriginal ? $", original archived as {kind.ArchiveContainer}/{blobName}" : "";
             log.WriteLine($"{row}: {(apply ? "" : "would be ")}{what}, {original.LongLength} -> {bytesAfter} bytes{archived}");
@@ -191,6 +197,7 @@ public sealed class ImageBackfillRunner(
         var fileId = image.File.Id;
         string? newOriginalPath = null;
         Models.File? thumbnail = null;
+        Models.File? social = null;
         try
         {
             if (plan.ReplaceOriginal)
@@ -215,13 +222,21 @@ public sealed class ImageBackfillRunner(
                     image.ThumbnailFile = thumbnail;
             }
 
-            // One save, so the row's columns and both File rows change together.
+            if (plan.AddSocial)
+            {
+                social = await imageWriter.WriteSocialAsync(
+                    kind.Container, processed, image.CreatedById, uploaded, ct);
+                if (social is not null)
+                    ProcessedImageWriter.SetSocial(image, social, processed);
+            }
+
+            // One save, so the row's columns and every File row change together.
             await context.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {
             context.ChangeTracker.Clear();
-            var outcome = await CommittedAsync(fileId, newOriginalPath, thumbnail?.Id);
+            var outcome = await CommittedAsync(fileId, newOriginalPath, thumbnail?.Id ?? social?.Id);
             if (outcome == true)
             {
                 // The save reached the database and only its acknowledgement was lost.
@@ -263,11 +278,11 @@ public sealed class ImageBackfillRunner(
 
     /// <summary>
     /// Whether a save that threw had committed anyway: true, false, or null when that cannot be
-    /// read. Either new File value is proof, since both were written in the same save.
+    /// read. Any new File value is proof, since all were written in the same save.
     /// </summary>
-    private async Task<bool?> CommittedAsync(Guid originalFileId, string? newOriginalPath, Guid? thumbnailFileId)
+    private async Task<bool?> CommittedAsync(Guid originalFileId, string? newOriginalPath, Guid? derivativeFileId)
     {
-        if (newOriginalPath is null && thumbnailFileId is null)
+        if (newOriginalPath is null && derivativeFileId is null)
             return false; // Nothing was staged, so nothing could have committed.
         try
         {
@@ -279,7 +294,7 @@ public sealed class ImageBackfillRunner(
                     .FirstOrDefaultAsync(CancellationToken.None);
                 return path == newOriginalPath;
             }
-            return await context.Files.AsNoTracking().AnyAsync(f => f.Id == thumbnailFileId, CancellationToken.None);
+            return await context.Files.AsNoTracking().AnyAsync(f => f.Id == derivativeFileId, CancellationToken.None);
         }
         catch (Exception)
         {

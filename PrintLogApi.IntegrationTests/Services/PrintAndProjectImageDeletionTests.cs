@@ -26,7 +26,7 @@ public class PrintAndProjectImageDeletionTests(CustomWebApplicationFactory facto
     }
 
     [Fact]
-    public async Task DeleteAllDataForUser_RemovesPrintAndProjectImagesWithThumbnails()
+    public async Task DeleteAllDataForUser_RemovesPrintAndProjectImagesWithDerivatives()
     {
         var ct = TestContext.Current.CancellationToken;
         using var scope = _factory.Services.CreateScope();
@@ -69,16 +69,19 @@ public class PrintAndProjectImageDeletionTests(CustomWebApplicationFactory facto
         var uploaded = new List<string>();
         using var printPng = MakePng();
         var printFiles = await writer.WriteAsync(
-            BlobContainers.PrintImages, await processing.ProcessAsync(printPng, ct), user.Id, uploaded, ct);
+            BlobContainers.PrintImages, await processing.ProcessAsync(printPng, ImageProcessingOptions.PrintUploads, ct),
+            user.Id, uploaded, ct);
         using var projectPng = MakePng();
         var projectFiles = await writer.WriteAsync(
-            BlobContainers.ProjectImages, await processing.ProcessAsync(projectPng, ct), user.Id, uploaded, ct);
+            BlobContainers.ProjectImages, await processing.ProcessAsync(projectPng, ImageProcessingOptions.PrintUploads, ct),
+            user.Id, uploaded, ct);
 
         context.PrintImages.Add(new PrintImage
         {
             PrintId = print.Id,
             File = printFiles.Original,
             ThumbnailFile = printFiles.Thumbnail,
+            SocialFile = printFiles.Social,
             CreatedById = user.Id,
             UpdatedById = user.Id,
         });
@@ -87,17 +90,19 @@ public class PrintAndProjectImageDeletionTests(CustomWebApplicationFactory facto
             ProjectId = project.Id,
             File = projectFiles.Original,
             ThumbnailFile = projectFiles.Thumbnail,
+            SocialFile = projectFiles.Social,
             CreatedById = user.Id,
             UpdatedById = user.Id,
         });
         await context.SaveChangesAsync(ct);
 
-        var paths = new[] { printFiles.Original, printFiles.Thumbnail!, projectFiles.Original, projectFiles.Thumbnail! }
-            .Select(f => f.Path!)
-            .ToList();
-        var fileIds = new[] { printFiles.Original, printFiles.Thumbnail!, projectFiles.Original, projectFiles.Thumbnail! }
-            .Select(f => f.Id)
-            .ToList();
+        var files = new[]
+        {
+            printFiles.Original, printFiles.Thumbnail!, printFiles.Social!,
+            projectFiles.Original, projectFiles.Thumbnail!, projectFiles.Social!,
+        };
+        var paths = files.Select(f => f.Path!).ToList();
+        var fileIds = files.Select(f => f.Id).ToList();
         Assert.All(paths, path => Assert.True(blobs.BlobExists(path)));
 
         // The account-deletion request arrives in its own scope with an empty change tracker.
