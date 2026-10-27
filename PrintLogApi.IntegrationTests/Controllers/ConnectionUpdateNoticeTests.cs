@@ -48,10 +48,24 @@ public class ConnectionUpdateNoticeTests : IClassFixture<CustomWebApplicationFac
         Assert.False(connection.UpdateAvailable);
     }
 
+    [Theory]
+    [InlineData("octoprint")]
+    [InlineData("prusalink")]
+    [InlineData("bambu")]
+    [InlineData("sdcp")]
+    public async Task Put_EveryBridgeAdapter_IsToldANewerBridgeIsOut(string kind)
+    {
+        // Every adapter is printlog-bridge, so they share its releases (printlog-bridge#82).
+        var connection = await ReadAsync(await PutAsync(NewInstanceId(), Body(kind: kind, agentVersion: "0.9.0")));
+
+        Assert.Equal("0.10.0", connection.LatestAgentVersion);
+        Assert.True(connection.UpdateAvailable);
+    }
+
     [Fact]
     public async Task Put_AgentWithNoKnownReleases_GetsNoLatestVersion()
     {
-        var connection = await ReadAsync(await PutAsync(NewInstanceId(), Body(kind: "octoprint", agentVersion: "0.1.0")));
+        var connection = await ReadAsync(await PutAsync(NewInstanceId(), Body(kind: "some-plugin", agentVersion: "0.1.0")));
 
         Assert.Null(connection.LatestAgentVersion);
         Assert.False(connection.UpdateAvailable);

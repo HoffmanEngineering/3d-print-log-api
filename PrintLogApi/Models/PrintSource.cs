@@ -13,4 +13,12 @@ public enum PrintSource
     Moonraker = 4,
     Mcp = 5,
     ApiKey = 6,
+
+    // printlog-bridge adapters beyond Moonraker (printlog-bridge#82), taken from the kind of the
+    // connection a print links to. A printlog-bridge `octoprint` connection reuses OctoPrint.
+    PrusaLink = 7,
+    Bambu = 8,
+
+    /// <summary>Elegoo printers, over the SDCP protocol.</summary>
+    Sdcp = 9,
 }

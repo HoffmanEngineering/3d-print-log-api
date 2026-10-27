@@ -87,12 +87,12 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
     /// <summary>
     /// Replaces the connection's health with what this heartbeat sent (printlog-bridge#37). Cut
     /// and clamped rather than validated: an agent must never lose its heartbeat over health.
+    /// The software names and versions are the exception: see <see cref="ApplySoftware"/>.
     /// </summary>
     private static void ApplyHealth(Connection connection, PutConnectionDto dto, DateTime now)
     {
         connection.Mode = Cut(dto.Mode, 20);
-        connection.KlipperVersion = Cut(dto.KlipperVersion, 50);
-        connection.MoonrakerVersion = Cut(dto.MoonrakerVersion, 50);
+        ApplySoftware(connection, dto);
         connection.PrinterModel = Cut(dto.PrinterModel, 100);
         connection.OutboxDepth = dto.OutboxDepth is { } depth ? Math.Max(0, depth) : null;
         connection.OutboxOldestQueuedAt = dto.OutboxOldestAgeSeconds is { } age
@@ -103,6 +103,41 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         connection.ErrorCount = dto.ErrorCount is { } count ? Math.Max(0, count) : null;
         connection.Snapshots = dto.Snapshots;
         connection.SlicerSettings = dto.SlicerSettings;
+    }
+
+    /// <summary>
+    /// The firmware and host software, in both shapes: the generic fields (printlog-bridge#82) and
+    /// Klipper's and Moonraker's own, each filled from the other so an old bridge and the current
+    /// web app keep working. A name or version that is missing, null or blank keeps the stored
+    /// one (#80): a bridge's first check-in can go out before it has read them, and they do not
+    /// stop being true because one heartbeat did not know them.
+    /// </summary>
+    private static void ApplySoftware(Connection connection, PutConnectionDto dto)
+    {
+        var klipper = Cut(dto.KlipperVersion, 50);
+        var moonraker = Cut(dto.MoonrakerVersion, 50);
+        var (firmwareName, firmwareVersion) = Generic(dto.FirmwareName, dto.FirmwareVersion, "Klipper", klipper);
+        var (hostName, hostVersion) = Generic(dto.HostSoftwareName, dto.HostSoftwareVersion, "Moonraker", moonraker);
+
+        connection.FirmwareName = firmwareName ?? connection.FirmwareName;
+        connection.FirmwareVersion = firmwareVersion ?? connection.FirmwareVersion;
+        connection.HostSoftwareName = hostName ?? connection.HostSoftwareName;
+        connection.HostSoftwareVersion = hostVersion ?? connection.HostSoftwareVersion;
+        connection.KlipperVersion = klipper ?? Named(firmwareName, "Klipper", firmwareVersion) ?? connection.KlipperVersion;
+        connection.MoonrakerVersion = moonraker ?? Named(hostName, "Moonraker", hostVersion) ?? connection.MoonrakerVersion;
+
+        // The generic pair as sent, or the legacy field under its own name when no version was sent.
+        static (string? Name, string? Version) Generic(string? name, string? version, string legacyName, string? legacyVersion)
+        {
+            var cutName = Cut(name, 50);
+            var cutVersion = Cut(version, 50);
+            return cutVersion is null && legacyVersion is not null
+                ? (cutName ?? legacyName, legacyVersion)
+                : (cutName, cutVersion);
+        }
+
+        static string? Named(string? name, string expected, string? version) =>
+            string.Equals(name, expected, StringComparison.OrdinalIgnoreCase) ? version : null;
     }
 
     private static string? Cut(string? value, int maxLength)

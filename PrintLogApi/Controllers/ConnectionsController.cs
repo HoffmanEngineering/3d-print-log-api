@@ -78,11 +78,18 @@ public class ConnectionsController(
     /// agent when a newer release of it is out, so it never has to ask anyone else.
     ///
     /// An agent can also report its health with each heartbeat (printlog-bridge#37): `mode`,
-    /// `klipperVersion`, `moonrakerVersion`, `printerModel`, `outboxDepth`,
-    /// `outboxOldestAgeSeconds`, `lastError` (scrubbed of host names, IP addresses, file names
-    /// and keys by the agent), `lastErrorAt`, `errorCount` (since its previous heartbeat),
-    /// `snapshots` and `slicerSettings`. All are optional and replaced on every call; a value
-    /// too long is cut and a negative number counts as 0, so health never fails the heartbeat.
+    /// `printerModel`, `outboxDepth`, `outboxOldestAgeSeconds`, `lastError` (scrubbed of host
+    /// names, IP addresses, file names and keys by the agent), `lastErrorAt`, `errorCount` (since
+    /// its previous heartbeat), `snapshots` and `slicerSettings`. All are optional and replaced on
+    /// every call; a value too long is cut and a negative number counts as 0, so health never
+    /// fails the heartbeat.
+    ///
+    /// The printer's software is `firmwareName` and `firmwareVersion` (Klipper, Prusa's, Bambu's)
+    /// and `hostSoftwareName` and `hostSoftwareVersion` (Moonraker, OctoPrint, PrusaLink), at most
+    /// 50 characters each (printlog-bridge#82). `klipperVersion` and `moonrakerVersion` still work
+    /// and fill the generic fields, and a `Klipper` firmware or `Moonraker` host fills them back.
+    /// Unlike the rest of the health, a name or version that is missing, null or blank keeps the
+    /// one stored, so a check-in sent before the agent has read them does not clear them.
     /// </remarks>
     /// <param name="instanceId">The agent's own stable id for the printer, at most 100 characters.</param>
     /// <param name="dto">The connection's details.</param>
@@ -203,6 +210,10 @@ public class ConnectionsController(
             Mode = connection.Mode,
             KlipperVersion = connection.KlipperVersion,
             MoonrakerVersion = connection.MoonrakerVersion,
+            FirmwareName = connection.FirmwareName,
+            FirmwareVersion = connection.FirmwareVersion,
+            HostSoftwareName = connection.HostSoftwareName,
+            HostSoftwareVersion = connection.HostSoftwareVersion,
             PrinterModel = connection.PrinterModel,
             OutboxDepth = connection.OutboxDepth,
             OutboxOldestQueuedAt = Utc(connection.OutboxOldestQueuedAt),

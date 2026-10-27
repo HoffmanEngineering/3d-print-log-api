@@ -468,6 +468,13 @@ public class PrintsController(
     /// against the print's unlinked rows. `endedAt` fills in the duration from the start date, or
     /// the start date from the duration, when one is missing. Every other field is left alone,
     /// and repeating the call is safe: remaining filament changes by the net difference only.
+    ///
+    /// Each usage row carries `amountMg`, `lengthInM` or `volumeMl`, and `source` (Weight `1`,
+    /// Length `2`, Volume `3`) names the measurement; without it, weight wins, then length. A
+    /// weight is stored as sent, never converted through length. Set `actualIsEstimate` when the
+    /// figures are the slicer's estimate rather than a measurement (a printer that reports only
+    /// that): the spool is still charged, but accuracy analytics leave the row out. Left out, a
+    /// row is measured.
     /// </remarks>
     /// <param name="id">The ID of the print.</param>
     /// <param name="completion">How the print ended.</param>

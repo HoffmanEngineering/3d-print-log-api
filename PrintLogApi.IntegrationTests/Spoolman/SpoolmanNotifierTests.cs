@@ -121,7 +121,20 @@ public class SpoolmanNotifierTests(CustomWebApplicationFactory factory) : IClass
     }
 
     [Fact]
-    public async Task LiveBridge_DropsTheEvent()
+    public Task LiveBridge_DropsTheEvent() => AssertNotifierEventWithLiveConnection(Connection.MoonrakerKind, logged: false);
+
+    [Theory]
+    [InlineData("octoprint")]
+    [InlineData("bambu")]
+    public Task LiveNonMoonrakerBridge_KeepsTheEvent(string kind)
+    {
+        // The dedupe stays Moonraker's (#150, printlog-bridge#82): the drop count drives the
+        // "remove [notifier] from moonraker.conf" notice on that connection. The config block
+        // leaves the notifier out for any bridge, so this only reaches a hand-added one.
+        return AssertNotifierEventWithLiveConnection(kind, logged: true);
+    }
+
+    private async Task AssertNotifierEventWithLiveConnection(string kind, bool logged)
     {
         var (user, secret, printer) = await ConnectedAsync();
         using (var scope = factory.Services.CreateScope())
@@ -131,7 +144,7 @@ public class SpoolmanNotifierTests(CustomWebApplicationFactory factory) : IClass
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
-                Kind = Connection.MoonrakerKind,
+                Kind = kind,
                 InstanceId = Guid.NewGuid().ToString("N"),
                 DisplayName = "Bridge",
                 PrinterId = printer,
@@ -145,7 +158,7 @@ public class SpoolmanNotifierTests(CustomWebApplicationFactory factory) : IClass
         var response = await PostAsync(secret, Event("started", printer, file));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Empty(await PrintsAsync(user, file));
+        Assert.Equal(logged ? 1 : 0, (await PrintsAsync(user, file)).Count);
     }
 
     private async Task<(User User, string Secret, long Printer)> ConnectedAsync()

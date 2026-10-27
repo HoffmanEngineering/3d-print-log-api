@@ -1170,6 +1170,138 @@ public class PrintsControllerPatchCompleteTests : IClassFixture<CustomWebApplica
         }
     }
 
+    // Adapters beyond Moonraker (printlog-bridge#82). The bodies are written out as JSON, field
+    // names and all, because they are the contract the bridge sends.
+
+    [Fact]
+    public async Task Complete_ActualIsEstimate_IsStoredAndStillComesOffTheSpool()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage: [UnlinkedEstimateRow(slot: 0, estimatedMg: 12_000)]);
+
+        var completed = await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [
+              {"slot": 0, "filamentId": "{{filament.Id}}", "amountMg": 12000, "source": 1, "actualIsEstimate": true}
+            ]}
+            """));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.True(row.ActualIsEstimate);
+        Assert.Equal(12_000, row.AmountMg);
+        Assert.Equal(1_000_000 - 12_000, await GetRemainingAsync(filament.Id));
+        Assert.True(Assert.Single((await GetDetailAsync(created.Id)).FilamentUsage!).ActualIsEstimate);
+    }
+
+    [Fact]
+    public async Task Complete_WithoutActualIsEstimate_IsMeasured_AndAReplayReplacesTheFlag()
+    {
+        // An older bridge never sends the field, and its usage is Klipper's measurement.
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+        await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [{"filamentId": "{{filament.Id}}", "lengthInM": 4.2, "source": 2, "actualIsEstimate": true}]}
+            """));
+
+        var completed = await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [{"filamentId": "{{filament.Id}}", "lengthInM": 4.2, "source": 2}]}
+            """));
+
+        Assert.False(Assert.Single(completed.FilamentUsage!).ActualIsEstimate);
+    }
+
+    [Fact]
+    public async Task Complete_GramsPerSlot_IsAWeightRow_NeverConvertedThroughLength()
+    {
+        // Bambu's 3MF gives grams per filament, and a slot may have no spool linked.
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing, usage:
+        [
+            UnlinkedEstimateRow(slot: 0, estimatedMg: 12_340),
+            UnlinkedEstimateRow(slot: 1, estimatedMg: 3_210),
+        ]);
+
+        var completed = await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [
+              {"slot": 0, "filamentId": "{{filament.Id}}", "amountMg": 12340, "source": 1, "actualIsEstimate": true},
+              {"slot": 1, "amountMg": 3210, "source": 1, "actualIsEstimate": true}
+            ]}
+            """));
+
+        var linked = Assert.Single(completed.FilamentUsage!, r => r.Slot == 0);
+        Assert.Equal(PrintFilament.SourceMeasurement.Weight, linked.Source);
+        Assert.Equal(12_340, linked.AmountMg);
+        Assert.Equal(1_000_000 - 12_340, await GetRemainingAsync(filament.Id));
+        var unlinked = Assert.Single(completed.FilamentUsage!, r => r.Slot == 1);
+        Assert.Null(unlinked.Filament);
+        Assert.Equal(PrintFilament.SourceMeasurement.Weight, unlinked.Source);
+        Assert.Equal(3_210, unlinked.AmountMg);
+        Assert.Null(unlinked.LengthInM);
+    }
+
+    [Fact]
+    public async Task Complete_WeightAndLengthBoth_SourceDecidesWhichIsTheMeasurement()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var completed = await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [{"filamentId": "{{filament.Id}}", "amountMg": 50000, "lengthInM": 10, "source": 2}]}
+            """));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(PrintFilament.SourceMeasurement.Length, row.Source);
+        Assert.InRange(row.AmountMg!.Value, 29_000, 30_500); // derived from the 10 m, not the 50 g sent
+    }
+
+    [Fact]
+    public async Task Complete_WeightAndLengthBoth_WithoutSource_WeightWins()
+    {
+        var filament = await CreateFilamentAsync();
+        var created = await CreatePrintAsync(status: PrintStatus.Printing);
+
+        var completed = await ReadAsync(await CompleteJsonAsync(created.Id, $$"""
+            {"status": 3, "filamentUsage": [{"filamentId": "{{filament.Id}}", "amountMg": 50000, "lengthInM": 10}]}
+            """));
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(PrintFilament.SourceMeasurement.Weight, row.Source);
+        Assert.Equal(50_000, row.AmountMg);
+        Assert.Equal(1_000_000 - 50_000, await GetRemainingAsync(filament.Id));
+    }
+
+    [Fact]
+    public async Task CreateAndPatch_CarryActualIsEstimate()
+    {
+        var filament = await CreateFilamentAsync();
+        var row = EstimateRow(filament.Id, 20_000);
+        row.AmountMg = 20_000;
+        row.Source = PrintFilament.SourceMeasurement.Weight;
+        row.ActualIsEstimate = true;
+        var created = await CreatePrintAsync(usage: [row]);
+        Assert.True(Assert.Single(created.FilamentUsage!).ActualIsEstimate);
+
+        var patched = await ReadAsync(await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new { filamentId = filament.Id, amountMg = 21_000, source = PrintFilament.SourceMeasurement.Weight, actualIsEstimate = true } },
+        }));
+        Assert.True(Assert.Single(patched.FilamentUsage!).ActualIsEstimate);
+
+        // PATCH replaces every row, so a client that leaves the flag out resets it.
+        var reset = await ReadAsync(await PatchAsync(created.Id, new
+        {
+            filamentUsage = new[] { new { filamentId = filament.Id, amountMg = 21_000, source = PrintFilament.SourceMeasurement.Weight } },
+        }));
+        Assert.False(Assert.Single(reset.FilamentUsage!).ActualIsEstimate);
+    }
+
+    private async Task<HttpResponseMessage> CompleteJsonAsync(long id, string json)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/Prints/{id}/complete");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
     private static CompletePrintDto Completion(Guid filamentId, int amountMg) => new()
     {
         Status = PrintStatus.Success,

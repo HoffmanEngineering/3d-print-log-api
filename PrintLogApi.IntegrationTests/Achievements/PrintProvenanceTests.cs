@@ -119,6 +119,99 @@ public class PrintProvenanceTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Null(print.Slicer);
     }
 
+    private static async Task<string> AddConnectionAsync(PrintLogContext db, User user, Printer printer, string kind)
+    {
+        var connection = new Connection
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Kind = kind,
+            InstanceId = Guid.NewGuid().ToString("N"),
+            DisplayName = "Bridge",
+            PrinterId = printer.Id,
+            CreatedDate = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        };
+        db.Connections.Add(connection);
+        await db.SaveChangesAsync(Ct);
+        return connection.InstanceId;
+    }
+
+    [Theory]
+    [InlineData("octoprint", PrintSource.OctoPrint)]
+    [InlineData("prusalink", PrintSource.PrusaLink)]
+    [InlineData("bambu", PrintSource.Bambu)]
+    [InlineData("sdcp", PrintSource.Sdcp)]
+    public async Task AddPrint_ApiKeyCandidate_LinkedToAnAdapterConnection_RecordsTheAdaptersSource(string kind, PrintSource expected)
+    {
+        var (scope, db, prints, user, printer) = await ArrangeAsync();
+        using var _ = scope;
+        var instanceId = await AddConnectionAsync(db, user, printer, kind);
+        var dto = NewPrint(printer.Id);
+        dto.ConnectionInstanceId = instanceId;
+
+        var print = await prints.AddPrint(dto, user.Id, PrintSource.ApiKey);
+
+        Assert.Equal(expected, print.Source);
+    }
+
+    [Fact]
+    public async Task AddPrint_ApiKeyCandidate_LinkedToAMoonrakerBridge_StillRecordsApiKey()
+    {
+        // What Moonraker bridge prints have always recorded; see Connection.PrintSourceForKind.
+        var (scope, db, prints, user, printer) = await ArrangeAsync();
+        using var _ = scope;
+        var dto = NewPrint(printer.Id);
+        dto.ConnectionInstanceId = await AddConnectionAsync(db, user, printer, Connection.MoonrakerKind);
+
+        var print = await prints.AddPrint(dto, user.Id, PrintSource.ApiKey);
+
+        Assert.Equal(PrintSource.ApiKey, print.Source);
+    }
+
+    [Fact]
+    public async Task AddPrint_LinkedToAnAdapterConnection_StillPrefersSlicerPlugin()
+    {
+        var (scope, db, prints, user, printer) = await ArrangeAsync();
+        using var _ = scope;
+        var setting = await AddSettingAsync(db, user.Id, "OrcaSlicer");
+        var dto = NewPrint(printer.Id, setting.Id);
+        dto.ConnectionInstanceId = await AddConnectionAsync(db, user, printer, "bambu");
+
+        var print = await prints.AddPrint(dto, user.Id, PrintSource.ApiKey);
+
+        Assert.Equal(PrintSource.SlicerPlugin, print.Source);
+    }
+
+    [Fact]
+    public async Task AddPrint_AnotherUsersAdapterConnection_RecordsApiKey()
+    {
+        var (scope, db, prints, user, printer) = await ArrangeAsync();
+        using var _ = scope;
+        var other = await AchievementTestData.CreateUserAsync(db);
+        var otherPrinter = await AchievementTestData.AddPrinterAsync(db, other);
+        var dto = NewPrint(printer.Id);
+        dto.ConnectionInstanceId = await AddConnectionAsync(db, other, otherPrinter, "bambu");
+
+        var print = await prints.AddPrint(dto, user.Id, PrintSource.ApiKey);
+
+        Assert.Equal(PrintSource.ApiKey, print.Source);
+    }
+
+    [Fact]
+    public async Task AddPrint_WebCandidate_LinkedToAnAdapterConnection_RecordsWeb()
+    {
+        // Only a connector's own credential is replaced by its kind; a person stays Web.
+        var (scope, db, prints, user, printer) = await ArrangeAsync();
+        using var _ = scope;
+        var dto = NewPrint(printer.Id);
+        dto.ConnectionInstanceId = await AddConnectionAsync(db, user, printer, "bambu");
+
+        var print = await prints.AddPrint(dto, user.Id, PrintSource.Web);
+
+        Assert.Equal(PrintSource.Web, print.Source);
+    }
+
     [Fact]
     public async Task PostPrint_ViaApiKey_RecordsApiKey()
     {

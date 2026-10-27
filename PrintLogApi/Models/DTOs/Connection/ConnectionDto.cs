@@ -15,7 +15,10 @@ public class ConnectionDto
 {
     public Guid Id { get; set; }
 
-    /// <summary>The connector type, lower-case: <c>moonraker</c>, <c>octoprint</c>.</summary>
+    /// <summary>
+    /// The connector type, lower-case. printlog-bridge registers <c>moonraker</c>, <c>octoprint</c>,
+    /// <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> (Elegoo).
+    /// </summary>
     public string Kind { get; set; } = null!;
 
     /// <summary>The agent's own stable id for this printer.</summary>
@@ -72,6 +75,19 @@ public class ConnectionDto
     public string? KlipperVersion { get; set; }
 
     public string? MoonrakerVersion { get; set; }
+
+    /// <summary>The printer's firmware, such as <c>Klipper</c>, <c>Prusa-Firmware-Buddy</c> or <c>Bambu</c>.</summary>
+    public string? FirmwareName { get; set; }
+
+    public string? FirmwareVersion { get; set; }
+
+    /// <summary>
+    /// The software the agent talks to on the printer's host, such as <c>Moonraker</c>,
+    /// <c>OctoPrint</c> or <c>PrusaLink</c>. Null when there is none apart from the firmware.
+    /// </summary>
+    public string? HostSoftwareName { get; set; }
+
+    public string? HostSoftwareVersion { get; set; }
 
     /// <summary>The printer model the slicer wrote in the last job's file.</summary>
     public string? PrinterModel { get; set; }
