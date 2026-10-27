@@ -32,6 +32,102 @@ public class BridgeCheckInDto
 
     /// <summary>When it last finished an active sweep ("Scan now"). A time in the future counts as now.</summary>
     public DateTimeOffset? LastSweepAt { get; set; }
+
+    /// <summary>
+    /// Its P-256 public key for sealed credentials: standard base64 (with padding) of the DER
+    /// SubjectPublicKeyInfo with an uncompressed point, 124 characters. Anything else is dropped
+    /// (<c>rejected</c>: <c>invalid_public_key</c>) and the stored key kept. The first key is
+    /// taken as is; a different one later is held pending until the owner confirms it. See
+    /// docs/bridge-credential-sealing.md.
+    /// </summary>
+    public string? PublicKey { get; set; }
+
+    /// <summary>Optional: lower-case hex SHA-256 of the key's SPKI bytes. When sent, it must match <c>publicKey</c>, or the key is dropped.</summary>
+    public string? PublicKeyFingerprint { get; set; }
+
+    /// <summary>The desired <c>version</c> that <c>credentialIssues</c> describes. Required with it; issues about another version are ignored.</summary>
+    public string? CredentialIssuesVersion { get; set; }
+
+    /// <summary>
+    /// Credentials it can't use, at most 200. Replaces the stored issues of all its printers;
+    /// an empty list clears them.
+    /// </summary>
+    public List<CredentialIssueReportDto?>? CredentialIssues { get; set; }
+}
+
+/// <summary>A credential a bridge can't use.</summary>
+public class CredentialIssueReportDto
+{
+    /// <summary>The desired printer's <c>id</c>.</summary>
+    public long? EntryId { get; set; }
+
+    /// <summary>One of the entry's <c>secretFields</c>.</summary>
+    public string? Field { get; set; }
+
+    /// <summary>
+    /// <c>missing</c> (needed, and no value it can open), <c>undecryptable</c> (a value that does not
+    /// open), <c>invalid_plaintext</c> (it opened to something that is not a credential: invalid
+    /// UTF-8 or a control character) or <c>rejected_by_printer</c> (it opened, and the printer
+    /// refused it).
+    /// </summary>
+    public string? Code { get; set; }
+}
+
+/// <summary>A credential problem the bridge reported, as stored.</summary>
+public class CredentialIssueDto
+{
+    public string? Field { get; set; }
+
+    public string? Code { get; set; }
+}
+
+/// <summary>One sealed LAN credential of a desired printer.</summary>
+public class BridgePrinterSecretDto
+{
+    /// <summary>The adapter's field, such as <c>access_code</c>.</summary>
+    public string? Field { get; set; }
+
+    /// <summary>
+    /// The sealed value (<c>v1.</c>…). Only in the bridge's own desired list; the owner's
+    /// endpoints never return it.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Sealed { get; set; }
+
+    /// <summary>The fingerprint of the bridge key it was sealed to.</summary>
+    public string? KeyFingerprint { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>Sealed to a key the bridge no longer has: seal it again to the current key.</summary>
+    public bool Stale { get; set; }
+}
+
+/// <summary>The body of <c>PUT /api/bridges/{id}/printers/{entryId}/secrets/{field}</c>.</summary>
+public class SetBridgePrinterSecretDto
+{
+    /// <summary>
+    /// The credential sealed in the browser to the bridge's <c>publicKey</c>
+    /// (docs/bridge-credential-sealing.md), with associated data
+    /// <c>printlog-credential:v1:{bridgeId}:{entryId}:{field}</c>. Never the plaintext.
+    /// </summary>
+    public string? Sealed { get; set; }
+
+    /// <summary>
+    /// The fingerprint of the key it was sealed to, computed by the sealer over the exact SPKI
+    /// bytes it sealed to (never copied from the API): it must be the bridge's current key.
+    /// </summary>
+    public string? KeyFingerprint { get; set; }
+}
+
+/// <summary>The body of <c>POST /api/bridges/{id}/public-key/confirm</c>.</summary>
+public class ConfirmBridgeKeyDto
+{
+    /// <summary>
+    /// The pending key's fingerprint, computed by the web app from <c>pendingPublicKey</c> (and
+    /// compared by the user with the one the bridge shows), never copied from the API.
+    /// </summary>
+    public string? Fingerprint { get; set; }
 }
 
 /// <summary>One printer a bridge found. The identity is computed from <c>serial</c>, else <c>mainboardId</c>, else the MACs and port, else the address and port.</summary>
@@ -96,12 +192,17 @@ public class BridgeCheckInResponseDto
 
     /// <summary>Entries of the report that were dropped.</summary>
     public List<RejectedEntryDto>? Rejected { get; set; }
+
+    /// <summary>The fingerprint of the public key values are sealed to, or null. If it isn't yours and nothing is pending, send <c>publicKey</c>.</summary>
+    public string? PublicKeyFingerprint { get; set; }
+
+    /// <summary>A newer key you reported, waiting for the owner to confirm it in the app; nothing is sealed to it until then.</summary>
+    public string? PendingPublicKeyFingerprint { get; set; }
 }
 
 /// <summary>
 /// The printers a bridge should watch, besides those in its config file (which win when both
-/// name the same printer). Credentials are not here: until they can be encrypted to the bridge's
-/// key, the bridge asks for an access code or password locally.
+/// name the same printer), with their LAN credentials sealed to the bridge's key.
 /// </summary>
 public class DesiredPrintersDto
 {
@@ -142,6 +243,18 @@ public class BridgePrinterDto
     public List<string>? Macs { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>The credentials this kind takes, sealed with <c>PUT …/secrets/{field}</c>.</summary>
+    public List<string>? SecretFields { get; set; }
+
+    /// <summary>
+    /// The sealed credentials. The bridge gets only those sealed to its current key, with
+    /// <c>sealed</c>; the owner gets all of them without it, stale ones marked.
+    /// </summary>
+    public List<BridgePrinterSecretDto>? Secrets { get; set; }
+
+    /// <summary>What the bridge last reported it can't use.</summary>
+    public List<CredentialIssueDto>? CredentialIssues { get; set; }
 }
 
 /// <summary>The body of <c>POST /api/bridges/{id}/printers</c>.</summary>
@@ -211,6 +324,39 @@ public class BridgeDto
     public string? HostName { get; set; }
 
     public List<string>? Networks { get; set; }
+
+    /// <summary>
+    /// Its public key for sealing credentials (base64 SPKI, P-256), or null when it has reported
+    /// none (an older bridge: it can't take sealed credentials).
+    /// </summary>
+    public string? PublicKey { get; set; }
+
+    /// <summary>
+    /// Lower-case hex SHA-256 of the key, for convenience only: the web app computes the
+    /// fingerprint it shows and sends from <c>publicKey</c> itself.
+    /// </summary>
+    public string? PublicKeyFingerprint { get; set; }
+
+    /// <summary>When this key became the one values are sealed to.</summary>
+    public DateTimeOffset? PublicKeyChangedAt { get; set; }
+
+    /// <summary>
+    /// A different key the bridge reported since, held until you confirm it
+    /// (<c>POST /api/bridges/{id}/public-key/confirm</c>), or null.
+    /// </summary>
+    public string? PendingPublicKey { get; set; }
+
+    /// <summary>Convenience only, like <c>publicKeyFingerprint</c>.</summary>
+    public string? PendingPublicKeyFingerprint { get; set; }
+
+    /// <summary>When the pending key was first reported.</summary>
+    public DateTimeOffset? PendingPublicKeyAt { get; set; }
+
+    /// <summary>
+    /// True when the bridge reported more new keys today than the daily cap: the API stopped
+    /// replacing the pending key (it keeps the first one past the cap) until the UTC day ends.
+    /// </summary>
+    public bool KeyChangesThrottled { get; set; }
 
     /// <summary>Online when it checked in within the last 15 minutes.</summary>
     public ConnectionStatus Status { get; set; }

@@ -374,7 +374,30 @@ public class PrinterService(
 
         context.Printers.Remove(printer);
 
-        await context.SaveChangesAsync();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await context.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 2 && ex.Entries.All(e => e.Entity is BridgePrinter))
+            {
+                // A bridge check-in rewrote an entry's credential issues (its concurrency stamp)
+                // meanwhile. The entry is being deleted either way: take the stored stamp and save again.
+                foreach (var entry in ex.Entries)
+                {
+                    if (await entry.GetDatabaseValuesAsync() is { } stored)
+                    {
+                        entry.OriginalValues.SetValues(stored);
+                    }
+                    else
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+        }
 
         // After commit, so a request racing the delete cannot re-cache the "valid" lookup.
         await spoolmanCredentials.InvalidateAsync(spoolmanConnections.Select(c => c.SecretHash));

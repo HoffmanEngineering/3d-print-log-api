@@ -73,6 +73,7 @@ public class PrintLogContext : DbContext
     public DbSet<BridgeDiscoveredPrinter> BridgeDiscoveredPrinters { get; set; }
     public DbSet<BridgeIgnoredPrinter> BridgeIgnoredPrinters { get; set; }
     public DbSet<BridgePrinter> BridgePrinters { get; set; }
+    public DbSet<BridgePrinterSecret> BridgePrinterSecrets { get; set; }
     public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
     public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
     public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
@@ -567,6 +568,19 @@ public class PrintLogContext : DbContext
             .WithMany()
             .HasForeignKey(p => p.PrinterId)
             .OnDelete(DeleteBehavior.NoAction);
+
+        // Sealed LAN credentials (story 14): one per entry and field, going with the entry, so
+        // disconnect, printer delete and revoke (grant -> bridge -> entries) all take them. The
+        // only cascade path into the table.
+        modelBuilder.Entity<BridgePrinterSecret>()
+            .HasIndex(s => new { s.BridgePrinterId, s.Field })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgePrinterSecret>()
+            .HasOne(s => s.BridgePrinter)
+            .WithMany(p => p.Secrets)
+            .HasForeignKey(s => s.BridgePrinterId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // Not a database cascade or set-null either (Users -> Connections and Users -> DeviceGrants
         // -> Bridges are two paths). Revoking a grant nulls it first, in the same transaction.

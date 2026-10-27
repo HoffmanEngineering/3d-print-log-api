@@ -79,6 +79,8 @@
     <None Include="..\.claude-plugin\marketplace.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\marketplace.json" />
     <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\server.json" />
     <None Update="Mcp\Plugin\*.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The sealed-credential test vectors the bridge and the web app copy (printlog-bridge#100). -->
+    <None Include="..\docs\bridge-credential-sealing.vectors.json" CopyToOutputDirectory="PreserveNewest" Link="Bridges\bridge-credential-sealing.vectors.json" />
   </ItemGroup>
 
 </Project>

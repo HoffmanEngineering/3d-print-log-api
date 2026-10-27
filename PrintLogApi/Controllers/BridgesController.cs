@@ -82,12 +82,18 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             telemetry.TrackEvent("BridgeRegistered", new Dictionary<string, string> { ["GrantId"] = Id(grantId) });
         }
 
-        if (report.Rejected.Count > 0)
+        if (result.KeyChange is { } change)
+        {
+            TrackKeyChange(grantId, change, result.KeyChangesToday);
+        }
+
+        List<RejectedEntryDto> rejected = [.. report.Rejected, .. result.Rejected];
+        if (rejected.Count > 0)
         {
             telemetry.TrackEvent("BridgeCheckInEntriesRejected", new Dictionary<string, string>
             {
                 ["GrantId"] = Id(grantId),
-                ["Codes"] = string.Join(' ', report.Rejected.Select(r => r.Code).Distinct().Order(StringComparer.Ordinal)),
+                ["Codes"] = string.Join(' ', rejected.Select(r => r.Code).Distinct().Order(StringComparer.Ordinal)),
             });
         }
 
@@ -97,9 +103,24 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             CheckInSeconds = CheckInSeconds,
             DesiredPollSeconds = DesiredPollSeconds,
             Desired = result.Desired,
-            Rejected = [.. report.Rejected],
+            Rejected = rejected,
+            PublicKeyFingerprint = result.PublicKeyFingerprint,
+            PendingPublicKeyFingerprint = result.PendingPublicKeyFingerprint,
         };
     }
+
+    /// <summary>
+    /// One event per key change (<c>first</c>, <c>pending</c>, <c>confirmed</c>) with the bridge's
+    /// count for the UTC day, so a bridge whose key flips is visible. Never the key itself, nor
+    /// anything sealed.
+    /// </summary>
+    private void TrackKeyChange(long grantId, string change, int changesToday)
+        => telemetry.TrackEvent("BridgeKeyChanged", new Dictionary<string, string>
+        {
+            ["GrantId"] = Id(grantId),
+            ["Change"] = change,
+            ["ChangesToday"] = changesToday.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        });
 
     /// <summary>
     /// A bridge reads the printers you connected to it (device token with `bridge:sync`). Send
@@ -285,8 +306,8 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// </summary>
     /// <remarks>
     /// No LAN credential is sent here. A printer that needs one (a Bambu Lab access code, a
-    /// PrusaLink password, an OctoPrint or Moonraker API key) gets it on the bridge until
-    /// credentials can be encrypted to the bridge's own key.
+    /// PrusaLink password, an OctoPrint or Moonraker API key) gets it sealed to the bridge's key
+    /// with `PUT /api/bridges/{id}/printers/{entryId}/secrets/{field}` once connected.
     /// </remarks>
     /// <response code="201">Connected.</response>
     /// <response code="400">`code`: `printer_not_found`, `discovered_printer_not_found`, `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial` or `serial_required`.</response>
@@ -358,6 +379,140 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     }
 
     /// <summary>
+    /// Sets or replaces one LAN credential of a connected printer, sealed in the browser to the
+    /// bridge's public key (docs/bridge-credential-sealing.md). The API stores the ciphertext and
+    /// can't read it; only the bridge gets it back, at its next check-in or poll.
+    /// </summary>
+    /// <remarks>
+    /// Seal with the bridge's `publicKey` (from `GET /api/bridges/{id}`), associated data
+    /// `printlog-credential:v1:{id}:{entryId}:{field}`, and send the `publicKeyFingerprint` you
+    /// sealed to. `field` is one of the entry's `secretFields`. The response never contains the
+    /// sealed value.
+    /// </remarks>
+    /// <response code="200">Stored. The body is the entry, with its secrets' fields, fingerprints and times.</response>
+    /// <response code="400">`code`: `invalid_secret_field`, `invalid_sealed_value` or `invalid_key_fingerprint`.</response>
+    /// <response code="404">You have no such bridge, or it has no such printer.</response>
+    /// <response code="409">`code`: `bridge_key_missing` (the bridge has reported no key; it needs updating), `bridge_key_unconfirmed` (sealed to the bridge's pending key: confirm it first) or `bridge_key_changed` (not the current key: reload the bridge, compare the fingerprint and seal again).</response>
+    [HttpPut("{id:long}/printers/{entryId:long}/secrets/{field}")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [RequestSizeLimit(4 * 1024)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BridgePrinterDto>> SetSecret(long id, long entryId, string field, SetBridgePrinterSecretDto body, CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        BridgePrinterDto? entry;
+        try
+        {
+            entry = await bridges.SetSecretAsync(userId, id, entryId, field, body, ct);
+        }
+        catch (BridgeProblemException problem)
+        {
+            return CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId, problem.KeyFingerprint);
+        }
+
+        if (entry is null)
+        {
+            return NotFound();
+        }
+
+        telemetry.TrackEvent("BridgePrinterSecretSet", new Dictionary<string, string>
+        {
+            ["GrantId"] = Id(id),
+            ["Kind"] = entry.Kind ?? string.Empty,
+            ["Field"] = field,
+        });
+        return entry;
+    }
+
+    /// <summary>Clears one sealed LAN credential of a connected printer. The bridge drops it at its next check-in or poll.</summary>
+    /// <response code="204">Cleared, or there was none.</response>
+    /// <response code="400">`code`: `invalid_secret_field`.</response>
+    /// <response code="404">You have no such bridge, or it has no such printer.</response>
+    [HttpDelete("{id:long}/printers/{entryId:long}/secrets/{field}")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ClearSecret(long id, long entryId, string field, CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            if (!await bridges.ClearSecretAsync(userId, id, entryId, field, ct))
+            {
+                return NotFound();
+            }
+        }
+        catch (BridgeProblemException problem)
+        {
+            return CodedProblem(problem.Status, problem.Message, problem.Code);
+        }
+
+        telemetry.TrackEvent("BridgePrinterSecretCleared", new Dictionary<string, string> { ["GrantId"] = Id(id), ["Field"] = field });
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Confirms the new encryption key a bridge reported, after you compared its fingerprint with
+    /// the one the bridge shows. Values sealed to the old key become stale and need sealing again.
+    /// </summary>
+    /// <remarks>
+    /// A bridge's first key is taken as is; a different one later is held as `pendingPublicKey`
+    /// until this call, because a stolen device token could report its own key. Send the
+    /// fingerprint you computed from `pendingPublicKey` (lower-case hex SHA-256 of its SPKI bytes),
+    /// not the API's `pendingPublicKeyFingerprint`.
+    /// </remarks>
+    /// <response code="200">Confirmed. The body is the bridge.</response>
+    /// <response code="400">`code`: `invalid_key_fingerprint`.</response>
+    /// <response code="404">You have no bridge with that id.</response>
+    /// <response code="409">`code`: `no_pending_key`, or `pending_key_changed` (the fingerprint isn't the pending key's: the bridge may have reported another; reload and compare again).</response>
+    [HttpPost("{id:long}/public-key/confirm")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BridgeDto>> ConfirmKey(long id, ConfirmBridgeKeyDto body, CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        BridgeKeyConfirmation? confirmed;
+        try
+        {
+            confirmed = await bridges.ConfirmPendingKeyAsync(userId, id, body.Fingerprint, ct);
+        }
+        catch (BridgeProblemException problem)
+        {
+            return CodedProblem(problem.Status, problem.Message, problem.Code);
+        }
+
+        if (confirmed is null)
+        {
+            return NotFound();
+        }
+
+        TrackKeyChange(id, "confirmed", confirmed.KeyChangesToday);
+        return confirmed.Bridge;
+    }
+
+    /// <summary>
     /// Asks a bridge to sweep its networks for printers now. It sees the request at its next
     /// check-in or poll. A second request within a minute is the same request.
     /// </summary>
@@ -388,13 +543,18 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     private ObjectResult NotRegistered() => CodedProblem(StatusCodes.Status404NotFound,
         "This bridge has not checked in yet: PUT /api/bridges/me first.", "bridge_not_registered");
 
-    private ObjectResult CodedProblem(int status, string detail, string code, long? bridgeId = null)
+    private ObjectResult CodedProblem(int status, string detail, string code, long? bridgeId = null, string? keyFingerprint = null)
     {
         var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
         problem.Extensions["code"] = code;
         if (bridgeId is { } other)
         {
             problem.Extensions["bridgeId"] = other;
+        }
+
+        if (keyFingerprint is not null)
+        {
+            problem.Extensions["keyFingerprint"] = keyFingerprint;
         }
         return new ObjectResult(problem)
         {

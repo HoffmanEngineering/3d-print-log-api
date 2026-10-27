@@ -18,6 +18,12 @@ public sealed record ValidDiscovery(
     IReadOnlyList<string> Macs,
     bool Configured);
 
+/// <summary>
+/// One reported credential issue, shaped but not yet matched to the bridge's entries (the
+/// service does that). <paramref name="Index"/> names it in <c>rejected</c>.
+/// </summary>
+public sealed record ReportedCredentialIssue(int Index, long? EntryId, string? Field, string? Code);
+
 /// <summary>A validated check-in. A null field or list keeps what is stored.</summary>
 public sealed record ValidCheckIn(
     string? AgentVersion,
@@ -26,7 +32,18 @@ public sealed record ValidCheckIn(
     IReadOnlyList<string>? Networks,
     IReadOnlyList<ValidDiscovery>? Discovered,
     DateTimeOffset? LastSweepAt,
-    IReadOnlyList<RejectedEntryDto> Rejected);
+    IReadOnlyList<RejectedEntryDto> Rejected)
+{
+    /// <summary>The bridge's public key, already parsed strictly, or null to keep the stored one.</summary>
+    public string? PublicKey { get; init; }
+
+    public string? PublicKeyFingerprint { get; init; }
+
+    public string? CredentialIssuesVersion { get; init; }
+
+    /// <summary>Null keeps the stored issues; empty clears them.</summary>
+    public IReadOnlyList<ReportedCredentialIssue>? CredentialIssues { get; init; }
+}
 
 /// <summary>
 /// Checks a check-in (printlog-bridge#100). The report as a whole is refused (a 400) when it is
@@ -70,8 +87,50 @@ public static partial class BridgeCheckInValidator
             return (null, $"hostName: up to {Bridge.HostNameMaxLength} characters, no control characters.");
         }
 
+        // A malformed key, or a fingerprint that doesn't match it, is dropped and named: the
+        // stored key stays and the rest of the check-in is stored, so a bad key can't lock the
+        // bridge out of its desired list. Nothing malformed is ever stored.
         var rejected = new List<RejectedEntryDto>();
-        return (new ValidCheckIn(agentVersion, mode, hostName, Networks(dto.Networks, rejected), Discovered(dto.Discovered, rejected), dto.LastSweepAt, rejected), null);
+        string? publicKey = null;
+        string? fingerprint = null;
+        if (dto.PublicKey is not null)
+        {
+            if (SealedCredentials.TryParsePublicKey(dto.PublicKey, out var parsed))
+            {
+                publicKey = dto.PublicKey;
+                fingerprint = parsed;
+            }
+            else
+            {
+                rejected.Add(new RejectedEntryDto { Field = "publicKey", Code = "invalid_public_key" });
+            }
+        }
+
+        if (dto.PublicKeyFingerprint is not null && publicKey is not null && dto.PublicKeyFingerprint != fingerprint)
+        {
+            rejected.Add(new RejectedEntryDto { Field = "publicKeyFingerprint", Code = "invalid_public_key" });
+            publicKey = null;
+            fingerprint = null;
+        }
+
+        if (dto.CredentialIssues is { Count: > BridgeService.MaxCredentialIssues })
+        {
+            return (null, $"credentialIssues: at most {BridgeService.MaxCredentialIssues}.");
+        }
+
+        var issuesVersion = Blank(dto.CredentialIssuesVersion);
+        if (dto.CredentialIssues is not null && (issuesVersion is null || issuesVersion.Length > 64))
+        {
+            return (null, "credentialIssuesVersion: the desired version the issues describe, required with credentialIssues.");
+        }
+
+        return (new ValidCheckIn(agentVersion, mode, hostName, Networks(dto.Networks, rejected), Discovered(dto.Discovered, rejected), dto.LastSweepAt, rejected)
+        {
+            PublicKey = publicKey,
+            PublicKeyFingerprint = fingerprint,
+            CredentialIssuesVersion = issuesVersion,
+            CredentialIssues = dto.CredentialIssues?.Select((issue, i) => new ReportedCredentialIssue(i, issue?.EntryId, issue?.Field, issue?.Code)).ToList(),
+        }, null);
     }
 
     private static List<string>? Networks(List<string?>? networks, List<RejectedEntryDto> rejected)

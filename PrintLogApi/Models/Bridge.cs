@@ -83,6 +83,45 @@ public class Bridge
     /// <summary>When the bridge last finished an active sweep, as it reports it, UTC.</summary>
     public DateTime? LastSweepAt { get; set; }
 
+    /// <summary>
+    /// The bridge's P-256 public key for sealed LAN credentials (story 14,
+    /// docs/bridge-credential-sealing.md): base64 of its DER SubjectPublicKeyInfo, exactly as
+    /// <c>SealedCredentials.TryParsePublicKey</c> accepts it. Null until a bridge reports one.
+    /// The private key never leaves the bridge.
+    /// </summary>
+    [MaxLength(200)]
+    public string? PublicKey { get; set; }
+
+    /// <summary>Lower-case hex SHA-256 of the SPKI bytes; what a sealed value names as the key it was sealed to.</summary>
+    [MaxLength(64)]
+    public string? PublicKeyFingerprint { get; set; }
+
+    /// <summary>When the current key became current (first reported, or confirmed), UTC.</summary>
+    public DateTime? PublicKeyChangedAt { get; set; }
+
+    /// <summary>
+    /// A different key the bridge reported after it already had one: held until the owner
+    /// confirms it by its fingerprint, because a stolen device token could report its own key.
+    /// Nothing is sealed to it until then. Same format as <see cref="PublicKey"/>.
+    /// </summary>
+    [MaxLength(200)]
+    public string? PendingPublicKey { get; set; }
+
+    [MaxLength(64)]
+    public string? PendingPublicKeyFingerprint { get; set; }
+
+    /// <summary>When the pending key was first reported, UTC.</summary>
+    public DateTime? PendingPublicKeyAt { get; set; }
+
+    /// <summary>The UTC day <see cref="KeyChangesToday"/> counts.</summary>
+    public DateTime? KeyChangesDay { get; set; }
+
+    /// <summary>Key changes (first key, new pending key, confirmation) on <see cref="KeyChangesDay"/>, for telemetry.</summary>
+    public int KeyChangesToday { get; set; }
+
+    /// <summary>The UTC day the owner was last told about a pending key; at most one notice a day.</summary>
+    public DateTime? KeyNotifiedDay { get; set; }
+
     public ICollection<BridgeDiscoveredPrinter>? DiscoveredPrinters { get; set; }
 
     public ICollection<BridgePrinter>? Printers { get; set; }
@@ -167,9 +206,8 @@ public class BridgeIgnoredPrinter
 
 /// <summary>
 /// A printer the user connected to a bridge from the app: the bridge's desired printer list,
-/// returned on every check-in. Only an interactive user creates one. Carries no LAN secret: until
-/// credentials are encrypted to the bridge's key (printlog-bridge#100, story 14), the access code
-/// or password is entered on the bridge.
+/// returned on every check-in. Only an interactive user creates one. Its LAN credentials are in
+/// <see cref="BridgePrinterSecret"/>, sealed to the bridge's key; never in plaintext.
 /// </summary>
 public class BridgePrinter
 {
@@ -208,5 +246,56 @@ public class BridgePrinter
     [MaxLength(200)]
     public string? Macs { get; set; }
 
+    /// <summary>
+    /// What the bridge last reported it can't use, space-separated <c>field:code</c> pairs
+    /// (<c>access_code:undecryptable</c>). Codes: <c>SealedCredentials.IssueCodes</c>.
+    /// </summary>
+    [MaxLength(400)]
+    public string? CredentialIssues { get; set; }
+
+    /// <summary>
+    /// Changes with every write of <see cref="CredentialIssues"/> or a sealed value, and is checked
+    /// on each: a check-in that read the entry before an owner sealed a new value can't then
+    /// overwrite the issue that seal cleared.
+    /// </summary>
+    [ConcurrencyCheck]
+    public Guid IssuesStamp { get; set; }
+
     public DateTime CreatedDate { get; set; }
+
+    public ICollection<BridgePrinterSecret>? Secrets { get; set; }
+}
+
+/// <summary>
+/// One LAN credential of a desired printer, sealed in the browser to the bridge's public key
+/// (docs/bridge-credential-sealing.md). The API stores and forwards the ciphertext and cannot
+/// read it. Only the owning bridge's device endpoints ever return <see cref="SealedValue"/>.
+/// A row whose <see cref="KeyFingerprint"/> is not the bridge's current one is stale: the bridge
+/// can't open it, so it isn't sent, and the owner is asked to seal it again.
+/// </summary>
+public class BridgePrinterSecret
+{
+    [Key]
+    public long Id { get; set; }
+
+    public long BridgePrinterId { get; set; }
+    [ForeignKey("BridgePrinterId")]
+    public BridgePrinter BridgePrinter { get; set; } = null!;
+
+    /// <summary>The adapter's field: <c>access_code</c>, <c>password</c>, <c>username</c>, <c>api_key</c>, <c>moonraker_api_key</c>.</summary>
+    [Required]
+    [MaxLength(40)]
+    public string Field { get; set; } = null!;
+
+    /// <summary><c>v1.</c> and base64url of the sealed box. Never logged, never in telemetry.</summary>
+    [Required]
+    [MaxLength(512)]
+    public string SealedValue { get; set; } = null!;
+
+    /// <summary>The fingerprint of the bridge key it was sealed to.</summary>
+    [Required]
+    [MaxLength(64)]
+    public string KeyFingerprint { get; set; } = null!;
+
+    public DateTime UpdatedDate { get; set; }
 }
