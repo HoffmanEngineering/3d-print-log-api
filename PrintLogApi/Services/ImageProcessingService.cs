@@ -86,7 +86,11 @@ public class ImageProcessingService : IImageProcessingService
             thumbnail = null;
         }
 
-        return new ProcessedImage(original, "image/jpeg", thumbnail);
+        return new ProcessedImage(original, "image/jpeg", thumbnail)
+        {
+            Width = oriented.Width,
+            Height = oriented.Height,
+        };
     }
 
     /// <summary>

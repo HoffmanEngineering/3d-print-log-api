@@ -1493,6 +1493,10 @@ namespace PrintLogApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<long>("CreatedById")
                         .HasColumnType("bigint");
 
@@ -1505,17 +1509,29 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("FileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDefault")
                         .HasColumnType("bit");
 
                     b.Property<long>("PrintId")
                         .HasColumnType("bigint");
 
+                    b.Property<Guid?>("SocialFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ThumbnailFileId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<long>("UpdatedById")
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -1528,6 +1544,10 @@ namespace PrintLogApi.Migrations
                         .HasFilter("[IsDefault] = 1");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrintId"), new[] { "Id", "FileId", "IsDefault", "CreatedDate", "CreatedById", "UpdatedDate", "UpdatedById" });
+
+                    b.HasIndex("SocialFileId");
+
+                    b.HasIndex("ThumbnailFileId");
 
                     b.HasIndex("UpdatedById");
 
@@ -2147,6 +2167,10 @@ namespace PrintLogApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<long>("CreatedById")
                         .HasColumnType("bigint");
 
@@ -2159,10 +2183,19 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("FileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDefault")
                         .HasColumnType("bit");
 
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SocialFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ThumbnailFileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<long>("UpdatedById")
@@ -2170,6 +2203,9 @@ namespace PrintLogApi.Migrations
 
                     b.Property<DateTime>("UpdatedDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -2181,6 +2217,10 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_ProjectImages_ProjectId");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("ProjectId"), new[] { "Id", "FileId", "IsDefault", "DisplayOrder", "CreatedDate", "CreatedById" });
+
+                    b.HasIndex("SocialFileId");
+
+                    b.HasIndex("ThumbnailFileId");
 
                     b.HasIndex("UpdatedById");
 
@@ -3322,6 +3362,16 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PrintLogApi.Models.File", "SocialFile")
+                        .WithMany()
+                        .HasForeignKey("SocialFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("PrintLogApi.Models.File", "ThumbnailFile")
+                        .WithMany()
+                        .HasForeignKey("ThumbnailFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
@@ -3333,6 +3383,10 @@ namespace PrintLogApi.Migrations
                     b.Navigation("File");
 
                     b.Navigation("Print");
+
+                    b.Navigation("SocialFile");
+
+                    b.Navigation("ThumbnailFile");
 
                     b.Navigation("UpdatedBy");
                 });
@@ -3497,6 +3551,16 @@ namespace PrintLogApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PrintLogApi.Models.File", "SocialFile")
+                        .WithMany()
+                        .HasForeignKey("SocialFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("PrintLogApi.Models.File", "ThumbnailFile")
+                        .WithMany()
+                        .HasForeignKey("ThumbnailFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PrintLogApi.Models.User", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
@@ -3508,6 +3572,10 @@ namespace PrintLogApi.Migrations
                     b.Navigation("File");
 
                     b.Navigation("Project");
+
+                    b.Navigation("SocialFile");
+
+                    b.Navigation("ThumbnailFile");
 
                     b.Navigation("UpdatedBy");
                 });

@@ -740,6 +740,21 @@ public class PrintLogContext : DbContext
             .HasDatabaseName("IX_PrintImages_PrintId_Default")
             .HasFilter("[IsDefault] = 1");
 
+        // Restrict, not Cascade, as for printer images: the delete paths remove the derivative
+        // File rows explicitly so their blobs go with them.
+        modelBuilder.Entity<PrintImage>(entity =>
+        {
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.SocialFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.SocialFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // Tag UIDs (#147). One physical tag is one spool, per user: two accounts may each have
         // scanned the same tag, so the index is not global. The race between two requests
         // assigning one UID lands here, and FilamentService reports it as the same 409.
@@ -885,6 +900,20 @@ public class PrintLogContext : DbContext
                 pi.CreatedById
             })
             .HasDatabaseName("IX_ProjectImages_ProjectId");
+
+        // See PrintImage above.
+        modelBuilder.Entity<ProjectImage>(entity =>
+        {
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.SocialFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.SocialFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<Project>()
             .HasIndex(p => new { p.CreatedById, p.CreatedDate })

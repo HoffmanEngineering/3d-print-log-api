@@ -10,7 +10,9 @@ public class ProjectService(
     PrintLogContext context,
     IMapper mapper,
     IBlobStorageService blobStorageService,
-    ICacheVersionService cacheVersionService) : IProjectService
+    ICacheVersionService cacheVersionService,
+    IImageProcessingService imageProcessing,
+    IProcessedImageWriter imageWriter) : IProjectService
 {
     public async Task<Mcp.McpPage<Mcp.ProjectListItem>> ListProjectsForMcp(
         long userId, int page, int pageSize, string? search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
@@ -437,6 +439,11 @@ public class ProjectService(
             .Include(p => p.Prints!)
             .Include(p => p.Images!)
                 .ThenInclude(img => img.File)
+            .Include(p => p.Images!)
+                .ThenInclude(img => img.ThumbnailFile)
+            .Include(p => p.Images!)
+                .ThenInclude(img => img.SocialFile)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (project == null)
@@ -454,57 +461,95 @@ public class ProjectService(
             }
         }
 
-        foreach (var image in project.Images!)
-        {
-            if (image.File != null)
-                await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
-        }
+        var files = project.Images!.SelectMany(ImageFiles).ToList();
+        var blobNames = BlobNames(files);
 
         context.ProjectImages.RemoveRange(project.Images!);
+        context.Files.RemoveRange(files);
         context.Projects.Remove(project);
         await context.SaveChangesAsync();
+
+        // Blobs last: a failed save then leaves an orphaned blob rather than a row pointing at
+        // deleted bytes.
+        foreach (var name in blobNames)
+            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, name);
     }
+
+    /// <summary>The original and every derivative of an image, whichever are loaded and set.</summary>
+    private static IEnumerable<Models.File> ImageFiles(ProjectImage image)
+        => new[] { image.File, image.ThumbnailFile, image.SocialFile }.OfType<Models.File>();
+
+    private static List<string> BlobNames(IEnumerable<Models.File> files)
+        => files
+            .Select(f => Path.GetFileName(f.Path))
+            .OfType<string>()
+            .Where(name => name.Length > 0)
+            .ToList();
 
     public async Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId)
     {
         var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
         if (project == null) throw new DoesNotExistException();
 
-        var blobName = $"{Guid.NewGuid()}{System.IO.Path.GetExtension(file.FileName)}";
-        using var stream = file.OpenReadStream();
-        await blobStorageService.UploadAsync(BlobContainers.ProjectImages, blobName, stream);
-
-        var fileEntity = new Models.File { Path = blobName, Size = file.Length, CreatedById = userId, UpdatedById = userId };
-        context.Files.Add(fileEntity);
-        await context.SaveChangesAsync();
-
-        var existingCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
-        var image = new ProjectImage
+        // Decode and re-encode BEFORE touching storage: an upload that is not a supported image
+        // throws InvalidImageException here and creates no blobs.
+        ProcessedImage processed;
+        await using (var stream = file.OpenReadStream())
         {
-            ProjectId = projectId,
-            FileId = fileEntity.Id,
-            IsDefault = existingCount == 0,
-            DisplayOrder = existingCount,
-            CreatedById = userId,
-            UpdatedById = userId
-        };
-        context.ProjectImages.Add(image);
-        await context.SaveChangesAsync();
-        return image;
+            processed = await imageProcessing.ProcessAsync(stream);
+        }
+
+        var uploadedBlobNames = new List<string>();
+        try
+        {
+            var files = await imageWriter.WriteAsync(
+                BlobContainers.ProjectImages, processed, userId, uploadedBlobNames);
+
+            var existingCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+            var image = new ProjectImage
+            {
+                ProjectId = projectId,
+                File = files.Original,
+                ThumbnailFile = files.Thumbnail,
+                ContentType = processed.ContentType,
+                Width = processed.Width,
+                Height = processed.Height,
+                IsDefault = existingCount == 0,
+                DisplayOrder = existingCount,
+                CreatedById = userId,
+                UpdatedById = userId
+            };
+            context.ProjectImages.Add(image);
+            await context.SaveChangesAsync();
+            return image;
+        }
+        catch
+        {
+            // The blobs are not covered by the save, so a failed save would orphan them.
+            await imageWriter.DeleteBlobsQuietlyAsync(BlobContainers.ProjectImages, uploadedBlobNames);
+            throw;
+        }
     }
 
     public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
     {
         var image = await context.ProjectImages
             .Include(pi => pi.File)
+            .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .FirstOrDefaultAsync(pi => pi.ProjectId == projectId && pi.Id == imageId);
         if (image == null) throw new DoesNotExistException();
 
-        if (image.File != null)
-            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
+        var files = ImageFiles(image).ToList();
+        var blobNames = BlobNames(files);
 
         context.ProjectImages.Remove(image);
+        context.Files.RemoveRange(files);
         await context.SaveChangesAsync();
+
+        // Blobs last, as in DeleteProjectAsync.
+        foreach (var name in blobNames)
+            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, name);
     }
 
     public async Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId)
@@ -536,13 +581,14 @@ public class ProjectService(
         await context.SaveChangesAsync();
     }
 
-    public async Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId)
+    public async Task<ProjectImageContent?> GetImageAsync(Guid projectId, int imageId, long? userId)
     {
         var data = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId && pi.Id == imageId)
             .Select(pi => new
             {
                 pi.File.Path,
+                pi.ContentType,
                 ProjectViewStatus = pi.Project.ViewStatus,
                 ProjectCreatedById = pi.Project.CreatedById,
             })
@@ -556,7 +602,10 @@ public class ProjectService(
             return null;
 
         var blobName = Path.GetFileName(data.Path!);
-        return await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
+        var download = await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
+        return download is { } found
+            ? new ProjectImageContent(found.stream, found.fileName, data.ContentType)
+            : null;
     }
 
     /// <summary>

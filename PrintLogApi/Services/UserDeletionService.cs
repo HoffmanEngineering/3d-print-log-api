@@ -133,36 +133,34 @@ public class UserDeletionService : IUserDeletionService
             // Delete PrintImages, their blobs, and their associated Files for user's prints
             if (printIds.Count > 0)
             {
+                // The thumbnail and social derivatives are Restrict FKs, so the image rows must go
+                // before their File rows, and their blobs must be listed here or nothing deletes them.
                 var printImageData = await _context.PrintImages
                     .Where(pi => printIds.Contains(pi.PrintId))
-                    .Select(pi => new { pi.FileId, pi.File.Path })
+                    .Select(pi => new
+                    {
+                        pi.FileId,
+                        pi.ThumbnailFileId,
+                        pi.SocialFileId,
+                        pi.File.Path,
+                        ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
+                        SocialPath = pi.SocialFile != null ? pi.SocialFile.Path : null,
+                    })
                     .AsNoTracking()
                     .ToListAsync();
 
-                foreach (var f in printImageData)
-                {
-                    if (!string.IsNullOrEmpty(f.Path))
-                    {
-                        var parts = f.Path.Split('/', 2);
-                        if (parts.Length == 2)
-                        {
-                            try
-                            {
-                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to delete blob {BlobPath} during user deletion; continuing", f.Path);
-                            }
-                        }
-                    }
-                }
+                await DeleteImageBlobsAsync(
+                    BlobContainers.PrintImages,
+                    printImageData.SelectMany(f => new[] { f.Path, f.ThumbnailPath, f.SocialPath }));
 
                 await _context.PrintImages
                     .Where(pi => printIds.Contains(pi.PrintId))
                     .ExecuteDeleteAsync();
 
-                var printImageFileIds = printImageData.Select(f => f.FileId).ToList();
+                var printImageFileIds = printImageData
+                    .SelectMany(f => new[] { (Guid?)f.FileId, f.ThumbnailFileId, f.SocialFileId })
+                    .OfType<Guid>()
+                    .ToList();
                 if (printImageFileIds.Count > 0)
                 {
                     await _context.Files
@@ -238,36 +236,34 @@ public class UserDeletionService : IUserDeletionService
                     .Where(p => p.ProjectId.HasValue && projectIds.Contains(p.ProjectId.Value))
                     .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.ProjectId, (Guid?)null));
 
+                // As for print images above. Older project rows store a bare blob name rather than
+                // "container/name", which DeleteImageBlobsAsync handles.
                 var projectImageData = await _context.ProjectImages
                     .Where(pi => projectIds.Contains(pi.ProjectId))
-                    .Select(pi => new { pi.FileId, pi.File.Path })
+                    .Select(pi => new
+                    {
+                        pi.FileId,
+                        pi.ThumbnailFileId,
+                        pi.SocialFileId,
+                        pi.File.Path,
+                        ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
+                        SocialPath = pi.SocialFile != null ? pi.SocialFile.Path : null,
+                    })
                     .AsNoTracking()
                     .ToListAsync();
 
-                foreach (var f in projectImageData)
-                {
-                    if (!string.IsNullOrEmpty(f.Path))
-                    {
-                        var parts = f.Path.Split('/', 2);
-                        if (parts.Length == 2)
-                        {
-                            try
-                            {
-                                await _blobStorageService.DeleteBlobAsync(parts[0], parts[1]);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to delete blob {BlobPath} during user deletion; continuing", f.Path);
-                            }
-                        }
-                    }
-                }
+                await DeleteImageBlobsAsync(
+                    BlobContainers.ProjectImages,
+                    projectImageData.SelectMany(f => new[] { f.Path, f.ThumbnailPath, f.SocialPath }));
 
                 await _context.ProjectImages
                     .Where(pi => projectIds.Contains(pi.ProjectId))
                     .ExecuteDeleteAsync();
 
-                var projectImageFileIds = projectImageData.Select(f => f.FileId).ToList();
+                var projectImageFileIds = projectImageData
+                    .SelectMany(f => new[] { (Guid?)f.FileId, f.ThumbnailFileId, f.SocialFileId })
+                    .OfType<Guid>()
+                    .ToList();
                 if (projectImageFileIds.Count > 0)
                 {
                     await _context.Files
@@ -537,6 +533,31 @@ public class UserDeletionService : IUserDeletionService
         {
             // Restore previous timeout
             _context.Database.SetCommandTimeout(previousTimeout);
+        }
+    }
+
+    /// <summary>
+    /// Deletes print or project image blobs from their fixed container. Paths are either
+    /// "container/name" or a bare name; the file name is the blob name either way. Failures are
+    /// logged and skipped, as everywhere else in account deletion.
+    /// </summary>
+    private async Task DeleteImageBlobsAsync(string containerName, IEnumerable<string?> paths)
+    {
+        var names = paths
+            .Select(path => System.IO.Path.GetFileName(path))
+            .OfType<string>()
+            .Where(name => name.Length > 0);
+
+        foreach (var name in names)
+        {
+            try
+            {
+                await _blobStorageService.DeleteBlobAsync(containerName, name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete blob {BlobName} during user deletion; continuing", name);
+            }
         }
     }
 }

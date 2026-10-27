@@ -11,6 +11,8 @@ public class PrintEventService(
     IPrintFinishNotifier printFinishNotifier,
     IPrintStartNotifier printStartNotifier,
     IBlobStorageService blobStorageService,
+    IImageProcessingService imageProcessing,
+    IProcessedImageWriter imageWriter,
     ICacheVersionService cacheVersionService,
     TimeProvider clock,
     ILogger<PrintEventService> logger) : IPrintEventService
@@ -79,10 +81,11 @@ public class PrintEventService(
 
         context.Prints.Add(print);
 
+        StoredSnapshot? snapshot = null;
         if (started.Snapshot is not null && await printService.GetMaxImagesPerPrint(started.UserId) > 0)
         {
             // A new print has no images yet, so this one is first and the default.
-            await AddSnapshot(print, started.Snapshot, started.UserId, displayOrder: 0);
+            snapshot = await AddSnapshot(print, started.Snapshot, started.UserId, displayOrder: 0);
         }
 
         try
@@ -93,6 +96,10 @@ public class PrintEventService(
         {
             // A racing delivery of the same start won IX_Prints_User_ExternalSource_ExternalId.
             context.ChangeTracker.Clear();
+            if (snapshot is not null)
+            {
+                await DeleteOrphanedSnapshot(snapshot);
+            }
             if (await FindByExternalId(started) is { } winner)
             {
                 return new PrintStartedResult(winner, WasReplayed: true);
@@ -189,7 +196,7 @@ public class PrintEventService(
             await printService.UpdateFilamentUsageWeights(print);
         }
 
-        (Guid FileId, string BlobName)? snapshot = null;
+        StoredSnapshot? snapshot = null;
         if (finished.Snapshot is not null)
         {
             var maxImages = await printService.GetMaxImagesPerPrint(finished.UserId);
@@ -201,13 +208,16 @@ public class PrintEventService(
                     .Where(pi => pi.PrintId == print.Id)
                     .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
                 snapshot = await AddSnapshot(print, finished.Snapshot, finished.UserId, maxDisplayOrder + 1);
-                var fileId = snapshot.Value.FileId;
+                if (snapshot is not null)
+                {
+                    var fileId = snapshot.FileId;
 
-                // The newest snapshot becomes the default.
-                var otherDefaults = await context.PrintImages
-                    .Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId)
-                    .ToListAsync();
-                otherDefaults.ForEach(p => p.IsDefault = false);
+                    // The newest snapshot becomes the default.
+                    var otherDefaults = await context.PrintImages
+                        .Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId)
+                        .ToListAsync();
+                    otherDefaults.ForEach(p => p.IsDefault = false);
+                }
             }
         }
 
@@ -220,9 +230,9 @@ public class PrintEventService(
             // A loss can also be this request's own commit seen through a retried save (see
             // PrintFinishTransition), so the cache may be stale either way. Invalidating is cheap.
             cacheVersionService.InvalidateUserCache(finished.UserId);
-            if (snapshot is { } uploaded)
+            if (snapshot is not null)
             {
-                await DeleteOrphanedSnapshot(uploaded.FileId, uploaded.BlobName);
+                await DeleteOrphanedSnapshot(snapshot);
             }
             if (retryIfRaced)
             {
@@ -345,58 +355,88 @@ public class PrintEventService(
         return printId is { } id ? await printService.GetPrintById(id) : null;
     }
 
+    /// <summary>The original's File id and every blob name one snapshot was uploaded under.</summary>
+    private sealed record StoredSnapshot(Guid FileId, IReadOnlyList<string> BlobNames);
+
     /// <summary>
-    /// Uploads <paramref name="image"/> and attaches it as the print's default image. Returns the
-    /// file id and the blob name it was uploaded under.
+    /// Processes <paramref name="image"/> like any print image upload (decoded, re-encoded,
+    /// thumbnail) and attaches it as the print's default image. Returns null, attaching nothing,
+    /// when the snapshot is not a supported image: a bad camera frame must not fail the event.
     /// </summary>
-    private async Task<(Guid FileId, string BlobName)> AddSnapshot(Print print, IFormFile image, long userId, int displayOrder)
+    private async Task<StoredSnapshot?> AddSnapshot(Print print, IFormFile image, long userId, int displayOrder)
     {
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-        using var uploadFileStream = image.OpenReadStream();
-        var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-        var file = new Models.File
+        ProcessedImage processed;
+        try
         {
-            Size = image.Length,
-            Path = uploadResult.BlobPath,
-            Id = fileId,
-            CreatedById = userId,
-            UpdatedById = userId,
-        };
-        context.Files.Add(file);
+            await using var uploadFileStream = image.OpenReadStream();
+            processed = await imageProcessing.ProcessAsync(uploadFileStream);
+        }
+        catch (InvalidImageException ex)
+        {
+            logger.LogWarning("Skipped a snapshot that is not a supported image: {Reason}", ex.Message);
+            return null;
+        }
+
+        var uploadedBlobNames = new List<string>();
+        StoredImageFiles files;
+        try
+        {
+            files = await imageWriter.WriteAsync(printImageContainerName, processed, userId, uploadedBlobNames);
+        }
+        catch
+        {
+            await imageWriter.DeleteBlobsQuietlyAsync(printImageContainerName, uploadedBlobNames);
+            throw;
+        }
+
         context.PrintImages.Add(new PrintImage
         {
-            File = file,
+            File = files.Original,
+            ThumbnailFile = files.Thumbnail,
+            ContentType = processed.ContentType,
+            Width = processed.Width,
+            Height = processed.Height,
             CreatedById = userId,
             UpdatedById = userId,
             Print = print,
             IsDefault = true,
             DisplayOrder = displayOrder,
         });
-        return (fileId, fileName);
+        return new StoredSnapshot(files.Original.Id, uploadedBlobNames);
     }
 
     /// <summary>
-    /// Deletes the snapshot a losing finish uploaded, unless its file row was stored after all: a
-    /// commit whose retried save reported a loss did store it, and the image is then live.
-    /// Best effort: a blob left behind costs storage, not correctness, so a failed delete is
-    /// logged and does not fail the event.
+    /// Deletes the blobs of a snapshot whose save lost a race, unless its file row was stored
+    /// after all: a commit whose retried save reported a loss did store it, and the image is
+    /// then live. The original and its thumbnail are saved together, so the original's row
+    /// answers for both. Best effort: a blob left behind costs storage, not correctness, so a
+    /// failed delete is logged and does not fail the event.
     /// </summary>
-    private async Task DeleteOrphanedSnapshot(Guid fileId, string blobName)
+    private async Task DeleteOrphanedSnapshot(StoredSnapshot snapshot)
     {
         try
         {
-            if (await context.Files.AnyAsync(f => f.Id == fileId))
+            if (await context.Files.AnyAsync(f => f.Id == snapshot.FileId))
             {
                 return;
             }
-            await blobStorageService.DeleteBlobAsync(printImageContainerName, blobName);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not delete the unreferenced snapshot {BlobName}.", blobName);
+            logger.LogWarning(ex, "Could not check whether snapshot {FileId} was stored.", snapshot.FileId);
+            return;
+        }
+
+        foreach (var blobName in snapshot.BlobNames)
+        {
+            try
+            {
+                await blobStorageService.DeleteBlobAsync(printImageContainerName, blobName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not delete the unreferenced snapshot {BlobName}.", blobName);
+            }
         }
     }
 

@@ -46,9 +46,13 @@ public interface IProjectService
     Task<Project> CreateProjectAsync(AddProjectDto dto, long userId);
     Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId);
     Task DeleteProjectAsync(Guid id, bool deletePrints, long userId);
+    /// <exception cref="Exceptions.InvalidImageException">The file is not a supported image.</exception>
     Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId);
     Task DeleteImageAsync(Guid projectId, int imageId, long userId);
     Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
     Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);
-    Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId);
+    Task<ProjectImageContent?> GetImageAsync(Guid projectId, int imageId, long? userId);
 }
+
+/// <summary>A project image's bytes, its blob name, and its stored content type (null on old rows).</summary>
+public sealed record ProjectImageContent(Stream Stream, string FileName, string? ContentType);

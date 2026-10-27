@@ -1,42 +1,23 @@
-﻿using Azure.Storage.Blobs;
-using PrintLogApi.Exceptions;
+﻿using PrintLogApi.Exceptions;
 using PrintLogApi.Models.DTOs.Print;
 
 namespace PrintLogApi.Services;
 
-public class PrintImageService : IPrintImageService
+public class PrintImageService(IBlobStorageService blobStorage) : IPrintImageService
 {
-    private const string printImageContainerName = BlobContainers.PrintImages;
-    private readonly BlobContainerClient printImageContainer;
-
-    public PrintImageService(IConfiguration config)
-    {
-        var blobServiceClient = new BlobServiceClient(config["AZURE_STORAGE_CONNECTION_STRING"]);
-        printImageContainer = blobServiceClient.GetBlobContainerClient(printImageContainerName);
-    }
-
     public async Task<PrintImageFileDto> DownloadPrintFile(Models.File file)
     {
         var fileName = Path.GetFileName(file.Path);
-        var blobClient = printImageContainer.GetBlobClient(fileName);
-
-        if (await blobClient.ExistsAsync())
-        {
-            var ms = new MemoryStream();
-            var stream = await blobClient.DownloadToAsync(ms);
-            ms.Position = 0;
-
-            return new PrintImageFileDto()
-            {
-                File = ms,
-                FileName = fileName
-            };
-
-        }
-        else
-        {
+        if (string.IsNullOrEmpty(fileName))
             throw new DoesNotExistException();
-        }
-    }
 
+        var download = await blobStorage.DownloadAsync(BlobContainers.PrintImages, fileName)
+            ?? throw new DoesNotExistException();
+
+        return new PrintImageFileDto
+        {
+            File = download.stream,
+            FileName = fileName
+        };
+    }
 }

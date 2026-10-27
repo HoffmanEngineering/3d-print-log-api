@@ -149,6 +149,49 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(1, await ImageCountAsync(print.Id));
     }
 
+    [Fact]
+    public async Task OctoPrint_Snapshot_IsProcessedLikeAnUpload()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash, withSnapshot: true);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var image = await db.PrintImages
+            .Include(i => i.File)
+            .Include(i => i.ThumbnailFile)
+            .AsNoTracking()
+            .SingleAsync(i => i.PrintId == print.Id, TestContext.Current.CancellationToken);
+        var blobs = (InMemoryBlobStorageService)_factory.Services.GetRequiredService<IBlobStorageService>();
+
+        Assert.Equal("image/jpeg", image.ContentType);
+        Assert.Equal(50, image.Width);
+        Assert.Equal(100, image.Height);
+        Assert.EndsWith(".jpg", image.File.Path, StringComparison.Ordinal);
+        Assert.DoesNotContain("Exif", Encoding.ASCII.GetString(blobs.Blobs[image.File.Path!]), StringComparison.Ordinal);
+        Assert.NotNull(image.ThumbnailFile);
+        Assert.True(blobs.BlobExists(image.ThumbnailFile!.Path!));
+    }
+
+    [Fact]
+    public async Task OctoPrint_SnapshotThatIsNotAnImage_LogsThePrintWithoutIt()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+
+        var response = await PostOctoPrintAsync(
+            "octoprint-print-started.json", printerId, run, hash, snapshotBytes: "not an image"u8.ToArray());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(0, await ImageCountAsync(print.Id));
+    }
+
     #endregion
 
     #region The pipeline itself
@@ -369,7 +412,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
     /// Sends an OctoPrint fixture as the plugin does when snapshots are on: multipart form fields,
     /// objects as JSON text.
     /// </summary>
-    private async Task<HttpResponseMessage> PostOctoPrintAsync(string fixture, long printerId, string run, string hash, bool withSnapshot = false)
+    private async Task<HttpResponseMessage> PostOctoPrintAsync(string fixture, long printerId, string run, string hash, bool withSnapshot = false, byte[]? snapshotBytes = null)
     {
         var fields = JsonSerializer.Deserialize<Dictionary<string, string>>(System.IO.File.ReadAllText(FixturePath(fixture)))!;
         var content = new MultipartFormDataContent();
@@ -377,9 +420,9 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         {
             content.Add(new StringContent(value.Replace("__PRINTER_ID__", printerId.ToString()).Replace("__RUN__", run).Replace("__HASH__", hash)), name);
         }
-        if (withSnapshot)
+        if (withSnapshot || snapshotBytes is not null)
         {
-            var image = new ByteArrayContent(System.IO.File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "tests-fixtures", "exif-orientation-6.jpg")));
+            var image = new ByteArrayContent(snapshotBytes ?? System.IO.File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "tests-fixtures", "exif-orientation-6.jpg")));
             image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
             content.Add(image, "snapshot", "snapshot.jpg");
         }

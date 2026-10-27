@@ -184,9 +184,7 @@ public class ProjectsController(
         var result = await projectService.GetImageAsync(id, imageId, userId);
         if (result == null) return NotFound();
 
-        new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
-            .TryGetContentType(result.Value.fileName, out var contentType);
-        return File(result.Value.stream, contentType ?? "application/octet-stream");
+        return ImageFileResult.Create(this, result.Stream, result.ContentType, result.FileName);
     }
 
     /// <summary>Upload an image to a project.</summary>
@@ -208,9 +206,10 @@ public class ProjectsController(
         if (file == null)
             return BadRequest("Image file is required.");
 
-        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+        // A cheap early answer for an obviously wrong file. The decode in the service decides.
+        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/webp" };
         if (!allowedImageTypes.Contains(file.ContentType.ToLowerInvariant()))
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
 
         const long maxImageSizeBytes = 10 * 1024 * 1024;
         if (file.Length > maxImageSizeBytes)
@@ -226,6 +225,10 @@ public class ProjectsController(
         catch (DoesNotExistException)
         {
             return NotFound();
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 

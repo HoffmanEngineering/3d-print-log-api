@@ -6,7 +6,6 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
@@ -43,7 +42,9 @@ public class PrintsController(
     CachedComputation computation,
     ICacheVersionService cacheVersionService,
     IBlobStorageService blobStorageService,
-    IFileAttachmentService fileAttachmentService) : ControllerBase
+    IFileAttachmentService fileAttachmentService,
+    IImageProcessingService imageProcessing,
+    IProcessedImageWriter imageWriter) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
@@ -1101,6 +1102,7 @@ public class PrintsController(
             .Select(pi => new
             {
                 pi.File,
+                pi.ContentType,
                 PrintViewStatus = pi.Print.ViewStatus,
                 PrintCreatedById = pi.Print.CreatedById
             })
@@ -1124,8 +1126,7 @@ public class PrintsController(
         {
             var printImageDto = await printImageService.DownloadPrintFile(imageData.File);
 
-            new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName!, out var contentType);
-            return File(printImageDto.File!, contentType ?? "application/octet-stream");
+            return ImageFileResult.Create(this, printImageDto.File!, imageData.ContentType, printImageDto.FileName);
 
         }
         catch (DoesNotExistException)
@@ -1279,10 +1280,11 @@ public class PrintsController(
             return BadRequest("Image file is required.");
         }
 
-        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+        // A cheap early answer for an obviously wrong file. The decode below is what decides.
+        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/webp" };
         if (!allowedImageTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         const long maxImageSizeBytes = 10 * 1024 * 1024;
@@ -1299,48 +1301,62 @@ public class PrintsController(
             return BadRequest($"Maximum of {maxImages} images per print allowed");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-
-
-        using var uploadFileStream = image.OpenReadStream();
-        var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-        var file = new Models.File()
+        // Decode and re-encode BEFORE touching storage, as printer and material images do: an
+        // upload that is not a supported image must not create blobs.
+        ProcessedImage processed;
+        try
         {
-            Size = image.Length,
-            Path = uploadResult.BlobPath,
-            Id = fileId,
-            CreatedById = userId.Value,
-            UpdatedById = userId.Value,
-        };
-        context.Files.Add(file);
-
-        // Calculate next display order
-        var maxDisplayOrder = await context.PrintImages
-            .Where(pi => pi.PrintId == id)
-            .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
-
-        var printImage = new PrintImage()
+            await using var uploadFileStream = image.OpenReadStream();
+            processed = await imageProcessing.ProcessAsync(uploadFileStream, HttpContext.RequestAborted);
+        }
+        catch (InvalidImageException ex)
         {
-            File = file,
-            CreatedById = userId.Value,
-            UpdatedById = userId.Value,
-            Print = print,
-            IsDefault = isDefault,
-            DisplayOrder = maxDisplayOrder + 1,
-        };
-        context.PrintImages.Add(printImage);
-
-        if (isDefault)
-        {
-            // Set other defaults to false;
-            var otherEntities = await context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-            otherEntities.ForEach(p => p.IsDefault = false);
+            return BadRequest(ex.Message);
         }
 
-        await context.SaveChangesAsync();
+        var uploadedBlobNames = new List<string>();
+        PrintImage printImage;
+        try
+        {
+            var files = await imageWriter.WriteAsync(
+                printImageContainerName, processed, userId.Value, uploadedBlobNames, HttpContext.RequestAborted);
+            var fileId = files.Original.Id;
+
+            // Calculate next display order
+            var maxDisplayOrder = await context.PrintImages
+                .Where(pi => pi.PrintId == id)
+                .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
+            printImage = new PrintImage()
+            {
+                File = files.Original,
+                ThumbnailFile = files.Thumbnail,
+                ContentType = processed.ContentType,
+                Width = processed.Width,
+                Height = processed.Height,
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
+                Print = print,
+                IsDefault = isDefault,
+                DisplayOrder = maxDisplayOrder + 1,
+            };
+            context.PrintImages.Add(printImage);
+
+            if (isDefault)
+            {
+                // Set other defaults to false;
+                var otherEntities = await context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                otherEntities.ForEach(p => p.IsDefault = false);
+            }
+
+            await context.SaveChangesAsync();
+        }
+        catch
+        {
+            // The blobs are not covered by the save, so a failed save would orphan them.
+            await imageWriter.DeleteBlobsQuietlyAsync(printImageContainerName, uploadedBlobNames);
+            throw;
+        }
 
         telemetry.TrackEvent("PrintPictureAdded");
 
@@ -1371,7 +1387,13 @@ public class PrintsController(
         }
 
         var print = await context.Prints
-            .Include(p => p.Images)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.File)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.ThumbnailFile)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.SocialFile)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == printId);
 
         if (print == null)
@@ -1392,7 +1414,17 @@ public class PrintsController(
 
         var wasDefault = imageToDelete.IsDefault;
 
+        var files = new[] { imageToDelete.File, imageToDelete.ThumbnailFile, imageToDelete.SocialFile }
+            .OfType<Models.File>()
+            .ToList();
+        var blobNames = files
+            .Select(f => Path.GetFileName(f.Path))
+            .OfType<string>()
+            .Where(name => name.Length > 0)
+            .ToList();
+
         context.PrintImages.Remove(imageToDelete);
+        context.Files.RemoveRange(files);
 
         // If deleted image was default, promote next image by DisplayOrder
         if (wasDefault)
@@ -1409,6 +1441,13 @@ public class PrintsController(
         }
 
         await context.SaveChangesAsync();
+
+        // Blobs last: a failed save then leaves an orphaned blob rather than a row pointing at
+        // deleted bytes.
+        foreach (var blobName in blobNames)
+        {
+            await blobStorageService.DeleteBlobAsync(printImageContainerName, blobName);
+        }
 
         cacheVersionService.InvalidateUserCache(userId.Value);
 
