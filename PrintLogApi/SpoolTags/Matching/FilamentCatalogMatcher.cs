@@ -150,6 +150,14 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
             .FirstOrDefault();
     }
 
+    /// <summary>A live catalog entry as a full-confidence match, or null when it is unknown or removed.</summary>
+    public async Task<CatalogMatch?> EntryAsync(string entryId, CancellationToken ct)
+    {
+        var entry = await db.FilamentCatalogEntries.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == entryId && e.RemovedAt == null, ct);
+        return entry is null ? null : ToMatch(entry, 1.0);
+    }
+
     private static double NameScore(LabelReading reading, string color, FilamentCatalogEntry entry)
     {
         var score = 0.6;

@@ -32,6 +32,7 @@ public class FilamentsController(
     IBlobStorageService blobStorageService,
     TagReadService tagReadService,
     FilamentCatalogMatcher catalogMatcher,
+    LabelReadService labelReadService,
     TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
@@ -176,6 +177,36 @@ public class FilamentsController(
         {
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
+    }
+
+    /// <summary>
+    /// Resolve what the phone read from a spool's label.
+    /// </summary>
+    /// <remarks>
+    /// The phone decodes the label's barcodes and OCRs it; the photo never leaves it. This finds
+    /// the brand and color name in the OCR text (the user's own brands and colors, then
+    /// SpoolmanDB's), the user's own spools the label may be (a stored barcode first, then
+    /// material, color name, brand and weight), and the catalog entry it may be (a barcode enough
+    /// users voted for, then brand, material and color name). At most eight barcodes are read and
+    /// the first 4,000 characters of OCR text.
+    /// </remarks>
+    /// <param name="request">The barcodes, OCR text and extracted fields.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The reading, up to five of the user's spools, and the catalog match or null.</response>
+    /// <response code="413">The request body is over 16 KB.</response>
+    [HttpPost("label-reads")]
+    [RequestSizeLimit(16_384)]
+    [ProducesResponseType<LabelReadResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<LabelReadResponse>> ResolveLabelRead([FromBody] LabelReadRequestDto request, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await labelReadService.ResolveAsync(userId.Value, request, ct);
     }
 
     /// <summary>

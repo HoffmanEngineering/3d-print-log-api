@@ -47,5 +47,20 @@ public class SpoolTagSqlServerTranslationTests
 
         Assert.Contains("EXISTS", sql);
         Assert.Contains("[Colors]", sql);
+        Assert.Contains("[ColorName]", sql);
+        Assert.Contains("[DisplayName]", sql);
+    }
+
+    [Fact]
+    public void OwnByBarcode_JoinsTheOwnerAndFiltersByValue()
+    {
+        using var context = SqlServerContext();
+
+        var sql = PrintLogApi.SpoolTags.Labels.LabelReadService.OwnByBarcodeQuery(context, 1, ["0849344041764", "X004N86WD5"]).ToQueryString();
+
+        Assert.Contains("[FilamentBarcodes]", sql);
+        Assert.Contains("[CreatedById]", sql);
+        Assert.Contains("DISTINCT", sql);
+        Assert.Contains("ORDER BY", sql);
     }
 }
