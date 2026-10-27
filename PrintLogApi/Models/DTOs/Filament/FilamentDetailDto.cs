@@ -220,6 +220,12 @@ public class FilamentDetailDto
     /// <summary>The catalog entry the spool was created from. Response-only: a PUT never changes it.</summary>
     public string? CatalogEntryId { get; set; }
 
+    /// <summary>
+    /// Response-only: barcodes from the spool's label, oldest first. A PUT ignores this; use
+    /// <c>POST/DELETE /api/Filaments/{id}/barcodes</c>.
+    /// </summary>
+    public List<FilamentBarcodeDto>? Barcodes { get; set; }
+
 
     /// <summary>
     /// Response-only, populated by <c>FilamentService.HydrateDetailImageUrlsAsync</c>.

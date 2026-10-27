@@ -37,6 +37,7 @@ public class PrintLogContext : DbContext
     public DbSet<FilamentTag> FilamentTags { get; set; } = null!;
     public DbSet<FilamentCatalogEntry> FilamentCatalogEntries { get; set; } = null!;
     public DbSet<FilamentCatalogSku> FilamentCatalogSkus { get; set; } = null!;
+    public DbSet<FilamentBarcode> FilamentBarcodes { get; set; } = null!;
     public DbSet<TagReadFailure> TagReadFailures { get; set; } = null!;
 
     public DbSet<MaterialCategory> MaterialCategories { get; set; }
@@ -803,6 +804,19 @@ public class PrintLogContext : DbContext
             entity.HasOne(s => s.User)
                 .WithMany()
                 .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Label barcodes. Several spools may share a value (it names a product), so the unique
+        // index is per spool; the Value index serves the lookup when a scan names one.
+        modelBuilder.Entity<FilamentBarcode>(entity =>
+        {
+            entity.HasIndex(b => new { b.FilamentId, b.Value }).IsUnique();
+            entity.HasIndex(b => b.Value);
+
+            entity.HasOne(b => b.Filament)
+                .WithMany(f => f.Barcodes)
+                .HasForeignKey(b => b.FilamentId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -13,6 +13,8 @@ using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
 using PrintLogApi.SpoolTags;
+using PrintLogApi.SpoolTags.Labels;
+using PrintLogApi.SpoolTags.Matching;
 
 namespace PrintLogApi.Controllers;
 
@@ -29,6 +31,8 @@ public class FilamentsController(
     PrintLogContext context,
     IBlobStorageService blobStorageService,
     TagReadService tagReadService,
+    FilamentCatalogMatcher catalogMatcher,
+    LabelReadService labelReadService,
     TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
@@ -173,6 +177,63 @@ public class FilamentsController(
         {
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
+    }
+
+    /// <summary>
+    /// Resolve what the phone read from a spool's label.
+    /// </summary>
+    /// <remarks>
+    /// The phone decodes the label's barcodes and OCRs it; the photo never leaves it. This finds
+    /// the brand and color name in the OCR text (the user's own brands and colors, then
+    /// SpoolmanDB's), the user's own spools the label may be (a stored barcode first, then
+    /// material, color name, brand and weight), and the catalog entry it may be (a barcode enough
+    /// users voted for, then brand, material and color name). At most eight barcodes are read and
+    /// the first 4,000 characters of OCR text.
+    /// </remarks>
+    /// <param name="request">The barcodes, OCR text and extracted fields.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The reading, up to five of the user's spools, and the catalog match or null.</response>
+    /// <response code="413">The request body is over 16 KB.</response>
+    [HttpPost("label-reads")]
+    [RequestSizeLimit(16_384)]
+    [ProducesResponseType<LabelReadResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<LabelReadResponse>> ResolveLabelRead([FromBody] LabelReadRequestDto request, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await labelReadService.ResolveAsync(userId.Value, request, ct);
+    }
+
+    /// <summary>
+    /// Find the SpoolmanDB catalog entry a label-scanned spool is, by brand, material and color name.
+    /// </summary>
+    /// <remarks>
+    /// The add form calls this once the user has typed the brand a label scan could not read.
+    /// Brand, material and color name are required for a match; the entry's name must contain the
+    /// color name. Weight and diameter break ties.
+    /// </remarks>
+    /// <param name="request">What the form knows about the spool.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The best catalog entry, with its temperatures.</response>
+    /// <response code="204">No entry matches well enough.</response>
+    [HttpPost("catalog-match")]
+    [ProducesResponseType<CatalogMatchDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> MatchCatalog([FromBody] CatalogMatchRequestDto request, CancellationToken ct)
+    {
+        if (!User.GetUserId().HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var match = await catalogMatcher.MatchByNameAsync(
+            new LabelReading(request.Brand, request.MaterialType, request.ColorName, request.NetWeightG, request.DiameterMm, null, null, null, null), ct);
+        return match is null ? NoContent() : Ok(CatalogMatchDto.From(match));
     }
 
     /// <summary>
@@ -489,6 +550,64 @@ public class FilamentsController(
         {
             return ToProblem(ex);
         }
+    }
+
+    /// <summary>
+    /// Remember a barcode on a spool, so a later label scan finds it.
+    /// </summary>
+    /// <remarks>
+    /// The value is normalized (trimmed, uppercased, a 12-digit UPC-A padded to EAN-13).
+    /// Remembering a barcode the spool already has returns it unchanged. A spool keeps at most
+    /// four; a fifth drops the oldest. On a spool created from a catalog entry, this also counts
+    /// as the user's vote that the barcode is that entry.
+    /// </remarks>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The barcode value and the symbology the scanner reported.</param>
+    /// <response code="200">The stored barcode.</response>
+    /// <response code="400">The value is not a barcode. Problem details with code invalid_barcode.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else.</response>
+    [HttpPost("{id:guid}/barcodes")]
+    [ProducesResponseType<FilamentBarcodeDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddBarcode(Guid id, [FromBody] BarcodeInputDto dto)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var barcode = await filamentService.AddBarcode(id, userId.Value, dto);
+            return barcode is null ? NotFound() : Ok(barcode);
+        }
+        catch (BadRequestException ex)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, ex.Message, "invalid_barcode");
+        }
+    }
+
+    /// <summary>
+    /// Remove a barcode from a spool.
+    /// </summary>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="barcodeId">The barcode's ID, from the spool's `barcodes`.</param>
+    /// <response code="204">The barcode was removed.</response>
+    /// <response code="404">The spool or barcode does not exist or belongs to someone else.</response>
+    [HttpDelete("{id:guid}/barcodes/{barcodeId:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveBarcode(Guid id, long barcodeId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await filamentService.RemoveBarcode(id, barcodeId, userId.Value) ? NoContent() : NotFound();
     }
 
     /// <summary>

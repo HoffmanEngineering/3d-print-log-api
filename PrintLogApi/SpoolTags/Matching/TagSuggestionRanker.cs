@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.SpoolTags.Labels;
 
 namespace PrintLogApi.SpoolTags.Matching;
 
@@ -10,7 +11,9 @@ internal sealed record RankCandidate(
     string? ColorHex,
     long? InitialNominalWeightMg,
     bool HasTags,
-    DateTime UpdatedDate);
+    DateTime UpdatedDate,
+    string? ColorName,
+    string? DisplayName);
 
 public sealed record TagSuggestion(Guid FilamentId, double Score, IReadOnlyList<string> Reasons);
 
@@ -88,7 +91,60 @@ public sealed class TagSuggestionRanker(PrintLogContext db)
                 f.ColorHex,
                 f.InitialNominalWeightMg,
                 f.Tags.Any(),
-                f.UpdatedDate));
+                f.UpdatedDate,
+                f.ColorName,
+                f.DisplayName));
+
+    /// <summary>
+    /// Scores a user's own materials against a spool label, for finding the spool by a scan. A
+    /// label has a color name rather than a hex color, and whether the spool has an NFC tag says
+    /// nothing about it, so those two signals are swapped for <c>same-color-name</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<TagSuggestion>> RankAsync(long userId, LabelReading reading, CancellationToken ct)
+    {
+        var materialKey = MaterialKey.Normalize(reading.MaterialType);
+        if (materialKey.Length == 0)
+        {
+            return [];
+        }
+
+        var candidates = await CandidatesQuery(db, userId).ToListAsync(ct);
+        var color = reading.ColorName?.Trim();
+        var brand = reading.Brand?.Trim();
+
+        return candidates
+            .Where(f => SameMaterial(materialKey, MaterialKey.Normalize(f.MaterialType)))
+            .Select(f =>
+            {
+                var score = 0.4;
+                var reasons = new List<string> { "same-material" };
+                if (!string.IsNullOrEmpty(color)
+                    && ((f.ColorName?.Contains(color, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (f.DisplayName?.Contains(color, StringComparison.OrdinalIgnoreCase) ?? false)))
+                {
+                    score += 0.25;
+                    reasons.Add("same-color-name");
+                }
+                if (!string.IsNullOrEmpty(brand) && string.Equals(brand, f.Brand?.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 0.15;
+                    reasons.Add("same-brand");
+                }
+                if (reading.NetWeightG is { } grams && f.InitialNominalWeightMg is { } mg
+                    && (long)Math.Round(mg / 1000.0) == grams)
+                {
+                    score += 0.05;
+                    reasons.Add("same-weight");
+                }
+                return (f.Id, f.UpdatedDate, Score: Math.Round(score, 4), Reasons: reasons);
+            })
+            .Where(x => x.Score >= MinScore)
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.UpdatedDate)
+            .Take(MaxSuggestions)
+            .Select(x => new TagSuggestion(x.Id, x.Score, x.Reasons))
+            .ToList();
+    }
 
     /// <summary>Prefix match in either direction, so PLA and PLA+ agree.</summary>
     private static bool SameMaterial(string a, string b) =>

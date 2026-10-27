@@ -39,6 +39,36 @@ public class CatalogMatchDto
 
     /// <summary>Always "SpoolmanDB".</summary>
     public string? Source { get; set; }
+
+    /// <summary>The product's nozzle temperature range and recommended nozzle and bed temperatures, °C, when SpoolmanDB has them.</summary>
+    public int? ExtruderTempMinC { get; set; }
+    public int? ExtruderTempMaxC { get; set; }
+    public int? ExtruderTempC { get; set; }
+    public int? BedTempC { get; set; }
+
+    /// <summary>The product's material, net weight (g) and diameter (mm), for a form a barcode alone filled.</summary>
+    public string? Material { get; set; }
+    public int? WeightG { get; set; }
+    public double? DiameterMm { get; set; }
+
+    public static CatalogMatchDto? From(PrintLogApi.SpoolTags.Matching.CatalogMatch? match) => match is null ? null : new()
+    {
+        Id = match.Id,
+        Confidence = match.Confidence,
+        SpoolWeightG = match.SpoolWeightG,
+        ColorName = match.ColorName,
+        Name = match.Name,
+        Manufacturer = match.Manufacturer,
+        DensityGramPerCubicCm = match.Density,
+        Source = "SpoolmanDB",
+        ExtruderTempMinC = match.ExtruderTempMinC,
+        ExtruderTempMaxC = match.ExtruderTempMaxC,
+        ExtruderTempC = match.ExtruderTempC,
+        BedTempC = match.BedTempC,
+        Material = match.Material,
+        WeightG = match.WeightG,
+        DiameterMm = match.DiameterMm,
+    };
 }
 
 public class TagSuggestionDto

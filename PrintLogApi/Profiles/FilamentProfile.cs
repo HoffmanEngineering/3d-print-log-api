@@ -180,7 +180,9 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType))
             .ForMember(dest => dest.Colors, src => src.MapFrom(src => src.Colors))
-            .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects));
+            .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects))
+            // Normalized and stored by the service.
+            .ForMember(dest => dest.Barcodes, opt => opt.Ignore());
 
         CreateMap<EditFilamentDto, Filament>()
             .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))
@@ -194,6 +196,8 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore())
             // Only a create sets the catalog entry (validated); a PUT can never change it.
             .ForMember(dest => dest.CatalogEntryId, opt => opt.Ignore())
+            // Barcodes change only through their own endpoints.
+            .ForMember(dest => dest.Barcodes, opt => opt.Ignore())
             // Response-only and request-only tag members: the service applies readings itself.
             .ForSourceMember(src => src.TagDetails, opt => opt.DoNotValidate())
             .ForSourceMember(src => src.TagReadings, opt => opt.DoNotValidate())
@@ -209,6 +213,10 @@ public class FilamentProfile : Profile
             // Ordered so a client diffing the list sees a stable order. GetFilamentById Includes Tags.
             .ForMember(dest => dest.TagUids, src => src.MapFrom(src => src.Tags.Select(t => t.Uid).OrderBy(u => u).ToList()))
             .ForMember(dest => dest.TagDetails, src => src.MapFrom(src => src.Tags.OrderBy(t => t.Uid).Select(ToTagDetail).ToList()))
+            // GetFilamentById Includes Barcodes; elsewhere the navigation is null and so is the list.
+            .ForMember(dest => dest.Barcodes, src => src.MapFrom(src => src.Barcodes == null ? null : src.Barcodes
+                .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+                .Select(b => new FilamentBarcodeDto { Id = b.Id, Value = b.Value, Format = b.Format }).ToList()))
             // Volume and length are NOT mapped here: FilamentDetailDto derives them from
             // this figure, which also gives them the untracked-spool null for free. Without
             // that an untracked spool would return remaining null alongside length 0 and
