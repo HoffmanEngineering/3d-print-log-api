@@ -879,10 +879,17 @@ public sealed class PrintService(
         if (!string.IsNullOrWhiteSpace(print.ConnectionInstanceId))
         {
             var instanceId = print.ConnectionInstanceId.Trim();
-            newPrint.ConnectionId = await context.Connections
+            var connection = await context.Connections
                 .Where(c => c.UserId == userId && c.InstanceId == instanceId)
-                .Select(c => (Guid?)c.Id)
+                .Select(c => new { c.Id, c.Kind })
                 .FirstOrDefaultAsync();
+            newPrint.ConnectionId = connection?.Id;
+
+            // A connector's own credential records which adapter it is (printlog-bridge#82).
+            if (sourceCandidate == PrintSource.ApiKey && Connection.PrintSourceForKind(connection?.Kind) is { } kindSource)
+            {
+                sourceCandidate = kindSource;
+            }
         }
 
         var filamentIdsToCheck = newPrint.FilamentUsage!

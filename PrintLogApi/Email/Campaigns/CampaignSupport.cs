@@ -8,7 +8,11 @@ namespace PrintLogApi.Email.Campaigns;
 /// <summary>Print sources that arrive without the user typing anything: the integrations.</summary>
 public static class AutomatedPrintSources
 {
-    public static readonly PrintSource[] All = [PrintSource.SlicerPlugin, PrintSource.OctoPrint, PrintSource.Moonraker, PrintSource.ApiKey];
+    public static readonly PrintSource[] All =
+    [
+        PrintSource.SlicerPlugin, PrintSource.OctoPrint, PrintSource.Moonraker, PrintSource.ApiKey,
+        PrintSource.PrusaLink, PrintSource.Bambu, PrintSource.Sdcp,
+    ];
 }
 
 /// <summary>Reads users' <c>General_TimeZone</c> settings in one query.</summary>

@@ -78,7 +78,9 @@ public class AddPrintDTO : IValidatableObject
     /// <summary>
     /// The <c>instanceId</c> of the connection (<c>PUT /api/Connections/{instanceId}</c>) logging
     /// this print, so it shows "Logged automatically by" that connection. An id that is not one of
-    /// yours is ignored, never rejected.
+    /// yours is ignored, never rejected. Sent with an API key, a connection of kind
+    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> also records the print's
+    /// source as that adapter.
     /// </summary>
     [StringLength(100)]
     public string? ConnectionInstanceId { get; set; }
