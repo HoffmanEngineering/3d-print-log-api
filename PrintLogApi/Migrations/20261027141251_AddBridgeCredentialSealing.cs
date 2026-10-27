@@ -24,6 +24,12 @@ namespace PrintLogApi.Migrations
                 nullable: false,
                 defaultValue: 0);
 
+            migrationBuilder.AddColumn<DateTime>(
+                name: "KeyNotifiedDay",
+                table: "Bridges",
+                type: "datetime2",
+                nullable: true);
+
             migrationBuilder.AddColumn<string>(
                 name: "PendingPublicKey",
                 table: "Bridges",
@@ -120,6 +126,10 @@ namespace PrintLogApi.Migrations
 
             migrationBuilder.DropColumn(
                 name: "KeyChangesToday",
+                table: "Bridges");
+
+            migrationBuilder.DropColumn(
+                name: "KeyNotifiedDay",
                 table: "Bridges");
 
             migrationBuilder.DropColumn(

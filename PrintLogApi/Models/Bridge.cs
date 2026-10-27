@@ -119,6 +119,9 @@ public class Bridge
     /// <summary>Key changes (first key, new pending key, confirmation) on <see cref="KeyChangesDay"/>, for telemetry.</summary>
     public int KeyChangesToday { get; set; }
 
+    /// <summary>The UTC day the owner was last told about a pending key; at most one notice a day.</summary>
+    public DateTime? KeyNotifiedDay { get; set; }
+
     public ICollection<BridgeDiscoveredPrinter>? DiscoveredPrinters { get; set; }
 
     public ICollection<BridgePrinter>? Printers { get; set; }

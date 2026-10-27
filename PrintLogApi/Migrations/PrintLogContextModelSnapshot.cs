@@ -47,6 +47,9 @@ namespace PrintLogApi.Migrations
                     b.Property<int>("KeyChangesToday")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("KeyNotifiedDay")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
 

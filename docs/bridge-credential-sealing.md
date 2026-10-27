@@ -164,15 +164,19 @@ and entry ids are SQL Server identity values that are not reused.
 
 - `v1.` versions the whole construction. A future `v2.` changes the prefix, the HKDF info and the
   `v1` in the associated data, so the versions cannot be confused. The API accepts only `v1.` today.
-- **The first key a bridge reports is taken as is** (trust on first use, right after the owner
-  paired it).
-- **A different key later is held pending** until the owner confirms it:
+- **Only the check-in that registers the bridge is trusted on first use.** A key sent on the
+  bridge's very first check-in, right after the owner paired it, is taken as is.
+- **Any other new key is held pending** until the owner confirms it. That includes the first key
+  from a bridge that registered without one (an older bridge, or one without `cryptography`), which
+  could otherwise be a stolen token's key arriving weeks later:
   - The bridge might have regenerated its key, or a stolen device token might be reporting its own.
-  - The current key stays in use, so nothing goes stale and the bridge keeps the values it can
-    open.
-  - The API refuses seals to the pending key (409 `bridge_key_unconfirmed`), creates an in-app
-    notification ("<bridge> reported a new encryption key; confirm it on the Bridges screen"), and
-    shows the pending key on the bridge.
+  - The current key, if there is one, stays in use, so nothing goes stale and the bridge keeps the
+    values it can open.
+  - The API refuses seals to the pending key (409 `bridge_key_unconfirmed`) and shows the pending
+    key on the bridge.
+  - It creates an in-app notification ("<bridge> reported a new encryption key; confirm it on the
+    Bridges screen") only when no key was pending before, and at most once per bridge per UTC day.
+    The notice is best effort: if it fails, the check-in still succeeds.
 - **Confirming.** The owner compares the pending key's fingerprint, computed by the web app from
   `pendingPublicKey`, with the one the bridge shows. The web app then confirms it, sending that
   fingerprint. On confirmation:
@@ -181,12 +185,21 @@ and entry ids are SQL Server identity values that are not reused.
     bridge;
   - the desired version changes;
   - the web app asks for those credentials again.
-- **Further reports.** A later report of the current key leaves the pending one alone. Another new
-  key replaces it (and notifies again). There is no "reject": a pending key nobody confirms is
-  harmless, and if the owner suspects the device, revoking it is the remedy.
-- **Re-pairing** the same bridge (the same device id) keeps the same bridge id and its key if the
-  bridge keeps it. Revoking the device deletes the bridge, its desired printers and their sealed
-  values.
+- **Further reports.** A later report of the current key leaves the pending one alone (a pending
+  key equal to the current one, which only a race leaves, is cleared). Another new key replaces
+  the pending one, without a new notice.
+- **A daily cap.** After 5 key changes in a UTC day (the first key, pending keys and confirmations
+  all count), a new key no longer replaces a pending one: the first pending key past the cap
+  stays, so a flapping or hostile bridge can't keep moving the key the owner is comparing. The
+  bridge is flagged (`keyChangesThrottled` on `BridgeDto`, `BridgeKeyChanged` telemetry with
+  `Change` `throttled`, once) until the day ends. With no key pending, a new one is still taken
+  as pending.
+- There is no "reject": a pending key nobody confirms is harmless, and if the owner suspects the
+  device, revoking it is the remedy.
+- **Re-pairing** the same bridge (the same device id) keeps the same bridge id and its current key,
+  and **clears a pending key**: the old token is dead, so a key it reported must not stay
+  confirmable. The re-paired bridge reports its key again, and a new one waits for the owner as
+  above. Revoking the device deletes the bridge, its desired printers and their sealed values.
 
 ## Trust model
 
@@ -202,11 +215,15 @@ and entry ids are SQL Server identity values that are not reused.
   - the web app computes it from the key it actually seals to (never trusting the API's copy);
   - the bridge shows its own;
   - a user who compares them detects the swap.
+- **Trust on first use covers only the registering check-in**, which follows the owner's own
+  pairing. Every later key, even a bridge's first, needs the owner's confirmation.
 - **A stolen device token** can report a new key, but it is held pending: nothing is sealed to it
   until the owner confirms it, and confirming means comparing fingerprints with the real bridge.
   - Key changes are counted per bridge per UTC day (`BridgeKeyChanged` telemetry,
-    `ChangesToday`), so a bridge whose key flips shows up.
-  - Revoking the device ends it.
+    `ChangesToday`), so a bridge whose key flips shows up; past the cap the pending key stops
+    moving and the bridge is flagged `keyChangesThrottled`.
+  - Notices are rate-limited (above), so a flapping key can't spam the owner.
+  - Re-pairing the device clears its pending key; revoking the device ends it.
 - **Lengths are visible.** The ciphertext is as long as the plaintext: an 8-digit access code looks
   like one. Not padded, because the fields are short and their formats are public anyway.
 
@@ -236,7 +253,10 @@ refuses a field the entry's kind doesn't take, and lists each entry's fields as 
       anything over 256 bytes, with a message, before sealing.
 - [ ] When the bridge has a `pendingPublicKey`, show "this bridge reported a new encryption key on
       …", both fingerprints (computed), and ask the user to compare with the bridge's `status` or
-      local page before confirming.
+      local page before confirming. A bridge with only a pending key (no `publicKey`) needs the
+      same confirmation before anything can be sealed.
+- [ ] When `keyChangesThrottled` is true, say the bridge's key keeps changing and the pending key
+      is held; suggest checking the bridge (or revoking it) rather than confirming blindly.
 - [ ] Check `stale` on every secret in the `PUT …/secrets/{field}` 200 response. A seal that raced a
       key confirmation is stored but stale: ask again.
 - [ ] Handle `bridge_key_changed` and `bridge_key_unconfirmed` by reloading the bridge, never by
@@ -249,7 +269,9 @@ refuses a field the entry's kind doesn't take, and lists each entry's fields as 
 - [ ] Generate and keep one P-256 key (0600), and show its fingerprint (first 16 hex, grouped) in
       `status`, `doctor` and the local page, saying when the app hasn't confirmed it yet
       (`pendingPublicKeyFingerprint` in the check-in response equals yours).
-- [ ] Send `publicKey` on every check-in.
+- [ ] Send `publicKey` on every check-in, including the first: only the registering check-in's key
+      is trusted without the owner's confirmation. Keep the key across re-pairs; a re-pair clears
+      a pending key, and the next check-in reports it again.
 - [ ] Open as above: shape check, curve check, AD from its own ids, strict UTF-8 and control
       characters after opening; use the value exactly as opened.
 - [ ] Send `credentialIssues` (with `credentialIssuesVersion`) on **every** check-in once it has
@@ -278,7 +300,8 @@ New optional fields:
   - A key that isn't exactly the shape above, or a `publicKeyFingerprint` that doesn't match it, is
     dropped. It is named in `rejected` (`publicKey` or `publicKeyFingerprint`, code
     `invalid_public_key`), the stored key stays, and the rest of the check-in is stored.
-  - The first key is taken. A different one later is held pending (above).
+  - A key on the check-in that registers the bridge is taken. Any other new key is held pending
+    (above), up to the daily cap.
 - **`credentialIssues`**: what the bridge can't use, at most 200.
   - Send it on **every** check-in once you have applied a desired version, as the complete list
     (`[]` when everything works). It replaces the stored issues of all your entries. A missing or
@@ -340,6 +363,8 @@ Each printer gains:
   - `publicKey`, `publicKeyFingerprint`, `publicKeyChangedAt`. These are null until the bridge
     sends a key: an older bridge can't take sealed credentials, so say "update the bridge".
   - `pendingPublicKey`, `pendingPublicKeyFingerprint`, `pendingPublicKeyAt`.
+  - `keyChangesThrottled`: the bridge passed today's cap of key changes and the pending key is
+    held (above).
   - Both fingerprints are convenience only (see the checklist).
 - **`BridgePrinterDto`** (in `GET /api/bridges/{id}/printers` and the connect response) adds:
   - `secretFields`;

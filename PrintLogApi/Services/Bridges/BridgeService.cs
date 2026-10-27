@@ -38,7 +38,7 @@ public sealed record BridgeCheckInResult(DesiredPrintersDto Desired, bool Regist
 
     public string? PendingPublicKeyFingerprint { get; init; }
 
-    /// <summary>What this check-in did to the key: <c>first</c> (taken), <c>pending</c> (held for confirmation), or null.</summary>
+    /// <summary>What this check-in did to the key: <c>first</c> (taken), <c>pending</c> (held for confirmation), <c>throttled</c> (a new key past the daily cap, not stored), or null.</summary>
     public string? KeyChange { get; init; }
 
     /// <summary>The bridge's key changes today, this one included, when <see cref="KeyChange"/> is set.</summary>
@@ -115,8 +115,19 @@ public interface IBridgeService
 /// here touches the user's cache version: no cached response reads bridges, and a check-in every
 /// few minutes must not flush the summaries.
 /// </summary>
-public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog agentReleases, TimeProvider clock, INotificationService notifications) : IBridgeService
+public sealed class BridgeService(
+    PrintLogContext context,
+    IAgentReleaseCatalog agentReleases,
+    TimeProvider clock,
+    INotificationService notifications,
+    ILogger<BridgeService> logger) : IBridgeService
 {
+    /// <summary>
+    /// Key changes a bridge may make in a UTC day before a new key stops replacing the pending
+    /// one, so a flapping (or hostile) bridge can't keep moving the key the owner is comparing.
+    /// </summary>
+    public const int MaxKeyChangesPerDay = 5;
+
     /// <summary>A second "Scan now" within this window is the same request.</summary>
     public static readonly TimeSpan ScanRequestWindow = TimeSpan.FromMinutes(1);
 
@@ -183,15 +194,36 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
             await ReplaceCredentialIssuesAsync(bridge.Id, issuesVersion, issues, rejected, ct);
         }
 
-        var keyChange = ApplyReportedKey(bridge, report, now);
+        var hadPending = bridge.PendingPublicKey is not null;
+        var keyChange = ApplyReportedKey(bridge, report, now, registered);
+        var notify = keyChange == "pending" && !hadPending && bridge.KeyNotifiedDay != now.Date;
+        if (notify)
+        {
+            bridge.KeyNotifiedDay = now.Date;
+        }
+
         await context.SaveChangesAsync(ct);
 
         if (keyChange == "pending")
         {
-            // After the save, never inside a transaction (push can't be recalled). Best effort,
-            // like every notification: the pending key also shows on the Bridges screen.
-            var grant = await context.DeviceGrants.AsNoTracking().Where(g => g.Id == grantId).Select(g => new { g.UserId, g.Name }).SingleAsync(ct);
-            await notifications.CreateBridgeKeyPendingNotification(grant.UserId, bridge.Name ?? grant.Name);
+            // A check-in that read the bridge before a confirmation can write a pending key the
+            // owner just made current. Left there it would refuse every seal as unconfirmed.
+            var cleared = await context.Bridges
+                .Where(b => b.Id == bridge.Id && b.PendingPublicKey != null && b.PendingPublicKey == b.PublicKey)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(b => b.PendingPublicKey, (string?)null)
+                    .SetProperty(b => b.PendingPublicKeyFingerprint, (string?)null)
+                    .SetProperty(b => b.PendingPublicKeyAt, (DateTime?)null), ct);
+            if (cleared > 0)
+            {
+                await context.Entry(bridge).ReloadAsync(ct);
+                notify = false;
+            }
+        }
+
+        if (notify)
+        {
+            await NotifyKeyPendingAsync(grantId, bridge.Name, ct);
         }
 
         return new BridgeCheckInResult(await DesiredAsync(bridge, ct), registered)
@@ -205,21 +237,52 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
     }
 
     /// <summary>
-    /// The first key a bridge reports is taken as is (trust on first use, at pairing). A
-    /// different key after that is held pending until the owner confirms it by its
+    /// A key reported on the check-in that registers the bridge is taken as is (trust on first
+    /// use, at pairing). Any other new key, including the first one from a bridge that
+    /// registered without a key, is held pending until the owner confirms it by its
     /// fingerprint, because a stolen device token could report its own key and collect what the
-    /// user seals next. Reporting the current key again leaves a pending one alone; another new
-    /// key replaces it. Returns <c>first</c>, <c>pending</c>, or null when nothing changed.
+    /// user seals next. Reporting the current key again leaves a pending one alone (and clears
+    /// one equal to it); another new key replaces it, up to MaxKeyChangesPerDay. Returns
+    /// first, pending, throttled (once a day, when the cap kept the pending key), or null.
     /// </summary>
-    private static string? ApplyReportedKey(Bridge bridge, ValidCheckIn report, DateTime now)
+    private static string? ApplyReportedKey(Bridge bridge, ValidCheckIn report, DateTime now, bool registered)
     {
-        if (report.PublicKey is not { } key || key == bridge.PublicKey || key == bridge.PendingPublicKey)
+        if (report.PublicKey is not { } key)
         {
             return null;
         }
 
+        if (key == bridge.PublicKey)
+        {
+            // A pending key equal to the current one is left over from a race; it would block seals.
+            if (bridge.PendingPublicKey == key)
+            {
+                ClearPendingKey(bridge);
+            }
+
+            return null;
+        }
+
+        if (key == bridge.PendingPublicKey)
+        {
+            return null;
+        }
+
+        if (bridge.PendingPublicKey is not null && bridge.KeyChangesDay == now.Date && bridge.KeyChangesToday >= MaxKeyChangesPerDay)
+        {
+            // Past the cap, keep the pending key the owner may be comparing. Counted (and
+            // reported) once, which is what flags the bridge as throttled for the rest of the day.
+            if (bridge.KeyChangesToday > MaxKeyChangesPerDay)
+            {
+                return null;
+            }
+
+            CountKeyChange(bridge, now);
+            return "throttled";
+        }
+
         string change;
-        if (bridge.PublicKey is null)
+        if (bridge.PublicKey is null && registered)
         {
             bridge.PublicKey = key;
             bridge.PublicKeyFingerprint = report.PublicKeyFingerprint;
@@ -237,6 +300,32 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
 
         CountKeyChange(bridge, now);
         return change;
+    }
+
+    /// <summary>Clears a bridge's pending key (re-pairing does too, in <c>DeviceGrantService</c>).</summary>
+    public static void ClearPendingKey(Bridge bridge)
+    {
+        bridge.PendingPublicKey = null;
+        bridge.PendingPublicKeyFingerprint = null;
+        bridge.PendingPublicKeyAt = null;
+    }
+
+    /// <summary>
+    /// Tells the owner a bridge reported a new key. After the check-in's save, never inside a
+    /// transaction (a push can't be recalled), and best effort: the check-in already committed,
+    /// and the pending key also shows on the Bridges screen.
+    /// </summary>
+    private async Task NotifyKeyPendingAsync(long grantId, string? bridgeName, CancellationToken ct)
+    {
+        try
+        {
+            var grant = await context.DeviceGrants.AsNoTracking().Where(g => g.Id == grantId).Select(g => new { g.UserId, g.Name }).SingleAsync(ct);
+            await notifications.CreateBridgeKeyPendingNotification(grant.UserId, bridgeName ?? grant.Name);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not notify the owner of bridge {GrantId} about a pending key", grantId);
+        }
     }
 
     private static void CountKeyChange(Bridge bridge, DateTime now)
@@ -494,6 +583,7 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 PendingPublicKey = b.PendingPublicKey,
                 PendingPublicKeyFingerprint = b.PendingPublicKeyFingerprint,
                 PendingPublicKeyAt = Utc(b.PendingPublicKeyAt),
+                KeyChangesThrottled = b.KeyChangesDay == now.UtcDateTime.Date && b.KeyChangesToday > MaxKeyChangesPerDay,
                 Status = now - lastSeen >= Connection.StaleAfter ? ConnectionStatus.Stale : ConnectionStatus.Online,
                 LastSeenAt = lastSeen,
                 CreatedAt = Utc(b.CreatedDate),
@@ -924,23 +1014,25 @@ public sealed class BridgeService(PrintLogContext context, IAgentReleaseCatalog 
                 throw Bad("invalid_key_fingerprint", "keyFingerprint: the bridge's publicKeyFingerprint you sealed to, 64 lower-case hex characters.");
             }
 
-            if (bridge.PublicKeyFingerprint is null)
-            {
-                throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_missing",
-                    "This bridge hasn't reported a key to seal credentials to. Update printlog-bridge.");
-            }
-
-            if (body.KeyFingerprint == bridge.PendingPublicKeyFingerprint)
-            {
-                throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_unconfirmed",
-                    "The bridge reported a new key that hasn't been confirmed. Compare its fingerprint with the bridge's and confirm it first.")
-                {
-                    KeyFingerprint = bridge.PublicKeyFingerprint,
-                };
-            }
-
+            // The current key first: a pending key equal to it (left by a race) must not refuse
+            // a seal to the key the bridge actually uses.
             if (body.KeyFingerprint != bridge.PublicKeyFingerprint)
             {
+                if (body.KeyFingerprint == bridge.PendingPublicKeyFingerprint)
+                {
+                    throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_unconfirmed",
+                        "The bridge reported a new key that hasn't been confirmed. Compare its fingerprint with the bridge's and confirm it first.")
+                    {
+                        KeyFingerprint = bridge.PublicKeyFingerprint,
+                    };
+                }
+
+                if (bridge.PublicKeyFingerprint is null)
+                {
+                    throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_missing",
+                        "This bridge hasn't reported a key to seal credentials to. Update printlog-bridge.");
+                }
+
                 throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_changed",
                     "The bridge's key changed. Check its fingerprint and seal the credential again.")
                 {

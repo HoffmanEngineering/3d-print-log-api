@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Bridges;
 
 namespace PrintLogApi.Services.DeviceGrants;
 
@@ -109,6 +110,14 @@ public sealed class DeviceGrantService(
         grant.Scopes = DeviceScopes.Join(scopes);
         grant.ClientId = clientId;
         grant.PairedDate = now;
+
+        if (!created && await context.Bridges.SingleOrDefaultAsync(b => b.Id == grant.Id, ct) is { } bridge)
+        {
+            // The old token dies with this save, so a key it reported (perhaps a thief's) must
+            // not stay confirmable. The re-paired bridge reports its key again, for the owner to
+            // confirm (docs/bridge-credential-sealing.md, Key changes).
+            BridgeService.ClearPendingKey(bridge);
+        }
 
         // Spent in the same save as the grant: a pairing that fails leaves the token unspent, and
         // two exchanges of one token cannot both commit, whichever instance serves them.

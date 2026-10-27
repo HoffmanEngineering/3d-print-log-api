@@ -515,15 +515,26 @@ reference sealer and opener are in the test project (`CredentialSealer`).
   fingerprints, times and `stale`, never `sealed` (the browser can't open them anyway). Never put
   one in a log, telemetry property, problem detail, the sync snapshot, MCP or a webhook.
   `SealedCredentialLeakTests` checks all of those at Trace.
-- **The first key is trusted; a later different key waits for the owner.** A check-in with a new
-  key stores it as `PendingPublicKey` (the current key stays in use), notifies the owner through
-  `INotificationService`, and seals to it are 409 `bridge_key_unconfirmed`. Only
+- **Only the registering check-in's key is trusted; every other new key waits for the owner.**
+  That includes the first key of a bridge that registered without one: a stolen token could send
+  it weeks later. A check-in with a new key stores it as `PendingPublicKey` (the current key, if
+  any, stays in use), and seals to it are 409 `bridge_key_unconfirmed`. Only
   `POST /api/bridges/{id}/public-key/confirm` with the pending key's fingerprint makes it current,
   in one conditional `ExecuteUpdate` (a newer pending key makes it 409 `pending_key_changed`). A
   stolen device token can report its own key; this is what stops the next seal going to it. Never
-  let a device-reported key become current without that confirmation, except the first.
-  `BridgeKeyChanged` telemetry carries `Change` and the bridge's `ChangesToday` (UTC day,
-  `Bridge.KeyChangesToday`).
+  let a device-reported key become current without that confirmation, except on registration.
+  - **The owner is notified only when no key was pending, at most once per bridge per UTC day**
+    (`Bridge.KeyNotifiedDay`), after the save and inside a try/catch: a failed notice never fails
+    a committed check-in.
+  - **Past `BridgeService.MaxKeyChangesPerDay` (5) changes in a UTC day, a new key no longer
+    replaces a pending one**, so a flapping key can't keep moving what the owner compares.
+    `BridgeDto.keyChangesThrottled` flags it; `BridgeKeyChanged` telemetry (`Change`,
+    `ChangesToday` from `Bridge.KeyChangesToday`) reports `throttled` once.
+  - **Re-pairing clears the pending key** (`DeviceGrantService.PairAsync`, same save as the token
+    rotation): the old token is dead, so its key must not stay confirmable.
+  - **A pending key equal to the current one is cleared** (a check-in reporting the current key,
+    and a conditional update after a check-in that set one), and seals compare with the current
+    key first, so that race can't block every seal.
 - **The fingerprint the browser sends is its own.** The web app computes it from the SPKI it seals
   to; the API's `publicKeyFingerprint`/`pendingPublicKeyFingerprint` are convenience only. A
   malicious API could pair its own key with the real fingerprint, so the doc makes this normative.

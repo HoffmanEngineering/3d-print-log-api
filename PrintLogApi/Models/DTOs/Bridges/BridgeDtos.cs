@@ -352,6 +352,12 @@ public class BridgeDto
     /// <summary>When the pending key was first reported.</summary>
     public DateTimeOffset? PendingPublicKeyAt { get; set; }
 
+    /// <summary>
+    /// True when the bridge reported more new keys today than the daily cap: the API stopped
+    /// replacing the pending key (it keeps the first one past the cap) until the UTC day ends.
+    /// </summary>
+    public bool KeyChangesThrottled { get; set; }
+
     /// <summary>Online when it checked in within the last 15 minutes.</summary>
     public ConnectionStatus Status { get; set; }
 

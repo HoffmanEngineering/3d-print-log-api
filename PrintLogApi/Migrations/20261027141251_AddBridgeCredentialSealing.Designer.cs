@@ -12,7 +12,7 @@ using PrintLogApi;
 namespace PrintLogApi.Migrations
 {
     [DbContext(typeof(PrintLogContext))]
-    [Migration("20261027134437_AddBridgeCredentialSealing")]
+    [Migration("20261027141251_AddBridgeCredentialSealing")]
     partial class AddBridgeCredentialSealing
     {
         /// <inheritdoc />
@@ -49,6 +49,9 @@ namespace PrintLogApi.Migrations
 
                     b.Property<int>("KeyChangesToday")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("KeyNotifiedDay")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
