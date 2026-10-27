@@ -285,6 +285,45 @@ public class ConnectBridgePrinterDto
     public string? Serial { get; set; }
 }
 
+/// <summary>
+/// The body of <c>POST /api/bridges/{id}/printers/{entryId}/move</c>. Without
+/// <c>discoveredPrinterId</c> or <c>host</c> the printer keeps its address, which suits a bridge
+/// on the same network.
+/// </summary>
+public class MoveBridgePrinterDto
+{
+    /// <summary>Another of your bridges, to watch the printer from now on.</summary>
+    public long? ToBridgeId { get; set; }
+
+    /// <summary>
+    /// The printer as the new bridge found it: its address, port, serial and identity are taken.
+    /// It must be the same kind. <c>host</c> and <c>port</c> here override them.
+    /// </summary>
+    public long? DiscoveredPrinterId { get; set; }
+
+    /// <summary>The address the new bridge reaches it at, when it differs: a private IP address or a local host name.</summary>
+    public string? Host { get; set; }
+
+    public int? Port { get; set; }
+}
+
+/// <summary>The answer to a move.</summary>
+public class MovedBridgePrinterDto
+{
+    /// <summary>The entry, as the new bridge has it. Its id is unchanged.</summary>
+    public BridgePrinterDto? Printer { get; set; }
+
+    public long FromBridgeId { get; set; }
+
+    public long ToBridgeId { get; set; }
+
+    /// <summary>
+    /// The credentials that were set and are now gone: they were sealed to the old bridge's key,
+    /// which the new bridge doesn't hold. Seal each again to the new bridge.
+    /// </summary>
+    public List<string>? DroppedSecretFields { get; set; }
+}
+
 /// <summary>The body of <c>PATCH /api/bridges/{id}</c>. Null keeps a field; an empty string clears it.</summary>
 public class UpdateBridgeDto
 {
@@ -380,6 +419,18 @@ public class BridgeDto
 
     /// <summary>Printers it found that are not connected, not in its config file and not ignored.</summary>
     public int DiscoveredNotConnectedCount { get; set; }
+
+    /// <summary>
+    /// New jobs it tried to log for a printer another of your bridges watches, and that were
+    /// refused so the print isn't logged twice. Non-zero: remove that printer from this bridge
+    /// (most likely its config file).
+    /// </summary>
+    public int DroppedEventCount { get; set; }
+
+    public DateTimeOffset? LastDroppedEventAt { get; set; }
+
+    /// <summary>The printer of the last refused job.</summary>
+    public long? LastDroppedPrinterId { get; set; }
 }
 
 /// <summary>Where a discovered printer stands.</summary>

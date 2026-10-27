@@ -37,6 +37,9 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("DesiredRevision")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("DroppedEventCount")
+                        .HasColumnType("int");
+
                     b.Property<string>("HostName")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -49,6 +52,12 @@ namespace PrintLogApi.Migrations
 
                     b.Property<DateTime?>("KeyNotifiedDay")
                         .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastDroppedEventAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long?>("LastDroppedPrinterId")
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
@@ -234,6 +243,9 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("Macs")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("MovedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int?>("Port")
                         .HasColumnType("int");

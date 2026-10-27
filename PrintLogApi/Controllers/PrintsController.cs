@@ -20,6 +20,7 @@ using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Bridges;
 using PrintLogApi.Services.SlicerSettings;
 using static PrintLogApi.Models.Print;
 
@@ -45,7 +46,8 @@ public class PrintsController(
     IFileAttachmentService fileAttachmentService,
     IImageProcessingService imageProcessing,
     IProcessedImageWriter imageWriter,
-    SocialImageLookup socialImages) : ControllerBase
+    SocialImageLookup socialImages,
+    IBridgePrintGuard bridgePrintGuard) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
@@ -523,7 +525,7 @@ public class PrintsController(
     /// <response code="200">The claimed print.</response>
     /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source, or `fileHash` is malformed.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
-    /// <response code="403">Returned when the print is not yours.</response>
+    /// <response code="403">Returned when the print is not yours, or (`code` `printer_watched_by_other_bridge`, with `bridgeId`) when a bridge claims for a printer another of your bridges watches.</response>
     /// <response code="404">Returned when the print does not exist.</response>
     /// <response code="409">The print is linked to another job or not Printing, or the job is already another print.</response>
     [DeviceAccess(DeviceScopes.PrintsWrite)]
@@ -538,6 +540,12 @@ public class PrintsController(
         if (User.GetUserId() is not { } userId)
         {
             return Unauthorized();
+        }
+
+        if (DeviceGrantClaim.Get(User) is { } grantId
+            && await bridgePrintGuard.CheckClaimAsync(userId, grantId, id, claim, HttpContext.RequestAborted) is { Verdict: BridgePrintVerdict.Refuse } refused)
+        {
+            return WatchedByOtherBridge(grantId, refused.BoundBridgeId, "claim");
         }
 
         try
@@ -946,11 +954,13 @@ public class PrintsController(
     /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
     /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
+    /// <response code="403">`code` `printer_watched_by_other_bridge` (with `bridgeId`): a paired bridge started a job on a printer another of your bridges watches and is online, so it isn't logged twice. Don't retry it; the other bridge logs it. A job that started before the printer moved to that bridge is accepted, and one the other bridge already logged returns that print (200).</response>
     [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
     {
         var userId = User.GetUserId();
@@ -958,6 +968,27 @@ public class PrintsController(
         if (!userId.HasValue)
         {
             return Unauthorized();
+        }
+
+        if (DeviceGrantClaim.Get(User) is { } grantId)
+        {
+            var decision = await bridgePrintGuard.CheckCreateAsync(userId.Value, grantId, print, HttpContext.RequestAborted);
+            if (decision.Verdict == BridgePrintVerdict.Refuse)
+            {
+                return WatchedByOtherBridge(grantId, decision.BoundBridgeId, "create");
+            }
+
+            if (decision is { Verdict: BridgePrintVerdict.UsePrint, PrintId: { } sameJob }
+                && await printService.GetPrintById(sameJob) is { } logged)
+            {
+                telemetry.TrackEvent("BridgePrintSameJob", new Dictionary<string, string>
+                {
+                    ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+                    ["HandedOver"] = decision.HandedOver.ToString(),
+                });
+                Response.Headers.Location = Url.Action("GetPrintById", null, new { id = logged.Id }, Request.Scheme);
+                return Ok(mapper.Map<PrintDetailDTO>(logged));
+            }
         }
 
         try
@@ -1917,4 +1948,32 @@ public class PrintsController(
     // EstimateCacheSize is gone: HybridCache charges the entry's real serialized byte length
     // against the shared budget, so the "~2KB per item" guess is both unnecessary and less
     // accurate than what replaces it. See PrintLogApi.Caching.CacheBudget.
+
+    /// <summary>
+    /// The cross-bridge safety net's refusal (printlog-bridge#103). A 403 on purpose:
+    /// printlog-bridge drops a 400/403 from its outbox and never retries it, where a 409, a 5xx, or
+    /// a 2xx without a print would be retried for ever.
+    /// </summary>
+    private ObjectResult WatchedByOtherBridge(long grantId, long? boundBridgeId, string what)
+    {
+        telemetry.TrackEvent("BridgeEventDropped", new Dictionary<string, string>
+        {
+            ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+            ["BoundGrantId"] = boundBridgeId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["Event"] = what,
+        });
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: StatusCodes.Status403Forbidden,
+            detail: "Another of your bridges watches this printer, so this bridge's job isn't logged (it would be logged twice). Remove the printer from this bridge.");
+        problem.Extensions["code"] = "printer_watched_by_other_bridge";
+        if (boundBridgeId is { } bound)
+        {
+            problem.Extensions["bridgeId"] = bound;
+        }
+
+        return new ObjectResult(problem)
+        {
+            StatusCode = StatusCodes.Status403Forbidden,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
 }

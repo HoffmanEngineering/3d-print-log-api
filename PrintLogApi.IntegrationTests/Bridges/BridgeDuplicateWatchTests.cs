@@ -12,7 +12,7 @@ namespace PrintLogApi.IntegrationTests.Bridges;
 /// <summary>
 /// Two bridges (or two entries on one) watching the same printer log every print twice: each has
 /// its own instance id, so nothing downstream dedupes them. Connect refuses every such case.
-/// Moving a printer between bridges is printlog-bridge#103's; until then the 409 is the answer.
+/// Moving one between bridges is BridgeMoveTests'.
 /// </summary>
 public class BridgeDuplicateWatchTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {

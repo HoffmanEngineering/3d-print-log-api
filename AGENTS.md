@@ -459,11 +459,11 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   `printer_configured_on_bridge` (with that `bridgeId`): on that bridge by identity or kind and
   address, on the others by stable identity. It shows as Configured even when an app entry
   matches. A missing port is the kind's default (`BridgeRules.DefaultPort`), so two instances on
-  one host stay apart. **Known limit, left for printlog-bridge#103:** across bridges only the
-  derived identity key is compared, so bridges that identify one printer by different fields
-  (MAC on one segment, address across a VLAN, a serial only one sees) are not caught, and two
-  concurrent connects of one serial to two bridges under different printers can both pass (no
-  unique constraint spans bridges).
+  one host stay apart. **Known limit:** across bridges only the derived identity key is
+  compared, so bridges that identify one printer by different fields (MAC on one segment,
+  address across a VLAN, a serial only one sees) are not caught, and two concurrent connects of
+  one serial to two bridges under different printers can both pass (no unique constraint spans
+  bridges). The event safety net below catches what connect misses.
 - **Validation is two-level** (`BridgeCheckInValidator`, `BridgeRules`): over a cap (16 networks,
   50 printers, 8 MACs) or a malformed `agentVersion`/`mode`/`hostName` is a 400 `invalid_check_in`;
   a network or printer that breaks a rule is dropped and named in `rejected`, so one odd printer
@@ -491,8 +491,35 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   the API, then release a bridge that requests it. A bridge requests only the scopes the pairing
   discovery lists, and on 403 `insufficient_scope` re-pairs once, then reports it instead of
   looping.
-- Out of scope so far (printlog-bridge#103): moving a printer between bridges, cross-bridge event
-  dedupe.
+- **Moving a printer between bridges** (printlog-bridge#103, story 15a):
+  `POST /api/bridges/{id}/printers/{entryId}/move` rebinds the entry **in place** (same id, so a
+  bridge's `app-<id>` state survives a move back) in one save, bumping both bridges' versions; the
+  old bridge drops it at its next poll with no bridge change (story 12). Its sealed credentials
+  are **deleted**, not carried: they are sealed to the old key and bound to the old bridge id, so
+  the new bridge can't open them; `droppedSecretFields` tells the web app what to ask for again.
+  Refused when either bridge has the printer in its config file (`printer_configured_on_bridge`).
+  Concurrency rests on `BridgePrinter.IssuesStamp`, which the move changes: a racing move, seal or
+  check-in issue write fails its save and reruns against where the entry is now (a losing move
+  answers 409 `printer_moved` with the entry's `bridgeId`). `BridgeMoveRaceTests` pins all three.
+  `BridgePrinter.MovedAt` is when it arrived; the safety net reads it.
+- **The cross-bridge safety net** (`BridgePrintGuard`, story 15a): a new print (`POST /api/Prints`,
+  `POST /api/Prints/{id}/claim`) from a bridge's device token for a printer whose desired entry is
+  on another, online bridge is refused with **403** `printer_watched_by_other_bridge` (with that
+  `bridgeId`) and counted on the sending bridge (`Bridge.DroppedEventCount`,
+  `LastDroppedEventAt`, `LastDroppedPrinterId`, in `BridgeDto`). **403, not 2xx or 409, on
+  purpose**: printlog-bridge drops a 400/403 from its outbox, and retries a 409, a 5xx, or a 2xx
+  without a print id for ever. What it never refuses: a replay of an existing pair, any write to an
+  existing print, a job that started before the entry's `MovedAt ?? CreatedDate` (the old bridge's
+  in-flight job), anything while the bound bridge is stale (a duplicate beats a lost print), API
+  keys and devices that never checked in as a bridge, printers with no desired entry. **Hand-off:**
+  the old bridge stops watching within a poll and never sees the in-flight job end, so when a
+  bridge starts a print for a job another bridge already logged (same printer, Printing, start
+  within 10 minutes, same file name when both have one) it gets that print: the bound bridge takes
+  it over (its pair and connection replace the old ones, one conditional `ExecuteUpdate`, the one
+  place an external pair is rewritten), the old bridge gets it back unchanged. Start times are
+  compared in memory (SQLite can't compare `DateTimeOffset`).
+- No tier limit counts bridges or desired printers (printlog-bridge#103 open question; Free is
+  limited on Spoolman connections only).
 
 ## Sealed LAN credentials (printlog-bridge#100, story 14)
 

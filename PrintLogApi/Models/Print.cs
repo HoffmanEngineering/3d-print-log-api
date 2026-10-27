@@ -107,8 +107,10 @@ public class Print : TimestampEntity
 
     /// <summary>
     /// The system a connector logged this print from (<c>moonraker</c>, <c>octoprint</c>,
-    /// <c>mcp</c>…). Set once at creation, never edited. Unique with <see cref="ExternalId"/>
-    /// per user, which is what makes a connector's retried create return the same print.
+    /// <c>mcp</c>…). Set once at creation (or by a claim, #165), never edited, with one exception:
+    /// a printer moved to another bridge mid-job hands its open print to the new bridge's job
+    /// (<c>BridgePrintGuard</c>, printlog-bridge#103). Unique with <see cref="ExternalId"/> per
+    /// user, which is what makes a connector's retried create return the same print.
     /// </summary>
     [MaxLength(50)]
     public string? ExternalSource { get; set; }

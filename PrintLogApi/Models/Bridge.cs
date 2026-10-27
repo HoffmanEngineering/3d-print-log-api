@@ -122,6 +122,19 @@ public class Bridge
     /// <summary>The UTC day the owner was last told about a pending key; at most one notice a day.</summary>
     public DateTime? KeyNotifiedDay { get; set; }
 
+    /// <summary>
+    /// New jobs this bridge tried to log for a printer another of the user's bridges is bound to,
+    /// refused by the cross-bridge safety net (printlog-bridge#103). Non-zero means this bridge
+    /// also watches a printer it shouldn't (its config file, most likely).
+    /// </summary>
+    public int DroppedEventCount { get; set; }
+
+    /// <summary>When a job was last refused, UTC.</summary>
+    public DateTime? LastDroppedEventAt { get; set; }
+
+    /// <summary>The 3D Print Log printer of the last refused job. A value, not a key: the printer may be deleted.</summary>
+    public long? LastDroppedPrinterId { get; set; }
+
     public ICollection<BridgeDiscoveredPrinter>? DiscoveredPrinters { get; set; }
 
     public ICollection<BridgePrinter>? Printers { get; set; }
@@ -262,6 +275,13 @@ public class BridgePrinter
     public Guid IssuesStamp { get; set; }
 
     public DateTime CreatedDate { get; set; }
+
+    /// <summary>
+    /// When the user last moved it here from another bridge, UTC, or null. The bridge has watched
+    /// the printer since this (or <see cref="CreatedDate"/>): a job that started before it belongs
+    /// to the bridge that watched it then.
+    /// </summary>
+    public DateTime? MovedAt { get; set; }
 
     public ICollection<BridgePrinterSecret>? Secrets { get; set; }
 }

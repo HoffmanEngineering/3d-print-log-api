@@ -379,6 +379,66 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     }
 
     /// <summary>
+    /// Moves a connected printer to another of your bridges: this bridge stops watching it and the
+    /// other starts, each at its next check-in or poll, with no restart. The entry keeps its id;
+    /// prints already logged keep their connection.
+    /// </summary>
+    /// <remarks>
+    /// Give the printer as the other bridge found it (`discoveredPrinterId`), or the address the
+    /// other bridge reaches it at (`host`, `port`); with neither it keeps its address.
+    ///
+    /// Sealed credentials can't move: they are sealed to this bridge's key. They are deleted, and
+    /// `droppedSecretFields` names the ones to seal again to the new bridge
+    /// (`PUT /api/bridges/{toBridgeId}/printers/{entryId}/secrets/{field}`).
+    ///
+    /// A job already running when the printer moves stays one print: the old bridge may still log
+    /// it, and the new bridge picking it up is handed the same print.
+    /// </remarks>
+    /// <response code="200">Moved.</response>
+    /// <response code="400">`code`: `invalid_target_bridge` (missing, this bridge, or not yours), `discovered_printer_not_found` (the new bridge found no such printer), `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial` or `serial_required`.</response>
+    /// <response code="404">You have no such bridge, or no such printer entry.</response>
+    /// <response code="409">`code`: `printer_moved` (it is on another bridge already; `bridgeId` names it), `printer_configured_on_bridge` (this bridge or the new one watches it from its config file; `bridgeId` names it), `discovered_printer_already_connected` (the new bridge already has that printer or address), `printer_connected_elsewhere` or `bridge_printer_limit` (50).</response>
+    [HttpPost("{id:long}/printers/{entryId:long}/move")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MovedBridgePrinterDto>> Move(long id, long entryId, MoveBridgePrinterDto body, CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        MovedBridgePrinterDto? moved;
+        try
+        {
+            moved = await bridges.MoveAsync(userId, id, entryId, body, ct);
+        }
+        catch (BridgeProblemException problem)
+        {
+            return CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId);
+        }
+
+        if (moved is null)
+        {
+            return NotFound();
+        }
+
+        telemetry.TrackEvent("BridgePrinterMoved", new Dictionary<string, string>
+        {
+            ["GrantId"] = Id(id),
+            ["ToGrantId"] = Id(moved.ToBridgeId),
+            ["Kind"] = moved.Printer?.Kind ?? string.Empty,
+            ["FromDiscovery"] = (body.DiscoveredPrinterId is not null).ToString(),
+            ["DroppedSecrets"] = (moved.DroppedSecretFields?.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        });
+        return moved;
+    }
+
+    /// <summary>
     /// Sets or replaces one LAN credential of a connected printer, sealed in the browser to the
     /// bridge's public key (docs/bridge-credential-sealing.md). The API stores the ciphertext and
     /// can't read it; only the bridge gets it back, at its next check-in or poll.

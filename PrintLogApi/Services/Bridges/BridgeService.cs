@@ -86,6 +86,14 @@ public interface IBridgeService
 
     Task<bool> DisconnectAsync(long userId, long bridgeId, long entryId, CancellationToken ct);
 
+    /// <summary>
+    /// Moves a desired printer to another of the user's bridges, in one save: the entry keeps its
+    /// id, both bridges' versions change, and its sealed credentials are deleted (sealed to the
+    /// old bridge's key). Null when the user has no such bridge or entry;
+    /// <see cref="BridgeProblemException"/> for a refusal.
+    /// </summary>
+    Task<MovedBridgePrinterDto?> MoveAsync(long userId, long bridgeId, long entryId, MoveBridgePrinterDto body, CancellationToken ct);
+
     /// <summary>Ignores or stops ignoring a discovered printer. False when the bridge or printer isn't the user's.</summary>
     Task<bool> SetIgnoredAsync(long userId, long bridgeId, long discoveredId, bool ignored, CancellationToken ct);
 
@@ -593,6 +601,9 @@ public sealed class BridgeService(
                 ConnectionCount = r.ConnectionCount,
                 DiscoveredCount = found.Count,
                 DiscoveredNotConnectedCount = found.Count(s => s.State == DiscoveredPrinterState.New),
+                DroppedEventCount = b.DroppedEventCount,
+                LastDroppedEventAt = Utc(b.LastDroppedEventAt),
+                LastDroppedPrinterId = b.LastDroppedPrinterId,
             };
         }).ToList();
     }
@@ -814,20 +825,21 @@ public sealed class BridgeService(
     /// own instance id and nothing downstream dedupes their prints: the 3D Print Log printer on
     /// any bridge, the same identity or address on this bridge, and the same stable identity
     /// (serial, mainboard id, MAC) on another of the user's bridges, and a printer a bridge
-    /// reported as in its config file. Moving a printer between bridges is printlog-bridge#103's;
-    /// until then the 409 names the bridge that has it.
+    /// reported as in its config file. The 409 names the bridge that has it, so the app can offer
+    /// to move it (<see cref="MoveAsync"/>, which passes <paramref name="movingEntryId"/> so the
+    /// entry doesn't collide with itself).
     /// <para>
-    /// Known limit (left for printlog-bridge#103): across bridges only the derived identity key
-    /// is compared, so two bridges that identify one printer by different fields (a MAC on one
-    /// segment, an address across a VLAN, a serial only one of them sees) are not caught; and
-    /// two concurrent connects of one serial to two bridges under different printers can both
-    /// pass, since no unique constraint spans bridges.
+    /// Known limit: across bridges only the derived identity key is compared, so two bridges that
+    /// identify one printer by different fields (a MAC on one segment, an address across a VLAN,
+    /// a serial only one of them sees) are not caught; and two concurrent connects of one serial
+    /// to two bridges under different printers can both pass, since no unique constraint spans
+    /// bridges. <see cref="BridgePrintGuard"/> is the safety net for both.
     /// </para>
     /// </summary>
-    private async Task EnsureNotConnectedAsync(long userId, BridgePrinter entry, CancellationToken ct)
+    private async Task EnsureNotConnectedAsync(long userId, BridgePrinter entry, CancellationToken ct, long? movingEntryId = null)
     {
         var printerOn = await context.BridgePrinters
-            .Where(p => p.PrinterId == entry.PrinterId)
+            .Where(p => p.PrinterId == entry.PrinterId && p.Id != movingEntryId)
             .Select(p => (long?)p.BridgeId)
             .FirstOrDefaultAsync(ct);
         if (printerOn == entry.BridgeId)
@@ -858,7 +870,7 @@ public sealed class BridgeService(
         if (entry.IdentityKey is { } key && !key.Contains(":ip:", StringComparison.Ordinal))
         {
             var otherBridge = await context.BridgePrinters
-                .Where(p => p.IdentityKey == key && p.BridgeId != entry.BridgeId && p.Bridge.Grant.UserId == userId)
+                .Where(p => p.IdentityKey == key && p.BridgeId != entry.BridgeId && p.Id != movingEntryId && p.Bridge.Grant.UserId == userId)
                 .Select(p => (long?)p.BridgeId)
                 .FirstOrDefaultAsync(ct);
             if (otherBridge is { } other)
@@ -925,6 +937,173 @@ public sealed class BridgeService(
                 // A check-in wrote the entry's issues (its concurrency stamp) meanwhile.
                 context.ChangeTracker.Clear();
             }
+        }
+    }
+
+    /// <summary>
+    /// Rebinds the entry in place, so its id (and the bridge's <c>app-&lt;id&gt;</c> state) is kept and
+    /// both desired lists change in the same save. Concurrency rests on the entry's
+    /// <see cref="BridgePrinter.IssuesStamp"/>, which this changes: a second move, an owner's seal
+    /// or a check-in's issue write that read the entry first fails its save, and the loser reruns
+    /// against where the entry is now. A move reruns too, and then finds the entry gone from this
+    /// bridge (409 <c>printer_moved</c>) or deletes the seal that beat it.
+    /// </summary>
+    public async Task<MovedBridgePrinterDto?> MoveAsync(long userId, long bridgeId, long entryId, MoveBridgePrinterDto body, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await MoveOnceAsync(userId, bridgeId, entryId, body, ct);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                context.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    private async Task<MovedBridgePrinterDto?> MoveOnceAsync(long userId, long bridgeId, long entryId, MoveBridgePrinterDto body, CancellationToken ct)
+    {
+        var from = await Owned(userId).SingleOrDefaultAsync(b => b.Id == bridgeId, ct);
+        if (from is null)
+        {
+            return null;
+        }
+
+        var entry = await context.BridgePrinters.SingleOrDefaultAsync(p => p.Id == entryId && p.Bridge.Grant.UserId == userId, ct);
+        if (entry is null)
+        {
+            return null;
+        }
+
+        if (entry.BridgeId != bridgeId)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "printer_moved",
+                "That printer has moved to another of your bridges.", entry.BridgeId);
+        }
+
+        if (body.ToBridgeId is not { } toId || toId == bridgeId)
+        {
+            throw Bad("invalid_target_bridge", "toBridgeId must be another of your bridges.");
+        }
+
+        var to = await Owned(userId).SingleOrDefaultAsync(b => b.Id == toId, ct)
+            ?? throw Bad("invalid_target_bridge", "toBridgeId must be another of your bridges.");
+
+        var moved = await MovedEntryAsync(entry, toId, body, ct);
+
+        if (await context.BridgePrinters.CountAsync(p => p.BridgeId == toId, ct) >= Bridge.MaxPrinters)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_printer_limit",
+                $"A bridge watches at most {Bridge.MaxPrinters} printers from the app.");
+        }
+
+        // The old bridge's config file wins there: moving the app entry away would leave it
+        // watched by the old bridge and the new one.
+        await EnsureNotConfiguredOnAsync(bridgeId, entry, ct);
+        await EnsureNotConnectedAsync(userId, moved, ct, movingEntryId: entry.Id);
+
+        var secrets = await context.BridgePrinterSecrets.Where(s => s.BridgePrinterId == entry.Id).OrderBy(s => s.Field).ToListAsync(ct);
+        context.BridgePrinterSecrets.RemoveRange(secrets);
+
+        entry.BridgeId = toId;
+        entry.Host = moved.Host;
+        entry.Port = moved.Port;
+        entry.Serial = moved.Serial;
+        entry.IdentityKey = moved.IdentityKey;
+        entry.Macs = moved.Macs;
+        entry.CredentialIssues = null;
+        entry.IssuesStamp = Guid.NewGuid();
+        entry.MovedAt = clock.GetUtcNow().UtcDateTime;
+        from.DesiredRevision = Guid.NewGuid();
+        to.DesiredRevision = Guid.NewGuid();
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException)
+        {
+            // The printer was deleted meanwhile, or a connect on the new bridge took the identity
+            // (the unique index). Say which, as connect does.
+            context.ChangeTracker.Clear();
+            if (!await context.BridgePrinters.AnyAsync(p => p.Id == entryId, ct))
+            {
+                return null;
+            }
+
+            await EnsureNotConnectedAsync(userId, moved, ct, movingEntryId: entryId);
+            throw;
+        }
+
+        var printerName = await context.Printers.Where(p => p.Id == entry.PrinterId).Select(p => p.Name).SingleOrDefaultAsync(ct);
+        return new MovedBridgePrinterDto
+        {
+            Printer = ToDto(entry, printerName, [], to.PublicKeyFingerprint, forBridge: false),
+            FromBridgeId = bridgeId,
+            ToBridgeId = toId,
+            DroppedSecretFields = [.. secrets.Select(s => s.Field).Distinct()],
+        };
+    }
+
+    /// <summary>
+    /// The entry's values on the new bridge: from what that bridge found (same kind), from the
+    /// address given, or kept. A stable identity (serial, mainboard id, MAC) is kept unless the
+    /// new bridge's discovery says otherwise; an address identity follows the address.
+    /// </summary>
+    private async Task<BridgePrinter> MovedEntryAsync(BridgePrinter entry, long toId, MoveBridgePrinterDto body, CancellationToken ct)
+    {
+        if (body.DiscoveredPrinterId is { } discoveredId)
+        {
+            var kind = await context.BridgeDiscoveredPrinters.AsNoTracking()
+                .Where(d => d.Id == discoveredId && d.BridgeId == toId)
+                .Select(d => d.Kind)
+                .SingleOrDefaultAsync(ct)
+                ?? throw Bad("discovered_printer_not_found", "The bridge you are moving to has not found a printer with that id.");
+            if (kind != entry.Kind)
+            {
+                throw Bad("invalid_kind", $"That printer is a {kind}; this one is a {entry.Kind}.");
+            }
+
+            return await NewEntryAsync(toId, entry.PrinterId, new ConnectBridgePrinterDto
+            {
+                DiscoveredPrinterId = discoveredId,
+                Host = body.Host,
+                Port = body.Port,
+            }, ct);
+        }
+
+        var addressChanged = body.Host is not null || body.Port is not null;
+        var moved = await NewEntryAsync(toId, entry.PrinterId, new ConnectBridgePrinterDto
+        {
+            Kind = entry.Kind,
+            Host = body.Host ?? entry.Host,
+            Port = body.Port ?? entry.Port,
+            Serial = entry.Serial,
+        }, ct);
+        var stable = entry.IdentityKey is { } key && !key.Contains(":ip:", StringComparison.Ordinal);
+        if (stable || (!addressChanged && entry.IdentityKey is not null))
+        {
+            moved.IdentityKey = entry.IdentityKey;
+            moved.Macs = entry.Macs;
+        }
+
+        return moved;
+    }
+
+    /// <summary>Refuses when <paramref name="bridgeId"/> reported the entry's printer as in its config file.</summary>
+    private async Task EnsureNotConfiguredOnAsync(long bridgeId, BridgePrinter entry, CancellationToken ct)
+    {
+        var configured = await context.BridgeDiscoveredPrinters.AsNoTracking()
+            .Where(d => d.BridgeId == bridgeId && d.Configured)
+            .Select(d => new { d.Kind, d.Address, d.Port, d.IdentityKey })
+            .ToListAsync(ct);
+        if (configured.Any(d =>
+                string.Equals(d.IdentityKey, entry.IdentityKey, StringComparison.OrdinalIgnoreCase)
+                || (d.Kind == entry.Kind && string.Equals(d.Address, entry.Host, StringComparison.OrdinalIgnoreCase)
+                    && BridgeRules.SamePort(d.Kind, d.Port, entry.Port))))
+        {
+            throw ConfiguredOn(bridgeId);
         }
     }
 
