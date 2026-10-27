@@ -1989,6 +1989,9 @@ public sealed class PrintService(
             row.AmountMg = incoming.AmountMg;
             row.LengthInM = incoming.LengthInM;
             row.VolumeMl = incoming.VolumeMl;
+            // Replaced with the values, and measured unless the connector says otherwise, so an
+            // older bridge's completion stays a measurement (printlog-bridge#82).
+            row.ActualIsEstimate = incoming.ActualIsEstimate ?? false;
         }
     }
 

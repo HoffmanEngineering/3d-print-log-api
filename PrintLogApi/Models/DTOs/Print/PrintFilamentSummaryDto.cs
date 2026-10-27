@@ -60,5 +60,12 @@ public class PrintFilamentSummaryDto
     /// </summary>
     public SourceMeasurement? Source { get; set; }
 
+    /// <summary>
+    /// True when the actual figures are the slicer's estimate rather than a measurement, as from a
+    /// printer that reports only the estimate. Accuracy analytics leave such a row out. Defaults to
+    /// false (measured).
+    /// </summary>
+    public bool ActualIsEstimate { get; set; }
+
     public string? Notes { get; set; }
 }
