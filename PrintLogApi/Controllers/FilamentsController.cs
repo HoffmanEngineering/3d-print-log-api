@@ -13,6 +13,8 @@ using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
 using PrintLogApi.SpoolTags;
+using PrintLogApi.SpoolTags.Labels;
+using PrintLogApi.SpoolTags.Matching;
 
 namespace PrintLogApi.Controllers;
 
@@ -29,6 +31,7 @@ public class FilamentsController(
     PrintLogContext context,
     IBlobStorageService blobStorageService,
     TagReadService tagReadService,
+    FilamentCatalogMatcher catalogMatcher,
     TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
@@ -173,6 +176,33 @@ public class FilamentsController(
         {
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
+    }
+
+    /// <summary>
+    /// Find the SpoolmanDB catalog entry a label-scanned spool is, by brand, material and color name.
+    /// </summary>
+    /// <remarks>
+    /// The add form calls this once the user has typed the brand a label scan could not read.
+    /// Brand, material and color name are required for a match; the entry's name must contain the
+    /// color name. Weight and diameter break ties.
+    /// </remarks>
+    /// <param name="request">What the form knows about the spool.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The best catalog entry, with its temperatures.</response>
+    /// <response code="204">No entry matches well enough.</response>
+    [HttpPost("catalog-match")]
+    [ProducesResponseType<CatalogMatch>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> MatchCatalog([FromBody] CatalogMatchRequestDto request, CancellationToken ct)
+    {
+        if (!User.GetUserId().HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var match = await catalogMatcher.MatchByNameAsync(
+            new LabelReading(request.Brand, request.MaterialType, request.ColorName, request.NetWeightG, request.DiameterMm, null, null, null, null), ct);
+        return match is null ? NoContent() : Ok(match);
     }
 
     /// <summary>

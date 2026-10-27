@@ -1,11 +1,23 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
+using PrintLogApi.SpoolTags.Labels;
 
 namespace PrintLogApi.SpoolTags.Matching;
 
 internal sealed record SkuTally(string EntryId, int Votes, int Users);
 
-public sealed record CatalogMatch(string Id, double Confidence, int? SpoolWeightG, string? ColorName, string Name, string Manufacturer, double Density);
+public sealed record CatalogMatch(
+    string Id,
+    double Confidence,
+    int? SpoolWeightG,
+    string? ColorName,
+    string Name,
+    string Manufacturer,
+    double Density,
+    int? ExtruderTempMinC = null,
+    int? ExtruderTempMaxC = null,
+    int? ExtruderTempC = null,
+    int? BedTempC = null);
 
 /// <summary>Finds the catalog entry a tag reading describes: a trusted SKU first, then a scored match.</summary>
 public sealed class FilamentCatalogMatcher(PrintLogContext db)
@@ -110,6 +122,55 @@ public sealed class FilamentCatalogMatcher(PrintLogContext db)
         return score;
     }
 
+    /// <summary>
+    /// Finds the entry a spool label describes. A label has no hex color, so the entry's name must
+    /// contain the label's color name; brand and material are required, as for a tag reading.
+    /// </summary>
+    public async Task<CatalogMatch?> MatchByNameAsync(LabelReading reading, CancellationToken ct)
+    {
+        var manufacturer = reading.Brand?.Trim();
+        var materialKey = MaterialKey.Normalize(reading.MaterialType);
+        var color = reading.ColorName?.Trim();
+        if (string.IsNullOrEmpty(manufacturer) || materialKey.Length == 0 || string.IsNullOrEmpty(color))
+        {
+            return null;
+        }
+
+        var candidates = await CandidatesQuery(db, manufacturer.ToUpperInvariant()).ToListAsync(ct);
+
+        return candidates
+            .Where(e => MaterialKey.Normalize(e.Material) == materialKey)
+            .Where(e => e.Name.Contains(color, StringComparison.OrdinalIgnoreCase))
+            .Where(e => reading.DiameterMm is not { } d || Math.Abs(e.DiameterMm - d) <= DiameterToleranceMm)
+            .Select(e => (Entry: e, Score: NameScore(reading, color, e)))
+            .Where(x => x.Score >= MatchThreshold)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Entry.Id, StringComparer.Ordinal)
+            .Select(x => ToMatch(x.Entry, x.Score))
+            .FirstOrDefault();
+    }
+
+    private static double NameScore(LabelReading reading, string color, FilamentCatalogEntry entry)
+    {
+        var score = 0.6;
+        var name = entry.Name.Trim();
+        if (string.Equals(name, color, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, $"{reading.MaterialType} {color}".Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            score += 0.2;
+        }
+        if (reading.NetWeightG == entry.WeightG)
+        {
+            score += 0.1;
+        }
+        if (reading.DiameterMm is { } d && Math.Abs(entry.DiameterMm - d) <= DiameterToleranceMm)
+        {
+            score += 0.1;
+        }
+        return score;
+    }
+
     private static CatalogMatch ToMatch(FilamentCatalogEntry e, double confidence) =>
-        new(e.Id, confidence, e.SpoolWeightG, e.Name, e.Name, e.Manufacturer, e.Density);
+        new(e.Id, confidence, e.SpoolWeightG, e.Name, e.Name, e.Manufacturer, e.Density,
+            e.ExtruderTempMin, e.ExtruderTempMax, e.ExtruderTemp, e.BedTemp);
 }
