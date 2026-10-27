@@ -20,6 +20,9 @@ public sealed class BridgeProblemException(int status, string code, string detai
 
     /// <summary>The bridge's current key, for <c>bridge_key_changed</c>.</summary>
     public string? KeyFingerprint { get; init; }
+
+    /// <summary>The credential fields a move must carry, for <c>secrets_required</c>.</summary>
+    public IReadOnlyList<string>? Fields { get; init; }
 }
 
 /// <summary>The device grant behind a check-in was revoked while the check-in ran.</summary>
@@ -956,8 +959,10 @@ public sealed class BridgeService(
             {
                 return await MoveOnceAsync(userId, bridgeId, entryId, body, ct);
             }
-            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            catch (DbUpdateException ex) when (attempt < 2 && (ex is DbUpdateConcurrencyException || UniqueConstraintViolation.IsUniqueViolation(ex)))
             {
+                // A racing write to the entry, a seal inserting the field this move inserts, or a
+                // connect taking the identity on the new bridge: the rerun's checks say which.
                 context.ChangeTracker.Clear();
             }
         }
@@ -1004,8 +1009,8 @@ public sealed class BridgeService(
         await EnsureNotConfiguredOnAsync(bridgeId, entry, ct);
         await EnsureNotConnectedAsync(userId, moved, ct, movingEntryId: entry.Id);
 
-        var secrets = await context.BridgePrinterSecrets.Where(s => s.BridgePrinterId == entry.Id).OrderBy(s => s.Field).ToListAsync(ct);
-        context.BridgePrinterSecrets.RemoveRange(secrets);
+        var now = clock.GetUtcNow().UtcDateTime;
+        var (kept, dropped) = await MoveSecretsAsync(entry, to, body, now, ct);
 
         entry.BridgeId = toId;
         entry.Host = moved.Host;
@@ -1015,17 +1020,17 @@ public sealed class BridgeService(
         entry.Macs = moved.Macs;
         entry.CredentialIssues = null;
         entry.IssuesStamp = Guid.NewGuid();
-        entry.MovedAt = clock.GetUtcNow().UtcDateTime;
+        entry.MovedAt = now;
+        entry.MovedFromBridgeId = bridgeId;
         from.DesiredRevision = Guid.NewGuid();
         to.DesiredRevision = Guid.NewGuid();
         try
         {
             await context.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException)
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && !UniqueConstraintViolation.IsUniqueViolation(ex))
         {
-            // The printer was deleted meanwhile, or a connect on the new bridge took the identity
-            // (the unique index). Say which, as connect does.
+            // The printer was deleted meanwhile. Say so, as connect does.
             context.ChangeTracker.Clear();
             if (!await context.BridgePrinters.AnyAsync(p => p.Id == entryId, ct))
             {
@@ -1039,10 +1044,114 @@ public sealed class BridgeService(
         var printerName = await context.Printers.Where(p => p.Id == entry.PrinterId).Select(p => p.Name).SingleOrDefaultAsync(ct);
         return new MovedBridgePrinterDto
         {
-            Printer = ToDto(entry, printerName, [], to.PublicKeyFingerprint, forBridge: false),
+            Printer = ToDto(entry, printerName, kept, to.PublicKeyFingerprint, forBridge: false),
             FromBridgeId = bridgeId,
             ToBridgeId = toId,
-            DroppedSecretFields = [.. secrets.Select(s => s.Field).Distinct()],
+            DroppedSecretFields = dropped,
+        };
+    }
+
+    /// <summary>
+    /// The entry's credentials across the move. Values sealed to the old bridge can't be opened by
+    /// the new one, so each is replaced by the move's own value for that field (sealed to the new
+    /// bridge's current key, checked as a seal is) or deleted. A field the printer can't connect
+    /// without (<see cref="SealedCredentials.CarriedGroups"/>) that was set must be sent: without it
+    /// the new bridge couldn't watch the printer while the old one lets go of it, and its prints
+    /// would be lost (400 <c>secrets_required</c>, naming the fields that were set). Returns the
+    /// stored values and the fields that were set and are now gone.
+    /// </summary>
+    private async Task<(List<BridgePrinterSecret> Kept, List<string> Dropped)> MoveSecretsAsync(BridgePrinter entry, Bridge to, MoveBridgePrinterDto body, DateTime now, CancellationToken ct)
+    {
+        var provided = body.Secrets ?? [];
+        foreach (var (field, value) in provided)
+        {
+            EnsureField(entry, field);
+            if (!SealedCredentials.IsSealedValue(value))
+            {
+                throw Bad("invalid_sealed_value",
+                    $"secrets.{field}: v1. and unpadded base64url of an uncompressed P-256 point, a 12-byte nonce, 1 to 256 bytes of ciphertext and a 16-byte tag (docs/bridge-credential-sealing.md).");
+            }
+        }
+
+        if (provided.Count > 0)
+        {
+            EnsureSealableTo(to, body.KeyFingerprint);
+        }
+
+        var existing = await context.BridgePrinterSecrets.Where(s => s.BridgePrinterId == entry.Id).OrderBy(s => s.Field).ToListAsync(ct);
+        var set = existing.Select(s => s.Field).ToHashSet(StringComparer.Ordinal);
+        var missing = SealedCredentials.CarriedGroups(entry.Kind)
+            .Where(group => group.Any(set.Contains) && !group.Any(provided.ContainsKey))
+            .SelectMany(group => group.Where(set.Contains))
+            .ToList();
+        if (missing.Count > 0)
+        {
+            throw new BridgeProblemException(StatusCodes.Status400BadRequest, "secrets_required",
+                $"The printer needs {string.Join(", ", missing)} to connect. Seal it to the new bridge's key and send it with the move.")
+            {
+                Fields = missing,
+            };
+        }
+
+        var kept = new List<BridgePrinterSecret>();
+        foreach (var (field, value) in provided.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            // The same row when the field was set, so delete and insert never meet on its unique index.
+            var row = existing.FirstOrDefault(s => s.Field == field);
+            if (row is null)
+            {
+                row = new BridgePrinterSecret { BridgePrinterId = entry.Id, Field = field };
+                context.BridgePrinterSecrets.Add(row);
+            }
+
+            row.SealedValue = value!;
+            row.KeyFingerprint = body.KeyFingerprint!;
+            row.UpdatedDate = now;
+            kept.Add(row);
+        }
+
+        var gone = existing.Where(s => !provided.ContainsKey(s.Field)).ToList();
+        context.BridgePrinterSecrets.RemoveRange(gone);
+        return (kept, [.. gone.Select(s => s.Field)]);
+    }
+
+    /// <summary>
+    /// The rules of a seal's key fingerprint (story 14a): the bridge's current key, else 409
+    /// <c>bridge_key_unconfirmed</c> (its pending key), <c>bridge_key_missing</c> (none yet) or
+    /// <c>bridge_key_changed</c>. The current key is compared first, so a pending key equal to it
+    /// (left by a race) can't refuse a seal to the key the bridge uses.
+    /// </summary>
+    private static void EnsureSealableTo(Bridge bridge, string? fingerprint)
+    {
+        if (!SealedCredentials.IsFingerprint(fingerprint))
+        {
+            throw Bad("invalid_key_fingerprint", "keyFingerprint: the bridge's publicKeyFingerprint you sealed to, 64 lower-case hex characters.");
+        }
+
+        if (fingerprint == bridge.PublicKeyFingerprint)
+        {
+            return;
+        }
+
+        if (fingerprint == bridge.PendingPublicKeyFingerprint)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_unconfirmed",
+                "The bridge reported a new key that hasn't been confirmed. Compare its fingerprint with the bridge's and confirm it first.")
+            {
+                KeyFingerprint = bridge.PublicKeyFingerprint,
+            };
+        }
+
+        if (bridge.PublicKeyFingerprint is null)
+        {
+            throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_missing",
+                "This bridge hasn't reported a key to seal credentials to. Update printlog-bridge.");
+        }
+
+        throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_changed",
+            "The bridge's key changed. Check its fingerprint and seal the credential again.")
+        {
+            KeyFingerprint = bridge.PublicKeyFingerprint,
         };
     }
 
@@ -1188,36 +1297,7 @@ public sealed class BridgeService(
                     "sealed: v1. and unpadded base64url of an uncompressed P-256 point, a 12-byte nonce, 1 to 256 bytes of ciphertext and a 16-byte tag (docs/bridge-credential-sealing.md).");
             }
 
-            if (!SealedCredentials.IsFingerprint(body.KeyFingerprint))
-            {
-                throw Bad("invalid_key_fingerprint", "keyFingerprint: the bridge's publicKeyFingerprint you sealed to, 64 lower-case hex characters.");
-            }
-
-            // The current key first: a pending key equal to it (left by a race) must not refuse
-            // a seal to the key the bridge actually uses.
-            if (body.KeyFingerprint != bridge.PublicKeyFingerprint)
-            {
-                if (body.KeyFingerprint == bridge.PendingPublicKeyFingerprint)
-                {
-                    throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_unconfirmed",
-                        "The bridge reported a new key that hasn't been confirmed. Compare its fingerprint with the bridge's and confirm it first.")
-                    {
-                        KeyFingerprint = bridge.PublicKeyFingerprint,
-                    };
-                }
-
-                if (bridge.PublicKeyFingerprint is null)
-                {
-                    throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_missing",
-                        "This bridge hasn't reported a key to seal credentials to. Update printlog-bridge.");
-                }
-
-                throw new BridgeProblemException(StatusCodes.Status409Conflict, "bridge_key_changed",
-                    "The bridge's key changed. Check its fingerprint and seal the credential again.")
-                {
-                    KeyFingerprint = bridge.PublicKeyFingerprint,
-                };
-            }
+            EnsureSealableTo(bridge, body.KeyFingerprint);
 
             var secret = await context.BridgePrinterSecrets.SingleOrDefaultAsync(s => s.BridgePrinterId == entryId && s.Field == field, ct);
             if (secret is null)

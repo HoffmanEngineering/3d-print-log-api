@@ -123,13 +123,16 @@ public class Bridge
     public DateTime? KeyNotifiedDay { get; set; }
 
     /// <summary>
-    /// New jobs this bridge tried to log for a printer another of the user's bridges is bound to,
-    /// refused by the cross-bridge safety net (printlog-bridge#103). Non-zero means this bridge
-    /// also watches a printer it shouldn't (its config file, most likely).
+    /// Distinct jobs this bridge tried to log for a printer another of the user's bridges is bound
+    /// to and evidently watching, refused by the cross-bridge safety net (printlog-bridge#103). A
+    /// job is counted once however often it is sent (start, finish, claim), by its external pair
+    /// (<see cref="BridgeDroppedJob"/>). Never reset; <see cref="LastDroppedEventAt"/> says whether
+    /// it is still happening. Non-zero means this bridge also watches a printer it shouldn't (its
+    /// config file, most likely).
     /// </summary>
     public int DroppedEventCount { get; set; }
 
-    /// <summary>When a job was last refused, UTC.</summary>
+    /// <summary>When a job was last refused, UTC, including a job already counted.</summary>
     public DateTime? LastDroppedEventAt { get; set; }
 
     /// <summary>The 3D Print Log printer of the last refused job. A value, not a key: the printer may be deleted.</summary>
@@ -283,6 +286,9 @@ public class BridgePrinter
     /// </summary>
     public DateTime? MovedAt { get; set; }
 
+    /// <summary>The bridge it was moved from at <see cref="MovedAt"/>. A value, not a key: that bridge may be revoked since.</summary>
+    public long? MovedFromBridgeId { get; set; }
+
     public ICollection<BridgePrinterSecret>? Secrets { get; set; }
 }
 
@@ -318,4 +324,31 @@ public class BridgePrinterSecret
     public string KeyFingerprint { get; set; } = null!;
 
     public DateTime UpdatedDate { get; set; }
+}
+
+/// <summary>
+/// A job the cross-bridge safety net refused from this bridge (printlog-bridge#103, story 15a),
+/// by the bridge's external pair, so the bridge sending it again (when it ends, or as a claim)
+/// isn't counted again in <see cref="Bridge.DroppedEventCount"/>. Kept for
+/// <c>BridgePrintGuard.DroppedJobRetention</c>; each refusal prunes older rows of its bridge.
+/// </summary>
+public class BridgeDroppedJob
+{
+    [Key]
+    public long Id { get; set; }
+
+    public long BridgeId { get; set; }
+    [ForeignKey("BridgeId")]
+    public Bridge Bridge { get; set; } = null!;
+
+    [Required]
+    [MaxLength(50)]
+    public string ExternalSource { get; set; } = null!;
+
+    [Required]
+    [MaxLength(200)]
+    public string ExternalId { get; set; } = null!;
+
+    /// <summary>The first refusal of the job, UTC.</summary>
+    public DateTime DroppedAt { get; set; }
 }

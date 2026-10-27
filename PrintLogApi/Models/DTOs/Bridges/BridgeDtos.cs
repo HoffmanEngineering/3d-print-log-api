@@ -305,6 +305,18 @@ public class MoveBridgePrinterDto
     public string? Host { get; set; }
 
     public int? Port { get; set; }
+
+    /// <summary>
+    /// The printer's credentials for the new bridge, by field: each sealed in the browser to the
+    /// new bridge's current key with associated data
+    /// <c>printlog-credential:v1:{toBridgeId}:{entryId}:{field}</c>, exactly as for
+    /// <c>PUT …/secrets/{field}</c>. A field the printer needs to connect, and that was set, must
+    /// be here (<c>secrets_required</c> otherwise); others that aren't sent are dropped.
+    /// </summary>
+    public Dictionary<string, string?>? Secrets { get; set; }
+
+    /// <summary>The new bridge's key fingerprint the values were sealed to, computed in the browser. Required with <c>secrets</c>.</summary>
+    public string? KeyFingerprint { get; set; }
 }
 
 /// <summary>The answer to a move.</summary>
@@ -318,8 +330,8 @@ public class MovedBridgePrinterDto
     public long ToBridgeId { get; set; }
 
     /// <summary>
-    /// The credentials that were set and are now gone: they were sealed to the old bridge's key,
-    /// which the new bridge doesn't hold. Seal each again to the new bridge.
+    /// The credentials that were set and are now gone because the move didn't send them (they were
+    /// sealed to the old bridge's key). Seal one again to the new bridge if the printer needs it.
     /// </summary>
     public List<string>? DroppedSecretFields { get; set; }
 }

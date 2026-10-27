@@ -177,6 +177,38 @@ namespace PrintLogApi.Migrations
                     b.ToTable("BridgeDiscoveredPrinters");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.BridgeDroppedJob", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BridgeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("DroppedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalSource")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BridgeId", "ExternalSource", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("BridgeDroppedJobs");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.BridgeIgnoredPrinter", b =>
                 {
                     b.Property<long>("Id")
@@ -246,6 +278,9 @@ namespace PrintLogApi.Migrations
 
                     b.Property<DateTime?>("MovedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<long?>("MovedFromBridgeId")
+                        .HasColumnType("bigint");
 
                     b.Property<int?>("Port")
                         .HasColumnType("int");
@@ -3345,6 +3380,17 @@ namespace PrintLogApi.Migrations
                 {
                     b.HasOne("PrintLogApi.Models.Bridge", "Bridge")
                         .WithMany("DiscoveredPrinters")
+                        .HasForeignKey("BridgeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Bridge");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.BridgeDroppedJob", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Bridge", "Bridge")
+                        .WithMany()
                         .HasForeignKey("BridgeId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

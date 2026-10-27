@@ -131,39 +131,157 @@ public class BridgeMoveTests(CustomWebApplicationFactory factory) : IClassFixtur
         Assert.Equal(2, (await GetAsUserAsync(_client, b.Subject, $"/api/bridges/{b.GrantId}/printers")).GetArrayLength());
     }
 
-    [Fact]
-    public async Task AMove_DropsTheSealedCredentials_AndNamesThemToEnterAgain()
+    private sealed record Credentialed(PairedBridge A, PairedBridge B, BridgeSealedCredentialTests.BridgeKey AKey, BridgeSealedCredentialTests.BridgeKey BKey, long EntryId) : IDisposable
     {
-        using var aKey = new BridgeSealedCredentialTests.BridgeKey();
-        using var bKey = new BridgeSealedCredentialTests.BridgeKey();
-        var (a, b) = await TwoBridgesAsync("move-secrets", aKey: aKey.PublicKey, bKey: bKey.PublicKey);
-        var entryId = await ConnectByHandAsync(a, "192.168.1.60", "bambu", Serial());
-        var sealedValue = CredentialSealer.Seal(aKey.PublicKey, CredentialSealer.AssociatedData(a.GrantId, entryId, "access_code"), "12345678");
-        Assert.Equal(HttpStatusCode.OK, (await Send(UserJson(HttpMethod.Put, $"/api/bridges/{a.GrantId}/printers/{entryId}/secrets/access_code", a.Subject,
-            new { @sealed = sealedValue, keyFingerprint = aKey.Fingerprint }))).StatusCode);
-        var version = (await CheckInOkAsync(_client, a.Token, new { })).GetProperty("desired").GetProperty("version").GetString();
-        await CheckInOkAsync(_client, a.Token, new
+        public void Dispose()
+        {
+            AKey.Dispose();
+            BKey.Dispose();
+        }
+
+        /// <summary>A value sealed as the web app would for the new bridge: its key, its id.</summary>
+        public string SealForB(string field, string plaintext = "12345678")
+            => CredentialSealer.Seal(BKey.PublicKey, CredentialSealer.AssociatedData(B.GrantId, EntryId, field), plaintext);
+    }
+
+    /// <summary>Two bridges with keys, and a printer of <paramref name="kind"/> on the first with these credentials sealed.</summary>
+    private async Task<Credentialed> CredentialedAsync(string label, string kind, params string[] fields)
+    {
+        var aKey = new BridgeSealedCredentialTests.BridgeKey();
+        var bKey = new BridgeSealedCredentialTests.BridgeKey();
+        var (a, b) = await TwoBridgesAsync(label, aKey: aKey.PublicKey, bKey: bKey.PublicKey);
+        var entryId = await ConnectByHandAsync(a, "192.168.1.60", kind, kind == "bambu" ? Serial() : null);
+        foreach (var field in fields)
+        {
+            var sealedValue = CredentialSealer.Seal(aKey.PublicKey, CredentialSealer.AssociatedData(a.GrantId, entryId, field), "secret-" + field);
+            Assert.Equal(HttpStatusCode.OK, (await Send(UserJson(HttpMethod.Put, $"/api/bridges/{a.GrantId}/printers/{entryId}/secrets/{field}", a.Subject,
+                new { @sealed = sealedValue, keyFingerprint = aKey.Fingerprint }))).StatusCode);
+        }
+
+        return new Credentialed(a, b, aKey, bKey, entryId);
+    }
+
+    /// <summary>
+    /// Without its access code the new bridge can't watch the printer, and the old one stops within
+    /// a minute: the move would leave it unwatched. So the credentials come with the move.
+    /// </summary>
+    [Fact]
+    public async Task ACredentialedPrinter_CannotMoveWithoutItsCredentials()
+    {
+        using var c = await CredentialedAsync("move-needs-secrets", "bambu", "access_code");
+
+        var response = await Move(c.A, c.EntryId, new { toBridgeId = c.B.GrantId, host = "192.168.2.60" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await Json(response);
+        Assert.Equal("secrets_required", problem.GetProperty("code").GetString());
+        Assert.Equal(["access_code"], problem.GetProperty("fields").EnumerateArray().Select(f => f.GetString()).ToArray());
+        Assert.Single((await GetAsUserAsync(_client, c.A.Subject, $"/api/bridges/{c.A.GrantId}/printers")).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ACredentialedPrinter_MovesWithItsCredentialsSealedToTheNewBridge_InOneStep()
+    {
+        using var c = await CredentialedAsync("move-with-secrets", "bambu", "access_code");
+        var version = (await CheckInOkAsync(_client, c.A.Token, new { })).GetProperty("desired").GetProperty("version").GetString();
+        await CheckInOkAsync(_client, c.A.Token, new
         {
             credentialIssuesVersion = version,
-            credentialIssues = new[] { new { entryId, field = "access_code", code = "rejected_by_printer" } },
+            credentialIssues = new[] { new { entryId = c.EntryId, field = "access_code", code = "rejected_by_printer" } },
+        });
+        var sealedForB = c.SealForB("access_code");
+
+        var response = await Move(c.A, c.EntryId, new
+        {
+            toBridgeId = c.B.GrantId,
+            host = "192.168.2.60",
+            keyFingerprint = c.BKey.Fingerprint,
+            secrets = new Dictionary<string, string> { ["access_code"] = sealedForB },
         });
 
-        var moved = await Json(await Move(a, entryId, new { toBridgeId = b.GrantId, host = "192.168.2.60" }));
-
-        Assert.Equal(["access_code"], moved.GetProperty("droppedSecretFields").EnumerateArray().Select(f => f.GetString()).ToArray());
-        Assert.Empty(moved.GetProperty("printer").GetProperty("secrets").EnumerateArray());
+        var moved = await Json(response);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, moved.ToString());
+        Assert.Empty(moved.GetProperty("droppedSecretFields").EnumerateArray());
+        var secret = Assert.Single(moved.GetProperty("printer").GetProperty("secrets").EnumerateArray());
+        Assert.Equal(c.BKey.Fingerprint, secret.GetProperty("keyFingerprint").GetString());
+        Assert.False(secret.GetProperty("stale").GetBoolean());
         Assert.Empty(moved.GetProperty("printer").GetProperty("credentialIssues").EnumerateArray());
-        var onB = Assert.Single((await Desired(b)).Body!.Value.GetProperty("printers").EnumerateArray());
-        Assert.Empty(onB.GetProperty("secrets").EnumerateArray());
 
+        // The new bridge gets it with its first poll; the old bridge's value is gone.
+        var onB = Assert.Single(Assert.Single((await Desired(c.B)).Body!.Value.GetProperty("printers").EnumerateArray()).GetProperty("secrets").EnumerateArray());
+        Assert.Equal(sealedForB, onB.GetProperty("sealed").GetString());
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        Assert.False(await db.BridgePrinterSecrets.AnyAsync(s => s.BridgePrinterId == entryId, TestContext.Current.CancellationToken));
+        Assert.Equal(c.BKey.Fingerprint, Assert.Single(await db.BridgePrinterSecrets.Where(s => s.BridgePrinterId == c.EntryId).ToListAsync(TestContext.Current.CancellationToken)).KeyFingerprint);
+    }
 
-        // The new bridge's key takes a seal bound to the new bridge's id.
-        var resealed = CredentialSealer.Seal(bKey.PublicKey, CredentialSealer.AssociatedData(b.GrantId, entryId, "access_code"), "12345678");
-        Assert.Equal(HttpStatusCode.OK, (await Send(UserJson(HttpMethod.Put, $"/api/bridges/{b.GrantId}/printers/{entryId}/secrets/access_code", b.Subject,
-            new { @sealed = resealed, keyFingerprint = bKey.Fingerprint }))).StatusCode);
+    /// <summary>The values are checked as the seal endpoint checks them, against the new bridge's key.</summary>
+    [Fact]
+    public async Task TheCredentialsOfAMove_AreCheckedLikeASeal()
+    {
+        using var c = await CredentialedAsync("move-secret-checks", "bambu", "access_code");
+
+        async Task Refused(object body, HttpStatusCode status, string code)
+        {
+            var response = await Move(c.A, c.EntryId, body);
+            Assert.Equal(status, response.StatusCode);
+            Assert.Equal(code, await CodeOf(response));
+        }
+
+        var good = c.SealForB("access_code");
+        await Refused(new { toBridgeId = c.B.GrantId, keyFingerprint = c.AKey.Fingerprint, secrets = new Dictionary<string, string> { ["access_code"] = good } },
+            HttpStatusCode.Conflict, "bridge_key_changed");
+        await Refused(new { toBridgeId = c.B.GrantId, keyFingerprint = c.BKey.Fingerprint, secrets = new Dictionary<string, string> { ["access_code"] = "v1.nope" } },
+            HttpStatusCode.BadRequest, "invalid_sealed_value");
+        await Refused(new { toBridgeId = c.B.GrantId, keyFingerprint = c.BKey.Fingerprint, secrets = new Dictionary<string, string> { ["access_code"] = good, ["password"] = c.SealForB("password") } },
+            HttpStatusCode.BadRequest, "invalid_secret_field");
+        await Refused(new { toBridgeId = c.B.GrantId, keyFingerprint = "zz", secrets = new Dictionary<string, string> { ["access_code"] = good } },
+            HttpStatusCode.BadRequest, "invalid_key_fingerprint");
+
+        // A bridge with no key can't take the move's credentials.
+        var keyless = await PairAsync(_client, c.A.Subject, AllBridgeScopes, name: "printlog-bridge, old");
+        var keylessBridge = new PairedBridge(c.A.Subject, keyless.GetProperty("token").GetString()!, keyless.GetProperty("id").GetInt64());
+        await CheckInOkAsync(_client, keylessBridge.Token, new { networks = new[] { "192.168.3.0/24" } });
+        await Refused(new { toBridgeId = keylessBridge.GrantId, keyFingerprint = c.BKey.Fingerprint, secrets = new Dictionary<string, string> { ["access_code"] = good } },
+            HttpStatusCode.Conflict, "bridge_key_missing");
+
+        Assert.Single((await GetAsUserAsync(_client, c.A.Subject, $"/api/bridges/{c.A.GrantId}/printers")).EnumerateArray());
+    }
+
+    /// <summary>
+    /// PrusaLink takes a password or an API key, and a user name only beside the password. One of
+    /// the two carries the move; what isn't sent is dropped and named.
+    /// </summary>
+    [Fact]
+    public async Task APrusaLinkPrinter_MovesWithEitherOfItsCredentials_AndNamesWhatWasDropped()
+    {
+        using var c = await CredentialedAsync("move-prusalink", "prusalink", "password", "username");
+
+        var needs = await Move(c.A, c.EntryId, new { toBridgeId = c.B.GrantId });
+        Assert.Equal(HttpStatusCode.BadRequest, needs.StatusCode);
+        Assert.Equal(["password"], (await Json(needs)).GetProperty("fields").EnumerateArray().Select(f => f.GetString()).ToArray());
+
+        var moved = await Json(await Move(c.A, c.EntryId, new
+        {
+            toBridgeId = c.B.GrantId,
+            keyFingerprint = c.BKey.Fingerprint,
+            secrets = new Dictionary<string, string> { ["api_key"] = c.SealForB("api_key") },
+        }));
+
+        Assert.Equal(["password", "username"], moved.GetProperty("droppedSecretFields").EnumerateArray().Select(f => f.GetString()).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal("api_key", Assert.Single(moved.GetProperty("printer").GetProperty("secrets").EnumerateArray()).GetProperty("field").GetString());
+    }
+
+    /// <summary>A Moonraker API key is set only for a Moonraker with [authorization], which can't be watched without it.</summary>
+    [Fact]
+    public async Task AMoonrakerApiKeyThatWasSet_IsRequiredForTheMove()
+    {
+        using var c = await CredentialedAsync("move-moonraker-key", "moonraker", "moonraker_api_key");
+
+        var response = await Move(c.A, c.EntryId, new { toBridgeId = c.B.GrantId });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("secrets_required", await CodeOf(response));
     }
 
     [Fact]

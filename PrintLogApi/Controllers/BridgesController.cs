@@ -387,17 +387,21 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// Give the printer as the other bridge found it (`discoveredPrinterId`), or the address the
     /// other bridge reaches it at (`host`, `port`); with neither it keeps its address.
     ///
-    /// Sealed credentials can't move: they are sealed to this bridge's key. They are deleted, and
-    /// `droppedSecretFields` names the ones to seal again to the new bridge
-    /// (`PUT /api/bridges/{toBridgeId}/printers/{entryId}/secrets/{field}`).
+    /// Credentials move in the same save. Values sealed to this bridge's key can't be opened by the
+    /// new bridge, so send `secrets` (`{field: sealed}`), each sealed in the browser to the new
+    /// bridge's current key with associated data
+    /// `printlog-credential:v1:{toBridgeId}:{entryId}:{field}`, and that key's `keyFingerprint`.
+    /// They are checked exactly as `PUT .../secrets/{field}` checks a seal. A credential the printer
+    /// can't connect without that was set must be sent (`secrets_required`, with `fields`). Others
+    /// not sent are deleted and named in `droppedSecretFields`.
     ///
     /// A job already running when the printer moves stays one print: the old bridge may still log
     /// it, and the new bridge picking it up is handed the same print.
     /// </remarks>
     /// <response code="200">Moved.</response>
-    /// <response code="400">`code`: `invalid_target_bridge` (missing, this bridge, or not yours), `discovered_printer_not_found` (the new bridge found no such printer), `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial` or `serial_required`.</response>
+    /// <response code="400">`code`: `invalid_target_bridge` (missing, this bridge, or not yours), `discovered_printer_not_found` (the new bridge found no such printer), `invalid_kind`, `invalid_host`, `invalid_port`, `invalid_serial`, `serial_required`, `secrets_required` (`fields` names the credentials to send), `invalid_secret_field`, `invalid_sealed_value` or `invalid_key_fingerprint`.</response>
     /// <response code="404">You have no such bridge, or no such printer entry.</response>
-    /// <response code="409">`code`: `printer_moved` (it is on another bridge already; `bridgeId` names it), `printer_configured_on_bridge` (this bridge or the new one watches it from its config file; `bridgeId` names it), `discovered_printer_already_connected` (the new bridge already has that printer or address), `printer_connected_elsewhere` or `bridge_printer_limit` (50).</response>
+    /// <response code="409">`code`: `printer_moved` (it is on another bridge already; `bridgeId` names it), `printer_configured_on_bridge` (this bridge or the new one watches it from its config file; `bridgeId` names it), `discovered_printer_already_connected` (the new bridge already has that printer or address), `printer_connected_elsewhere`, `bridge_printer_limit` (50), or for `secrets` `bridge_key_missing`, `bridge_key_unconfirmed` or `bridge_key_changed` (with `keyFingerprint`).</response>
     [HttpPost("{id:long}/printers/{entryId:long}/move")]
     [Authorize(Policy = "InteractiveUserOnly")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -419,7 +423,13 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
         }
         catch (BridgeProblemException problem)
         {
-            return CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId);
+            var result = CodedProblem(problem.Status, problem.Message, problem.Code, problem.BridgeId, problem.KeyFingerprint);
+            if (problem.Fields is { } fields && result.Value is ProblemDetails details)
+            {
+                details.Extensions["fields"] = fields;
+            }
+
+            return result;
         }
 
         if (moved is null)

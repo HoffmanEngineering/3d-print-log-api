@@ -494,30 +494,51 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
 - **Moving a printer between bridges** (printlog-bridge#103, story 15a):
   `POST /api/bridges/{id}/printers/{entryId}/move` rebinds the entry **in place** (same id, so a
   bridge's `app-<id>` state survives a move back) in one save, bumping both bridges' versions; the
-  old bridge drops it at its next poll with no bridge change (story 12). Its sealed credentials
-  are **deleted**, not carried: they are sealed to the old key and bound to the old bridge id, so
-  the new bridge can't open them; `droppedSecretFields` tells the web app what to ask for again.
-  Refused when either bridge has the printer in its config file (`printer_configured_on_bridge`).
-  Concurrency rests on `BridgePrinter.IssuesStamp`, which the move changes: a racing move, seal or
-  check-in issue write fails its save and reruns against where the entry is now (a losing move
-  answers 409 `printer_moved` with the entry's `bridgeId`). `BridgeMoveRaceTests` pins all three.
-  `BridgePrinter.MovedAt` is when it arrived; the safety net reads it.
+  old bridge drops it at its next poll with no bridge change (story 12). **Credentials move with
+  it, in the same save**: values sealed to the old key (and bound to the old bridge id) can't be
+  opened by the new bridge, so the body carries `secrets` (`{field: sealed}`, sealed in the browser
+  to the new bridge's current key with AD `printlog-credential:v1:{toBridgeId}:{entryId}:{field}`)
+  and `keyFingerprint`, checked exactly as a seal (`EnsureSealableTo`). A field the printer can't
+  connect without that was set (`SealedCredentials.CarriedGroups`: Bambu access code, PrusaLink
+  password or API key, OctoPrint API key, and a Moonraker API key, set only with
+  `[authorization]`) must be sent, or 400 `secrets_required` with `fields`: otherwise the old
+  bridge lets go and the new one can't connect, and every print in between is lost. Fields not
+  sent are deleted and named in `droppedSecretFields`. Refused when either bridge has the printer
+  in its config file (`printer_configured_on_bridge`). Concurrency rests on
+  `BridgePrinter.IssuesStamp`, which the move changes: a racing move, seal or check-in issue write
+  fails its save and reruns against where the entry is now (a losing move answers 409
+  `printer_moved` with the entry's `bridgeId`), and a seal inserting the field the move inserts
+  reruns it too. `BridgeMoveRaceTests` pins them. `BridgePrinter.MovedAt` and `MovedFromBridgeId`
+  record the move; the safety net reads them.
 - **The cross-bridge safety net** (`BridgePrintGuard`, story 15a): a new print (`POST /api/Prints`,
   `POST /api/Prints/{id}/claim`) from a bridge's device token for a printer whose desired entry is
-  on another, online bridge is refused with **403** `printer_watched_by_other_bridge` (with that
-  `bridgeId`) and counted on the sending bridge (`Bridge.DroppedEventCount`,
-  `LastDroppedEventAt`, `LastDroppedPrinterId`, in `BridgeDto`). **403, not 2xx or 409, on
-  purpose**: printlog-bridge drops a 400/403 from its outbox, and retries a 409, a 5xx, or a 2xx
-  without a print id for ever. What it never refuses: a replay of an existing pair, any write to an
-  existing print, a job that started before the entry's `MovedAt ?? CreatedDate` (the old bridge's
-  in-flight job), anything while the bound bridge is stale (a duplicate beats a lost print), API
-  keys and devices that never checked in as a bridge, printers with no desired entry. **Hand-off:**
-  the old bridge stops watching within a poll and never sees the in-flight job end, so when a
-  bridge starts a print for a job another bridge already logged (same printer, Printing, start
-  within 10 minutes, same file name when both have one) it gets that print: the bound bridge takes
-  it over (its pair and connection replace the old ones, one conditional `ExecuteUpdate`, the one
-  place an external pair is rewritten), the old bridge gets it back unchanged. Start times are
-  compared in memory (SQLite can't compare `DateTimeOffset`).
+  on another bridge is refused with **403** `printer_watched_by_other_bridge` (with that
+  `bridgeId`). **403, not 2xx or 409, on purpose**: printlog-bridge drops a 400/403 from its
+  outbox for good, and retries a 409, a 5xx, or a 2xx without a print id for ever. Because the
+  drop is for good, **a refusal needs evidence that the bound bridge is logging the printer**:
+  a heartbeat for that printer from that bridge within `Connection.StaleAfter` with no error
+  reported in that window, no `CredentialIssues` on the entry, no stale sealed value, and every
+  credential the kind can't connect without (`SealedCredentials.RequiredGroups`) sealed to the
+  bridge's current key. An online bridge that can't watch the printer is not evidence. Never
+  refused: a replay of an existing pair, any write to an existing print, a job that started
+  before the entry's `MovedAt ?? CreatedDate` (the old bridge's in-flight job), API keys and
+  devices that never checked in as a bridge, printers with no desired entry.
+  - **Counter:** distinct refused jobs per bridge (`Bridge.DroppedEventCount`), keyed on the
+    external pair in `BridgeDroppedJobs` (30 days; each refusal prunes its bridge's older rows), so
+    a job sent at its start, again at its end and as a claim counts once. `LastDroppedEventAt`
+    moves on every refusal, so the UI can hide a warning that stopped happening.
+  - **Hand-off:** the old bridge stops watching within a poll and never sees the in-flight job
+    end. The bound bridge's create for a job that started within 10 minutes of the move takes over
+    an open print another bridge logged when both file names are present and equal and that print
+    started no later than the move plus 10 minutes: the one whose start is within 10 minutes of its
+    own, else the previous bridge's only open print, started before the move (PrusaLink after a
+    pause, Bambu Lab without `gcode_start_time`: they report their first look). Its pair and
+    connection replace the old ones in one conditional `ExecuteUpdate`, the one place an external
+    pair is rewritten; the connection is the one the create names, else the bound bridge's latest
+    for the printer, never the old bridge's. The old bridge's late create for a job from before
+    the move gets the print another bridge logged for it, in any status (start within 10 minutes,
+    same file), instead of a second one nobody would finish. Start times are compared in memory
+    (SQLite can't compare `DateTimeOffset`).
 - No tier limit counts bridges or desired printers (printlog-bridge#103 open question; Free is
   limited on Spoolman connections only).
 

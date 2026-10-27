@@ -58,7 +58,7 @@ public class BridgeMoveRaceTests(BridgeMoveRaceTests.Factory factory) : IClassFi
 
     private Task<HttpResponseMessage> Send(HttpRequestMessage request) => _client.SendAsync(request, TestContext.Current.CancellationToken);
 
-    private async Task<(PairedBridge A, PairedBridge B, PairedBridge C)> ThreeBridgesAsync(string label, string? aKey = null)
+    private async Task<(PairedBridge A, PairedBridge B, PairedBridge C)> ThreeBridgesAsync(string label, string? aKey = null, string? bKey = null)
     {
         var a = await PairBridgeAsync(_client, label);
         await CheckInOkAsync(_client, a.Token, new { publicKey = aKey, networks = new[] { "192.168.1.0/24" } });
@@ -67,7 +67,7 @@ public class BridgeMoveRaceTests(BridgeMoveRaceTests.Factory factory) : IClassFi
         {
             var paired = await PairAsync(_client, a.Subject, AllBridgeScopes, name: $"printlog-bridge on {name}");
             var bridge = new PairedBridge(a.Subject, paired.GetProperty("token").GetString()!, paired.GetProperty("id").GetInt64());
-            await CheckInOkAsync(_client, bridge.Token, new { networks = new[] { "192.168.2.0/24" } });
+            await CheckInOkAsync(_client, bridge.Token, new { publicKey = others.Count == 0 ? bKey : null, networks = new[] { "192.168.2.0/24" } });
             others.Add(bridge);
         }
 
@@ -112,33 +112,60 @@ public class BridgeMoveRaceTests(BridgeMoveRaceTests.Factory factory) : IClassFi
         Assert.Empty((await GetAsUserAsync(_client, a.Subject, $"/api/bridges/{b.GrantId}/printers")).EnumerateArray());
     }
 
-    /// <summary>A seal to the old bridge's key that commits during the move doesn't survive it.</summary>
+    /// <summary>A seal to the old bridge's key that commits during the move doesn't survive it: the move's own value for the new bridge does.</summary>
     [Fact]
-    public async Task ASealDuringAMove_IsDroppedWithTheOthers()
+    public async Task ASealDuringAMove_IsReplacedByTheMovesOwnValue()
     {
         using var key = new BridgeSealedCredentialTests.BridgeKey();
-        var (a, b, _) = await ThreeBridgesAsync("race-seal", key.PublicKey);
+        using var bKey = new BridgeSealedCredentialTests.BridgeKey();
+        var (a, b, _) = await ThreeBridgesAsync("race-seal", key.PublicKey, bKey.PublicKey);
         var entryId = await ConnectAsync(a, "bambu", "192.168.1.21", "RACE" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant());
         var userId = await UserIdAsync(factory, a.Subject);
 
         factory.Interceptor.When = IsMove;
-        factory.Interceptor.Before = async () =>
+        factory.Interceptor.Before = () => SealOnOldBridgeAsync(userId, a, entryId, key);
+        var moved = await Send(UserJson(HttpMethod.Post, $"/api/bridges/{a.GrantId}/printers/{entryId}/move", a.Subject, new
         {
-            using var scope = factory.Services.CreateScope();
-            var bridges = scope.ServiceProvider.GetRequiredService<IBridgeService>();
-            var sealedValue = CredentialSealer.Seal(key.PublicKey, CredentialSealer.AssociatedData(a.GrantId, entryId, "access_code"), "12345678");
-            Assert.NotNull(await bridges.SetSecretAsync(userId, a.GrantId, entryId, "access_code",
-                new SetBridgePrinterSecretDto { Sealed = sealedValue, KeyFingerprint = key.Fingerprint }, TestContext.Current.CancellationToken));
-        };
-        var moved = await Send(UserJson(HttpMethod.Post, $"/api/bridges/{a.GrantId}/printers/{entryId}/move", a.Subject, new { toBridgeId = b.GrantId, host = "192.168.2.21" }));
+            toBridgeId = b.GrantId,
+            host = "192.168.2.21",
+            keyFingerprint = bKey.Fingerprint,
+            secrets = new Dictionary<string, string> { ["access_code"] = CredentialSealer.Seal(bKey.PublicKey, CredentialSealer.AssociatedData(b.GrantId, entryId, "access_code"), "12345678") },
+        }));
 
         Assert.Null(factory.Interceptor.Before);
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
-        var body = await moved.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
-        Assert.Equal(["access_code"], body.GetProperty("droppedSecretFields").EnumerateArray().Select(f => f.GetString()).ToArray());
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        Assert.False(await db.BridgePrinterSecrets.AnyAsync(s => s.BridgePrinterId == entryId, TestContext.Current.CancellationToken));
+        var stored = Assert.Single(await db.BridgePrinterSecrets.Where(s => s.BridgePrinterId == entryId).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(bKey.Fingerprint, stored.KeyFingerprint);
+    }
+
+    /// <summary>A move that read the entry before the owner set its access code can't carry the printer off without it.</summary>
+    [Fact]
+    public async Task ASealDuringAMove_WithoutTheValue_StopsTheMove()
+    {
+        using var key = new BridgeSealedCredentialTests.BridgeKey();
+        var (a, b, _) = await ThreeBridgesAsync("race-seal-missing", key.PublicKey);
+        var entryId = await ConnectAsync(a, "bambu", "192.168.1.23", "RACE" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant());
+        var userId = await UserIdAsync(factory, a.Subject);
+
+        factory.Interceptor.When = IsMove;
+        factory.Interceptor.Before = () => SealOnOldBridgeAsync(userId, a, entryId, key);
+        var moved = await Send(UserJson(HttpMethod.Post, $"/api/bridges/{a.GrantId}/printers/{entryId}/move", a.Subject, new { toBridgeId = b.GrantId, host = "192.168.2.23" }));
+
+        Assert.Null(factory.Interceptor.Before);
+        Assert.Equal(HttpStatusCode.BadRequest, moved.StatusCode);
+        Assert.Equal("secrets_required", await CodeOf(moved));
+        Assert.Equal(a.GrantId, await BridgeOfEntryAsync(entryId));
+    }
+
+    private async Task SealOnOldBridgeAsync(long userId, PairedBridge a, long entryId, BridgeSealedCredentialTests.BridgeKey key)
+    {
+        using var scope = factory.Services.CreateScope();
+        var bridges = scope.ServiceProvider.GetRequiredService<IBridgeService>();
+        var sealedValue = CredentialSealer.Seal(key.PublicKey, CredentialSealer.AssociatedData(a.GrantId, entryId, "access_code"), "12345678");
+        Assert.NotNull(await bridges.SetSecretAsync(userId, a.GrantId, entryId, "access_code",
+            new SetBridgePrinterSecretDto { Sealed = sealedValue, KeyFingerprint = key.Fingerprint }, TestContext.Current.CancellationToken));
     }
 
     /// <summary>The old bridge's issue report, read before the move, can't land on the moved entry.</summary>
