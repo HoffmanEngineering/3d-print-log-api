@@ -1,4 +1,5 @@
-﻿using Azure.Storage.Blobs;
+﻿using Azure;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 
@@ -167,6 +168,33 @@ public class AzureBlobStorageService : IBlobStorageService
         await blobClient.DownloadToAsync(ms);
         ms.Position = 0;
         return (ms, Path.GetFileName(blobName));
+    }
+
+    /// <summary>
+    /// Opens a blob for streaming. Forward-only is one GET whose body is the stream; seekable is
+    /// the SDK's read stream, which reads the properties first and then fetches ranges on demand.
+    /// A missing blob surfaces as a 404 from that first request, which is the existence check.
+    /// </summary>
+    public async Task<BlobContent?> OpenReadAsync(
+        string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
+    {
+        var blobClient = _blobServiceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName);
+        try
+        {
+            if (seekable)
+            {
+                var stream = await blobClient.OpenReadAsync(
+                    new BlobOpenReadOptions(allowModifications: false), cancellationToken);
+                return new BlobContent(stream, stream.Length);
+            }
+
+            var download = await blobClient.DownloadStreamingAsync(cancellationToken: cancellationToken);
+            return new BlobContent(download.Value.Content, download.Value.Details.ContentLength);
+        }
+        catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
+        {
+            return null;
+        }
     }
 
     /// <summary>

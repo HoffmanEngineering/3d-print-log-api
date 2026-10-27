@@ -1,4 +1,5 @@
 ﻿using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Project;
 
 namespace PrintLogApi.Models.DTOs.Print;
@@ -45,6 +46,12 @@ public class GroupedFeedItemDto
     public int? TotalEstimatedPrintTimeInSeconds { get; set; }
     public long? TotalFilamentWeightMg { get; set; }
     public int? DefaultProjectImageId { get; set; }
+
+    /// <summary>
+    /// Path of the project's default image thumbnail, relative to the API base URL. Null on print
+    /// rows and for a project without a default image.
+    /// </summary>
+    public string? DefaultProjectImageThumbnailUrl => ImageUrls.ProjectThumbnailOrNull(ProjectId, DefaultProjectImageId);
 
     /// <summary>
     /// Aggregated filament usage across all prints in this project,

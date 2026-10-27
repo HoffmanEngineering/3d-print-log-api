@@ -1,16 +1,18 @@
 # Image backfill runbook
 
 `PrintLogApi.Tools image-backfill` re-processes legacy print and project images to the canonical
-format with thumbnails, the shape every upload has had since #283: a re-encoded JPEG original, a
-320px WebP thumbnail, and the decoded content type, width and height on the image row.
+format with thumbnails and social images, the shape every upload has: a re-encoded JPEG original,
+a 320px WebP thumbnail (#283), a JPEG social image of about 1200px on the long edge for link
+previews (#281), and the decoded content type, width and height on the image row.
 
-Run it once, from a workstation, after the release that contains #283 (and its migration) is
-deployed. The API keeps serving while it runs.
+Run it once, from a workstation, after the release that contains #281's social image (and its
+migration) is deployed. The API keeps serving while it runs. A run before that release does not
+add social images; running it again after the release adds them to every row.
 
 ## What it does
 
-It selects every `PrintImages` and `ProjectImages` row with no `ContentType` or no
-`ThumbnailFileId` (`ImageBackfillSelection`). For each row, in this order:
+It selects every `PrintImages` and `ProjectImages` row with no `ContentType`, no
+`ThumbnailFileId` or no `SocialFileId` (`ImageBackfillSelection`). For each row, in this order:
 
 1. Downloads the original blob. The file row's `Path` is either `printimages/<name>` or, for older
    project images, a bare `<name>`; only the name is used.
@@ -20,18 +22,20 @@ It selects every `PrintImages` and `ProjectImages` row with no `ContentType` or 
    before.
 3. Copies the untouched original to a private container, `printimages-archive` or
    `projectimages-archive`, under its existing name.
-4. Uploads the new original (`<new id>.jpg`) and thumbnail (`<new id>.webp`).
+4. Uploads the new original (`<new id>.jpg`), thumbnail (`<new id>.webp`) and social image
+   (`<new id>.jpg`).
 5. In one save: points the existing `Files` row at the new original (`Path`, `Size`; its id is
-   unchanged), adds the thumbnail's `Files` row, and sets `ContentType`, `ThumbnailFileId`, `Width`
-   and `Height` on the image row.
+   unchanged), adds the derivatives' `Files` rows, and sets `ContentType`, `ThumbnailFileId`,
+   `SocialFileId`, `Width`, `Height`, `SocialWidth` and `SocialHeight` on the image row.
 6. Only after that save commits, deletes the old original.
 
 If anything fails before the save commits, the blobs that row wrote are deleted (the archive copy
 stays, and the next run overwrites it), the row is unchanged, and it is listed under **Failed**.
 A re-run picks it up again. Rows already done are not selected, so re-running is always safe.
 
-A row that already has a content type but no thumbnail (a processed upload whose thumbnail failed)
-only gets the thumbnail: its original is not re-encoded or archived.
+A row that already has a content type only gets the derivatives it lacks: its original is not
+re-encoded or archived. That covers uploads made after #283 but before the social image existed
+(they get only the social image), and processed uploads whose thumbnail failed.
 
 ## Setup
 
@@ -72,7 +76,7 @@ It reads every legacy image, so on a large library it takes a while and costs eg
 dotnet run --project PrintLogApi.Tools -- image-backfill --apply --limit 10 2>&1 | tee image-backfill-trial.log
 ```
 
-The log lists each row it changed (`print-image 123: image/png -> image/jpeg + thumbnail, ...`).
+The log lists each row it changed (`print-image 123: image/png -> image/jpeg + thumbnail + social, ...`).
 Check a few of them as below before the full run. One print or project can be targeted with
 `--print-id <id>` or `--project-id <guid>`.
 
@@ -98,8 +102,8 @@ After the trial and after the full run:
 - **In the database**, nothing is left except the reported undecodable and missing rows:
 
   ```sql
-  SELECT COUNT(*) FROM PrintImages   WHERE ContentType IS NULL OR ThumbnailFileId IS NULL;
-  SELECT COUNT(*) FROM ProjectImages WHERE ContentType IS NULL OR ThumbnailFileId IS NULL;
+  SELECT COUNT(*) FROM PrintImages   WHERE ContentType IS NULL OR ThumbnailFileId IS NULL OR SocialFileId IS NULL;
+  SELECT COUNT(*) FROM ProjectImages WHERE ContentType IS NULL OR ThumbnailFileId IS NULL OR SocialFileId IS NULL;
   ```
 
 - **For one row**, its `Files.Path` ends in `.jpg`, that blob exists in the live container, and the
@@ -115,8 +119,9 @@ If a converted image is wrong, its original is in the archive under its old name
 line for that row gives (`original archived as printimages-archive/<name>`). Copy it back to
 `printimages` (or `projectimages`) under that name, set the `Files` row's `Path` back
 (`printimages/<name>`; a bare `<name>` works for project images too) and its `Size`,
-and set the image row's `ContentType`, `Width`, `Height` and `ThumbnailFileId` to `NULL`. Delete the
-thumbnail's `Files` row and blob. The API then serves it the legacy way again, and the next run
+and set the image row's `ContentType`, `Width`, `Height`, `ThumbnailFileId`, `SocialFileId`,
+`SocialWidth` and `SocialHeight` to `NULL`. Delete the thumbnail's and social image's `Files` rows
+and blobs. The API then serves it the legacy way again, and the next run
 would select it again, so fix the cause before re-running.
 
 ## Deleting the archive containers

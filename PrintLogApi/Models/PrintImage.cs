@@ -23,9 +23,18 @@ public class PrintImage : TimestampEntity, IStoredImage
     public Guid? ThumbnailFileId { get; set; }
     public File? ThumbnailFile { get; set; }
 
-    /// <summary>The link-preview derivative. Not generated yet (#281 fills it).</summary>
+    /// <summary>
+    /// The link-preview derivative (JPEG, about 1200px on the long edge). Null for images not yet
+    /// backfilled, and when its generation failed; the social-image endpoint then serves the original.
+    /// </summary>
     public Guid? SocialFileId { get; set; }
     public File? SocialFile { get; set; }
+
+    /// <summary>Pixel width of <see cref="SocialFile"/>, for <c>og:image:width</c>.</summary>
+    public int? SocialWidth { get; set; }
+
+    /// <summary>Pixel height of <see cref="SocialFile"/>, for <c>og:image:height</c>.</summary>
+    public int? SocialHeight { get; set; }
 
     /// <summary>
     /// MIME type of the original, from the server-side decode. Null for images uploaded before

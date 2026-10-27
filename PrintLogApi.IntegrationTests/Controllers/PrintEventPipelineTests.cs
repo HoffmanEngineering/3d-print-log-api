@@ -164,6 +164,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         var image = await db.PrintImages
             .Include(i => i.File)
             .Include(i => i.ThumbnailFile)
+            .Include(i => i.SocialFile)
             .AsNoTracking()
             .SingleAsync(i => i.PrintId == print.Id, TestContext.Current.CancellationToken);
         var blobs = (InMemoryBlobStorageService)_factory.Services.GetRequiredService<IBlobStorageService>();
@@ -175,6 +176,10 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         Assert.DoesNotContain("Exif", Encoding.ASCII.GetString(blobs.Blobs[image.File.Path!]), StringComparison.Ordinal);
         Assert.NotNull(image.ThumbnailFile);
         Assert.True(blobs.BlobExists(image.ThumbnailFile!.Path!));
+        Assert.NotNull(image.SocialFile);
+        Assert.True(blobs.BlobExists(image.SocialFile!.Path!));
+        Assert.Equal(50, image.SocialWidth);
+        Assert.Equal(100, image.SocialHeight);
     }
 
     [Fact]

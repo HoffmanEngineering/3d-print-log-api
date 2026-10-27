@@ -238,4 +238,73 @@ public class ImageProcessingServiceTests
 
         Assert.Equal("image/png", result.SourceContentType);
     }
+
+    [Fact]
+    public async Task PrintUploads_AddASocialJpeg_ScaledTo1200OnTheLongEdge()
+    {
+        using var png = Encode(3000, 1500, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result.Social);
+        using var codec = SKCodec.Create(new MemoryStream(result.Social!));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec!.EncodedFormat);
+        Assert.Equal(1200, codec.Info.Width);
+        Assert.Equal(600, codec.Info.Height);
+        Assert.Equal(1200, result.SocialWidth);
+        Assert.Equal(600, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task PrintUploads_DoNotUpscaleASmallImageIntoASocialImage()
+    {
+        using var png = Encode(640, 480, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        using var codec = SKCodec.Create(new MemoryStream(result.Social!));
+        Assert.Equal(640, codec!.Info.Width);
+        Assert.Equal(480, codec.Info.Height);
+        Assert.Equal(640, result.SocialWidth);
+        Assert.Equal(480, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task PrintUploads_SocialImageFollowsTheAppliedOrientation()
+    {
+        await using var input = Fixture("exif-orientation-6.jpg");
+
+        var result = await _service.ProcessAsync(
+            input, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.Equal(50, result.SocialWidth);
+        Assert.Equal(100, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task DefaultUploads_ProduceNoSocialImage()
+    {
+        // Printer and material images go through the default options and never use one.
+        using var png = Encode(3000, 1500, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        Assert.Null(result.Social);
+        Assert.Null(result.SocialWidth);
+        Assert.Null(result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task LegacyBackfill_AlsoProducesASocialImage()
+    {
+        using var png = Encode(2400, 1800, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1200, result.SocialWidth);
+        Assert.Equal(900, result.SocialHeight);
+    }
 }

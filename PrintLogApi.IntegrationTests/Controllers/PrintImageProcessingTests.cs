@@ -83,6 +83,7 @@ public class PrintImageProcessingTests(CustomWebApplicationFactory factory)
         return await context.PrintImages
             .Include(pi => pi.File)
             .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .AsNoTracking()
             .SingleAsync(pi => pi.Id == imageId, TestContext.Current.CancellationToken);
     }
@@ -190,6 +191,30 @@ public class PrintImageProcessingTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task Upload_CreatesASocialImage_WithItsSize()
+    {
+        var printId = await CreatePrintAsync();
+
+        var response = await UploadAsync(printId, PngBytes(2400, 1600), "image/png", "large.png");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var dto = await response.Content.ReadFromJsonAsync<PrintImageDto>(TestContext.Current.CancellationToken);
+        var image = await LoadImageAsync(dto!.Id);
+
+        Assert.NotNull(image.SocialFile);
+        Assert.EndsWith(".jpg", image.SocialFile!.Path, StringComparison.Ordinal);
+        Assert.NotEqual(image.File.Path, image.SocialFile.Path);
+        var social = Blobs().Blobs[image.SocialFile.Path!];
+        using var codec = SKCodec.Create(new MemoryStream(social));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec!.EncodedFormat);
+        Assert.Equal(1200, codec.Info.Width);
+        Assert.Equal(800, codec.Info.Height);
+        Assert.Equal(1200, image.SocialWidth);
+        Assert.Equal(800, image.SocialHeight);
+        Assert.Equal(social.LongLength, image.SocialFile.Size);
+    }
+
+    [Fact]
     public async Task Upload_NonImageBytesWithImageContentType_IsRejected()
     {
         var printId = await CreatePrintAsync();
@@ -293,13 +318,14 @@ public class PrintImageProcessingTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task RemoveImage_DeletesOriginalAndThumbnail()
+    public async Task RemoveImage_DeletesOriginalAndDerivatives()
     {
         var printId = await CreatePrintAsync();
         var dto = await (await UploadAsync(printId, PngBytes(), "image/png", "remove.png"))
             .Content.ReadFromJsonAsync<PrintImageDto>(TestContext.Current.CancellationToken);
         var image = await LoadImageAsync(dto!.Id);
         Assert.NotNull(image.ThumbnailFileId);
+        Assert.NotNull(image.SocialFileId);
 
         var response = await _client.SendAsync(
             AuthenticatedRequest(HttpMethod.Delete, $"/api/Prints/{printId}/image/{dto.Id}"),
@@ -308,14 +334,16 @@ public class PrintImageProcessingTests(CustomWebApplicationFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(Blobs().BlobExists(image.File.Path!));
         Assert.False(Blobs().BlobExists(image.ThumbnailFile!.Path!));
+        Assert.False(Blobs().BlobExists(image.SocialFile!.Path!));
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         Assert.False(await context.Files.AnyAsync(
-            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId, TestContext.Current.CancellationToken));
+            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId || f.Id == image.SocialFileId,
+            TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task DeletePrint_RemovesThumbnailFileRow()
+    public async Task DeletePrint_RemovesDerivativeFileRows()
     {
         var printId = await CreatePrintAsync();
         var dto = await (await UploadAsync(printId, PngBytes(), "image/png", "print-delete.png"))
@@ -327,9 +355,11 @@ public class PrintImageProcessingTests(CustomWebApplicationFactory factory)
             TestContext.Current.CancellationToken);
 
         Assert.True(response.IsSuccessStatusCode);
+        Assert.NotNull(image.SocialFileId);
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         Assert.False(await context.Files.AnyAsync(
-            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId, TestContext.Current.CancellationToken));
+            f => f.Id == image.FileId || f.Id == image.ThumbnailFileId || f.Id == image.SocialFileId,
+            TestContext.Current.CancellationToken));
     }
 }

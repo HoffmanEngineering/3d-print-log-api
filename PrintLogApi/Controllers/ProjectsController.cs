@@ -17,7 +17,9 @@ public class ProjectsController(
     IProjectService projectService,
     IMapper mapper,
     ICacheVersionService cacheVersionService,
-    TelemetryClient telemetry) : ControllerBase
+    TelemetryClient telemetry,
+    IBlobStorageService blobStorage,
+    SocialImageLookup socialImages) : ControllerBase
 {
     /// <summary>Get a paged list of the current user's projects.</summary>
     [HttpGet]
@@ -172,19 +174,80 @@ public class ProjectsController(
     }
 
     /// <summary>Get a project image.</summary>
+    /// <remarks>
+    /// Anyone can read an image of a public or unlisted project; a private project's images only
+    /// its owner (anyone else gets 404). Responses carry a strong `ETag` (answering
+    /// `If-None-Match` with 304) and support `Range`. An image anyone can read is
+    /// `Cache-Control: public, max-age=3600`; a private project's image is `private`.
+    /// </remarks>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range of the image.</response>
+    /// <response code="304">The image has not changed since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">No such image, or the project is private and the caller is not its owner.</response>
     [AllowAnonymous]
     [HttpGet("{id}/images/{imageId}")]
-    [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [MediaEndpoint]
-    public async Task<IActionResult> GetProjectImage(Guid id, int imageId)
-    {
-        var userId = User.GetUserId();
-        var result = await projectService.GetImageAsync(id, imageId, userId);
-        if (result == null) return NotFound();
+    public Task<IActionResult> GetProjectImage(Guid id, int imageId)
+        => ServeProjectImageAsync(id, imageId, thumbnail: false);
 
-        return ImageFileResult.Create(this, result.Stream, result.ContentType, result.FileName);
+    /// <summary>Get the 320px thumbnail of a project image, for list views.</summary>
+    /// <remarks>
+    /// Same access, caching and headers as the image itself. An image stored before thumbnails
+    /// existed returns the original instead.
+    /// </remarks>
+    /// <response code="200">The thumbnail, or the original when the image has none.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">No such image, or the project is private and the caller is not its owner.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/images/{imageId}/thumbnail")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public Task<IActionResult> GetProjectImageThumbnail(Guid id, int imageId)
+        => ServeProjectImageAsync(id, imageId, thumbnail: true);
+
+    /// <summary>Get the link-preview image of a public project: its default image, about 1200px on the long edge.</summary>
+    /// <remarks>
+    /// This is the `og:image` the project's `/seo` metadata points at, with a `?v=` that changes
+    /// when the image does; the parameter is otherwise ignored. Returns the original when the
+    /// image has no social derivative yet. 404 for a project that is not public (even to its
+    /// owner) or has no image.
+    /// </remarks>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">The project does not exist, is not public, or has no image.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/social-image")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public async Task<IActionResult> GetProjectSocialImage(Guid id)
+    {
+        var image = await socialImages.ForProjectAsync(id, HttpContext.RequestAborted);
+        if (image is null) return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorage, BlobContainers.ProjectImages, image.Served, HttpContext.RequestAborted);
+    }
+
+    private async Task<IActionResult> ServeProjectImageAsync(Guid id, int imageId, bool thumbnail)
+    {
+        var image = await projectService.GetImageRefAsync(
+            id, imageId, User.GetUserId(), thumbnail, HttpContext.RequestAborted);
+        if (image == null) return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorage, BlobContainers.ProjectImages, image, HttpContext.RequestAborted);
     }
 
     /// <summary>Upload an image to a project.</summary>

@@ -1540,6 +1540,12 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid?>("SocialFileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("SocialHeight")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SocialWidth")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("ThumbnailFileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2213,6 +2219,12 @@ namespace PrintLogApi.Migrations
 
                     b.Property<Guid?>("SocialFileId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("SocialHeight")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SocialWidth")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("ThumbnailFileId")
                         .HasColumnType("uniqueidentifier");

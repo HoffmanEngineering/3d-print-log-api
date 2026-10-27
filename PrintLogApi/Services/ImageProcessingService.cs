@@ -11,6 +11,19 @@ public class ImageProcessingService : IImageProcessingService
     private const int OriginalQuality = 90;
     private const int ThumbnailQuality = 80;
 
+    /// <summary>
+    /// Link previews: 1200px is what Facebook, X, Slack and Discord ask for on the long edge, and
+    /// JPEG is the one format all of them accept.
+    /// </summary>
+    private const int SocialLongEdgePx = 1200;
+
+    /// <summary>
+    /// Measured on three photos of prints, scaled to 900x1200: quality 82 gives 90-116 KB (75 gives
+    /// 75-97 KB, 90 gives 121-157 KB). That leaves busier scenes well under the 300 KB some
+    /// preview services cap at. Pure noise, the worst case no photo reaches, is about 700 KB.
+    /// </summary>
+    private const int SocialQuality = 82;
+
     private static readonly HashSet<SKEncodedImageFormat> AllowedFormats =
     [
         SKEncodedImageFormat.Jpeg,
@@ -98,11 +111,36 @@ public class ImageProcessingService : IImageProcessingService
             thumbnail = null;
         }
 
+        byte[]? social = null;
+        int? socialWidth = null, socialHeight = null;
+        if (options.IncludeSocial)
+        {
+            try
+            {
+                using var scaled = ScaleLongEdge(oriented, SocialLongEdgePx);
+                social = Encode(scaled, SKEncodedImageFormat.Jpeg, SocialQuality);
+                if (social is not null)
+                {
+                    socialWidth = scaled.Width;
+                    socialHeight = scaled.Height;
+                }
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // Same reasoning as the thumbnail: the original is fine, and the social-image
+                // endpoint falls back to it.
+                social = null;
+            }
+        }
+
         return new ProcessedImage(original, "image/jpeg", thumbnail)
         {
             Width = oriented.Width,
             Height = oriented.Height,
             SourceContentType = SourceContentTypeOf(codec.EncodedFormat),
+            Social = social,
+            SocialWidth = socialWidth,
+            SocialHeight = socialHeight,
         };
     }
 
@@ -176,13 +214,16 @@ public class ImageProcessingService : IImageProcessingService
     /// Scales the long edge down to the thumbnail size. Never upscales: a 100px
     /// photo blown up to 320px is a bigger file that looks worse.
     /// </summary>
-    private static SKBitmap? CreateThumbnail(SKBitmap source)
+    private static SKBitmap? CreateThumbnail(SKBitmap source) => ScaleLongEdge(source, ThumbnailLongEdgePx);
+
+    /// <summary>A copy of <paramref name="source"/> with its long edge at most <paramref name="longEdgePx"/>.</summary>
+    private static SKBitmap ScaleLongEdge(SKBitmap source, int longEdgePx)
     {
         var longEdge = Math.Max(source.Width, source.Height);
-        if (longEdge <= ThumbnailLongEdgePx)
+        if (longEdge <= longEdgePx)
             return source.Copy();
 
-        var scale = (double)ThumbnailLongEdgePx / longEdge;
+        var scale = (double)longEdgePx / longEdge;
         var width = Math.Max(1, (int)Math.Round(source.Width * scale));
         var height = Math.Max(1, (int)Math.Round(source.Height * scale));
 
