@@ -485,14 +485,51 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   so the bridge still sees changes during a backfill. Nothing here bumps the cache version.
 - **`Connection.BridgeId` comes from the heartbeat's token**: a device whose grant has a bridge row
   sets it, anything else (API key, a bridge that never checked in) sets null.
-- **No LAN secrets yet.** Credentials (Bambu access code, PrusaLink password) are entered on the
-  bridge until story 14 encrypts them to the bridge's key. Don't add a plaintext secret column.
+- **LAN secrets are sealed to the bridge's key, never plaintext** (story 14, next section). Don't
+  add a plaintext secret column.
 - **Release order for `bridge:sync`:** add the permission to the Auth0 device API first, then deploy
   the API, then release a bridge that requests it. A bridge requests only the scopes the pairing
   discovery lists, and on 403 `insufficient_scope` re-pairs once, then reports it instead of
   looping.
 - Out of scope so far (printlog-bridge#103): moving a printer between bridges, cross-bridge event
   dedupe.
+
+## Sealed LAN credentials (printlog-bridge#100, story 14)
+
+A printer's access code, password or API key is sealed in the browser to the bridge's public key
+and only the bridge can open it. **The scheme is a contract with printlog-bridge and the web app:
+`docs/bridge-credential-sealing.md`, with test vectors in `bridge-credential-sealing.vectors.json`
+that both repos copy.** `printlog-credential` v1 is ECDH P-256 + HKDF-SHA256 + AES-256-GCM, a
+fresh ephemeral key per value, associated data `printlog-credential:v1:{bridgeId}:{entryId}:{field}`.
+Code: `Services/Bridges/SealedCredentials.cs`, `BridgePrinterSecret` in `Models/Bridge.cs`; the
+reference sealer and opener are in the test project (`CredentialSealer`).
+
+- **The API never decrypts and holds nothing that could.** It parses the bridge's key strictly
+  (`SealedCredentials.TryParsePublicKey`: exactly the 91-byte SPKI of an uncompressed P-256 point on
+  the curve, padded standard base64; anything else is a 400 `invalid_check_in`) and checks a sealed
+  value's shape (prefix, canonical base64url, 94 to 349 bytes, ephemeral point on the curve). A
+  change to either rule, or to the vectors, is a change to the other two repos' contract.
+- **Sealed values leave the API only through the owning bridge's device endpoints** (the check-in
+  response and `GET /api/bridges/me/desired`). The owner's endpoints return field names,
+  fingerprints, times and `stale`, never `sealed` (the browser can't open them anyway). Never put
+  one in a log, telemetry property, problem detail, the sync snapshot, MCP or a webhook.
+  `SealedCredentialLeakTests` checks all of those at Trace.
+- **A key change makes values stale, derived, not written.** A value is stale when its
+  `KeyFingerprint` isn't the bridge's current one: the bridge isn't sent it, the owner sees it
+  marked. Nothing is deleted, so a bridge restored with its old key reads them again, and a seal
+  racing a key change is simply stale. The check-in that changes the key bumps the desired version.
+- **Setting or clearing a value bumps the desired version** and clears that field's reported issue.
+  A fingerprint that isn't the current key's is 409 `bridge_key_changed` (with `keyFingerprint`);
+  no key yet is 409 `bridge_key_missing`.
+- **The bridge reports what it can't use** (`credentialIssues`: `missing`, `undecryptable`,
+  `rejected_by_printer`), applied only when `credentialIssuesVersion` is the current desired
+  version, so a report about a value the user has since replaced can't land on the new one.
+- **Fields per kind** are printlog-bridge's adapters' `app_secrets` (`SealedCredentials.FieldsFor`);
+  a new adapter with secrets adds its fields there and in the doc's table.
+- **Trust limits, documented in the doc:** the API (or a stolen device token reporting its own
+  key) can substitute the key the browser seals to, and anyone can seal a value the bridge accepts.
+  The defense is the fingerprint the web app and the bridge both show. Values cascade with their
+  entry, so disconnect, printer delete, revoke and account deletion take them.
 
 ## Integration polling (#234)
 
