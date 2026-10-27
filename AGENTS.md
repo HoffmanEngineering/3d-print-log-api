@@ -444,11 +444,19 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   and desired printers. `Connection.BridgeId` has no cascade (1785), so `DeviceGrantService` nulls
   it in the same transaction and retries if a heartbeat relinks one in between. Connections and
   prints are kept. `PrinterService.DeletePrinter` removes a printer's desired entries and bumps
-  their bridges' version; `UserDeletionService` deletes bridges after connections, before printers.
+  their bridges' version. `UserDeletionService` deletes device grants (so the tokens die and the
+  bridges cascade) before connections and printers, with the same unlink-and-retry.
 - **Nothing a device sends creates a desired printer.** `BridgePrinter` rows come only from
   `POST /api/bridges/{id}/printers` (`InteractiveUserOnly`). Discovered printers are suggestions
   (printlog-bridge#100 rejects auto-connect: a neighbor's printer on a shared network). Keep it so;
   `ACheckIn_NeverConnectsAPrinter_WhateverItSends` is the guard.
+- **One watcher per printer, or every print is logged twice** (each watcher has its own instance
+  id, and nothing downstream dedupes). `BridgePrinters.PrinterId` is unique account-wide (409
+  `printer_connected_elsewhere`, with the other `bridgeId`); on one bridge the same identity or
+  kind and address is 409 `discovered_printer_already_connected`, and a hand entry gets an
+  identity key too (`kind:ip:host:port`); a stable identity (serial, mainboard id, MAC) is also
+  refused on the user's other bridges. A printer the bridge reported as in its config file is 409
+  `printer_configured_on_bridge`, and shows as Configured even when an app entry matches.
 - **Validation is two-level** (`BridgeCheckInValidator`, `BridgeRules`): over a cap (16 networks,
   50 printers, 8 MACs) or a malformed `agentVersion`/`mode`/`hostName` is a 400 `invalid_check_in`;
   a network or printer that breaks a rule is dropped and named in `rejected`, so one odd printer
@@ -461,7 +469,10 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   id across address changes. A missing or null field or list keeps what is stored; `{}` is a fetch.
 - **The desired list is versioned by `Bridge.DesiredRevision`**, a new GUID on every change
   (connect, disconnect, printer delete, scan request), so concurrent edits need no counter.
-  `GET /api/bridges/me/desired` answers 304 on a matching weak `ETag` after one small read.
+  `GET /api/bridges/me/desired` answers 304 on a matching weak `ETag` after one small read. A
+  poll also refreshes the bridge's last-seen time, at most every two minutes
+  (`BridgeService.PollSeenResolution`), so a bridge whose check-ins a backfill holds back stays
+  online.
 - **Check-ins are not exempt from the connector write budget**, unlike the heartbeat: starving one
   only delays discovery and desired-list updates, never duplicates prints, and the poll is a read,
   so the bridge still sees changes during a backfill. Nothing here bumps the cache version.
@@ -469,8 +480,12 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   sets it, anything else (API key, a bridge that never checked in) sets null.
 - **No LAN secrets yet.** Credentials (Bambu access code, PrusaLink password) are entered on the
   bridge until story 14 encrypts them to the bridge's key. Don't add a plaintext secret column.
-- Out of scope so far (printlog-bridge#103): one active bridge per printer (today the uniqueness is
-  per bridge), moving a printer between bridges, cross-bridge dedupe.
+- **Release order for `bridge:sync`:** add the permission to the Auth0 device API first, then deploy
+  the API, then release a bridge that requests it. A bridge requests only the scopes the pairing
+  discovery lists, and on 403 `insufficient_scope` re-pairs once, then reports it instead of
+  looping.
+- Out of scope so far (printlog-bridge#103): moving a printer between bridges, cross-bridge event
+  dedupe.
 
 ## Integration polling (#234)
 
