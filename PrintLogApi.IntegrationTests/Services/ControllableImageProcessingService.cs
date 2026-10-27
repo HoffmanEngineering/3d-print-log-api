@@ -15,9 +15,12 @@ public class ControllableImageProcessingService(ImageProcessingService inner) : 
     /// </summary>
     public bool NextThumbnailIsNull { get; set; }
 
-    public async Task<ProcessedImage> ProcessAsync(Stream input, CancellationToken ct = default)
+    public Task<ProcessedImage> ProcessAsync(Stream input, CancellationToken ct = default)
+        => ProcessAsync(input, ImageProcessingOptions.Uploads, ct);
+
+    public async Task<ProcessedImage> ProcessAsync(Stream input, ImageProcessingOptions options, CancellationToken ct = default)
     {
-        var processed = await inner.ProcessAsync(input, ct);
+        var processed = await inner.ProcessAsync(input, options, ct);
 
         if (!NextThumbnailIsNull) return processed;
 

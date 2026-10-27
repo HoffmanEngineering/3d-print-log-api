@@ -18,7 +18,17 @@ public class ImageProcessingService : IImageProcessingService
         SKEncodedImageFormat.Webp,
     ];
 
-    public async Task<ProcessedImage> ProcessAsync(Stream input, CancellationToken ct = default)
+    /// <summary>Formats only the backfill accepts (<see cref="ImageProcessingOptions.LegacyBackfill"/>).</summary>
+    private static readonly HashSet<SKEncodedImageFormat> LegacyFormats =
+    [
+        SKEncodedImageFormat.Gif,
+        SKEncodedImageFormat.Bmp,
+    ];
+
+    public Task<ProcessedImage> ProcessAsync(Stream input, CancellationToken ct = default)
+        => ProcessAsync(input, ImageProcessingOptions.Uploads, ct);
+
+    public async Task<ProcessedImage> ProcessAsync(Stream input, ImageProcessingOptions options, CancellationToken ct = default)
     {
         // Buffer once: SKCodec needs a seekable source and we read it twice.
         using var buffer = new MemoryStream();
@@ -36,7 +46,8 @@ public class ImageProcessingService : IImageProcessingService
         if (codec is null)
             throw new InvalidImageException("The file could not be read as an image.");
 
-        if (!AllowedFormats.Contains(codec.EncodedFormat))
+        var legacyFormat = options.AcceptLegacyFormats && LegacyFormats.Contains(codec.EncodedFormat);
+        if (!AllowedFormats.Contains(codec.EncodedFormat) && !legacyFormat)
             throw new InvalidImageException(
                 $"Unsupported image format '{codec.EncodedFormat}'. Allowed: JPEG, PNG, WebP.");
 
@@ -51,8 +62,9 @@ public class ImageProcessingService : IImageProcessingService
         if ((long)info.Width * info.Height > MaxPixels)
             throw new InvalidImageException($"Image must be {MaxPixels / 1_000_000}MP or smaller.");
 
-        // Catches animated WebP; GIF is already excluded by the format allowlist.
-        if (codec.FrameCount > 1)
+        // Catches animated WebP; GIF is already excluded by the format allowlist. The backfill
+        // keeps the first frame instead, which is what the decode below reads.
+        if (codec.FrameCount > 1 && !options.AcceptLegacyFormats)
             throw new InvalidImageException("Animated images are not supported.");
 
         // Captured before decode: SKBitmap.Decode discards it.
@@ -90,8 +102,19 @@ public class ImageProcessingService : IImageProcessingService
         {
             Width = oriented.Width,
             Height = oriented.Height,
+            SourceContentType = SourceContentTypeOf(codec.EncodedFormat),
         };
     }
+
+    private static string? SourceContentTypeOf(SKEncodedImageFormat format) => format switch
+    {
+        SKEncodedImageFormat.Jpeg => "image/jpeg",
+        SKEncodedImageFormat.Png => "image/png",
+        SKEncodedImageFormat.Webp => "image/webp",
+        SKEncodedImageFormat.Gif => "image/gif",
+        SKEncodedImageFormat.Bmp => "image/bmp",
+        _ => null,
+    };
 
     /// <summary>
     /// Applies an EXIF origin to pixels. SkiaSharp does not do this during decode,

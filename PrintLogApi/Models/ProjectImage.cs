@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PrintLogApi.Models;
 
-public class ProjectImage : TimestampEntity
+public class ProjectImage : TimestampEntity, IStoredImage
 {
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
