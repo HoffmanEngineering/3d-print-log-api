@@ -62,7 +62,7 @@ public class DeviceGrantsController(
     /// <response code="200">The device was already paired; its token was replaced.</response>
     /// <response code="400">`deviceId` or `name` is missing or invalid.</response>
     /// <response code="403">The token is not a pairing token, or carries no device scope (`code`: `insufficient_scope`), carries `offline_access` (`offline_access_not_allowed`), or was already exchanged (`pairing_token_used`).</response>
-    /// <response code="409">The account has as many paired devices as allowed (`code`: `device_grant_limit`).</response>
+    /// <response code="409">The account has as many paired devices as allowed (`code`: `device_grant_limit`), or the user revoked this device while it re-paired (`code`: `device_grant_revoked`; the pairing token is spent, so run the device flow again).</response>
     [HttpPost]
     [Authorize(Policy = DevicePairingAuthentication.Policy)]
     [ProducesResponseType(StatusCodes.Status201Created)]
@@ -117,6 +117,11 @@ public class DeviceGrantsController(
         {
             return CodedProblem(StatusCodes.Status409Conflict,
                 "This account has as many paired devices as allowed. Revoke one to pair another.", DeviceTokenErrors.GrantLimit);
+        }
+        catch (DeviceGrantRevokedException)
+        {
+            return CodedProblem(StatusCodes.Status409Conflict,
+                "This device was revoked while it was pairing. Run the device flow again.", DeviceTokenErrors.GrantRevoked);
         }
 
         var grant = paired.Grant;

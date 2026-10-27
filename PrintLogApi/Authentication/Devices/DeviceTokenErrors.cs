@@ -42,6 +42,12 @@ public static class DeviceTokenErrors
     public const string GrantLimit = "device_grant_limit";
 
     /// <summary>
+    /// 409: the user revoked this device while it re-paired. The pairing token is spent, so the
+    /// device runs the device flow again and the user approves it anew.
+    /// </summary>
+    public const string GrantRevoked = "device_grant_revoked";
+
+    /// <summary>
     /// Writes a problem details body with a <c>code</c>, from middleware, where there is no
     /// controller to do it. The body is ours, so <c>ProblemDetailsStatusCodePages</c> leaves it.
     /// </summary>

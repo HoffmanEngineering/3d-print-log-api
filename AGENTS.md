@@ -218,7 +218,9 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   It is spent in the same `SaveChanges` as the grant, so a refused pairing leaves it unspent, and
   the unique index decides a race on any instance. Each pairing deletes expired rows first (one
   indexed delete); there is no background job. A bridge whose pairing response was lost runs the
-  device flow again.
+  device flow again. A re-pair that loses a race with a revoke (the rotation updates no row) answers
+  409 `device_grant_revoked` and spends the token: recreating the row or leaving the token
+  reusable would let an approval given before the revoke undo it.
 - **Where a device token works is an allow-list.** `DeviceTokenMiddleware` (after
   `UseAuthentication`, before `ApiKeyMiddleware`) sets a principal only on an endpoint whose action
   carries `[DeviceAccess(scope)]` and only if the grant holds that scope; everywhere else it answers

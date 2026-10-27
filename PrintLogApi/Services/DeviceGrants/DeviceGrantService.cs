@@ -26,12 +26,17 @@ public sealed class DeviceGrantLimitException : Exception;
 
 public sealed class PairingTokenUsedException : Exception;
 
+/// <summary>The user revoked the device while it was re-pairing; the pairing token is spent.</summary>
+public sealed class DeviceGrantRevokedException : Exception;
+
 public interface IDeviceGrantService
 {
     /// <summary>
     /// Pairs (or re-pairs) a device and spends <paramref name="pairingToken"/> in the same save.
     /// Throws <see cref="PairingTokenUsedException"/> when that token was spent before, and
-    /// <see cref="DeviceGrantLimitException"/> when the user has too many devices.
+    /// <see cref="DeviceGrantLimitException"/> when the user has too many devices, and
+    /// <see cref="DeviceGrantRevokedException"/> (token spent) when the user revoked the device
+    /// while it re-paired.
     /// </summary>
     Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct);
 
@@ -113,7 +118,7 @@ public sealed class DeviceGrantService(
         {
             await context.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
             context.ChangeTracker.Clear();
 
@@ -121,6 +126,16 @@ public sealed class DeviceGrantService(
             if (await IsSpentAsync(pairingToken, ct))
             {
                 throw new PairingTokenUsedException();
+            }
+
+            if (ex is DbUpdateConcurrencyException && !created)
+            {
+                // The rotation updated no row: the user revoked this device after we read the
+                // grant. Never recreate it (that would undo the revoke), and spend the token, so
+                // an approval given before the revoke cannot pair the device back on a retry.
+                // The user re-approves through a new device flow.
+                await SpendAloneAsync(pairingToken, ct);
+                throw new DeviceGrantRevokedException();
             }
 
             if (!created || retried)
@@ -135,6 +150,21 @@ public sealed class DeviceGrantService(
         }
 
         return new PairedDevice(grant, token, created);
+    }
+
+    private async Task SpendAloneAsync(PairingTokenSpend pairingToken, CancellationToken ct)
+    {
+        context.PairingTokenUses.Add(new PairingTokenUse { TokenKeyHash = pairingToken.KeyHash, ExpiresAt = pairingToken.ExpiresAt });
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Another exchange of the same token spent it first; that one answers for it.
+            context.ChangeTracker.Clear();
+            throw new PairingTokenUsedException();
+        }
     }
 
     private Task<bool> IsSpentAsync(PairingTokenSpend pairingToken, CancellationToken ct) =>
