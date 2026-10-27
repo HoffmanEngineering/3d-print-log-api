@@ -79,6 +79,22 @@ namespace PrintLogApi.Migrations
                     b.Property<int?>("ErrorCount")
                         .HasColumnType("int");
 
+                    b.Property<string>("FirmwareName")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("HostSoftwareName")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("HostSoftwareVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("InstanceId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1433,6 +1449,9 @@ namespace PrintLogApi.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ActualIsEstimate")
+                        .HasColumnType("bit");
 
                     b.Property<int?>("AmountMg")
                         .HasColumnType("int");

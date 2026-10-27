@@ -270,6 +270,14 @@ public class PrintEventService(
     /// The printer's bridge connections seen within <see cref="Connection.StaleAfter"/> of
     /// <paramref name="now"/>. A stale bridge does not count: while it is down, the notifier is the
     /// only thing logging the printer.
+    /// <para>
+    /// Moonraker bridges only, not every <see cref="Connection.BridgeKinds"/> entry
+    /// (printlog-bridge#82). The drop count drives the "remove <c>[notifier]</c> from
+    /// moonraker.conf" notice on the connection, which only means something on a Moonraker one,
+    /// and Spoolman <c>/use</c> must agree with the drop: it lands only on a notifier print, which
+    /// exists exactly when its events were not dropped. The config block already leaves the
+    /// notifier out for a printer with a bridge of any kind.
+    /// </para>
     /// </summary>
     private IQueryable<Connection> LiveBridges(long userId, long printerId, DateTime now)
     {

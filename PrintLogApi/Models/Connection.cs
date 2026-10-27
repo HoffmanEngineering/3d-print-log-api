@@ -19,6 +19,33 @@ public class Connection
     /// <summary>The <see cref="Kind"/> the printlog-bridge registers for a Moonraker printer.</summary>
     public const string MoonrakerKind = "moonraker";
 
+    /// <summary>
+    /// The kinds printlog-bridge registers, one per adapter (printlog-bridge#82): Moonraker,
+    /// OctoPrint, PrusaLink, Bambu Lab and Elegoo's SDCP. A connection of any of them is a bridge
+    /// that logs its printer's prints itself.
+    /// </summary>
+    public static readonly string[] BridgeKinds = [MoonrakerKind, "octoprint", "prusalink", "bambu", "sdcp"];
+
+    /// <summary>Whether <paramref name="kind"/> is one of <see cref="BridgeKinds"/>, ignoring case.</summary>
+    public static bool IsBridgeKind(string? kind) =>
+        kind is not null && BridgeKinds.Contains(kind, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The source a print created through a connection of this kind records, or null to keep the
+    /// caller's. <c>moonraker</c> has none on purpose: its bridge prints have always been
+    /// <see cref="PrintSource.ApiKey"/>, and <see cref="PrintSource.Moonraker"/> means the
+    /// notifier. Moving them would change what existing users' new prints count toward
+    /// (achievements, the sync snapshot, the silent-printer email), which needs its own decision.
+    /// </summary>
+    public static PrintSource? PrintSourceForKind(string? kind) => kind?.ToLowerInvariant() switch
+    {
+        "octoprint" => PrintSource.OctoPrint,
+        "prusalink" => PrintSource.PrusaLink,
+        "bambu" => PrintSource.Bambu,
+        "sdcp" => PrintSource.Sdcp,
+        _ => null,
+    };
+
     [Key]
     public Guid Id { get; set; }
 
@@ -26,7 +53,7 @@ public class Connection
     [ForeignKey("UserId")]
     public User User { get; set; } = null!;
 
-    /// <summary>The connector type, lower-case: <c>moonraker</c>, <c>octoprint</c>.</summary>
+    /// <summary>The connector type, lower-case: one of <see cref="BridgeKinds"/> for printlog-bridge.</summary>
     [Required]
     [MaxLength(50)]
     public string Kind { get; set; } = null!;
@@ -66,7 +93,8 @@ public class Connection
     public DateTime? NotifierNoticeDismissedAt { get; set; }
 
     // The agent's health, as of its last heartbeat (printlog-bridge#37). Each heartbeat replaces
-    // all of it, and an agent that sends none (an older bridge) leaves it null.
+    // all of it except the software names and versions, and an agent that sends none (an older
+    // bridge) leaves it null.
 
     /// <summary>How the agent reaches the printer: <c>local</c> or <c>remote</c>.</summary>
     [MaxLength(20)]
@@ -77,6 +105,22 @@ public class Connection
 
     [MaxLength(50)]
     public string? MoonrakerVersion { get; set; }
+
+    // The same, for any adapter (printlog-bridge#82). Firmware runs the printer (Klipper, Prusa's,
+    // Bambu's); the host software is what the bridge talks to (Moonraker, OctoPrint, PrusaLink).
+    // Unlike the rest of the health, a heartbeat without one keeps the stored value (#80).
+
+    [MaxLength(50)]
+    public string? FirmwareName { get; set; }
+
+    [MaxLength(50)]
+    public string? FirmwareVersion { get; set; }
+
+    [MaxLength(50)]
+    public string? HostSoftwareName { get; set; }
+
+    [MaxLength(50)]
+    public string? HostSoftwareVersion { get; set; }
 
     /// <summary>The printer model the slicer wrote in the last job's file, such as <c>InfiMech EX</c>.</summary>
     [MaxLength(100)]

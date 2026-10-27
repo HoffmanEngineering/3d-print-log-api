@@ -122,6 +122,13 @@ public class CompletePrintFilamentUsageDto
     /// </summary>
     public SourceMeasurement? Source { get; set; }
 
+    /// <summary>
+    /// True when these figures are the slicer's estimate, not a measurement: send it from a
+    /// printer that reports only the estimate (most firmwares other than Klipper). The spool is
+    /// still charged, but accuracy analytics leave the row out. Absent or null means measured.
+    /// </summary>
+    public bool? ActualIsEstimate { get; set; }
+
     /// <summary>The measurement this row carries, or null when it carries none (or not the one named).</summary>
     public SourceMeasurement? ResolveSource()
     {

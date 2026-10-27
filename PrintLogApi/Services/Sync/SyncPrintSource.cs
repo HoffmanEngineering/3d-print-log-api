@@ -14,6 +14,9 @@ internal static class SyncPrintSource
         PrintSource.Moonraker => "moonraker",
         PrintSource.Mcp => "mcp",
         PrintSource.ApiKey => "api_key",
+        PrintSource.PrusaLink => "prusalink",
+        PrintSource.Bambu => "bambu",
+        PrintSource.Sdcp => "sdcp",
         _ => "unknown",
     };
 

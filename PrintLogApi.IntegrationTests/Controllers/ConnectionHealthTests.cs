@@ -107,7 +107,9 @@ public class ConnectionHealthTests : IClassFixture<CustomWebApplicationFactory>
             """)));
 
         Assert.Equal("v0.13.0", connection.KlipperVersion);
-        Assert.Null(connection.MoonrakerVersion);
+        // A version sent as null is unknown, not gone (#80): the stored one stays.
+        Assert.Equal("v0.9.3-45", connection.MoonrakerVersion);
+        Assert.Null(connection.PrinterModel);
         Assert.Equal(0, connection.OutboxDepth);
         Assert.Null(connection.OutboxOldestQueuedAt);
         Assert.Null(connection.LastError);
@@ -126,8 +128,17 @@ public class ConnectionHealthTests : IClassFixture<CustomWebApplicationFactory>
             "outboxOldestAgeSeconds": -60,
             "lastError": "{{new string('e', 900)}}",
             "lastErrorAt": "2999-01-01T00:00:00+00:00",
-            "errorCount": -1
+            "errorCount": -1,
+            "firmwareName": "{{new string('f', 80)}}",
+            "firmwareVersion": "{{new string('v', 80)}}",
+            "hostSoftwareName": "{{new string('h', 80)}}",
+            "hostSoftwareVersion": "{{new string('s', 80)}}"
             """)));
+
+        Assert.Equal(50, connection.FirmwareName!.Length);
+        Assert.Equal(50, connection.FirmwareVersion!.Length);
+        Assert.Equal(50, connection.HostSoftwareName!.Length);
+        Assert.Equal(50, connection.HostSoftwareVersion!.Length);
 
         Assert.Equal(20, connection.Mode!.Length);
         Assert.Equal(50, connection.KlipperVersion!.Length);
@@ -150,6 +161,115 @@ public class ConnectionHealthTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Null(connection.Mode);
         Assert.Null(connection.KlipperVersion);
         Assert.Null(connection.LastError);
+    }
+
+    // Generic software fields (printlog-bridge#82), so adapters other than Moonraker do not
+    // overload klipperVersion and moonrakerVersion.
+
+    [Fact]
+    public async Task Put_GenericSoftwareFields_AreStoredAndReturned()
+    {
+        var instanceId = NewInstanceId();
+
+        var connection = await ReadAsync(await PutJsonAsync(instanceId, $$"""
+            {
+              "kind": "prusalink", "displayName": "printlog-bridge (mk4)", "agentVersion": "0.9.0",
+              "printerId": {{IntegrationTestSeeder.TestPrinterId}},
+              "firmwareName": "Prusa-Firmware-Buddy", "firmwareVersion": "6.2.1",
+              "hostSoftwareName": "PrusaLink", "hostSoftwareVersion": "2.1.2"
+            }
+            """));
+
+        Assert.Equal("Prusa-Firmware-Buddy", connection.FirmwareName);
+        Assert.Equal("6.2.1", connection.FirmwareVersion);
+        Assert.Equal("PrusaLink", connection.HostSoftwareName);
+        Assert.Equal("2.1.2", connection.HostSoftwareVersion);
+        Assert.Null(connection.KlipperVersion);
+        Assert.Null(connection.MoonrakerVersion);
+
+        var listed = Assert.Single(await ListAsync(), c => c.InstanceId == instanceId);
+        Assert.Equal("6.2.1", listed.FirmwareVersion);
+        Assert.Equal("PrusaLink", listed.HostSoftwareName);
+    }
+
+    [Fact]
+    public async Task Put_FromABridgeSendingOnlyTheKlipperFields_AlsoFillsTheGenericOnes()
+    {
+        var connection = await ReadAsync(await PutJsonAsync(NewInstanceId(), BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, FullHealth)));
+
+        Assert.Equal("Klipper", connection.FirmwareName);
+        Assert.Equal("v0.12.0-123-gabcdef", connection.FirmwareVersion);
+        Assert.Equal("Moonraker", connection.HostSoftwareName);
+        Assert.Equal("v0.9.3-45", connection.HostSoftwareVersion);
+    }
+
+    [Fact]
+    public async Task Put_GenericKlipperAndMoonraker_AlsoFillTheKlipperFields()
+    {
+        // The web app reads klipperVersion and moonrakerVersion until it learns the new fields.
+        var connection = await ReadAsync(await PutJsonAsync(NewInstanceId(), BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, """
+            "firmwareName": "klipper", "firmwareVersion": "v0.13.0",
+            "hostSoftwareName": "Moonraker", "hostSoftwareVersion": "v0.9.4"
+            """)));
+
+        Assert.Equal("v0.13.0", connection.KlipperVersion);
+        Assert.Equal("v0.9.4", connection.MoonrakerVersion);
+        Assert.Equal("klipper", connection.FirmwareName);
+    }
+
+    [Fact]
+    public async Task Put_OtherFirmware_LeavesTheKlipperFieldsAlone()
+    {
+        var connection = await ReadAsync(await PutJsonAsync(NewInstanceId(), BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, """
+            "firmwareName": "Bambu", "firmwareVersion": "01.08.02.00"
+            """)));
+
+        Assert.Null(connection.KlipperVersion);
+        Assert.Null(connection.MoonrakerVersion);
+        Assert.Null(connection.HostSoftwareName);
+        Assert.Equal("01.08.02.00", connection.FirmwareVersion);
+    }
+
+    [Fact]
+    public async Task Put_BothShapes_AreEachStoredAsSent()
+    {
+        var connection = await ReadAsync(await PutJsonAsync(NewInstanceId(), BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, """
+            "klipperVersion": "v0.12.0", "moonrakerVersion": "v0.9.3",
+            "firmwareName": "Kalico", "firmwareVersion": "v2026.01", "hostSoftwareName": "Moonraker", "hostSoftwareVersion": "v0.9.3"
+            """)));
+
+        Assert.Equal("v0.12.0", connection.KlipperVersion);
+        Assert.Equal("Kalico", connection.FirmwareName);
+        Assert.Equal("v2026.01", connection.FirmwareVersion);
+        Assert.Equal("v0.9.3", connection.MoonrakerVersion);
+    }
+
+    [Fact]
+    public async Task Put_AHeartbeatWithoutVersions_KeepsTheStoredOnes()
+    {
+        // printlog-bridge#80: the bridge's first check-in after a restart can go out before it has
+        // read the printer's versions. Nulls, blanks and missing fields all leave them as they were.
+        var instanceId = NewInstanceId();
+        await PutJsonAsync(instanceId, BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, FullHealth));
+        await PutJsonAsync(instanceId, BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, """
+            "firmwareName": "Klipper", "firmwareVersion": "v0.12.0-123-gabcdef"
+            """));
+
+        var connection = await ReadAsync(await PutJsonAsync(instanceId, BridgeHeartbeat(IntegrationTestSeeder.TestPrinterId, """
+            "klipperVersion": null, "moonrakerVersion": "", "firmwareName": null, "firmwareVersion": " ",
+            "mode": "local"
+            """)));
+
+        Assert.Equal("v0.12.0-123-gabcdef", connection.KlipperVersion);
+        Assert.Equal("v0.9.3-45", connection.MoonrakerVersion);
+        Assert.Equal("Klipper", connection.FirmwareName);
+        Assert.Equal("v0.12.0-123-gabcdef", connection.FirmwareVersion);
+        Assert.Equal("Moonraker", connection.HostSoftwareName);
+        Assert.Equal("v0.9.3-45", connection.HostSoftwareVersion);
+        // The rest of the health is still replaced by every heartbeat.
+        Assert.Equal("local", connection.Mode);
+        Assert.Null(connection.OutboxDepth);
+        Assert.Null(connection.PrinterModel);
     }
 
     [Fact]

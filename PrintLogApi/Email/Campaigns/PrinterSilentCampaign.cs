@@ -200,6 +200,9 @@ public sealed class PrinterSilentCampaign(
         PrintSource.OctoPrint => "OctoPrint",
         PrintSource.SlicerPlugin => "the slicer uploader",
         PrintSource.ApiKey => "an API key",
+        PrintSource.PrusaLink => "PrusaLink",
+        PrintSource.Bambu => "Bambu Lab",
+        PrintSource.Sdcp => "Elegoo",
         _ => source.ToString(),
     };
 
@@ -208,6 +211,10 @@ public sealed class PrinterSilentCampaign(
         PrintSource.Moonraker => ("/docs/klipper", "Klipper setup guide"),
         PrintSource.OctoPrint => ("/docs/octoprint-webhook", "OctoPrint setup guide"),
         PrintSource.SlicerPlugin => ("/docs/slic3r-uploader", "Slicer uploader guide"),
+        // printlog-bridge adapter guides (printlog-bridge#82), one page per connection kind.
+        PrintSource.PrusaLink => ("/docs/printlog-bridge/prusalink", "PrusaLink setup guide"),
+        PrintSource.Bambu => ("/docs/printlog-bridge/bambu", "Bambu Lab setup guide"),
+        PrintSource.Sdcp => ("/docs/printlog-bridge/sdcp", "Elegoo setup guide"),
         _ => ("/api-keys", "Your API keys"),
     };
 }

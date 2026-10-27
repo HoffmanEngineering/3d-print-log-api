@@ -65,7 +65,7 @@ public class AgentReleaseCatalogTests
     {
         SetTags("v0.2.0");
 
-        Assert.Null(await Catalog().GetLatestVersionAsync("octoprint", Ct));
+        Assert.Null(await Catalog().GetLatestVersionAsync("some-plugin", Ct));
         Assert.Empty(_github.Requests);
     }
 

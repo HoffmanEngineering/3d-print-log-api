@@ -73,6 +73,13 @@ public class PutPrintFilamentSummaryDto
     public SourceMeasurement? Source { get; set; }
 
     /// <summary>
+    /// True when the actual figures are the slicer's estimate rather than a measurement, as from a
+    /// printer that reports only the estimate. Accuracy analytics leave such a row out. Defaults to
+    /// false (measured). Every row is replaced, so send it back to keep it.
+    /// </summary>
+    public bool ActualIsEstimate { get; set; }
+
+    /// <summary>
     /// Any notes for this filament usage.
     /// </summary>
     public string? Notes { get; set; }

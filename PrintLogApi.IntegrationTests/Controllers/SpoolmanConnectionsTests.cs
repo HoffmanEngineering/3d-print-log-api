@@ -167,14 +167,33 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
         Assert.DoesNotContain("[notifier", created.ConfigBlock);
     }
 
+    [Theory]
+    [InlineData("octoprint")]
+    [InlineData("prusalink")]
+    [InlineData("bambu")]
+    [InlineData("sdcp")]
+    public async Task ConfigBlock_ForAPrinterWithAnyBridgeKind_LeavesOutTheNotifier(string kind)
+    {
+        // Any bridge logs the printer's prints itself, so a notifier would only add duplicates
+        // (printlog-bridge#82).
+        var user = await CreateUserAsync();
+        var printer = await CreatePrinterAsync(user);
+        await AddConnectionAsync(user, printer, kind, DateTime.UtcNow);
+
+        var created = await CreateAsync(user, printer);
+
+        Assert.Contains("[spoolman]\n", created.ConfigBlock);
+        Assert.DoesNotContain("[notifier", created.ConfigBlock);
+    }
+
     [Fact]
-    public async Task ConfigBlock_KeepsTheNotifier_WhenTheBridgeIsOnAnotherPrinterOrIsNotMoonraker()
+    public async Task ConfigBlock_KeepsTheNotifier_WhenTheBridgeIsOnAnotherPrinterOrIsNotABridge()
     {
         var user = await CreateUserAsync(pro: true);
         var printer = await CreatePrinterAsync(user);
         var other = await CreatePrinterAsync(user);
         await AddConnectionAsync(user, other, Connection.MoonrakerKind, DateTime.UtcNow);
-        await AddConnectionAsync(user, printer, "octoprint", DateTime.UtcNow);
+        await AddConnectionAsync(user, printer, "some-plugin", DateTime.UtcNow);
         await AddConnectionAsync(user, null, Connection.MoonrakerKind, DateTime.UtcNow);
 
         var created = await CreateAsync(user, printer);

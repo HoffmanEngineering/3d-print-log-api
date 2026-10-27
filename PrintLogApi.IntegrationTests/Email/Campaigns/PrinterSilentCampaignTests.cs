@@ -208,6 +208,9 @@ public class PrinterSilentCampaignTests : IClassFixture<CustomWebApplicationFact
     [InlineData(PrintSource.OctoPrint, "/docs/octoprint-webhook")]
     [InlineData(PrintSource.SlicerPlugin, "/docs/slic3r-uploader")]
     [InlineData(PrintSource.ApiKey, "/api-keys")]
+    [InlineData(PrintSource.PrusaLink, "/docs/printlog-bridge/prusalink")]
+    [InlineData(PrintSource.Bambu, "/docs/printlog-bridge/bambu")]
+    [InlineData(PrintSource.Sdcp, "/docs/printlog-bridge/sdcp")]
     public async Task Render_TroubleshootingLinkFollowsTheSource(PrintSource source, string path)
     {
         var (user, _) = await SilentAsync(TimeSpan.FromDays(15), source: source);

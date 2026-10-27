@@ -262,8 +262,9 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   `[spoolman]` and the notifier, so one paste sets up both. A printer with a live printlog-bridge
   has its events dropped: **the bridge stays authoritative** and the notifier tier is only for
   printers without one.
-- **A printer with a printlog-bridge connection gets `[spoolman]` alone.** Any `moonraker`
-  `Connection` row for the printer counts, stale or not: the block is pasted once and kept, and a
+- **A printer with a printlog-bridge connection gets `[spoolman]` alone.** Any `Connection` row
+  of a bridge kind (`Connection.BridgeKinds`, printlog-bridge#82) for the printer counts, stale or
+  not: the block is pasted once and kept, and a
   bridge that is briefly down would otherwise hand the user a notifier that duplicates the
   bridge's prints when it catches up (the bridge's own check tells them to delete it anyway).
   Removing the connection in the web app deletes the row, so the next connect includes the
@@ -341,7 +342,8 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
 that a newer release is out, so Docker bridges hear about one without calling GitHub themselves.
 `AgentReleaseCatalog` reads the agent repo's `vX.Y.Z` tags (the bridge makes Docker images from
 tags and no GitHub releases, so not `releases/latest`), keyed by connection kind in
-`AgentReleases:Repositories` (`moonraker` → printlog-bridge).
+`AgentReleases:Repositories`. Every bridge kind maps to printlog-bridge; a kind missing there
+never gets `updateAvailable`.
 
 - **Tags are read every `CacheMinutes` (6 h); a failure keeps the last version** and retries after
   `FailureCacheMinutes` (15), so a GitHub outage never turns each 5-minute heartbeat into a call.
@@ -349,6 +351,32 @@ tags and no GitHub releases, so not `releases/latest`), keyed by connection kind
 - **Every test host routes the `AgentReleases` client to `CustomWebApplicationFactory.GitHub`**,
   which 404s unless a test seeds it, so no test reaches GitHub. The catalog is a singleton that
   keeps what it reads, so seed it before the host's first connection request.
+
+## Bridge adapters (printlog-bridge#82)
+
+printlog-bridge registers one connection kind per adapter: `moonraker`, `octoprint`, `prusalink`,
+`bambu`, `sdcp` (Elegoo). `Connection.BridgeKinds` and `IsBridgeKind` are the list; add a new
+adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceForKind`.
+
+- **Source.** A print created with an API key that links to a connection (`connectionInstanceId`)
+  takes `PrintSourceForKind`: `octoprint` → OctoPrint (3), `prusalink` → PrusaLink (7), `bambu` →
+  Bambu (8), `sdcp` → Sdcp (9). A Cura setting still wins. **`moonraker` maps to nothing and stays
+  ApiKey**, what bridge prints have always been; `PrintSource.Moonraker` means the notifier, and
+  moving bridge prints there changes their achievements, sync `source` and silent-printer email.
+- **"Has a bridge" is not one question.** The Spoolman config block leaves out the notifier for a
+  bridge of any kind. The notifier dedupe (#150, `PrintEventService.LiveBridges`) and Spoolman
+  `/use` stay Moonraker-only: the drop count drives the "remove `[notifier]`" notice, and `/use`
+  must agree with the drop. A non-Moonraker bridge plus a hand-added notifier logs twice; that and
+  the OctoPrint webhook dedupe belong with the OctoPrint adapter.
+- **`PrintFilament.ActualIsEstimate`.** True when a row's actual figures are the slicer's estimate
+  (most firmwares other than Klipper report only that). The spool is charged as usual; accuracy
+  analytics drop the row from both sides of the material sample. `/complete` resets it with the
+  values, absent meaning measured. PUT and PATCH replace every row, so a client that does not send
+  it back resets it to false.
+- **Heartbeat software fields.** `firmwareName`/`firmwareVersion` and
+  `hostSoftwareName`/`hostSoftwareVersion` sit beside `klipperVersion`/`moonrakerVersion`, each
+  filling the other (`Klipper` and `Moonraker` by name, case-insensitive). Unlike the rest of the
+  health, a missing, null or blank name or version keeps the stored one (#80).
 
 ## Integration polling (#234)
 

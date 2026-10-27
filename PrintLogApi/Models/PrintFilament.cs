@@ -66,6 +66,13 @@ public class PrintFilament
     /// </summary>
     public SourceMeasurement Source { get; set; }
 
+    /// <summary>
+    /// True when the actual figures are the slicer's estimate rather than a measurement: most
+    /// firmwares other than Klipper report only that (printlog-bridge#82). The spool is still
+    /// charged them, but accuracy analytics leave the row out, as they do a row with no estimate.
+    /// </summary>
+    public bool ActualIsEstimate { get; set; }
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
