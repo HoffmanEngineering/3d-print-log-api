@@ -492,6 +492,64 @@ public class FilamentsController(
     }
 
     /// <summary>
+    /// Remember a barcode on a spool, so a later label scan finds it.
+    /// </summary>
+    /// <remarks>
+    /// The value is normalized (trimmed, uppercased, a 12-digit UPC-A padded to EAN-13).
+    /// Remembering a barcode the spool already has returns it unchanged. A spool keeps at most
+    /// four; a fifth drops the oldest. On a spool created from a catalog entry, this also counts
+    /// as the user's vote that the barcode is that entry.
+    /// </remarks>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The barcode value and the symbology the scanner reported.</param>
+    /// <response code="200">The stored barcode.</response>
+    /// <response code="400">The value is not a barcode. Problem details with code invalid_barcode.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else.</response>
+    [HttpPost("{id:guid}/barcodes")]
+    [ProducesResponseType<FilamentBarcodeDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddBarcode(Guid id, [FromBody] BarcodeInputDto dto)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var barcode = await filamentService.AddBarcode(id, userId.Value, dto);
+            return barcode is null ? NotFound() : Ok(barcode);
+        }
+        catch (BadRequestException ex)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, ex.Message, "invalid_barcode");
+        }
+    }
+
+    /// <summary>
+    /// Remove a barcode from a spool.
+    /// </summary>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="barcodeId">The barcode's ID, from the spool's `barcodes`.</param>
+    /// <response code="204">The barcode was removed.</response>
+    /// <response code="404">The spool or barcode does not exist or belongs to someone else.</response>
+    [HttpDelete("{id:guid}/barcodes/{barcodeId:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveBarcode(Guid id, long barcodeId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await filamentService.RemoveBarcode(id, barcodeId, userId.Value) ? NoContent() : NotFound();
+    }
+
+    /// <summary>
     /// Maps the MCP service's outcomes to problem details with a machine-readable `code`. A
     /// missing and a foreign spool are both 404 `material_not_found`: the Home Assistant client
     /// tells that apart from an unmatched route (also a 404 problem body) by the code.

@@ -10,6 +10,7 @@ using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.SpoolTags;
+using PrintLogApi.SpoolTags.Labels;
 using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services;
@@ -1337,6 +1338,7 @@ public class FilamentService(
                 .Include(f => f.PrintFilaments)
                 .Include(f => f.MaterialCategory)
                 .Include(f => f.Tags)
+                .Include(f => f.Barcodes)
                 .AsSplitQuery()
                 .SingleOrDefaultAsync();
     }
@@ -1571,22 +1573,101 @@ public class FilamentService(
         return applied;
     }
 
-    /// <summary>
-    /// Records the user's vote that each tag's SKU is <paramref name="catalogEntryId"/>: one row per
-    /// (format, sku, user), pointed at the entry the user just chose. Saved with the filament.
-    /// </summary>
-    private async Task CastSkuVotes(long userId, string catalogEntryId, IEnumerable<FilamentTag> tags)
+    /// <summary>The <see cref="FilamentCatalogSku.Format"/> a label barcode votes under.</summary>
+    public const string BarcodeVoteFormat = "barcode";
+
+    /// <summary>The (format, SKU) each read tag reports, for voting. Tags without both are skipped.</summary>
+    private static IEnumerable<(string Format, string Sku)> TagSkuPairs(IEnumerable<FilamentTag> tags)
     {
-        var votes = new Dictionary<(string Format, string Sku), string>();
         foreach (var tag in tags)
         {
-            if (string.IsNullOrEmpty(tag.Format) || TagReadingJson.Deserialize(tag.DecodedJson)?.Sku is not { Length: > 0 } sku)
+            if (!string.IsNullOrEmpty(tag.Format) && TagReadingJson.Deserialize(tag.DecodedJson)?.Sku is { Length: > 0 } sku)
             {
-                continue;
+                yield return (tag.Format, sku);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Normalized, de-duplicated barcodes for a new spool. Invalid values are dropped; more than
+    /// <see cref="FilamentBarcode.MaxPerFilament"/> sent is a 400.
+    /// </summary>
+    private static List<(string Value, string Format)> NormalizeBarcodes(List<BarcodeInputDto>? barcodes)
+    {
+        if (barcodes is { Count: > FilamentBarcode.MaxPerFilament })
+        {
+            throw new BadRequestException($"A spool can have at most {FilamentBarcode.MaxPerFilament} barcodes.");
+        }
+
+        return (barcodes ?? [])
+            .Select(b => (Input: b, Value: BarcodeValue.Normalize(b.Value)))
+            .Where(b => b.Value != null)
+            .DistinctBy(b => b.Value)
+            .Select(b => (b.Value!, BarcodeValue.NormalizeFormat(b.Input.Format, b.Value!)))
+            .ToList();
+    }
+
+    public async Task<FilamentBarcodeDto?> AddBarcode(Guid id, long userId, BarcodeInputDto dto)
+    {
+        var value = BarcodeValue.Normalize(dto.Value)
+            ?? throw new BadRequestException("Not a barcode value.");
+
+        var filament = await context.Filaments
+            .Include(f => f.Barcodes)
+            .SingleOrDefaultAsync(f => f.Id == id && f.CreatedById == userId);
+        if (filament is null)
+        {
+            return null;
+        }
+
+        var barcodes = filament.Barcodes ??= new List<FilamentBarcode>();
+        var existing = barcodes.FirstOrDefault(b => b.Value == value);
+        if (existing is null)
+        {
+            // Oldest first, so remembering a fifth keeps the newest four.
+            foreach (var oldest in barcodes.OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+                .Take(barcodes.Count - FilamentBarcode.MaxPerFilament + 1).ToList())
+            {
+                context.FilamentBarcodes.Remove(oldest);
             }
 
-            votes[(tag.Format, sku)] = catalogEntryId;
+            existing = new FilamentBarcode { Value = value, Format = BarcodeValue.NormalizeFormat(dto.Format, value), CreatedAt = DateTime.UtcNow };
+            barcodes.Add(existing);
         }
+
+        if (filament.CatalogEntryId is { } entryId)
+        {
+            await CastSkuVotes(userId, entryId, [(BarcodeVoteFormat, value)]);
+        }
+
+        await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
+        return new FilamentBarcodeDto { Id = existing.Id, Value = existing.Value, Format = existing.Format };
+    }
+
+    public async Task<bool> RemoveBarcode(Guid id, long barcodeId, long userId)
+    {
+        var barcode = await context.FilamentBarcodes
+            .SingleOrDefaultAsync(b => b.Id == barcodeId && b.FilamentId == id && b.Filament.CreatedById == userId);
+        if (barcode is null)
+        {
+            return false;
+        }
+
+        context.FilamentBarcodes.Remove(barcode);
+        await context.SaveChangesAsync();
+        cacheVersionService.InvalidateUserCache(userId);
+        return true;
+    }
+
+    /// <summary>
+    /// Records the user's vote that each (format, SKU) is <paramref name="catalogEntryId"/>: one
+    /// row per (format, sku, user), pointed at the entry the user just chose. Tag SKUs and label
+    /// barcodes (format <see cref="BarcodeVoteFormat"/>) vote alike. Saved with the caller's changes.
+    /// </summary>
+    private async Task CastSkuVotes(long userId, string catalogEntryId, IEnumerable<(string Format, string Sku)> pairs)
+    {
+        var votes = pairs.Distinct().ToDictionary(p => p, _ => catalogEntryId);
 
         foreach (var ((format, sku), entryId) in votes)
         {
@@ -1659,6 +1740,7 @@ public class FilamentService(
         var tagUids = NormalizeTagUids(filament.TagUids ?? []);
         ThrowIfTooManyTagReadings(filament.TagReadings);
         await ThrowIfTagsHeldElsewhere(userId, null, tagUids);
+        var barcodes = NormalizeBarcodes(filament.Barcodes);
 
         // Only a create sets the catalog entry. Removed entries are soft-deleted, so they are unknown here.
         filament.CatalogEntryId = string.IsNullOrWhiteSpace(filament.CatalogEntryId) ? null : filament.CatalogEntryId.Trim();
@@ -1713,9 +1795,12 @@ public class FilamentService(
 
         ReplaceTags(newFilament, tagUids);
         var readTags = ApplyTagReadings(newFilament, tagUids, filament.TagReadings);
+        newFilament.Barcodes = barcodes
+            .Select(b => new FilamentBarcode { Value = b.Value, Format = b.Format, CreatedAt = DateTime.UtcNow })
+            .ToList();
         if (filament.CatalogEntryId is { } votedEntryId)
         {
-            await CastSkuVotes(userId, votedEntryId, readTags);
+            await CastSkuVotes(userId, votedEntryId, TagSkuPairs(readTags).Concat(barcodes.Select(b => (BarcodeVoteFormat, b.Value))));
         }
 
         // Reserved before the insert, so a create that then fails (a tag conflict) leaves a gap

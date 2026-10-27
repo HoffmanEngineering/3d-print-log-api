@@ -11,6 +11,16 @@ public interface IFilamentService
     Task<Filament> AddFilament(AddFilamentDto filament, long userId);
 
     /// <summary>
+    /// Remembers a barcode on the user's spool (idempotent; a fifth drops the oldest) and votes
+    /// for it when the spool is catalog-linked. Null when the spool is missing or someone else's.
+    /// Throws <see cref="Exceptions.BadRequestException"/> for a value that is not a barcode.
+    /// </summary>
+    Task<FilamentBarcodeDto?> AddBarcode(Guid id, long userId, BarcodeInputDto dto);
+
+    /// <summary>Removes one barcode from the user's spool. False when either is not found or not theirs.</summary>
+    Task<bool> RemoveBarcode(Guid id, long barcodeId, long userId);
+
+    /// <summary>
     /// Subscription-tier cap on images per filament, mirroring
     /// <see cref="IPrintService.GetMaxImagesPerPrint"/>.
     /// </summary>
