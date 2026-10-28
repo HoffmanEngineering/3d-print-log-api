@@ -378,6 +378,123 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
 
     #endregion
 
+    #region Notifier finish after the bridge goes live (#295)
+
+    public static TheoryData<string, PrintStatus> NotifierFinishes => new()
+    {
+        { "moonraker-notifier-complete.json", PrintStatus.Success },
+        { "moonraker-notifier-cancelled.json", PrintStatus.Failed },
+        { "moonraker-notifier-error.json", PrintStatus.Failed },
+    };
+
+    [Theory]
+    [MemberData(nameof(NotifierFinishes))]
+    public async Task NotifierFinish_ForANotifierPrintStartedBeforeTheBridgeWentLive_ClosesIt_AndIsNotCounted(
+        string fixture, PrintStatus expected)
+    {
+        // A duplicate beats a lost print (#290): a user who installs the bridge mid-print must
+        // not be left with the notifier's print stuck in Printing.
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+        var notifierPrint = Assert.Single(await PrintsForRunAsync(run));
+        var instanceId = await RegisterBridgeAsync(printerId);
+
+        Assert.Equal(HttpStatusCode.OK, (await PostNotifierAsync(fixture, printerId, run)).StatusCode);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(notifierPrint.Id, print.Id);
+        Assert.Equal(expected, print.Status);
+        var connection = await GetConnectionAsync(instanceId);
+        Assert.Equal(0, connection.DroppedNotifierEventCount);
+        Assert.False(connection.ShowNotifierNotice);
+    }
+
+    [Fact]
+    public async Task NotifierFinish_ForANotifierPrintStartedWhileTheBridgeWasStale_ClosesIt()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId);
+        await BackdateLastSeenAsync(instanceId, TimeSpan.FromMinutes(20));
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+        // The bridge comes back with a heartbeat before the job ends.
+        await RegisterBridgeAsync(printerId, instanceId: instanceId);
+
+        await PostNotifierAsync("moonraker-notifier-complete.json", printerId, run);
+
+        Assert.Equal(PrintStatus.Success, Assert.Single(await PrintsForRunAsync(run)).Status);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task NotifierStarted_WithANotifierPrintOpen_IsStillDropped()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+        var instanceId = await RegisterBridgeAsync(printerId);
+
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+
+        Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(1, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task NotifierFinish_WithANotifierPrintOpenOnAnotherPrinter_IsStillDropped()
+    {
+        var otherPrinter = await CreatePrinterAsync();
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", otherPrinter, run);
+        var instanceId = await RegisterBridgeAsync(printerId);
+
+        await PostNotifierAsync("moonraker-notifier-complete.json", printerId, run);
+
+        Assert.Equal(PrintStatus.Printing, Assert.Single(await PrintsForRunAsync(run)).Status);
+        Assert.Equal(1, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Theory]
+    [InlineData("moonraker-notifier-complete.json")]
+    [InlineData("moonraker-notifier-cancelled.json")]
+    [InlineData("moonraker-notifier-error.json")]
+    public async Task NotifierFinish_WhenTheOpenPrintIsTheBridges_IsStillDropped(string fixture)
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId);
+        var run = NewRun();
+        var bridgePrint = await PostBridgePrintAsync(printerId, instanceId, run);
+
+        await PostNotifierAsync(fixture, printerId, run);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(bridgePrint.Id, print.Id);
+        Assert.Equal(PrintStatus.Printing, print.Status);
+        Assert.Equal(1, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task NotifierFinish_NeverClosesABridgePrint_AndClosesItsOwn()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+        var notifierPrint = Assert.Single(await PrintsForRunAsync(run));
+        // The bridge logs the same file on the same printer later, with no live connection
+        // (so nothing is dropped): it is the newest Printing print of that file.
+        var bridgePrint = await PostBridgePrintAsync(printerId, instanceId: null, run);
+
+        await PostNotifierAsync("moonraker-notifier-complete.json", printerId, run);
+
+        var prints = await PrintsForRunAsync(run);
+        Assert.Equal(PrintStatus.Success, prints.Single(p => p.Id == notifierPrint.Id).Status);
+        Assert.Equal(PrintStatus.Printing, prints.Single(p => p.Id == bridgePrint.Id).Status);
+    }
+
+    #endregion
+
     #region OctoPrint webhook and bridge on one printer (#291)
 
     public static TheoryData<string, string?> WebhookEvents => new()

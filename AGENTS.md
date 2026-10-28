@@ -302,7 +302,8 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   Writes return 400 until #172.
 - **`PUT /spool/{id}/use` accumulates** (#171) into `SpoolmanUsages`, one row per (print, spool),
   on the printer's open *notifier* print only: not with a live printlog-bridge (it records usage
-  itself) and not without an open print. A spool's first report of a print loads it into slot 0
+  itself, even when a notifier print from before it went live is still open, #295) and not
+  without an open print. A spool's first report of a print loads it into slot 0
   on a single-slot printer (so A->B->A leaves B loaded). Increments are one `ExecuteUpdate` and
   never bump the cache version. A `/use` racing the finish can be lost, bounded to one report
   interval. A notifier print whose finish never arrives stays open and keeps accumulating idle
@@ -430,8 +431,14 @@ adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceFo
   `Finished`): a print the webhook started before its bridge went live (installed mid-print, or
   back from stale) is closed by the webhook and not counted, because a duplicate beats a lost
   print (#290). Only `Print Started`, and finishes with nothing of the webhook's to close, are
-  dropped. The Moonraker notifier still drops its finishes unconditionally, so a notifier print
-  started before its bridge went live stays in Printing (follow-up).
+  dropped.
+- **The Moonraker notifier follows the same rule** (#295): its finish carries
+  `ExternalSource = moonraker-notifier` and its printer, so it never closes the bridge's
+  `moonraker` print of the same file, and `complete`, `cancelled` and `error` go through, uncounted,
+  while `HasPrintToFinish` finds a notifier print of that file open on that printer. `started` is
+  always dropped. Spoolman `/use` still records nothing while the bridge is live, so a print the
+  notifier started before its bridge went live is closed with the `/use` totals reported before
+  that (or, with none, the notifier's own `filament_used`).
 - **`PrintFilament.ActualIsEstimate`.** True when a row's actual figures are the slicer's estimate
   (most firmwares other than Klipper report only that). The spool is charged as usual; accuracy
   analytics drop the row from both sides of the material sample. `/complete` resets it with the

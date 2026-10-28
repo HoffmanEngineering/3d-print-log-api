@@ -327,6 +327,33 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
     }
 
     [Fact]
+    public async Task Complete_AfterTheBridgeWentLive_ClosesThePrintWithWhatWasAccumulatedBefore()
+    {
+        // #295: the notifier's finish closes its own print after a bridge goes live mid-print.
+        // /use stops recording once the bridge is live (the bridge records usage itself), so the
+        // print keeps what Moonraker reported before that, and the finish is not a counted drop.
+        var (user, secret, printer, a, _, file) = await StartedWithTwoSpoolsAsync();
+        await UseAsync(secret, a, 1000);
+        var bridge = await AddBridgeAsync(user, printer);
+        Assert.Equal(HttpStatusCode.OK, (await UseAsync(secret, a, 500)).StatusCode);
+        var open = Assert.Single(await PrintsAsync(user, file));
+        Assert.Equal(1000, Assert.Single(await UsagesAsync(open.Id)).LengthMm, 6);
+
+        Assert.Equal(HttpStatusCode.OK, (await NotifyAsync(secret, "complete", printer, file, filamentUsed: 9999)).StatusCode);
+
+        var print = Assert.Single(await PrintsAsync(user, file));
+        Assert.Equal(PrintStatus.Success, print.Status);
+        var row = Assert.Single(await FilamentUsageAsync(print.Id));
+        Assert.Equal(a.Id, row.FilamentId);
+        Assert.Equal(1.0, row.LengthInM);
+        Assert.Empty(await UsagesAsync(print.Id));
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var connection = await db.Connections.AsNoTracking().SingleAsync(c => c.Id == bridge, Ct);
+        Assert.Equal(0, connection.DroppedNotifierEventCount);
+    }
+
+    [Fact]
     public async Task Complete_WithoutAccumulations_Unchanged()
     {
         var (user, secret, printer, a, _, file) = await StartedWithTwoSpoolsAsync();

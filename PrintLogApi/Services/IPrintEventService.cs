@@ -33,7 +33,9 @@ public interface IPrintEventService
 
     /// <summary>
     /// True when the printer has a live Moonraker bridge connection, as for
-    /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted.
+    /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted. Spoolman
+    /// <c>/use</c> records nothing while this is true, even on a notifier print that started
+    /// before the bridge went live and whose finish will still close it (#295).
     /// </summary>
     Task<bool> IsBridgeLive(long userId, long printerId);
 }

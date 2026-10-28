@@ -297,10 +297,12 @@ public class PrintEventService(
     /// Moonraker notifier event is dropped only for a <c>moonraker</c> bridge (#150), an OctoPrint
     /// webhook event only for an <c>octoprint</c> one (#291). The drop count drives the notice on
     /// the connection that tells the user to remove the integration the bridge duplicates, which
-    /// only means something on a connection of that kind. Spoolman <c>/use</c> must agree with the
-    /// notifier drop: it lands only on a notifier print, which exists exactly when its events were
-    /// not dropped. The config block already leaves the notifier out for a printer with a bridge
-    /// of any kind.
+    /// only means something on a connection of that kind. Spoolman <c>/use</c> stays Moonraker-only
+    /// to agree with the notifier drop: it lands only on a notifier print, which exists only when
+    /// the notifier's start was not dropped. A notifier print started before its bridge went live
+    /// is still closed by its own finish (#295), but <c>/use</c> stops recording on it once the
+    /// bridge is live, so the bridge never shares a spool report with it. The config block
+    /// already leaves the notifier out for a printer with a bridge of any kind.
     /// </para>
     /// </summary>
     private IQueryable<Connection> LiveBridges(long userId, long printerId, string kind, DateTime now)
