@@ -117,8 +117,10 @@ public class CompletePrintFilamentUsageDto
     public double? VolumeMl { get; set; }
 
     /// <summary>
-    /// Which of the three values is the measurement. Defaults to the first one sent, in the order
-    /// weight, length, volume.
+    /// Which of the three values is the measurement: Weight (1), Length (2) or Volume (3). Left out,
+    /// it is the linked spool's own measurement when the row carries it, else the first one sent in
+    /// the order weight, length, volume. A length on a spool with no diameter (resin) charges
+    /// nothing, so a volume or weight the row also carries is used instead.
     /// </summary>
     public SourceMeasurement? Source { get; set; }
 
@@ -129,23 +131,54 @@ public class CompletePrintFilamentUsageDto
     /// </summary>
     public bool? ActualIsEstimate { get; set; }
 
+    private static readonly SourceMeasurement[] DefaultOrder =
+        [SourceMeasurement.Weight, SourceMeasurement.Length, SourceMeasurement.Volume];
+
+    private bool Has(SourceMeasurement m) => m switch
+    {
+        SourceMeasurement.Weight => AmountMg.HasValue,
+        SourceMeasurement.Length => LengthInM.HasValue,
+        SourceMeasurement.Volume => VolumeMl.HasValue,
+        _ => false,
+    };
+
     /// <summary>The measurement this row carries, or null when it carries none (or not the one named).</summary>
     public SourceMeasurement? ResolveSource()
     {
-        bool Has(SourceMeasurement m) => m switch
-        {
-            SourceMeasurement.Weight => AmountMg.HasValue,
-            SourceMeasurement.Length => LengthInM.HasValue,
-            SourceMeasurement.Volume => VolumeMl.HasValue,
-            _ => false,
-        };
-
         if (Source.HasValue)
         {
             return Has(Source.Value) ? Source : null;
         }
-        return new[] { SourceMeasurement.Weight, SourceMeasurement.Length, SourceMeasurement.Volume }
-            .Cast<SourceMeasurement?>()
-            .FirstOrDefault(m => Has(m!.Value));
+        return DefaultOrder.Cast<SourceMeasurement?>().FirstOrDefault(m => Has(m!.Value));
+    }
+
+    /// <summary>
+    /// The measurement to record against a spool measured in <paramref name="spoolSource"/>
+    /// (printlog-bridge#97). The named source wins when the spool can convert it. Otherwise, or
+    /// when none is named, the spool's own measurement wins when the row carries it, so a
+    /// bottle of resin is charged in milliliters. Failing that, the first the row carries that
+    /// the spool can convert, in the order weight, length, volume. A length is convertible only
+    /// on a spool with a diameter: resin and powder have none, and a length recorded against
+    /// them is kept as sent but charges nothing. With no spool this is <see cref="ResolveSource"/>.
+    /// </summary>
+    public SourceMeasurement? ResolveSourceFor(SourceMeasurement? spoolSource, bool spoolHasDiameter)
+    {
+        var resolved = ResolveSource();
+        if (resolved is null || spoolSource is not { } spool)
+        {
+            return resolved;
+        }
+
+        bool Convertible(SourceMeasurement m) => m != SourceMeasurement.Length || spoolHasDiameter;
+
+        if (Source is { } named && Convertible(named))
+        {
+            return named;
+        }
+        if (Has(spool) && Convertible(spool))
+        {
+            return spool;
+        }
+        return DefaultOrder.Cast<SourceMeasurement?>().FirstOrDefault(m => Has(m!.Value) && Convertible(m!.Value)) ?? resolved;
     }
 }

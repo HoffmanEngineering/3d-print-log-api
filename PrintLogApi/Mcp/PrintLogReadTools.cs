@@ -70,7 +70,8 @@ public class PrintLogReadTools(
         "Get the details of one of your own prints by id, including a per-material breakdown of " +
         "what it used. Only the print's creator can read it; any other id (including public " +
         "prints owned by someone else) returns not found. Weights are grams, durations are " +
-        "seconds. Slicer settings are NOT structured fields, but prints imported through a " +
+        "seconds. A material row recorded by volume (resin) also carries 'milliliters', the " +
+        "same amount in the unit the user measures the bottle in: report resin in mL. Slicer settings are NOT structured fields, but prints imported through a " +
         "slicer integration carry a settings summary in 'notes' (layer height, line width, " +
         "print/infill/wall speeds, nozzle and bed temperature, infill density, supports): when " +
         "the user asks what settings a print used, read 'notes' and quote it. A null field means " +
