@@ -18,8 +18,10 @@ public interface IPrintEventService
     Task<Models.Print?> Finished(PrintFinishedEvent finished);
 
     /// <summary>
-    /// True when <see cref="Finished"/> would find a Printing print to close for this event.
-    /// Read-only.
+    /// True when <see cref="Finished"/> would find a Printing print to close for this event,
+    /// created within <see cref="PrintEventService.FinishForBridgeWithin"/>. Read-only. It decides
+    /// whether a notifier or webhook finish goes through a live bridge, so a print stuck in
+    /// Printing for longer is never revived by a later job of the same file.
     /// </summary>
     Task<bool> HasPrintToFinish(PrintFinishedEvent finished);
 

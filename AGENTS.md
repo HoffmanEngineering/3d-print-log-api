@@ -431,7 +431,10 @@ adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceFo
   `Finished`): a print the webhook started before its bridge went live (installed mid-print, or
   back from stale) is closed by the webhook and not counted, because a duplicate beats a lost
   print (#290). Only `Print Started`, and finishes with nothing of the webhook's to close, are
-  dropped.
+  dropped. `HasPrintToFinish` only counts prints created within
+  `PrintEventService.FinishForBridgeWithin` (72 hours, #295): an older open print is one whose
+  finish was lost, and a later job of the same file, which the bridge logs and charges, must not
+  close it and charge the spool again. `Finished` itself has no bound.
 - **The Moonraker notifier follows the same rule** (#295): its finish carries
   `ExternalSource = moonraker-notifier` and its printer, so it never closes the bridge's
   `moonraker` print of the same file, and `complete`, `cancelled` and `error` go through, uncounted,

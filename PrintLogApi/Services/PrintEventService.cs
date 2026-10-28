@@ -19,6 +19,19 @@ public class PrintEventService(
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
 
+    /// <summary>
+    /// How recently a print must have been created for <see cref="HasPrintToFinish"/> to count it
+    /// (#295). The check lets a notifier or webhook finish through a live bridge so a print it
+    /// started before the bridge went live is closed. A print open longer than this is not that
+    /// job: it is one whose finish was lost (production has some from before #292 and #295), and
+    /// letting a later job of the same file close it would charge the spool for a job the bridge
+    /// already logs and charges. 72 hours covers a print started just before a mid-print bridge
+    /// install; prints rarely run longer. Nothing records when a bridge went live (a stale bridge
+    /// coming back is just a heartbeat), so creation time is the anchor. <see cref="Finished"/>
+    /// itself has no bound: without a live bridge a finish closes what it always did.
+    /// </summary>
+    public static readonly TimeSpan FinishForBridgeWithin = TimeSpan.FromHours(72);
+
     public async Task<PrintStartedResult> Started(PrintStartedEvent started)
     {
         if (await FindByExternalId(started) is { } existing)
@@ -116,8 +129,17 @@ public class PrintEventService(
 
     public Task<Print?> Finished(PrintFinishedEvent finished) => Finished(finished, retryIfRaced: true);
 
-    public async Task<bool> HasPrintToFinish(PrintFinishedEvent finished) =>
-        MatchingPrints(finished) is { } query && await query.AnyAsync();
+    public async Task<bool> HasPrintToFinish(PrintFinishedEvent finished)
+    {
+        if (MatchingPrints(finished) is not { } query)
+        {
+            return false;
+        }
+
+        // CreatedDate, not StartDate: SQLite cannot compare a DateTimeOffset.
+        var createdSince = clock.GetUtcNow().UtcDateTime - FinishForBridgeWithin;
+        return await query.AnyAsync(p => p.CreatedDate > createdSince);
+    }
 
     /// <summary>
     /// The Printing prints <paramref name="finished"/> could close, or null when it carries
