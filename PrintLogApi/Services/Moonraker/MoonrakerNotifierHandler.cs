@@ -19,7 +19,7 @@ public class MoonrakerNotifierHandler(
     public async Task HandleAsync(long userId, PrintEventMessageDto message)
     {
         if (message.PrinterId > 0 && message.EventName is { } eventName && PrintEvents.Contains(eventName)
-            && await printEventService.DropNotifierEventForBridge(userId, message.PrinterId))
+            && await printEventService.DropNotifierEventForBridge(userId, message.PrinterId, Connection.MoonrakerKind))
         {
             telemetry.TrackEvent("Moonraker_Webhook_DroppedForBridge", new Dictionary<string, string> { { "event", eventName } });
             return;

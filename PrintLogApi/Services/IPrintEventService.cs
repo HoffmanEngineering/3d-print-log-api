@@ -18,13 +18,15 @@ public interface IPrintEventService
     Task<Models.Print?> Finished(PrintFinishedEvent finished);
 
     /// <summary>
-    /// True when the printer has a live bridge connection, so a Moonraker notifier event for it
-    /// must be dropped: the bridge logs the same job. The drop is counted on the connection.
+    /// True when the printer has a live bridge connection of <paramref name="kind"/>, so an event
+    /// the printer's host software sent on its own (the Moonraker notifier for <c>moonraker</c>,
+    /// the OctoPrint Webhooks plugin for <c>octoprint</c>) must be dropped: the bridge logs the
+    /// same job. The drop is counted on the connection.
     /// </summary>
-    Task<bool> DropNotifierEventForBridge(long userId, long printerId);
+    Task<bool> DropNotifierEventForBridge(long userId, long printerId, string kind);
 
     /// <summary>
-    /// True when the printer has a live bridge connection, as for
+    /// True when the printer has a live Moonraker bridge connection, as for
     /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted.
     /// </summary>
     Task<bool> IsBridgeLive(long userId, long printerId);

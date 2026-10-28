@@ -52,13 +52,19 @@ public sealed record PrintEventUsage(
 /// <summary>
 /// A job ending. The print is the newest one still Printing that matches: by
 /// <see cref="FileHash"/> when sent, otherwise by <see cref="FileName"/>, and on
-/// <see cref="PrinterId"/> when sent.
+/// <see cref="PrinterId"/> and <see cref="ExternalSource"/> when sent.
 /// </summary>
 public sealed record PrintFinishedEvent
 {
     public required long UserId { get; init; }
 
     public long? PrinterId { get; init; }
+
+    /// <summary>
+    /// Only a print with this external source is finished, so an integration never closes a print
+    /// another source started (#291). Null matches any source.
+    /// </summary>
+    public string? ExternalSource { get; init; }
 
     public byte[]? FileHash { get; init; }
 

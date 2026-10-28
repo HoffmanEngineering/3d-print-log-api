@@ -80,6 +80,11 @@ public class OctoprintController(
             return Ok($"Webhook Connection to 3D Print Log is Good!\nPrinter is {printerName}.\nReady to start logging prints.");
         }
 
+        if (await DroppedForBridge(data, userId.Value))
+        {
+            return Ok(data);
+        }
+
         try
         {
             switch (data.Topic)
@@ -115,6 +120,27 @@ public class OctoprintController(
         return Ok(data);
 
     }
+
+    /// <summary>
+    /// True, after counting the drop, when this is a print event for a printer a live OctoPrint
+    /// bridge is logging (#291): the bridge reports the same job, so logging it here too would
+    /// record it twice. The count tells the user to turn the Webhooks plugin off. Matched on the
+    /// <c>octoprint</c> kind only, as the Moonraker notifier is on <c>moonraker</c> (#150).
+    /// </summary>
+    private async Task<bool> DroppedForBridge(OctoprintWebhookDto data, long userId)
+    {
+        if (data.Topic is not { } topic || !PrintTopics.Contains(topic)
+            || !long.TryParse(data.DeviceIdentifier, out var printerId)
+            || !await printEventService.DropNotifierEventForBridge(userId, printerId, Connection.OctoPrintKind))
+        {
+            return false;
+        }
+
+        telemetry.TrackEvent("OctoPrint_Webhook_DroppedForBridge", new Dictionary<string, string> { { "Topic", topic } });
+        return true;
+    }
+
+    private static readonly HashSet<string> PrintTopics = ["Print Started", "Print Done", "Print Failed", "Error"];
 
     private bool isTestWebhook(OctoprintWebhookDto data)
     {
@@ -194,7 +220,11 @@ public class OctoprintController(
         return new PrintFinishedEvent
         {
             UserId = userId,
-            // Matched by file only, never by printer: the webhook has always matched this way.
+            // Only the webhook's own prints, on its printer when the device identifier names one
+            // (#291). Without these, a Print Done could finish the OctoPrint bridge's print of the
+            // same file, or the same file printing on another printer, and leave its own Printing.
+            PrinterId = long.TryParse(data.DeviceIdentifier, out var printerId) ? printerId : null,
+            ExternalSource = WebhookSource,
             FileHash = data.Meta?.Hash is { } hash ? StringToByteArray(hash) : null,
             FileName = data.Job?.File?.Name,
             Status = status,
