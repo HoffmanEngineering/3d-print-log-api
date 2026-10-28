@@ -338,7 +338,8 @@ public sealed class PrintService(
                 // Unset (null) rather than 0 when that side recorded nothing usable, as before.
                 u.ActualMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.ActualMg)) : (double?)null,
                 u.EstimatedMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.EstimatedMg)) : (double?)null,
-                u.Notes))
+                u.Notes,
+                u.Milliliters))
             .ToList();
 
         var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
@@ -1687,7 +1688,7 @@ public sealed class PrintService(
             .Where(p => p.Id == print.PrinterId)
             .Select(p => p.SlotCount)
             .FirstOrDefaultAsync() == 1;
-        MergeActualUsage(print, usage, singleTool);
+        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage));
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
@@ -1901,7 +1902,11 @@ public sealed class PrintService(
     /// multi-tool printer an unslotted row is ambiguous, so it is left to the in-order match.
     /// </para>
     /// </summary>
-    private void MergeActualUsage(Print print, IEnumerable<CompletePrintFilamentUsageDto> usage, bool singleTool)
+    private void MergeActualUsage(
+        Print print,
+        IEnumerable<CompletePrintFilamentUsageDto> usage,
+        bool singleTool,
+        IReadOnlyDictionary<Guid, SpoolMeasure> spools)
     {
         var rows = print.FilamentUsage!;
         var unlinked = rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id).ToList();
@@ -1984,8 +1989,10 @@ public sealed class PrintService(
             }
 
             // Validation guarantees a source. All three values are replaced so a figure from an
-            // earlier completion cannot outlive the measurement that produced it.
-            row.Source = incoming.ResolveSource()!.Value;
+            // earlier completion cannot outlive the measurement that produced it. The spool's own
+            // measurement decides between several the row carries (printlog-bridge#97).
+            var spool = row.FilamentId is { } linkedId ? spools.GetValueOrDefault(linkedId) : null;
+            row.Source = incoming.ResolveSourceFor(spool?.Source, spool?.HasDiameter ?? false)!.Value;
             row.AmountMg = incoming.AmountMg;
             row.LengthInM = incoming.LengthInM;
             row.VolumeMl = incoming.VolumeMl;
@@ -1993,6 +2000,35 @@ public sealed class PrintService(
             // older bridge's completion stays a measurement (printlog-bridge#82).
             row.ActualIsEstimate = incoming.ActualIsEstimate ?? false;
         }
+    }
+
+    /// <summary>How a spool is measured, and whether it has a diameter to convert a length with.</summary>
+    private sealed record SpoolMeasure(PrintFilament.SourceMeasurement Source, bool HasDiameter);
+
+    /// <summary>
+    /// How each spool a completion names is measured, for
+    /// <see cref="CompletePrintFilamentUsageDto.ResolveSourceFor"/>. A spool missing here falls
+    /// back to the row's own source.
+    /// </summary>
+    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(IEnumerable<CompletePrintFilamentUsageDto> usage)
+    {
+        var ids = usage.Select(u => u.FilamentId).OfType<Guid>().Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var spools = await context.Filaments
+            .Where(f => ids.Contains(f.Id))
+            .Select(f => new
+            {
+                f.Id,
+                f.Source,
+                HasDiameter = f.MaterialCategory.HasDiameter && f.DiameterMm > 0,
+            })
+            .ToListAsync();
+        // The two enums share their values: Weight 1, Length 2, Volume 3.
+        return spools.ToDictionary(f => f.Id, f => new SpoolMeasure((PrintFilament.SourceMeasurement)(int)f.Source, f.HasDiameter));
     }
 
     /// <summary>
@@ -2914,6 +2950,7 @@ public sealed class PrintService(
         public double ActualMg { get; init; }
         public double EstimatedMg { get; init; }
         public string? Notes { get; init; }
+        public double? Milliliters { get; init; }
 
         public static Expression<Func<PrintFilament, McpUsageRow>> For(long userId) =>
             ExpressionSplice.With<PrintFilament, double, bool, double, double, McpUsageRow>(
@@ -2942,6 +2979,13 @@ public sealed class PrintService(
                     ActualMg = actualMg,
                     EstimatedMg = estimatedMg,
                     Notes = pf.Notes,
+                    // The same side Mg resolved to, in milliliters, when that side was recorded
+                    // as a volume (resin, printlog-bridge#97). The actual volume counts even with
+                    // no spool to give it a weight.
+                    Milliliters = pf.Source == PrintFilament.SourceMeasurement.Volume && pf.VolumeMl > 0 ? pf.VolumeMl
+                        : actualMg > 0 ? null
+                        : pf.EstimatedSource == PrintFilament.SourceMeasurement.Volume && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl
+                        : null,
                 },
                 FilamentProfile.UsageRowMg,
                 FilamentProfile.UsageRowIsEstimated,

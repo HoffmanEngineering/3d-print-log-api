@@ -26,7 +26,10 @@ public sealed record MaterialUsage(
     Guid? FilamentId, string? Name, string? Brand, string? Material, string? Color,
     // Grams stays the RESOLVED figure (actual if recorded, else estimate); IsEstimated says which.
     double Grams, bool IsEstimated,
-    double? ActualGrams, double? EstimatedGrams, string? Notes);
+    double? ActualGrams, double? EstimatedGrams, string? Notes,
+    // The resolved figure in milliliters when that side was recorded as a volume (resin), else
+    // null. Grams stays the invariant unit; this is the unit the user measured the bottle in.
+    double? Milliliters = null);
 
 public sealed record PrintDetailResult(
     long Id, string Title, string Status, long? PrinterId, string? PrinterName,
