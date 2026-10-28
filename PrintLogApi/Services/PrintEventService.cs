@@ -19,6 +19,19 @@ public class PrintEventService(
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
 
+    /// <summary>
+    /// How recently a print must have been created for <see cref="HasPrintToFinish"/> to count it
+    /// (#295). The check lets a notifier or webhook finish through a live bridge so a print it
+    /// started before the bridge went live is closed. A print open longer than this is not that
+    /// job: it is one whose finish was lost (production has some from before #292 and #295), and
+    /// letting a later job of the same file close it would charge the spool for a job the bridge
+    /// already logs and charges. 72 hours covers a print started just before a mid-print bridge
+    /// install; prints rarely run longer. Nothing records when a bridge went live (a stale bridge
+    /// coming back is just a heartbeat), so creation time is the anchor. <see cref="Finished"/>
+    /// itself has no bound: without a live bridge a finish closes what it always did.
+    /// </summary>
+    public static readonly TimeSpan FinishForBridgeWithin = TimeSpan.FromHours(72);
+
     public async Task<PrintStartedResult> Started(PrintStartedEvent started)
     {
         if (await FindByExternalId(started) is { } existing)
@@ -116,8 +129,17 @@ public class PrintEventService(
 
     public Task<Print?> Finished(PrintFinishedEvent finished) => Finished(finished, retryIfRaced: true);
 
-    public async Task<bool> HasPrintToFinish(PrintFinishedEvent finished) =>
-        MatchingPrints(finished) is { } query && await query.AnyAsync();
+    public async Task<bool> HasPrintToFinish(PrintFinishedEvent finished)
+    {
+        if (MatchingPrints(finished) is not { } query)
+        {
+            return false;
+        }
+
+        // CreatedDate, not StartDate: SQLite cannot compare a DateTimeOffset.
+        var createdSince = clock.GetUtcNow().UtcDateTime - FinishForBridgeWithin;
+        return await query.AnyAsync(p => p.CreatedDate > createdSince);
+    }
 
     /// <summary>
     /// The Printing prints <paramref name="finished"/> could close, or null when it carries
@@ -297,10 +319,12 @@ public class PrintEventService(
     /// Moonraker notifier event is dropped only for a <c>moonraker</c> bridge (#150), an OctoPrint
     /// webhook event only for an <c>octoprint</c> one (#291). The drop count drives the notice on
     /// the connection that tells the user to remove the integration the bridge duplicates, which
-    /// only means something on a connection of that kind. Spoolman <c>/use</c> must agree with the
-    /// notifier drop: it lands only on a notifier print, which exists exactly when its events were
-    /// not dropped. The config block already leaves the notifier out for a printer with a bridge
-    /// of any kind.
+    /// only means something on a connection of that kind. Spoolman <c>/use</c> stays Moonraker-only
+    /// to agree with the notifier drop: it lands only on a notifier print, which exists only when
+    /// the notifier's start was not dropped. A notifier print started before its bridge went live
+    /// is still closed by its own finish (#295), but <c>/use</c> stops recording on it once the
+    /// bridge is live, so the bridge never shares a spool report with it. The config block
+    /// already leaves the notifier out for a printer with a bridge of any kind.
     /// </para>
     /// </summary>
     private IQueryable<Connection> LiveBridges(long userId, long printerId, string kind, DateTime now)

@@ -18,8 +18,10 @@ public interface IPrintEventService
     Task<Models.Print?> Finished(PrintFinishedEvent finished);
 
     /// <summary>
-    /// True when <see cref="Finished"/> would find a Printing print to close for this event.
-    /// Read-only.
+    /// True when <see cref="Finished"/> would find a Printing print to close for this event,
+    /// created within <see cref="PrintEventService.FinishForBridgeWithin"/>. Read-only. It decides
+    /// whether a notifier or webhook finish goes through a live bridge, so a print stuck in
+    /// Printing for longer is never revived by a later job of the same file.
     /// </summary>
     Task<bool> HasPrintToFinish(PrintFinishedEvent finished);
 
@@ -33,7 +35,9 @@ public interface IPrintEventService
 
     /// <summary>
     /// True when the printer has a live Moonraker bridge connection, as for
-    /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted.
+    /// <see cref="DropNotifierEventForBridge"/>, but read-only: nothing is counted. Spoolman
+    /// <c>/use</c> records nothing while this is true, even on a notifier print that started
+    /// before the bridge went live and whose finish will still close it (#295).
     /// </summary>
     Task<bool> IsBridgeLive(long userId, long printerId);
 }
