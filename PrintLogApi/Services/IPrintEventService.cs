@@ -18,6 +18,12 @@ public interface IPrintEventService
     Task<Models.Print?> Finished(PrintFinishedEvent finished);
 
     /// <summary>
+    /// True when <see cref="Finished"/> would find a Printing print to close for this event.
+    /// Read-only.
+    /// </summary>
+    Task<bool> HasPrintToFinish(PrintFinishedEvent finished);
+
+    /// <summary>
     /// True when the printer has a live bridge connection of <paramref name="kind"/>, so an event
     /// the printer's host software sent on its own (the Moonraker notifier for <c>moonraker</c>,
     /// the OctoPrint Webhooks plugin for <c>octoprint</c>) must be dropped: the bridge logs the

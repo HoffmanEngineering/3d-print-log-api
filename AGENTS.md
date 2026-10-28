@@ -425,8 +425,13 @@ adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceFo
   drop. A non-Moonraker bridge plus a hand-added notifier logs twice.
 - **The webhook only finishes its own prints** (#291): its `PrintFinishedEvent` carries
   `ExternalSource = octoprint-webhook` and the device identifier's printer, so a Print Done can't
-  close the bridge's `octoprint` print of the same file. A webhook print that started before its
-  bridge went live has its finish dropped too and stays in Printing; the owner finishes it by hand.
+  close the bridge's `octoprint` print of the same file. **A webhook finish is never dropped while
+  it has its own print to close** (`IPrintEventService.HasPrintToFinish`, same matching as
+  `Finished`): a print the webhook started before its bridge went live (installed mid-print, or
+  back from stale) is closed by the webhook and not counted, because a duplicate beats a lost
+  print (#290). Only `Print Started`, and finishes with nothing of the webhook's to close, are
+  dropped. The Moonraker notifier still drops its finishes unconditionally, so a notifier print
+  started before its bridge went live stays in Printing (follow-up).
 - **`PrintFilament.ActualIsEstimate`.** True when a row's actual figures are the slicer's estimate
   (most firmwares other than Klipper report only that). The spool is charged as usual; accuracy
   analytics drop the row from both sides of the material sample. `/complete` resets it with the

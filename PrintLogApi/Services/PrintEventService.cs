@@ -116,7 +116,14 @@ public class PrintEventService(
 
     public Task<Print?> Finished(PrintFinishedEvent finished) => Finished(finished, retryIfRaced: true);
 
-    private async Task<Print?> Finished(PrintFinishedEvent finished, bool retryIfRaced)
+    public async Task<bool> HasPrintToFinish(PrintFinishedEvent finished) =>
+        MatchingPrints(finished) is { } query && await query.AnyAsync();
+
+    /// <summary>
+    /// The Printing prints <paramref name="finished"/> could close, or null when it carries
+    /// nothing that correlates it with a start.
+    /// </summary>
+    private IQueryable<Print>? MatchingPrints(PrintFinishedEvent finished)
     {
         var query = context.Prints
             .Where(p => p.CreatedById == finished.UserId && p.Status == PrintStatus.Printing);
@@ -131,8 +138,6 @@ public class PrintEventService(
         }
         else
         {
-            // Nothing else correlates a finish with its start.
-            logger.LogWarning("Not enough information in the print event to find the matching print.");
             return null;
         }
 
@@ -144,6 +149,18 @@ public class PrintEventService(
         if (finished.ExternalSource is { } externalSource)
         {
             query = query.Where(p => p.ExternalSource == externalSource);
+        }
+
+        return query;
+    }
+
+    private async Task<Print?> Finished(PrintFinishedEvent finished, bool retryIfRaced)
+    {
+        if (MatchingPrints(finished) is not { } query)
+        {
+            // Nothing else correlates a finish with its start.
+            logger.LogWarning("Not enough information in the print event to find the matching print.");
+            return null;
         }
 
         var print = await query
