@@ -196,7 +196,10 @@ public class PrintLogReadTools(
         "estimate. 'printsWithEstimatedDuration' says how many prints in scope were estimated " +
         "rather than measured: when it is non-zero, present the total as approximate and say how " +
         "many were estimates. Never report an estimated total as a measured one. " +
-        "'printsWithEstimatedMaterial' does the same for filament weight.")]
+        "'printsWithEstimatedMaterial' does the same for filament weight. " +
+        "'materialUsedMilliliters' is the resin in scope, counted only from usage recorded as a " +
+        "volume; 'materialUsedGrams' includes that resin too, by density. Report resin in " +
+        "milliliters and never add the two figures.")]
     public Task<PrintSummaryResult> GetPrintSummary(
         [Description("Optional inclusive start of the UTC range. Omit with 'to' for all-time.")] DateTimeOffset? from = null,
         [Description("Optional inclusive end of the UTC range (at most 366 days after 'from').")] DateTimeOffset? to = null,

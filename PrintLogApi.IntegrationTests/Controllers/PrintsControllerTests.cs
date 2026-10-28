@@ -943,7 +943,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(
             "Start Date,Title,Printer Name,Printer Make,Printer Model,Estimated Print Time (s),"
             + "Estimated Filament Usage (g),Print Time (s),Filament Usage (g),Filament Type,Notes,"
-            + "Url,Status,View Status",
+            + "Url,Status,View Status,Estimated Filament Usage (mL),Filament Usage (mL)",
             lines[0]);
 
         var newerIndex = lines.FindIndex(l => l.Contains(newer.Title!, StringComparison.Ordinal));

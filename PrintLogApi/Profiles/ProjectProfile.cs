@@ -36,6 +36,8 @@ public class ProjectProfile : Profile
             // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
                 opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
+            .ForMember(dest => dest.TotalFilamentVolumeMl,
+                opt => opt.MapFrom(src => TotalFilamentVolumeMl(src)))
             .ForMember(dest => dest.DefaultImageId,
                 opt => opt.MapFrom(src => src.Images!
                     .Where(i => i.IsDefault)
@@ -72,6 +74,8 @@ public class ProjectProfile : Profile
             // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
                 opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
+            .ForMember(dest => dest.TotalFilamentVolumeMl,
+                opt => opt.MapFrom(src => TotalFilamentVolumeMl(src)))
             .ForMember(dest => dest.Images,
                 opt => opt.MapFrom(src => src.Images!.OrderBy(i => i.DisplayOrder)))
             // Resolved in AfterMap, not MapFrom: the rules live in ProjectDateResolver and
@@ -90,6 +94,13 @@ public class ProjectProfile : Profile
     /// </summary>
     private static long TotalFilamentWeightMg(Project project) =>
         project.Prints?.Sum(p => PrintMetrics.RowsMg(p.FilamentUsage)) ?? 0L;
+
+    /// <summary>
+    /// The project's resin in milliliters (#294): every print's rows by
+    /// <see cref="PrintMetrics.RowsMl"/>, rounded once on the total. Zero when the prints were not loaded.
+    /// </summary>
+    private static double TotalFilamentVolumeMl(Project project) =>
+        PrintMetrics.RowsMl(project.Prints?.SelectMany(p => p.FilamentUsage ?? Enumerable.Empty<PrintFilament>()));
 
     /// <summary>
     /// The single resolution site for all four REST project read paths. Every project path

@@ -41,6 +41,27 @@ public static class ExpressionSplice
     }
 
     /// <summary>
+    /// <see cref="With{TSource, TValue, TResult}"/> for three figures, filling the second through
+    /// fourth parameters of <paramref name="shape"/>.
+    /// </summary>
+    public static Expression<Func<TSource, TResult>> With<TSource, T1, T2, T3, TResult>(
+        Expression<Func<TSource, T1, T2, T3, TResult>> shape,
+        Expression<Func<TSource, T1>> first,
+        Expression<Func<TSource, T2>> second,
+        Expression<Func<TSource, T3>> third)
+    {
+        var source = shape.Parameters[0];
+        var body = shape.Body;
+        LambdaExpression[] figures = [first, second, third];
+        for (var i = 0; i < figures.Length; i++)
+        {
+            body = Replace(body, shape.Parameters[i + 1], Replace(figures[i].Body, figures[i].Parameters[0], source));
+        }
+
+        return Expression.Lambda<Func<TSource, TResult>>(body, source);
+    }
+
+    /// <summary>
     /// <see cref="With{TSource, TValue, TResult}"/> for four figures, filling the second through
     /// fifth parameters of <paramref name="shape"/>.
     /// </summary>

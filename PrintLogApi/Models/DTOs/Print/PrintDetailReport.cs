@@ -31,4 +31,10 @@ public class PrintDetailReport
     public PrintStatus Status { get; set; }
 
     public PrintViewStatus ViewStatus { get; set; }
+
+    /// <summary>Estimated resin in milliliters: the estimated side of each usage row recorded as a volume (#294).</summary>
+    public double? EstimatedFilamentUsageMl { get; set; }
+
+    /// <summary>Actual resin in milliliters: the actual side of each usage row recorded as a volume (#294).</summary>
+    public double? FilamentUsageMl { get; set; }
 }

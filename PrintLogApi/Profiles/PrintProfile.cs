@@ -30,6 +30,18 @@ public class PrintProfile : Profile
     private static readonly Expression<Func<Print, double?>> EstimatedMaterialG =
         ExpressionSplice.With<Print, int?, double?>((src, mg) => mg / 1000.0, EstimatedMaterialMg);
 
+    /// <summary>A print's estimated resin in mL: each row's estimated side when it was a volume (#294).</summary>
+    private static readonly Expression<Func<Print, double?>> EstimatedMaterialMl =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, double?>(
+            (src, row) => Math.Round(src.FilamentUsage!.Sum(pf => row(pf)), 2),
+            FilamentProfile.UsageRowEstimatedMl);
+
+    /// <summary>A print's actual resin in mL: each row's actual side when it was a volume (#294).</summary>
+    private static readonly Expression<Func<Print, double?>> ActualMaterialMl =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, double?>(
+            (src, row) => Math.Round(src.FilamentUsage!.Sum(pf => row(pf)), 2),
+            FilamentProfile.UsageRowActualMl);
+
     public PrintProfile()
     {
         CreateMap<AddPrintDTO, Print>()
@@ -55,6 +67,7 @@ public class PrintProfile : Profile
             .ForMember(dest => dest.SumActualFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.ActualRowsMg(src.FilamentUsage)))
             .ForMember(dest => dest.SumEstimatedFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.EstimatedRowsMg(src.FilamentUsage)))
             .ForMember(dest => dest.TotalFilamentWeightMg, opt => opt.MapFrom(src => (int)PrintMetrics.RowsMg(src.FilamentUsage)))
+            .ForMember(dest => dest.TotalFilamentVolumeMl, opt => opt.MapFrom(src => PrintMetrics.RowsMl(src.FilamentUsage)))
             .ForMember(dest => dest.ProjectId,
                 opt => opt.MapFrom(src => src.ProjectId))
             .ForMember(dest => dest.ProjectName,
@@ -103,6 +116,8 @@ public class PrintProfile : Profile
             // cannot disagree.
             .ForMember(dest => dest.EstimatedFilamentUsageG, opt => opt.MapFrom(EstimatedMaterialG))
             .ForMember(dest => dest.FilamentUsageG, opt => opt.MapFrom(ActualMaterialG))
+            .ForMember(dest => dest.EstimatedFilamentUsageMl, opt => opt.MapFrom(EstimatedMaterialMl))
+            .ForMember(dest => dest.FilamentUsageMl, opt => opt.MapFrom(ActualMaterialMl))
             // Combine the FilamentTypes with the display names of the filaments, deliminated by ;.
             .ForMember(dest => dest.FilamentType, opt => opt.MapFrom(src => (src.FilamentType + "; " + string.Join("; ", src.FilamentUsage!.Select(f => f.Filament!.DisplayName).ToList())).Trim().Trim(';').Trim()));
 

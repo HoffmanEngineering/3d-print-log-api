@@ -7,9 +7,10 @@ namespace PrintLogApi.Models.DTOs.Analytics;
 /// One period, carrying EVERY metric the tab's toggle can show. Four metrics in one payload
 /// rather than four requests: the toggle is instant, and the four numbers are guaranteed to
 /// describe the same set of prints. Cost is null when the cost row cap was exceeded.
+/// MaterialMl is the bucket's resin in milliliters (#294), beside MaterialMg and never added to it.
 /// </summary>
 public sealed record ActivitySeriesBucket(
-    int Index, DateOnly LocalStart, int Count, long DurationSeconds, long MaterialMg, decimal? Cost);
+    int Index, DateOnly LocalStart, int Count, long DurationSeconds, long MaterialMg, decimal? Cost, double MaterialMl);
 
 public sealed record CalendarDay(DateOnly Date, int Count);
 

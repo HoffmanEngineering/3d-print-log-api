@@ -20,5 +20,8 @@ public class PrintDetailReportMap : ClassMap<PrintDetailReport>
         Map(p => p.Url).Index(11).Name("Url");
         Map(p => p.Status).Index(12).Name("Status");
         Map(p => p.ViewStatus).Index(13).Name("View Status");
+        // Appended, never inserted (#294): spreadsheets built on this export address columns by position.
+        Map(p => p.EstimatedFilamentUsageMl).Index(14).Name("Estimated Filament Usage (mL)");
+        Map(p => p.FilamentUsageMl).Index(15).Name("Filament Usage (mL)");
     }
 }

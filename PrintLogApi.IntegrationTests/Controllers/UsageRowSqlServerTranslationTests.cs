@@ -43,6 +43,25 @@ public class UsageRowSqlServerTranslationTests(CustomWebApplicationFactory facto
         AssertUsageAggregatesConvert(sql, expected: 1);
     }
 
+    /// <summary>
+    /// The resin totals (#294) choose a row's side through UsageRowActualMg, so they convert as the
+    /// gram totals do and must keep density and diameter inside the aggregate too.
+    /// </summary>
+    [Fact]
+    public void MaterialMlExpr_AndItsOwnedVariant_ConvertWithoutAnOuterReference()
+    {
+        using var context = SqlServerContext();
+
+        foreach (var expression in new[] { PrintMetrics.MaterialMlExpr, PrintMetrics.OwnedMaterialMlExpr(42) })
+        {
+            var sql = context.Prints.AsNoTracking().Select(expression).ToQueryString();
+
+            Assert.Contains("[VolumeMl]", sql);
+            Assert.Contains("[EstimatedVolumeMl]", sql);
+            AssertUsageAggregatesConvert(sql, expected: 1);
+        }
+    }
+
     [Fact]
     public void MaterialIsEstimatedExpr_ReadsTheRowsActualMeasures()
     {
