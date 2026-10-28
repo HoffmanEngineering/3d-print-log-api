@@ -170,7 +170,10 @@ public sealed record SummaryMetrics(
     // agent say "about 40 hours, but 9 of the 13 are estimates" instead of passing off a blended
     // figure as measured.
     int PrintsWithEstimatedDuration,
-    int PrintsWithEstimatedMaterial);
+    int PrintsWithEstimatedMaterial,
+    // Resin in milliliters (#294): only usage recorded as a volume. MaterialUsedGrams still counts
+    // it too, by density; report resin in mL and never add the two.
+    double MaterialUsedMilliliters);
 
 /// <summary>
 /// Nested on purpose. The status filter and the status breakdown describe DIFFERENT populations:

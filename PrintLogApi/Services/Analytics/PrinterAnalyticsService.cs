@@ -81,7 +81,7 @@ public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvide
         // as the Func g.Sum takes; the durations stay inline.
         var stats = await scoped
             .GroupBy(p => p.PrinterId)
-            .SelectWith((g, material) => new
+            .SelectWith((g, material, milliliters) => new
             {
                 PrinterId = g.Key,
                 PrintCount = g.Count(),
@@ -104,7 +104,9 @@ public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvide
                 // `no linked spool OR an owned one`, not `linked AND owned` — an unlinked
                 // usage row is legitimate untracked material under the rowSum + other rule.
                 MaterialMg = g.Sum(material),
-            }, PrintMetrics.OwnedMaterialMgExpr(userId))
+                // Resin by volume (#294), on the same ownership rule.
+                MaterialMl = g.Sum(milliliters),
+            }, PrintMetrics.OwnedMaterialMgExpr(userId), PrintMetrics.OwnedMaterialMlExpr(userId))
             .ToDictionaryAsync(x => x.PrinterId, ct);
 
         // Intervals for utilization, plus the per-bucket time series: both need per-print
@@ -222,7 +224,8 @@ public sealed class PrinterAnalyticsService(PrintLogContext context, TimeProvide
                 // dividing by zero would report an infinite cost for an idle machine.
                 CostPerPrintHour: maintenanceCost.HasValue && printHours > 0
                     ? (double)maintenanceCost.Value / printHours
-                    : null));
+                    : null,
+                MaterialMl: PrintMetrics.RoundMl(s?.MaterialMl)));
         }
 
         rows = rows.OrderByDescending(r => r.PrintCount).ThenBy(r => r.PrinterId).ToList();

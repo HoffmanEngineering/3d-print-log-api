@@ -83,7 +83,8 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         Dictionary<string, int> StatusCounts,
         IReadOnlyList<SeriesBucket> Series,
         bool SeriesTruncated,
-        OverviewHighlights Highlights);
+        OverviewHighlights Highlights,
+        double MaterialMl);
 
     private async Task<AggregateResult> Aggregate(
         long userId, AnalyticsFilter filter,
@@ -107,6 +108,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         var durationEstimated = await scoped.CountAsync(PrintMetrics.DurationIsEstimatedExpr, ct);
         var materialMg = await scoped.SumAsync(PrintMetrics.MaterialMgExpr, ct);
         var materialEstimated = await scoped.CountAsync(PrintMetrics.MaterialIsEstimatedExpr, ct);
+        var materialMl = await scoped.SumAsync(PrintMetrics.MaterialMlExpr, ct);
 
         var statusCounts = await scoped
             .GroupBy(p => p.Status)
@@ -123,7 +125,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
 
         return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
             materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
-            series, seriesTruncated, highlights);
+            series, seriesTruncated, highlights, PrintMetrics.RoundMl(materialMl));
     }
 
     /// <summary>
@@ -349,6 +351,10 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
             TotalCost: new MoneyMetric(c.Cost, p?.Cost, c.Currency,
                 Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
                     c.CostExclusions.Select(kv => (kv.Key, kv.Value)).ToArray())),
-            AvgPrintTimeSeconds: new Metric(Avg(c), Avg(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)));
+            AvgPrintTimeSeconds: new Metric(Avg(c), Avg(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)),
+            // Resin by volume (#294): the same population and estimate exclusion as FilamentGrams.
+            FilamentMl: new Metric(c.MaterialMl, p?.MaterialMl,
+                Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
+                    (ExclusionReason.MaterialEstimated, c.MaterialEstimatedCount))));
     }
 }

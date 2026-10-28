@@ -15,6 +15,12 @@ public class ProjectSummaryDto : IProjectDates
     public int TotalPrintTimeInSeconds { get; set; }
     public int TotalEstimatedPrintTimeInSeconds { get; set; }
     public long TotalFilamentWeightMg { get; set; }
+
+    /// <summary>
+    /// Resin used, in milliliters (#294): only usage recorded as a volume, summed by the same
+    /// actual-else-estimate rule as the gram total. Beside TotalFilamentWeightMg, never added to it.
+    /// </summary>
+    public double TotalFilamentVolumeMl { get; set; }
     public int DefaultImageId { get; set; }
 
     /// <summary>

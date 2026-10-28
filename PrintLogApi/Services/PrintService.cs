@@ -2546,11 +2546,14 @@ public sealed class PrintService(
 
         // Each row resolved by FilamentProfile.UsageRowMg and rounded once in SQL, then summed
         // per project, exactly as the project pages total them.
+        // The resin in mL (#294) rides along: each row by FilamentProfile.UsageRowMl, as the
+        // project pages total it.
         var projectFilamentTotals = await context.PrintFilament
             .Where(pf => pf.Print.CreatedById == userId && pf.Print.ProjectId != null)
-            .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
+            .Select(ExpressionSplice.With((PrintFilament pf, double mg, double ml) => new { pf.Print.ProjectId, Mg = (long)Math.Round(mg), Ml = ml },
+                FilamentProfile.UsageRowMg, FilamentProfile.UsageRowMl))
             .GroupBy(x => x.ProjectId)
-            .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg) })
+            .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg), Ml = g.Sum(x => x.Ml) })
             .AsNoTracking()
             .ToListAsync();
 
@@ -2558,6 +2561,10 @@ public sealed class PrintService(
             // Non-null by the Where; the row is still needed for the value selector.
             .Where(x => x.ProjectId.HasValue)
             .ToDictionary(x => x.ProjectId!.Value, x => x.Mg);
+
+        var projectVolumeLookup = projectFilamentTotals
+            .Where(x => x.ProjectId.HasValue)
+            .ToDictionary(x => x.ProjectId!.Value, x => PrintMetrics.RoundMl(x.Ml));
 
         // Start only: the feed carries no finish date, so there is no reason to load the
         // duration columns or compute a finish here.
@@ -2911,6 +2918,7 @@ public sealed class PrintService(
                     TotalPrintTimeInSeconds = stats.TotalPrintTime,
                     TotalEstimatedPrintTimeInSeconds = stats.TotalEstPrintTime,
                     TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var fw) ? fw : 0L,
+                    TotalFilamentVolumeMl = projectVolumeLookup.TryGetValue(p.Id, out var fv) ? fv : 0.0,
                     DefaultProjectImageId = projectDefaultImageLookup.TryGetValue(p.Id, out var imgId) ? imgId : 0,
                     FilamentUsage = projectFilamentUsageLookup.TryGetValue(p.Id, out var fu) ? fu : new List<PrintFilamentSummaryDto>(),
                     Printers = projectPrinterLookup.TryGetValue(p.Id, out var printers) ? printers : new List<PrinterSummary>(),

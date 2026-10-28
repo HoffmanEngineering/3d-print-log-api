@@ -17,7 +17,7 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
     /// <summary>53 weeks. Beyond this a calendar heatmap is unreadable, not merely large.</summary>
     public const int MaxCalendarDays = 371;
 
-    private sealed record ActivityRow(DateTimeOffset StartDate, int DurationSeconds, int Count, long MaterialMg);
+    private sealed record ActivityRow(DateTimeOffset StartDate, int DurationSeconds, int Count, long MaterialMg, double MaterialMl);
 
     public async Task<ActivityResponse> GetActivity(long userId, AnalyticsFilter filter, CancellationToken ct)
     {
@@ -67,7 +67,7 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0,
             })
-            .SelectWith((g, material) => new
+            .SelectWith((g, material, milliliters) => new
             {
                 g.Key.StartDate,
                 g.Key.DurationSeconds,
@@ -80,9 +80,11 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
                 // Requiring a linked spool would silently drop it and make these totals
                 // disagree with /overview.
                 MaterialMg = g.Sum(material),
-            }, PrintMetrics.OwnedMaterialMgExpr(userId))
+                // Resin by volume (#294), on the same ownership rule.
+                MaterialMl = g.Sum(milliliters),
+            }, PrintMetrics.OwnedMaterialMgExpr(userId), PrintMetrics.OwnedMaterialMlExpr(userId))
             .ToListAsync(ct))
-            .Select(r => new ActivityRow(r.StartDate!.Value, r.DurationSeconds, r.Count, r.MaterialMg))
+            .Select(r => new ActivityRow(r.StartDate!.Value, r.DurationSeconds, r.Count, r.MaterialMg, r.MaterialMl))
             .ToList();
 
         coverage.Counted = rows.Sum(r => r.Count);
@@ -93,6 +95,7 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
         var counts = new int[buckets.Count];
         var durations = new long[buckets.Count];
         var materials = new long[buckets.Count];
+        var milliliters = new double[buckets.Count];
 
         var calendarCounts = new Dictionary<DateOnly, int>();
         var matrixObservations = new List<(int Weekday, int Hour, int Count)>();
@@ -115,6 +118,7 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
                 counts[index] += row.Count;
                 durations[index] += (long)row.DurationSeconds * row.Count;
                 materials[index] += row.MaterialMg;
+                milliliters[index] += row.MaterialMl;
             }
 
             calendarCounts[localDate] = calendarCounts.TryGetValue(localDate, out var n)
@@ -133,7 +137,8 @@ public sealed class ActivityAnalyticsService(PrintLogContext context, TimeProvid
         var series = buckets
             .Select(b => new ActivitySeriesBucket(
                 b.Index, b.LocalStart, counts[b.Index], durations[b.Index], materials[b.Index],
-                costByBucket is null ? null : costByBucket[b.Index]))
+                costByBucket is null ? null : costByBucket[b.Index],
+                PrintMetrics.RoundMl(milliliters[b.Index])))
             .ToList();
 
         var (calendar, calendarFrom, calendarTo, truncated) =

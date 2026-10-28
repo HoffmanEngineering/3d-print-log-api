@@ -45,6 +45,12 @@ public class GroupedFeedItemDto
     public int? TotalPrintTimeInSeconds { get; set; }
     public int? TotalEstimatedPrintTimeInSeconds { get; set; }
     public long? TotalFilamentWeightMg { get; set; }
+
+    /// <summary>
+    /// The project's resin in milliliters (#294), beside TotalFilamentWeightMg and never added to
+    /// it. Project rows only; a print row carries its own on Print.
+    /// </summary>
+    public double? TotalFilamentVolumeMl { get; set; }
     public int? DefaultProjectImageId { get; set; }
 
     /// <summary>

@@ -61,6 +61,39 @@ public class FilamentProfile : Profile
         UsageRowActualMg,
         UsageRowEstimatedMg);
 
+    /// <summary>
+    /// The actual side of <see cref="UsageRowMl"/>: the row's volume when its actual was recorded
+    /// as one (<see cref="PrintFilament.SourceMeasurement.Volume"/>), else 0. A row recorded by
+    /// weight or length also carries a volume derived from it, which is not resin and never counts.
+    /// </summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowActualMl = p =>
+        p.Source == PrintFilament.SourceMeasurement.Volume && p.VolumeMl.HasValue && p.VolumeMl > 0
+            ? p.VolumeMl.Value
+            : 0.0;
+
+    /// <summary>The estimated side of <see cref="UsageRowMl"/>, on the estimated measures.</summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowEstimatedMl = p =>
+        p.EstimatedSource == PrintFilament.SourceMeasurement.Volume && p.EstimatedVolumeMl.HasValue && p.EstimatedVolumeMl > 0
+            ? p.EstimatedVolumeMl.Value
+            : 0.0;
+
+    /// <summary>
+    /// Milliliters of resin a row used (#294): the mL counterpart of <see cref="UsageRowMg"/>, which
+    /// stays the invariant figure; the two are reported side by side and never added.
+    ///
+    /// <para>The side is chosen as <see cref="UsageRowMg"/> chooses it: the actual when the row has
+    /// one, else the estimate. A row "has an actual" when its actual converts to milligrams or is a
+    /// recorded volume. The second half matters for a vat with no bottle linked: its volume has no
+    /// density to convert by, so it is 0 g, but it is still the mL the print used. Only a side
+    /// recorded as a volume contributes, so a row whose actual is a weight counts 0 mL even when
+    /// its estimate was a volume.</para>
+    /// </summary>
+    public static readonly Expression<Func<PrintFilament, double>> UsageRowMl = ExpressionSplice.With<PrintFilament, double, double, double, double>(
+        (p, actualMg, actualMl, estimatedMl) => actualMg > 0 || actualMl > 0 ? actualMl : estimatedMl,
+        UsageRowActualMg,
+        UsageRowActualMl,
+        UsageRowEstimatedMl);
+
     /// <summary>Milligrams the spool's prints took off it, by <see cref="UsageRowMg"/>.</summary>
     private static readonly Expression<Func<Filament, double>> PrintUsageMg =
         ExpressionSplice.Inline<Filament, Func<PrintFilament, double>, double>((f, row) => f.PrintFilaments!.Sum(row), UsageRowMg);
@@ -172,7 +205,9 @@ public class FilamentProfile : Profile
         // SpoolNumber is ignored on every inbound map: it is assigned on create and never
         // settable by a client (#174), so a PUT echoing back a different number is a no-op.
         CreateMap<FilamentSummaryDto, Filament>()
-            .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore());
+            .ForMember(dest => dest.SpoolNumber, opt => opt.Ignore())
+            // Read-only, like SpoolNumber: a summary echoed back without it must not reset it.
+            .ForMember(dest => dest.Source, opt => opt.Ignore());
 
         CreateMap<AddFilamentDto, Filament>()
             .ForMember(dest => dest.MaterialCategoryNickname, src => src.MapFrom(src => !String.IsNullOrEmpty(src.MaterialCategoryNickname) ? src.MaterialCategoryNickname : "filament"))

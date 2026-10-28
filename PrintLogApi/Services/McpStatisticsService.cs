@@ -86,9 +86,11 @@ public sealed class McpStatisticsService(PrintLogContext context) : IMcpStatisti
         var timeSeconds = await prints.SumAsync(PrintMetrics.DurationSecondsExpr, ct);
         var estimatedDuration = await prints.CountAsync(PrintMetrics.DurationIsEstimatedExpr, ct);
         var estimatedMaterial = await prints.CountAsync(PrintMetrics.MaterialIsEstimatedExpr, ct);
+        var materialMl = await prints.SumAsync(PrintMetrics.MaterialMlExpr, ct);
 
         return new SummaryMetrics(
-            count, McpUnits.MgToGrams(materialMg), timeSeconds, estimatedDuration, estimatedMaterial);
+            count, McpUnits.MgToGrams(materialMg), timeSeconds, estimatedDuration, estimatedMaterial,
+            PrintMetrics.RoundMl(materialMl));
     }
 
     public async Task<PrintSummaryResult> GetPrintSummaryForMcp(

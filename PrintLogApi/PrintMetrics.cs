@@ -113,6 +113,49 @@ public static class PrintMetrics
                     && p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0),
             FilamentProfile.UsageRowIsEstimated);
 
+    /// <summary>
+    /// A print's resin in milliliters (#294): each usage row resolved by
+    /// <see cref="FilamentProfile.UsageRowMl"/>, summed. The mL figure beside
+    /// <see cref="MaterialMgExpr"/> and <see cref="RowsMgExpr"/> alike: the "other filament" scalar
+    /// is milligrams only, so there is no volume to add. Use as those are used: top level, or
+    /// spliced into a group projection with SelectWith. Round the total with <see cref="RoundMl"/>
+    /// once it is in memory.
+    /// </summary>
+    public static Expression<Func<Print, double>> MaterialMlExpr { get; } =
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, double>(
+            (p, row) => p.FilamentUsage!.Sum(pf => row(pf)),
+            FilamentProfile.UsageRowMl);
+
+    /// <summary>
+    /// <see cref="MaterialMlExpr"/> counting only the rows a user may see, by the same rule as
+    /// <see cref="OwnedMaterialMgExpr"/>: no linked spool, or one they own.
+    /// </summary>
+    public static Expression<Func<Print, double>> OwnedMaterialMlExpr(long userId) =>
+        ExpressionSplice.Inline<Print, Func<PrintFilament, double>, double>(
+            (p, row) => p.FilamentUsage!
+                .Where(pf => pf.Filament == null || pf.Filament.CreatedById == userId)
+                .Sum(pf => row(pf)),
+            FilamentProfile.UsageRowMl);
+
+    private static readonly Func<PrintFilament, double> RowMl = FilamentProfile.UsageRowMl.Compile();
+    private static readonly Func<PrintFilament, double> RowActualMl = FilamentProfile.UsageRowActualMl.Compile();
+    private static readonly Func<PrintFilament, double> RowEstimatedMl = FilamentProfile.UsageRowEstimatedMl.Compile();
+
+    /// <summary><see cref="MaterialMlExpr"/> over rows already in memory, rounded by <see cref="RoundMl"/>.</summary>
+    public static double RowsMl(IEnumerable<PrintFilament>? rows) => RoundMl(rows?.Sum(RowMl));
+
+    /// <summary>The actual side of <see cref="RowsMl"/>: each row's <see cref="FilamentProfile.UsageRowActualMl"/>.</summary>
+    public static double ActualRowsMl(IEnumerable<PrintFilament>? rows) => RoundMl(rows?.Sum(RowActualMl));
+
+    /// <summary>The estimated side of <see cref="RowsMl"/>: each row's <see cref="FilamentProfile.UsageRowEstimatedMl"/>.</summary>
+    public static double EstimatedRowsMl(IEnumerable<PrintFilament>? rows) => RoundMl(rows?.Sum(RowEstimatedMl));
+
+    /// <summary>
+    /// A milliliter total to the hundredth, away from zero, so a sum of doubles reads 82.6 rather
+    /// than 82.60000000000001. Rounded once, on the total, never per row.
+    /// </summary>
+    public static double RoundMl(double? milliliters) => Math.Round(milliliters ?? 0, 2, MidpointRounding.AwayFromZero);
+
     private static readonly Func<PrintFilament, double> RowMg = FilamentProfile.UsageRowMg.Compile();
     private static readonly Func<PrintFilament, double> RowActualMg = FilamentProfile.UsageRowActualMg.Compile();
     private static readonly Func<PrintFilament, double> RowEstimatedMg = FilamentProfile.UsageRowEstimatedMg.Compile();
