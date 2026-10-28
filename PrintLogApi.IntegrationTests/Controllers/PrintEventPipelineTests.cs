@@ -378,7 +378,262 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
 
     #endregion
 
+    #region OctoPrint webhook and bridge on one printer (#291)
+
+    public static TheoryData<string, string?> WebhookEvents => new()
+    {
+        { "octoprint-print-started.json", null },
+        { "octoprint-print-done.json", null },
+        { "octoprint-print-failed.json", null },
+        { "octoprint-print-failed.json", "Error" },
+    };
+
+    [Theory]
+    [MemberData(nameof(WebhookEvents))]
+    public async Task WebhookWithALiveOctoPrintBridge_DropsTheEvent_AndCountsIt(string fixture, string? topic)
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+        var run = NewRun();
+        var hash = NewHash();
+        // The bridge's print of the job, so a finish has something it could wrongly close.
+        var bridgePrint = await PostBridgePrintAsync(
+            printerId, instanceId, run, externalSource: "octoprint", fileName: $"{run}_benchy.gcode", fileHash: hash);
+        var before = DateTimeOffset.UtcNow;
+
+        var response = await PostOctoPrintAsync(fixture, printerId, run, hash, topic: topic);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(bridgePrint.Id, print.Id);
+        Assert.Equal(PrintStatus.Printing, print.Status);
+        var connection = await GetConnectionAsync(instanceId);
+        Assert.Equal(1, connection.DroppedNotifierEventCount);
+        Assert.True(connection.LastDroppedNotifierEventAt >= before.AddSeconds(-1));
+        Assert.True(connection.ShowNotifierNotice);
+    }
+
+    public static TheoryData<string, string?, PrintStatus> WebhookFinishes => new()
+    {
+        { "octoprint-print-done.json", null, PrintStatus.Success },
+        { "octoprint-print-failed.json", null, PrintStatus.Failed },
+        { "octoprint-print-failed.json", "Error", PrintStatus.Failed },
+    };
+
+    [Theory]
+    [MemberData(nameof(WebhookFinishes))]
+    public async Task WebhookFinish_ForAWebhookPrintStartedBeforeTheBridgeWentLive_ClosesIt_AndIsNotCounted(
+        string fixture, string? topic, PrintStatus expected)
+    {
+        // A duplicate beats a lost print (#290): a user who installs the bridge mid-print must
+        // not be left with the webhook's print stuck in Printing.
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash);
+        var webhookPrint = Assert.Single(await PrintsForRunAsync(run));
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+
+        Assert.Equal(HttpStatusCode.OK, (await PostOctoPrintAsync(fixture, printerId, run, hash, topic: topic)).StatusCode);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(webhookPrint.Id, print.Id);
+        Assert.Equal(expected, print.Status);
+        var connection = await GetConnectionAsync(instanceId);
+        Assert.Equal(0, connection.DroppedNotifierEventCount);
+        Assert.False(connection.ShowNotifierNotice);
+    }
+
+    [Fact]
+    public async Task WebhookFinish_ForAWebhookPrintStartedWhileTheBridgeWasStale_ClosesIt()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+        await BackdateLastSeenAsync(instanceId, TimeSpan.FromMinutes(20));
+        var run = NewRun();
+        var hash = NewHash();
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash);
+        // The bridge comes back with a heartbeat before the job ends.
+        await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind, instanceId: instanceId);
+
+        await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash);
+
+        Assert.Equal(PrintStatus.Success, Assert.Single(await PrintsForRunAsync(run)).Status);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task WebhookFinish_WithAWebhookPrintOpenOnAnotherPrinter_IsStillDropped()
+    {
+        var otherPrinter = await CreatePrinterAsync();
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+        await PostOctoPrintAsync("octoprint-print-started.json", otherPrinter, run, hash);
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+
+        await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash);
+
+        Assert.Equal(PrintStatus.Printing, Assert.Single(await PrintsForRunAsync(run)).Status);
+        Assert.Equal(1, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task WebhookUnhandledTopic_WithALiveOctoPrintBridge_IsNotCounted()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, NewRun(), NewHash(), topic: "Print Paused");
+
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task WebhookWithAStaleOctoPrintBridge_StillLogsThePrint()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+        await BackdateLastSeenAsync(instanceId, TimeSpan.FromMinutes(20));
+        var run = NewRun();
+        var hash = NewHash();
+
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash);
+        await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(OctoprintWebhookSource, print.ExternalSource);
+        Assert.Equal(PrintStatus.Success, print.Status);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Theory]
+    [InlineData(Connection.MoonrakerKind)]
+    [InlineData("prusalink")]
+    public async Task WebhookWithABridgeOfAnotherKind_StillLogsThePrint(string kind)
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: kind);
+        var run = NewRun();
+        var hash = NewHash();
+
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash);
+        await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash);
+
+        Assert.Equal(PrintStatus.Success, Assert.Single(await PrintsForRunAsync(run)).Status);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task WebhookWithAnOctoPrintBridgeOnAnotherPrinter_StillLogsThePrint()
+    {
+        var bridgedPrinter = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(bridgedPrinter, kind: Connection.OctoPrintKind);
+        var webhookPrinter = await CreatePrinterAsync();
+        var run = NewRun();
+
+        await PostOctoPrintAsync("octoprint-print-started.json", webhookPrinter, run, NewHash());
+
+        Assert.Equal(webhookPrinter, Assert.Single(await PrintsForRunAsync(run)).PrinterId);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task WebhookFinish_NeverClosesABridgePrint_AndClosesItsOwn()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash);
+        var webhookPrint = Assert.Single(await PrintsForRunAsync(run));
+        // The bridge logs the same file on the same printer later, with no live connection
+        // (so nothing is dropped): it is the newest Printing print of that file.
+        var bridgePrint = await PostBridgePrintAsync(
+            printerId, instanceId: null, run, externalSource: "octoprint", fileName: $"{run}_benchy.gcode", fileHash: hash);
+
+        await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash);
+
+        var prints = await PrintsForRunAsync(run);
+        Assert.Equal(PrintStatus.Success, prints.Single(p => p.Id == webhookPrint.Id).Status);
+        Assert.Equal(PrintStatus.Printing, prints.Single(p => p.Id == bridgePrint.Id).Status);
+    }
+
+    [Fact]
+    public async Task WebhookFinish_WithOnlyABridgePrint_ClosesNothing()
+    {
+        var printerId = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+        var bridgePrint = await PostBridgePrintAsync(
+            printerId, instanceId: null, run, externalSource: "octoprint", fileName: $"{run}_benchy.gcode", fileHash: hash);
+
+        Assert.Equal(HttpStatusCode.OK, (await PostOctoPrintAsync("octoprint-print-failed.json", printerId, run, hash)).StatusCode);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(bridgePrint.Id, print.Id);
+        Assert.Equal(PrintStatus.Printing, print.Status);
+        Assert.Empty(await NotificationsForPrintAsync(print.Id));
+    }
+
+    [Fact]
+    public async Task WebhookFinish_ClosesThePrintOnItsOwnPrinter()
+    {
+        var printerA = await CreatePrinterAsync();
+        var printerB = await CreatePrinterAsync();
+        var run = NewRun();
+        var hash = NewHash();
+        await PostOctoPrintAsync("octoprint-print-started.json", printerA, run, hash);
+        // The same file starts on a second OctoPrint later, so it is the newest match.
+        await PostOctoPrintAsync("octoprint-print-started.json", printerB, run, hash);
+
+        await PostOctoPrintAsync("octoprint-print-done.json", printerA, run, hash);
+
+        var prints = await PrintsForRunAsync(run);
+        Assert.Equal(PrintStatus.Success, prints.Single(p => p.PrinterId == printerA).Status);
+        Assert.Equal(PrintStatus.Printing, prints.Single(p => p.PrinterId == printerB).Status);
+    }
+
+    [Fact]
+    public async Task WebhookAndOctoPrintBridgeBothActive_RecordOnePrintPerJob()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+        var run = NewRun();
+        var hash = NewHash();
+
+        // The bridge logs the job…
+        var bridgePrint = await PostBridgePrintAsync(
+            printerId, instanceId, run, externalSource: "octoprint", fileName: $"{run}_benchy.gcode", fileHash: hash);
+        // …and the Webhooks plugin still configured on the same OctoPrint reports it too.
+        Assert.Equal(HttpStatusCode.OK, (await PostOctoPrintAsync("octoprint-print-started.json", printerId, run, hash)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PostOctoPrintAsync("octoprint-print-done.json", printerId, run, hash)).StatusCode);
+
+        var print = Assert.Single(await PrintsForRunAsync(run));
+        Assert.Equal(bridgePrint.Id, print.Id);
+        Assert.Equal("octoprint", print.ExternalSource);
+        // The bridge finishes its own print; the webhook's Done must not have.
+        Assert.Equal(PrintStatus.Printing, print.Status);
+        Assert.Equal(2, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    [Fact]
+    public async Task OctoPrintBridge_DoesNotDropMoonrakerNotifierEvents()
+    {
+        var printerId = await CreatePrinterAsync();
+        var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
+        var run = NewRun();
+
+        await PostNotifierAsync("moonraker-notifier-started.json", printerId, run);
+
+        Assert.Equal("moonraker-notifier", Assert.Single(await PrintsForRunAsync(run)).ExternalSource);
+        Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
+    }
+
+    #endregion
+
     #region Helpers
+
+    private const string OctoprintWebhookSource = "octoprint-webhook";
 
     private static string NewRun() => $"run{Guid.NewGuid():N}";
 
@@ -417,9 +672,13 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
     /// Sends an OctoPrint fixture as the plugin does when snapshots are on: multipart form fields,
     /// objects as JSON text.
     /// </summary>
-    private async Task<HttpResponseMessage> PostOctoPrintAsync(string fixture, long printerId, string run, string hash, bool withSnapshot = false, byte[]? snapshotBytes = null)
+    private async Task<HttpResponseMessage> PostOctoPrintAsync(string fixture, long printerId, string run, string hash, bool withSnapshot = false, byte[]? snapshotBytes = null, string? topic = null)
     {
         var fields = JsonSerializer.Deserialize<Dictionary<string, string>>(System.IO.File.ReadAllText(FixturePath(fixture)))!;
+        if (topic is not null)
+        {
+            fields["topic"] = topic;
+        }
         var content = new MultipartFormDataContent();
         foreach (var (name, value) in fields)
         {
@@ -469,7 +728,8 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         return (await response.Content.ReadFromJsonAsync<ConnectionDto>(TestContext.Current.CancellationToken))!;
     }
 
-    private async Task<PrintDetailDTO> PostBridgePrintAsync(long printerId, string instanceId, string run)
+    private async Task<PrintDetailDTO> PostBridgePrintAsync(
+        long printerId, string? instanceId, string run, string externalSource = "moonraker", string? fileName = null, string? fileHash = null)
     {
         var response = await SendAsync(HttpMethod.Post, "/api/Prints", new AddPrintDTO
         {
@@ -477,9 +737,10 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
             PrinterId = printerId,
             Status = PrintStatus.Printing,
             ViewStatus = PrintViewStatus.Private,
-            FileName = $"{run}_Benchy_0.2mm_PLA_MK3S_1h5m.gcode",
-            ExternalSource = "moonraker",
-            ExternalId = $"{instanceId}:000042",
+            FileName = fileName ?? $"{run}_Benchy_0.2mm_PLA_MK3S_1h5m.gcode",
+            FileHash = fileHash,
+            ExternalSource = externalSource,
+            ExternalId = $"{instanceId ?? Guid.NewGuid().ToString()}:000042",
             ConnectionInstanceId = instanceId,
             FilamentUsage = [],
         });

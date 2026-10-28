@@ -20,11 +20,17 @@ public class Connection
     public const string MoonrakerKind = "moonraker";
 
     /// <summary>
+    /// The <see cref="Kind"/> the printlog-bridge registers for an OctoPrint printer (its adapter's
+    /// name, printlog-bridge#83). Its prints carry the external source <c>octoprint</c>.
+    /// </summary>
+    public const string OctoPrintKind = "octoprint";
+
+    /// <summary>
     /// The kinds printlog-bridge registers, one per adapter (printlog-bridge#82): Moonraker,
     /// OctoPrint, PrusaLink, Bambu Lab and Elegoo's SDCP. A connection of any of them is a bridge
     /// that logs its printer's prints itself.
     /// </summary>
-    public static readonly string[] BridgeKinds = [MoonrakerKind, "octoprint", "prusalink", "bambu", "sdcp"];
+    public static readonly string[] BridgeKinds = [MoonrakerKind, OctoPrintKind, "prusalink", "bambu", "sdcp"];
 
     /// <summary>Whether <paramref name="kind"/> is one of <see cref="BridgeKinds"/>, ignoring case.</summary>
     public static bool IsBridgeKind(string? kind) =>
@@ -39,7 +45,7 @@ public class Connection
     /// </summary>
     public static PrintSource? PrintSourceForKind(string? kind) => kind?.ToLowerInvariant() switch
     {
-        "octoprint" => PrintSource.OctoPrint,
+        OctoPrintKind => PrintSource.OctoPrint,
         "prusalink" => PrintSource.PrusaLink,
         "bambu" => PrintSource.Bambu,
         "sdcp" => PrintSource.Sdcp,
@@ -89,8 +95,10 @@ public class Connection
     public DateTime LastSeenAt { get; set; }
 
     /// <summary>
-    /// Moonraker notifier events dropped because this connection was logging the same printer
-    /// (#150). Non-zero means the user still has a <c>[notifier]</c> section they can remove.
+    /// Events dropped because this connection was logging the same printer: Moonraker notifier
+    /// events on a <c>moonraker</c> connection (#150), OctoPrint webhook events on an
+    /// <c>octoprint</c> one (#291). Non-zero means the user still has a <c>[notifier]</c> section,
+    /// or the OctoPrint Webhooks plugin, they can remove. The name predates the second.
     /// </summary>
     public int DroppedNotifierEventCount { get; set; }
 

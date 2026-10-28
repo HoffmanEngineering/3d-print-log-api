@@ -56,8 +56,9 @@ public class ConnectionDto
     public ConnectionStatus Status { get; set; }
 
     /// <summary>
-    /// Moonraker notifier events dropped because this connection logs the same printer. Each job
-    /// is logged once, by the connection.
+    /// Events dropped because this connection logs the same printer: the Moonraker notifier's on a
+    /// <c>moonraker</c> connection, the OctoPrint Webhooks plugin's on an <c>octoprint</c> one. Each
+    /// job is logged once, by the connection.
     /// </summary>
     public int DroppedNotifierEventCount { get; set; }
 
@@ -68,8 +69,9 @@ public class ConnectionDto
     public DateTimeOffset? NotifierNoticeDismissedAt { get; set; }
 
     /// <summary>
-    /// Whether to suggest removing the <c>[notifier]</c> section from moonraker.conf: events were
-    /// dropped and the notice has not been dismissed.
+    /// Whether to suggest removing the integration this connection duplicates (the <c>[notifier]</c>
+    /// section of moonraker.conf for <c>moonraker</c>, the OctoPrint Webhooks plugin for
+    /// <c>octoprint</c>): events were dropped and the notice has not been dismissed.
     /// </summary>
     public bool ShowNotifierNotice { get; set; }
 

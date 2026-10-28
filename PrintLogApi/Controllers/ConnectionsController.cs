@@ -162,11 +162,14 @@ public class ConnectionsController(
         return NoContent();
     }
 
-    /// <summary>Dismisses the suggestion to remove the Moonraker notifier, for good.</summary>
+    /// <summary>
+    /// Dismisses the suggestion to remove the Moonraker notifier or the OctoPrint Webhooks plugin,
+    /// for good.
+    /// </summary>
     /// <remarks>
-    /// The suggestion shows while `showNotifierNotice` is true: notifier events for this
-    /// connection's printer were dropped because the connection logs the same jobs. Dismissing it
-    /// keeps the count.
+    /// The suggestion shows while `showNotifierNotice` is true: notifier (or, on an `octoprint`
+    /// connection, webhook) events for this connection's printer were dropped because the
+    /// connection logs the same jobs. Dismissing it keeps the count.
     /// </remarks>
     /// <param name="instanceId">The agent's own stable id for the printer.</param>
     /// <response code="204">The notice was dismissed, or already had been.</response>

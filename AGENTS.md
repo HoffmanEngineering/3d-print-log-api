@@ -416,10 +416,22 @@ adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceFo
   ApiKey**, what bridge prints have always been; `PrintSource.Moonraker` means the notifier, and
   moving bridge prints there changes their achievements, sync `source` and silent-printer email.
 - **"Has a bridge" is not one question.** The Spoolman config block leaves out the notifier for a
-  bridge of any kind. The notifier dedupe (#150, `PrintEventService.LiveBridges`) and Spoolman
-  `/use` stay Moonraker-only: the drop count drives the "remove `[notifier]`" notice, and `/use`
-  must agree with the drop. A non-Moonraker bridge plus a hand-added notifier logs twice; that and
-  the OctoPrint webhook dedupe belong with the OctoPrint adapter.
+  bridge of any kind. The event dedupe (`PrintEventService.LiveBridges`) matches one kind: the
+  Moonraker notifier is dropped for a live `moonraker` bridge (#150), the OctoPrint Webhooks plugin
+  (`OctoprintController`: Print Started, Print Done, Print Failed, Error) for a live `octoprint`
+  one (#291). Both count on the same `Connection.DroppedNotifierEventCount`, so `showNotifierNotice`
+  on an `octoprint` connection means "turn off the Webhooks plugin" and the UI must word it by the
+  connection's kind. Spoolman `/use` stays Moonraker-only, because it must agree with the notifier
+  drop. A non-Moonraker bridge plus a hand-added notifier logs twice.
+- **The webhook only finishes its own prints** (#291): its `PrintFinishedEvent` carries
+  `ExternalSource = octoprint-webhook` and the device identifier's printer, so a Print Done can't
+  close the bridge's `octoprint` print of the same file. **A webhook finish is never dropped while
+  it has its own print to close** (`IPrintEventService.HasPrintToFinish`, same matching as
+  `Finished`): a print the webhook started before its bridge went live (installed mid-print, or
+  back from stale) is closed by the webhook and not counted, because a duplicate beats a lost
+  print (#290). Only `Print Started`, and finishes with nothing of the webhook's to close, are
+  dropped. The Moonraker notifier still drops its finishes unconditionally, so a notifier print
+  started before its bridge went live stays in Printing (follow-up).
 - **`PrintFilament.ActualIsEstimate`.** True when a row's actual figures are the slicer's estimate
   (most firmwares other than Klipper report only that). The spool is charged as usual; accuracy
   analytics drop the row from both sides of the material sample. `/complete` resets it with the
