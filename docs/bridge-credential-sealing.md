@@ -236,6 +236,9 @@ and entry ids are SQL Server identity values that are not reused.
 | `moonraker` | `moonraker_api_key` |
 | `octoprint` | `api_key` |
 | `sdcp` | none |
+| `duet` | `password` (optional: RepRapFirmware often has none) |
+| `flashforge` | `check_code` (the code on the printer's screen; the serial is not secret) |
+| `anycubic` | none (LAN mode takes its credentials from the printer's `/ctrl` handshake) |
 
 These are printlog-bridge's adapters' `app_secrets`, the same names as the interim
 `[app_printer <id>]` section. `username` is not secret, but sealing it keeps one mechanism. The API

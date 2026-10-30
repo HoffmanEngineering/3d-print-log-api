@@ -178,7 +178,32 @@ public class BridgeCredentialSealingTests
     [InlineData("prusalink", new[] { "password", "username", "api_key" })]
     [InlineData("moonraker", new[] { "moonraker_api_key" })]
     [InlineData("octoprint", new[] { "api_key" })]
+    [InlineData("duet", new[] { "password" })]
+    [InlineData("flashforge", new[] { "check_code" })]
     [InlineData("sdcp", new string[0])]
+    [InlineData("anycubic", new string[0])]
     public void EachKind_TakesItsAdaptersFields(string kind, string[] fields)
         => Assert.Equal(fields, SealedCredentials.FieldsFor(kind));
+
+    [Fact]
+    public void AFlashForge_CantConnectWithoutItsCheckCode()
+    {
+        Assert.Equal([["check_code"]], SealedCredentials.RequiredGroups("flashforge"));
+        Assert.Equal([["check_code"]], SealedCredentials.CarriedGroups("flashforge"));
+    }
+
+    [Fact]
+    public void ADuetPassword_IsOptional_ButMovesWithThePrinterWhenSet()
+    {
+        // RepRapFirmware often has no password; one that is set refuses the bridge without it.
+        Assert.Empty(SealedCredentials.RequiredGroups("duet"));
+        Assert.Equal([["password"]], SealedCredentials.CarriedGroups("duet"));
+    }
+
+    [Fact]
+    public void AnAnycubic_NeedsNoSealedCredential()
+    {
+        Assert.Empty(SealedCredentials.RequiredGroups("anycubic"));
+        Assert.Empty(SealedCredentials.CarriedGroups("anycubic"));
+    }
 }

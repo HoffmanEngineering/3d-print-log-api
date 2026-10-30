@@ -165,8 +165,9 @@ public static partial class BridgeRules
     /// <summary>
     /// The port an adapter uses when none is given, so "no port" and the default name the same
     /// printer while two instances on one host (Moonraker on 7125 and 7126) stay apart. Moonraker,
-    /// Bambu (MQTT) and PrusaLink follow printlog-bridge's adapters; OctoPrint and SDCP have no
-    /// adapter yet and take their usual ports. 0 for anything else.
+    /// Bambu (MQTT), PrusaLink, OctoPrint and SDCP follow printlog-bridge's adapters; Duet (HTTP),
+    /// FlashForge (its HTTP API, 8898) and Anycubic (LAN-mode HTTP, 18910) have no adapter yet and
+    /// take their usual ports. 0 for anything else.
     /// </summary>
     public static int DefaultPort(string? kind) => kind switch
     {
@@ -175,6 +176,9 @@ public static partial class BridgeRules
         "prusalink" => 80,
         "octoprint" => 80,
         "sdcp" => 3030,
+        "duet" => 80,
+        "flashforge" => 8898,
+        "anycubic" => 18910,
         _ => 0,
     };
 

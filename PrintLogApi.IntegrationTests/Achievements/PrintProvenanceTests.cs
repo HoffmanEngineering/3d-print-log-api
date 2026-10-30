@@ -142,6 +142,9 @@ public class PrintProvenanceTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData("prusalink", PrintSource.PrusaLink)]
     [InlineData("bambu", PrintSource.Bambu)]
     [InlineData("sdcp", PrintSource.Sdcp)]
+    [InlineData("duet", PrintSource.Duet)]
+    [InlineData("flashforge", PrintSource.FlashForge)]
+    [InlineData("anycubic", PrintSource.Anycubic)]
     public async Task AddPrint_ApiKeyCandidate_LinkedToAnAdapterConnection_RecordsTheAdaptersSource(string kind, PrintSource expected)
     {
         var (scope, db, prints, user, printer) = await ArrangeAsync();
