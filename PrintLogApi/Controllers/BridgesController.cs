@@ -61,11 +61,6 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             return DeviceTokenRequired();
         }
 
-        if (DeviceGrantClaim.IsSuperseded(User))
-        {
-            return Superseded();
-        }
-
         var (report, error) = BridgeCheckInValidator.Validate(body);
         if (report is null)
         {
@@ -150,11 +145,6 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
         if (DeviceGrantClaim.Get(User) is not { } grantId)
         {
             return DeviceTokenRequired();
-        }
-
-        if (DeviceGrantClaim.IsSuperseded(User))
-        {
-            return Superseded();
         }
 
         if (await bridges.PollDesiredVersionAsync(grantId, ct) is not { } version)
@@ -617,15 +607,6 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     }
 
     private static string Id(long id) => id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// A token a re-pair replaced still logs prints and heartbeats during its grace (api#287),
-    /// but nothing more: whoever holds a copy of it (perhaps a thief, which is why the re-pair
-    /// cleared the pending key) must not register the bridge, report a key or read the desired
-    /// list, which carries sealed printer credentials.
-    /// </summary>
-    private ObjectResult Superseded() => CodedProblem(StatusCodes.Status403Forbidden,
-        "This device token was replaced by a re-pair. Use the new token.", DeviceTokenErrors.TokenSuperseded);
 
     private ObjectResult DeviceTokenRequired() => CodedProblem(StatusCodes.Status403Forbidden,
         "Only a paired bridge's device token can check in.", "device_token_required");

@@ -12,7 +12,7 @@ public interface IConnectionService
     /// request authenticated with, or null: the connection records it as its bridge when that
     /// grant has a bridge (printlog-bridge#103), and records none otherwise.
     /// </summary>
-    Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null);
+    Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null, bool keepBridgeLink = false);
 
     /// <summary>The caller's connections, optionally only those bound to one printer.</summary>
     Task<IReadOnlyList<Connection>> List(long userId, long? printerId);

@@ -94,6 +94,18 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
                 return;
             }
 
+            if (identity.Superseded && (access.Scope is null || !DeviceScopes.DuringRepairGrace.Contains(access.Scope)))
+            {
+                // A token a re-pair replaced, inside its grace (api#287): prints and heartbeats
+                // only, so a device whose re-pair reply was lost keeps logging, while a copy of
+                // the old token (perhaps a thief's) can read nothing, create nothing, check in,
+                // report a key or fetch sealed credentials.
+                TrackRejected(telemetry, "superseded", identity.GrantId);
+                await DeviceTokenErrors.WriteAsync(context, StatusCodes.Status403Forbidden, DeviceTokenErrors.TokenSuperseded,
+                    "This device token was replaced by a re-pair. Use the new token.");
+                return;
+            }
+
             context.User = CreatePrincipal(identity);
             await grants.TouchLastUsedAsync(identity.GrantId, context.RequestAborted);
         }

@@ -18,8 +18,9 @@ public static class DeviceTokenErrors
     public const string Throttled = "device_token_throttled";
 
     /// <summary>
-    /// 403 at bridge check-in and the desired list: the token is one a re-pair replaced, still in
-    /// its grace (api#287). It logs prints and heartbeats until the grace ends, nothing more.
+    /// 403 on any device endpoint but the <see cref="DeviceScopes.DuringRepairGrace"/> ones: the
+    /// token is one a re-pair replaced, still in its grace (api#287). It logs prints and sends
+    /// heartbeats until the grace ends, nothing more. Switch to the new token; it is not "re-pair".
     /// </summary>
     public const string TokenSuperseded = "device_token_superseded";
 

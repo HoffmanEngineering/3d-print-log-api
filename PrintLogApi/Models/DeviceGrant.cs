@@ -76,4 +76,12 @@ public class DeviceGrant
 
     /// <summary>When the owner was last told this device paired (api#287): the per-device throttle on that notice.</summary>
     public DateTime? PairingNoticeAt { get; set; }
+
+    /// <summary>
+    /// What that notice described (api#287): a SHA-256 of the scopes, the client id and the
+    /// request's address (<c>DeviceGrantService.NoticeFingerprint</c>), never the address itself.
+    /// A re-pair within the throttle that differs from it is noticed again.
+    /// </summary>
+    [MaxLength(64)]
+    public string? PairingNoticeFor { get; set; }
 }

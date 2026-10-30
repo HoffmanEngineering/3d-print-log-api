@@ -17,6 +17,13 @@ namespace PrintLogApi.Migrations
                 type: "datetime2",
                 nullable: true);
 
+            migrationBuilder.AddColumn<string>(
+                name: "PairingNoticeFor",
+                table: "DeviceGrants",
+                type: "nvarchar(64)",
+                maxLength: 64,
+                nullable: true);
+
             migrationBuilder.AddColumn<DateTime>(
                 name: "PreviousTokenExpiresAt",
                 table: "DeviceGrants",
@@ -45,6 +52,10 @@ namespace PrintLogApi.Migrations
 
             migrationBuilder.DropColumn(
                 name: "PairingNoticeAt",
+                table: "DeviceGrants");
+
+            migrationBuilder.DropColumn(
+                name: "PairingNoticeFor",
                 table: "DeviceGrants");
 
             migrationBuilder.DropColumn(

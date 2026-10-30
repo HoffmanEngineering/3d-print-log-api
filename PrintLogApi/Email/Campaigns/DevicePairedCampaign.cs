@@ -51,15 +51,15 @@ public sealed class DevicePairedCampaign(
         => Task.FromResult<IReadOnlyList<DueEmail>>([]);
 
     /// <summary>
-    /// The outbox row for one pairing, added to the pairing's own save. Keyed by device and the
-    /// pairing's time, since a new grant has no id yet; the per-device throttle keeps two notices
-    /// of one device an hour apart.
+    /// The outbox row for one pairing, added to the pairing's own save. Keyed by device, the
+    /// pairing's time and what it describes (<paramref name="noticeFor"/>, a fingerprint), since a
+    /// new grant has no id yet and two different notices of one device can share an instant.
     /// </summary>
-    public static EmailOutbox Queue(long userId, Guid deviceId, string deviceName, string scopes, DateTimeOffset pairedAt, bool repaired, string? ipAddress) => new()
+    public static EmailOutbox Queue(long userId, Guid deviceId, string deviceName, string scopes, DateTimeOffset pairedAt, bool repaired, string? ipAddress, string noticeFor) => new()
     {
         UserId = userId,
         Campaign = CampaignName,
-        PeriodKey = $"device:{deviceId:N}:{pairedAt.UtcDateTime.ToString("yyyyMMdd'T'HHmmss.fffffff'Z'", CultureInfo.InvariantCulture)}",
+        PeriodKey = $"device:{deviceId:N}:{pairedAt.UtcDateTime.ToString("yyyyMMdd'T'HHmmss.fffffff'Z'", CultureInfo.InvariantCulture)}:{noticeFor[..16]}",
         Status = EmailOutboxStatus.Pending,
         SendAfter = pairedAt,
         NextAttemptAt = pairedAt,

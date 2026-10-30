@@ -19,8 +19,18 @@ public class DeviceRepairGraceTests(CustomWebApplicationFactory factory) : IClas
 
     private Task<HttpResponseMessage> Send(HttpRequestMessage request) => _client.SendAsync(request, TestContext.Current.CancellationToken);
 
+    /// <summary>
+    /// Whether the token works, by a heartbeat: one of the two things a superseded token may still
+    /// do (api#287). OK for 200 or 201, else the status.
+    /// </summary>
     private async Task<HttpStatusCode> MeAsync(string token)
-        => (await Send(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), token))).StatusCode;
+    {
+        var response = await Send(WithDevice(new HttpRequestMessage(HttpMethod.Put, $"/api/Connections/probe-{Guid.NewGuid():N}")
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(new { kind = "moonraker", displayName = "probe" }),
+        }, token));
+        return response.StatusCode is HttpStatusCode.Created ? HttpStatusCode.OK : response.StatusCode;
+    }
 
     private async Task<JsonElement> PairWithAsync(string pairingToken, Guid deviceId, HttpStatusCode? expected = null)
     {
@@ -54,7 +64,10 @@ public class DeviceRepairGraceTests(CustomWebApplicationFactory factory) : IClas
 
         // The new token's first use proves the device has it, which ends the grace.
         Assert.Equal(HttpStatusCode.OK, await MeAsync(current));
-        var after = await Send(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), old));
+        var after = await Send(WithDevice(new HttpRequestMessage(HttpMethod.Put, $"/api/Connections/probe-{Guid.NewGuid():N}")
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(new { kind = "moonraker", displayName = "probe" }),
+        }, old));
         Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
         Assert.Equal(DeviceTokenErrors.InvalidToken, await CodeOf(after));
         Assert.Equal(HttpStatusCode.OK, await MeAsync(current));

@@ -32,6 +32,13 @@ public static class DeviceScopes
     /// </summary>
     public const string BridgeSync = "bridge:sync";
 
+    /// <summary>
+    /// What a token a re-pair replaced may still do during its grace (api#287): log prints and
+    /// send heartbeats. Every other device endpoint answers it 403 <c>device_token_superseded</c>
+    /// (<c>DeviceTokenMiddleware</c>). Widening this is a security decision, like the allow-list.
+    /// </summary>
+    public static readonly IReadOnlySet<string> DuringRepairGrace = new HashSet<string>(StringComparer.Ordinal) { PrintsWrite, ConnectionsWrite };
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         PrintsRead, PrintsWrite, PrintersRead, PrintersCreate, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite, BridgeSync,

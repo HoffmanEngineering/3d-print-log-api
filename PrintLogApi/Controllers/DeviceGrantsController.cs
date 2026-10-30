@@ -56,13 +56,15 @@ public class DeviceGrantsController(
     /// Pairs a device: exchanges an Auth0 device-flow access token (in `Authorization: Bearer`,
     /// for the pairing audience, at most a few minutes old) for a device token. The grant gets the
     /// device scopes the access token carries. Pairing the same `deviceId` again replaces its
-    /// token and keeps the grant; the replaced token keeps logging prints and heartbeats (not
-    /// check-in, not the desired list) until the new one is first used, for at most 10 minutes.
+    /// token and keeps the grant; the replaced token keeps logging prints and sending heartbeats
+    /// (every other device endpoint answers it 403 `device_token_superseded`) until the new one
+    /// is first used, for at most 10 minutes.
     /// Each access token is exchanged once, whatever device sends it: a retry after a lost reply
     /// runs the device flow again. One requested with `offline_access` (or refreshed) is refused.
     /// The owner gets a security email (queued with the pairing, so a pairing whose email cannot
-    /// be queued fails) and an in-app notification, both naming the address the request came
-    /// from, at most once per device an hour; a new device always gets them.
+    /// be queued fails) and an in-app notification, both naming the public address the request
+    /// came from. A new device always gets them; a re-pair within the hour of the last notice
+    /// only when its scopes, client or address differ.
     /// </summary>
     /// <response code="201">A new device was paired. The body carries its token, shown only this once.</response>
     /// <response code="200">The device was already paired; its token was replaced.</response>
@@ -109,9 +111,11 @@ public class DeviceGrantsController(
 
         var clientId = User.FindFirst("azp")?.Value;
 
-        // As the app sees it: the client when forwarded headers are enabled (App Service sets
-        // ASPNETCORE_FORWARDEDHEADERS_ENABLED), else the front end. For the notice only.
-        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+        // As the app sees it: the client only when the host's forwarded headers are on
+        // (ASPNETCORE_FORWARDEDHEADERS_ENABLED; nothing in Startup reads X-Forwarded-For), else
+        // the front end's private address, which PairingNoticeAddress leaves out. For the notice
+        // only: never telemetry or logs.
+        var clientIp = PairingNoticeAddress.For(HttpContext.Connection.RemoteIpAddress);
         PairedDevice paired;
         try
         {
@@ -141,6 +145,14 @@ public class DeviceGrantsController(
         {
             // The email is already queued with the pairing; this is the best-effort extra.
             await notifier.NotifyInAppAsync(grant, repaired: !paired.Created, clientIp);
+        }
+        else
+        {
+            // An identical re-pair within the hour of the last notice. Never the address.
+            telemetry.TrackEvent("DevicePairingNoticeThrottled", new Dictionary<string, string>
+            {
+                ["GrantId"] = grant.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
         }
 
         var dto = new PairedDeviceDto(grant.Id, grant.DeviceId, grant.Name, DeviceScopes.Split(grant.Scopes),

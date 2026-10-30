@@ -39,7 +39,7 @@ public class DevicePairedCampaignTests : IClassFixture<CustomWebApplicationFacto
     private static EmailOutbox Row(long userId, bool repaired = false, string deviceName = "printlog-bridge on voron", string? ipAddress = "203.0.113.7")
     {
         var row = DevicePairedCampaign.Queue(userId, Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff"), deviceName,
-            "connections:write prints:write printers:slots", PairedAt, repaired, ipAddress);
+            "connections:write prints:write printers:slots", PairedAt, repaired, ipAddress, new string('0', 64));
         row.Id = 7;
         return row;
     }

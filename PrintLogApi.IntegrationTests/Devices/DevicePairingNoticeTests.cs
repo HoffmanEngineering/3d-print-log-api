@@ -29,7 +29,13 @@ public class DevicePairingNoticeTests(DevicePairingNoticeTests.FromAddressFactor
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>TestServer leaves the peer address unset; this sets it, as forwarded headers would behind App Service.</summary>
+    /// <summary>A test sets the peer address it wants with this header; without it the peer is <see cref="ClientIp"/>.</summary>
+    public const string PeerHeader = "X-Test-Peer";
+
+    /// <summary>
+    /// TestServer leaves the peer address unset; this sets it (from <see cref="PeerHeader"/>, or
+    /// <see cref="ClientIp"/>), as the socket or forwarded headers would in production.
+    /// </summary>
     public sealed class FromAddressFactory : CustomWebApplicationFactory
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -44,7 +50,7 @@ public class DevicePairingNoticeTests(DevicePairingNoticeTests.FromAddressFactor
             {
                 app.Use((context, call) =>
                 {
-                    context.Connection.RemoteIpAddress = IPAddress.Parse(ClientIp);
+                    context.Connection.RemoteIpAddress = IPAddress.Parse(context.Request.Headers[PeerHeader].FirstOrDefault() ?? ClientIp);
                     return call(context);
                 });
                 next(app);
@@ -87,6 +93,47 @@ public class DevicePairingNoticeTests(DevicePairingNoticeTests.FromAddressFactor
         Assert.Equal("/settings", notification.ActionUrl);
     }
 
+    private async Task<JsonNode> PairFromAsync(string peer, string label)
+    {
+        var subject = NewSubject(label);
+        var request = PairRequest(PairingToken(subject), Guid.NewGuid());
+        request.Headers.Add(PeerHeader, peer);
+        Assert.Equal(HttpStatusCode.Created, (await _client.SendAsync(request, Ct)).StatusCode);
+        var (emails, notifications) = await NoticesAsync(factory, subject);
+        var snapshot = JsonNode.Parse(Assert.Single(emails).Exposure!)!;
+        snapshot["message"] = Assert.Single(notifications).Message;
+        return snapshot;
+    }
+
+    [Fact]
+    public async Task AnIPv4MappedAddress_IsShownAsIPv4()
+    {
+        var snapshot = await PairFromAsync("::ffff:203.0.113.9", "notice-mapped");
+
+        Assert.Equal("203.0.113.9", (string?)snapshot["ipAddress"]);
+        Assert.Contains("from IP address 203.0.113.9.", (string?)snapshot["message"], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("10.1.2.3")]
+    [InlineData("172.16.0.9")]
+    [InlineData("192.168.1.20")]
+    [InlineData("127.0.0.1")]
+    [InlineData("169.254.130.5")]
+    [InlineData("::1")]
+    [InlineData("fe80::1")]
+    [InlineData("fd12:3456::1")]
+    [InlineData("::ffff:10.0.0.4")]
+    public async Task APrivateLoopbackOrLinkLocalAddress_IsLeftOut(string peer)
+    {
+        // Behind App Service without forwarded headers, the peer is the front end's private
+        // address: naming it would tell the owner nothing, or something wrong.
+        var snapshot = await PairFromAsync(peer, "notice-private");
+
+        Assert.Null((string?)snapshot["ipAddress"]);
+        Assert.DoesNotContain("IP address", (string?)snapshot["message"], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task TheAddress_NeverReachesTelemetry()
     {
@@ -115,6 +162,54 @@ public class DevicePairingNoticeTests(DevicePairingNoticeTests.FromAddressFactor
         (emails, notifications) = await NoticesAsync(factory, subject);
         Assert.Equal(2, emails.Count);
         Assert.Equal(2, notifications.Count);
+    }
+
+    [Fact]
+    public async Task AThrottledRePair_IsTracked_WithoutTheAddress()
+    {
+        var subject = NewSubject("notice-throttled-event");
+        var deviceId = Guid.NewGuid();
+        await PairAsync(_client, subject, deviceId: deviceId);
+        var repaired = await PairAsync(_client, subject, deviceId: deviceId);
+
+        var id = repaired.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var throttled = Assert.Single(factory.Telemetry.Events("DevicePairingNoticeThrottled"), e => e.Properties.TryGetValue("GrantId", out var g) && g == id);
+        Assert.DoesNotContain(throttled.Properties.Values, v => v.Contains(ClientIp, StringComparison.Ordinal));
+    }
+
+    private sealed class ServiceWorld(PrintLogContext db, IServiceProvider sp, long userId)
+    {
+        public SettableTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero));
+
+        public Guid DeviceId { get; } = Guid.NewGuid();
+
+        public async Task<bool> PairAsync(string[] scopes, string clientId = "client", string? ip = "198.51.100.4") =>
+            (await new DeviceGrantService(db, sp.GetRequiredService<IMemoryCache>(), Options.Create(new DevicePairingOptions { MaxGrantsPerUser = 25 }), Clock)
+                .PairAsync(userId, DeviceId, "bridge", scopes, clientId,
+                    new PairingTokenSpend(DeviceTokenFormat.Hash("jti:" + Guid.NewGuid()), Clock.GetUtcNow().UtcDateTime.AddMinutes(15)), ip, Ct)).Noticed;
+    }
+
+    [Fact]
+    public async Task WithinTheHour_OnlyAnIdenticalRePair_IsThrottled()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var user = await Email.EmailTestData.CreateUserAsync(db);
+        var w = new ServiceWorld(db, scope.ServiceProvider, user.Id);
+
+        Assert.True(await w.PairAsync([DeviceScopes.PrintsWrite]));
+        Assert.False(await w.PairAsync([DeviceScopes.PrintsWrite]));
+
+        // What the owner was told no longer describes the device: tell them again.
+        Assert.True(await w.PairAsync([DeviceScopes.PrintsWrite, DeviceScopes.BridgeSync]), "wider scopes");
+        Assert.False(await w.PairAsync([DeviceScopes.PrintsWrite, DeviceScopes.BridgeSync]));
+        Assert.True(await w.PairAsync([DeviceScopes.PrintsWrite, DeviceScopes.BridgeSync], clientId: "other-client"), "another client");
+        Assert.True(await w.PairAsync([DeviceScopes.PrintsWrite, DeviceScopes.BridgeSync], clientId: "other-client", ip: "198.51.100.99"), "another address");
+        Assert.False(await w.PairAsync([DeviceScopes.PrintsWrite, DeviceScopes.BridgeSync], clientId: "other-client", ip: "198.51.100.99"));
+
+        var grant = await db.DeviceGrants.AsNoTracking().SingleAsync(g => g.DeviceId == w.DeviceId, Ct);
+        Assert.DoesNotContain("198.51.100.99", System.Text.Json.JsonSerializer.Serialize(grant), StringComparison.Ordinal);
+        Assert.Equal(4, await db.EmailOutbox.CountAsync(o => o.UserId == user.Id, Ct));
     }
 
     [Fact]

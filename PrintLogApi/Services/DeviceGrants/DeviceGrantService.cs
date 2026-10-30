@@ -93,7 +93,9 @@ public sealed class DeviceGrantService(
 
     /// <summary>
     /// The pairing notice's per-device throttle (api#287): a re-pair within this of the last
-    /// notice queues none. A new device is a new grant and always gets one.
+    /// notice queues none, if it is identical to what that notice described (same scopes, client
+    /// and address; <see cref="DeviceGrant.PairingNoticeFor"/>). A new device is a new grant and
+    /// always gets one.
     /// </summary>
     public static readonly TimeSpan PairingNoticeRepeatAfter = TimeSpan.FromHours(1);
 
@@ -179,12 +181,16 @@ public sealed class DeviceGrantService(
 
         // The pairing notice, queued in the same save too: a pairing that commits has its email
         // queued, and one whose email cannot be queued does not commit. The throttle is decided
-        // on the row this save rotates, so racing re-pairs cannot both claim it.
-        var noticed = grant.PairingNoticeAt is not { } lastNotice || lastNotice <= now - PairingNoticeRepeatAfter;
+        // on the row this save rotates, so racing re-pairs cannot both claim it, and only an
+        // identical re-pair is throttled: new scopes, another client or another address is news.
+        var noticeFor = NoticeFingerprint(grant.Scopes, clientId, clientIp);
+        var noticed = grant.PairingNoticeAt is not { } lastNotice || lastNotice <= now - PairingNoticeRepeatAfter
+            || grant.PairingNoticeFor != noticeFor;
         if (noticed)
         {
             grant.PairingNoticeAt = now;
-            context.EmailOutbox.Add(DevicePairedCampaign.Queue(userId, deviceId, name, grant.Scopes, at, repaired: !created, clientIp));
+            grant.PairingNoticeFor = noticeFor;
+            context.EmailOutbox.Add(DevicePairedCampaign.Queue(userId, deviceId, name, grant.Scopes, at, repaired: !created, clientIp, noticeFor));
         }
 
         try
@@ -276,6 +282,14 @@ public sealed class DeviceGrantService(
             throw new PairingTokenUsedException();
         }
     }
+
+    /// <summary>
+    /// What a pairing notice described, as one SHA-256 (lowercase hex): the scopes, the client
+    /// and the address. Only equality is ever asked of it.
+    /// </summary>
+    internal static string NoticeFingerprint(string scopes, string? clientId, string? clientIp) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{scopes}\n{clientId}\n{clientIp}")));
 
     private Task<bool> IsSpentAsync(PairingTokenSpend pairingToken, CancellationToken ct) =>
         context.PairingTokenUses.AnyAsync(u => u.TokenKeyHash == pairingToken.KeyHash, ct);
