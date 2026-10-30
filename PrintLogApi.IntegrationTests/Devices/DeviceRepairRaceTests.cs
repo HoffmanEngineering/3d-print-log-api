@@ -49,7 +49,7 @@ public class DeviceRepairRaceTests(CustomWebApplicationFactory factory) : IClass
         var deviceId = Guid.NewGuid();
 
         var first = await new DeviceGrantService(shared, cache, options, TimeProvider.System)
-            .PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", Spend("first"), TestContext.Current.CancellationToken);
+            .PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", Spend("first"), null, TestContext.Current.CancellationToken);
 
         var racing = new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlite(shared.Database.GetDbConnection())
@@ -61,7 +61,7 @@ public class DeviceRepairRaceTests(CustomWebApplicationFactory factory) : IClass
         var repair = Spend("repair");
 
         await Assert.ThrowsAsync<DeviceGrantRevokedException>(() =>
-            service.PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", repair, TestContext.Current.CancellationToken));
+            service.PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", repair, null, TestContext.Current.CancellationToken));
 
         await using var check = new PrintLogContext(new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlite(shared.Database.GetDbConnection()).Options);
@@ -71,6 +71,6 @@ public class DeviceRepairRaceTests(CustomWebApplicationFactory factory) : IClass
         // So the same approval cannot pair the device back afterwards.
         await Assert.ThrowsAsync<PairingTokenUsedException>(() =>
             new DeviceGrantService(check, cache, options, TimeProvider.System)
-                .PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", repair, TestContext.Current.CancellationToken));
+                .PairAsync(userId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", repair, null, TestContext.Current.CancellationToken));
     }
 }

@@ -557,12 +557,28 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("PairedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("PairingNoticeAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PairingNoticeFor")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("PreviousTokenExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PreviousTokenHash")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Scopes")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("TokenHash")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -571,6 +587,8 @@ namespace PrintLogApi.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PreviousTokenHash");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();

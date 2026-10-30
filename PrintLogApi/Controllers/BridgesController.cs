@@ -45,7 +45,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// </remarks>
     /// <response code="200">Checked in. The body carries the desired printers.</response>
     /// <response code="400">The report is malformed (`code`: `invalid_check_in`).</response>
-    /// <response code="403">Not a device token (`code`: `device_token_required`), or the grant lacks `bridge:sync` (`insufficient_scope`).</response>
+    /// <response code="403">Not a device token (`code`: `device_token_required`), the grant lacks `bridge:sync` (`insufficient_scope`), or the token is one a re-pair replaced (`device_token_superseded`: use the new one).</response>
     [HttpPut("me")]
     [Authorize]
     [DeviceAccess(DeviceScopes.BridgeSync)]
@@ -130,6 +130,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// </summary>
     /// <response code="200">The desired printers, with an `ETag`.</response>
     /// <response code="304">Unchanged since the `ETag` sent.</response>
+    /// <response code="403">Not a device token, the grant lacks `bridge:sync`, or the token is one a re-pair replaced (`device_token_superseded`).</response>
     /// <response code="404">The bridge has not checked in yet (`code`: `bridge_not_registered`).</response>
     [HttpGet("me/desired")]
     [Authorize]

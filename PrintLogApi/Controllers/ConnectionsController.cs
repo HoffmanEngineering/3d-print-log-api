@@ -122,7 +122,8 @@ public class ConnectionsController(
 
         try
         {
-            var (connection, created) = await connectionService.Upsert(userId, instanceId, dto, DeviceGrantClaim.Get(User));
+            var (connection, created) = await connectionService.Upsert(userId, instanceId, dto, DeviceGrantClaim.Get(User),
+                keepBridgeLink: DeviceGrantClaim.IsSuperseded(User));
             var body = await ToDtoAsync(connection);
             if (!created)
             {

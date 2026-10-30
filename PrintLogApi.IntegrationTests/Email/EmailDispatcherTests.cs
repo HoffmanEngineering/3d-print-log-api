@@ -368,6 +368,66 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
     }
 
+    // ---------- security notices (api#287) ----------
+
+    private static TestCampaign SecurityNotice() => new("security-test")
+    {
+        IsSecurityNotice = true,
+        CountsTowardFrequencyCap = false,
+        ExemptFromFrequencyCap = true,
+    };
+
+    [Theory]
+    [InlineData(EmailSettingTypes.All)]
+    [InlineData(EmailSettingTypes.MonthlyRecap)]
+    public async Task SecurityNotice_IgnoresOptOutsTheNoticeGateAndTheHoldout(int settingType)
+    {
+        using var h = new Harness(_factory, SecurityNotice());
+        h.Options.Notice.Required = true;
+        h.Options.HoldoutPercent = 100;
+        var user = await h.UserAsync();
+        await new EmailPreferenceService(h.Db, new TelemetryClient(new TelemetryConfiguration())).SetAsync(user.Id, settingType, false, h.Ct);
+        var row = await h.QueueAsync(user.Id);
+
+        await h.TickAsync();
+
+        Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+        var message = Assert.Single(h.Transport.Sent);
+        Assert.False(message.Headers.ContainsKey("List-Unsubscribe"));
+        Assert.False(message.Headers.ContainsKey("List-Unsubscribe-Post"));
+    }
+
+    [Fact]
+    public async Task SecurityNotice_StillHonorsTheSuppressionList()
+    {
+        using var h = new Harness(_factory, SecurityNotice());
+        var user = await h.UserAsync();
+        h.Db.EmailSuppressions.Add(new EmailSuppression { EmailHash = h.Hasher.Hash(user.Email!), Reason = EmailSuppressionReason.Bounce, CreatedAt = Now });
+        await h.Db.SaveChangesAsync(h.Ct);
+        var row = await h.QueueAsync(user.Id);
+
+        await h.TickAsync();
+
+        AssertSkipped(await h.ReloadAsync(row.Id), EmailSkipReasons.Suppressed);
+    }
+
+    [Fact]
+    public async Task SecurityNotice_IsOnUnlessSwitchedOff()
+    {
+        using var h = new Harness(_factory, SecurityNotice());
+        h.Options.Campaigns.Clear();
+        var user = await h.UserAsync();
+        var row = await h.QueueAsync(user.Id);
+
+        await h.TickAsync();
+        Assert.Equal(EmailOutboxStatus.Sent, (await h.ReloadAsync(row.Id)).Status);
+
+        h.Options.Campaigns[EmailOptions.CampaignKey("security-test")] = new CampaignOptions { Enabled = false };
+        var second = await h.QueueAsync(user.Id, period: "p2");
+        await h.TickAsync();
+        AssertSkipped(await h.ReloadAsync(second.Id), EmailSkipReasons.DisabledCampaign);
+    }
+
     [Fact]
     public async Task AllowList_DefersOthers_SendsListed()
     {

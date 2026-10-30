@@ -147,11 +147,12 @@ public class DevicePairingTests(CustomWebApplicationFactory factory) : IClassFix
         Assert.Equal(first.GetProperty("id").GetInt64(), second.GetProperty("id").GetInt64());
         Assert.Equal("renamed", second.GetProperty("name").GetString());
 
-        var old = await _client.SendAsync(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), first.GetProperty("token").GetString()!), TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, old.StatusCode);
-
+        // The old token stops once the new one is used (or after the grace, api#287).
         var current = await _client.SendAsync(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), second.GetProperty("token").GetString()!), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, current.StatusCode);
+
+        var old = await _client.SendAsync(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), first.GetProperty("token").GetString()!), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, old.StatusCode);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();

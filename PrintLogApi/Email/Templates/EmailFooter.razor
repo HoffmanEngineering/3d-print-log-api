@@ -29,9 +29,7 @@ else if (Model.Supporter == SupporterLine.Thanks)
 }
 <p style="margin:0 0 8px 0;">@Model.ReasonLine</p>
 <p style="margin:0 0 8px 0;">
-    <a href="@Model.ManageUrl" class="em-link" style="color:#5c6bc0;">Manage email preferences</a>
-    &nbsp;&middot;&nbsp;
-    <a href="@Model.UnsubscribeUrl" class="em-link" style="color:#5c6bc0;">Unsubscribe</a>
+    <a href="@Model.ManageUrl" class="em-link" style="color:#5c6bc0;">Manage email preferences</a>@UnsubscribeLink
 </p>
 <p style="margin:0 0 8px 0;">@Model.PostalAddress</p>
 <p style="margin:0;"><a href="@Model.HomeUrl" class="em-link" style="color:#5c6bc0;">3dprintlog.com</a></p>
@@ -44,4 +42,14 @@ else if (Model.Supporter == SupporterLine.Thanks)
     public const string ThanksLine = "Thanks for supporting 3D Print Log as a Pro member.";
 
     [Parameter, EditorRequired] public EmailFooterModel Model { get; set; } = default!;
+
+    /// <summary>
+    /// The separator and the unsubscribe link, or nothing on a security notice (api#287), which
+    /// offers no way out. Built as markup so the campaign footers render byte for byte as before:
+    /// a Razor block here would change the whitespace every approved file pins. The URL goes
+    /// through the encoder Razor itself uses for attributes.
+    /// </summary>
+    private MarkupString UnsubscribeLink => Model.UnsubscribeUrl is { } url
+        ? new MarkupString("\n    &nbsp;&middot;&nbsp;\n    <a href=\"" + System.Text.Encodings.Web.HtmlEncoder.Default.Encode(url) + "\" class=\"em-link\" style=\"color:#5c6bc0;\">Unsubscribe</a>")
+        : default;
 }

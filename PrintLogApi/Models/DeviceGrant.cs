@@ -35,10 +35,13 @@ public class DeviceGrant
     /// <summary>
     /// SHA-256 of the device token, lowercase hex. The token itself is never stored. It carries
     /// 256 random bits, so an unsalted hash is not guessable, and it is what the per-request
-    /// lookup matches on.
+    /// lookup matches on. A concurrency token, with <see cref="PreviousTokenHash"/>: a re-pair
+    /// rotates the pair it read, and fails (then reads again) if a racing re-pair or the new
+    /// token's first use changed either since (api#287).
     /// </summary>
     [Required]
     [MaxLength(64)]
+    [ConcurrencyCheck]
     public string TokenHash { get; set; } = null!;
 
     /// <summary>The granted device scopes, space-separated and sorted (<c>DeviceScopes</c>).</summary>
@@ -57,4 +60,28 @@ public class DeviceGrant
 
     /// <summary>Last authenticated request, stamped at most every few minutes.</summary>
     public DateTime? LastUsedDate { get; set; }
+
+    /// <summary>
+    /// The token a re-pair replaced (api#287), still accepted until <see cref="PreviousTokenExpiresAt"/>
+    /// or the first use of <see cref="TokenHash"/>, whichever comes first, so a device whose
+    /// re-pair reply was lost is not stranded. Same format as <see cref="TokenHash"/>. Deleting
+    /// the row (a revoke) ends both. A concurrency token: see <see cref="TokenHash"/>.
+    /// </summary>
+    [MaxLength(64)]
+    [ConcurrencyCheck]
+    public string? PreviousTokenHash { get; set; }
+
+    /// <summary>When <see cref="PreviousTokenHash"/> stops working, whether or not the new token was used.</summary>
+    public DateTime? PreviousTokenExpiresAt { get; set; }
+
+    /// <summary>When the owner was last told this device paired (api#287): the per-device throttle on that notice.</summary>
+    public DateTime? PairingNoticeAt { get; set; }
+
+    /// <summary>
+    /// What that notice described (api#287): a SHA-256 of the scopes, the client id and the
+    /// request's address (<c>DeviceGrantService.NoticeFingerprint</c>), never the address itself.
+    /// A re-pair within the throttle that differs from it is noticed again.
+    /// </summary>
+    [MaxLength(64)]
+    public string? PairingNoticeFor { get; set; }
 }

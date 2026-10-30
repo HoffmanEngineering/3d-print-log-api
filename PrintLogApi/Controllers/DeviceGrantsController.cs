@@ -20,6 +20,7 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 public class DeviceGrantsController(
     IDeviceGrantService grants,
+    IDevicePairingNotifier notifier,
     IOptions<DevicePairingOptions> options,
     TelemetryClient telemetry) : ControllerBase
 {
@@ -55,8 +56,15 @@ public class DeviceGrantsController(
     /// Pairs a device: exchanges an Auth0 device-flow access token (in `Authorization: Bearer`,
     /// for the pairing audience, at most a few minutes old) for a device token. The grant gets the
     /// device scopes the access token carries. Pairing the same `deviceId` again replaces its
-    /// token and keeps the grant. Each access token pairs once, and one requested with
-    /// `offline_access` (or refreshed) is refused.
+    /// token and keeps the grant; the replaced token keeps logging prints and sending heartbeats
+    /// (every other device endpoint answers it 403 `device_token_superseded`) until the new one
+    /// is first used, for at most 10 minutes.
+    /// Each access token is exchanged once, whatever device sends it: a retry after a lost reply
+    /// runs the device flow again. One requested with `offline_access` (or refreshed) is refused.
+    /// The owner gets a security email (queued with the pairing, so a pairing whose email cannot
+    /// be queued fails) and an in-app notification, both naming the public address the request
+    /// came from. A new device always gets them; a re-pair within the hour of the last notice
+    /// only when its scopes, client or address differ.
     /// </summary>
     /// <response code="201">A new device was paired. The body carries its token, shown only this once.</response>
     /// <response code="200">The device was already paired; its token was replaced.</response>
@@ -102,11 +110,17 @@ public class DeviceGrantsController(
         }
 
         var clientId = User.FindFirst("azp")?.Value;
+
+        // As the app sees it: the client only when the host's forwarded headers are on
+        // (ASPNETCORE_FORWARDEDHEADERS_ENABLED; nothing in Startup reads X-Forwarded-For), else
+        // the front end's private address, which PairingNoticeAddress leaves out. For the notice
+        // only: never telemetry or logs.
+        var clientIp = PairingNoticeAddress.For(HttpContext.Connection.RemoteIpAddress);
         PairedDevice paired;
         try
         {
             paired = await grants.PairAsync(userId, deviceId, name, scopes, clientId,
-                DevicePairingAuthentication.SpendOf(User, Request.Headers.Authorization.ToString(), options.Value), ct);
+                DevicePairingAuthentication.SpendOf(User, Request.Headers.Authorization.ToString(), options.Value), clientIp, ct);
         }
         catch (PairingTokenUsedException)
         {
@@ -126,6 +140,20 @@ public class DeviceGrantsController(
 
         var grant = paired.Grant;
         telemetry.TrackEvent(paired.Created ? "DevicePaired" : "DeviceRepaired", GrantProperties(grant.Id, clientId, grant.Scopes));
+
+        if (paired.Noticed)
+        {
+            // The email is already queued with the pairing; this is the best-effort extra.
+            await notifier.NotifyInAppAsync(grant, repaired: !paired.Created, clientIp);
+        }
+        else
+        {
+            // An identical re-pair within the hour of the last notice. Never the address.
+            telemetry.TrackEvent("DevicePairingNoticeThrottled", new Dictionary<string, string>
+            {
+                ["GrantId"] = grant.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+        }
 
         var dto = new PairedDeviceDto(grant.Id, grant.DeviceId, grant.Name, DeviceScopes.Split(grant.Scopes),
             AsUtc(grant.CreatedDate), paired.Token, "Bearer");
@@ -175,6 +203,35 @@ public class DeviceGrantsController(
 
         telemetry.TrackEvent("DeviceGrantRevoked", GrantProperties(revoked.Id, revoked.ClientId, revoked.Scopes));
         return NoContent();
+    }
+
+    /// <summary>
+    /// Revokes every paired device of the signed-in user (api#287), as if each were revoked on
+    /// its own: their tokens (and any token a re-pair replaced) stop working on the next request,
+    /// their bridges and everything those found, watch or hold sealed credentials for are
+    /// deleted, and their connections are kept, unlinked. Interactive sessions only. Answers how
+    /// many were revoked; 0 when there were none.
+    /// </summary>
+    /// <response code="200">`{ "revoked": n }`.</response>
+    [HttpDelete]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<RevokedDeviceGrantsDto>> RevokeAll(CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        var (count, revoked) = await grants.RevokeAllAsync(userId, ct);
+        foreach (var grant in revoked)
+        {
+            var properties = GrantProperties(grant.Id, grant.ClientId, grant.Scopes);
+            properties["Via"] = "all";
+            telemetry.TrackEvent("DeviceGrantRevoked", properties);
+        }
+
+        return new RevokedDeviceGrantsDto(count);
     }
 
     /// <summary>What the pairing and revoke events carry: which grant, through which app, with what. Never the token.</summary>

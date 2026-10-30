@@ -485,6 +485,10 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<PairingTokenUse>()
             .HasIndex(u => u.ExpiresAt);
 
+        // A re-pair's replaced token, looked up only when the current-token lookup misses.
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => g.PreviousTokenHash);
+
         modelBuilder.Entity<DeviceGrant>()
             .HasOne(g => g.User)
             .WithMany()

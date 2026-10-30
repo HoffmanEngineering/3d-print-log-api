@@ -43,6 +43,14 @@ public class SesEmailTransportRequestTests
     }
 
     [Fact]
+    public void BuildRequest_SendsNoHeadersList_WhenTheMessageHasNone()
+    {
+        var notice = Message with { Headers = new Dictionary<string, string>(), Campaign = "device-paired" };
+
+        Assert.Null(SesEmailTransport.BuildRequest(notice, Options).Content.Simple.Headers);
+    }
+
+    [Fact]
     public void BuildRequest_TagsCampaignAndOutboxId()
     {
         var tags = SesEmailTransport.BuildRequest(Message, Options).EmailTags.ToDictionary(t => t.Name, t => t.Value);

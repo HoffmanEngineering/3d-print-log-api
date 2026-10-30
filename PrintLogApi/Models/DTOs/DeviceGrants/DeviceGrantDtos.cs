@@ -58,3 +58,6 @@ public sealed record DevicePairingConfigDto(
     string ClientId,
     string Audience,
     IReadOnlyList<string> Scopes);
+
+/// <summary>The answer to revoking every paired device (api#287): how many were revoked, 0 when there were none.</summary>
+public sealed record RevokedDeviceGrantsDto(int Revoked);

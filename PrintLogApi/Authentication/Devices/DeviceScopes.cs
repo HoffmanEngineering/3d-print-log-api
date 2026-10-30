@@ -32,6 +32,13 @@ public static class DeviceScopes
     /// </summary>
     public const string BridgeSync = "bridge:sync";
 
+    /// <summary>
+    /// What a token a re-pair replaced may still do during its grace (api#287): log prints and
+    /// send heartbeats. Every other device endpoint answers it 403 <c>device_token_superseded</c>
+    /// (<c>DeviceTokenMiddleware</c>). Widening this is a security decision, like the allow-list.
+    /// </summary>
+    public static readonly IReadOnlySet<string> DuringRepairGrace = new HashSet<string>(StringComparer.Ordinal) { PrintsWrite, ConnectionsWrite };
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         PrintsRead, PrintsWrite, PrintersRead, PrintersCreate, PrintersSlots, FilamentsRead, FilesWrite, ConnectionsWrite, BridgeSync,
@@ -49,6 +56,39 @@ public static class DeviceScopes
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>
+    /// What each scope lets a device do, in the order they are listed, worded as the web app's
+    /// Connected Agents list words them (3d-print-log-ui <c>device-scopes.ts</c>).
+    /// </summary>
+    private static readonly (string Scope, string Label)[] Labels =
+    [
+        (PrintsWrite, "log prints"),
+        (PrintsRead, "see prints"),
+        (PrintersRead, "see printers"),
+        (PrintersCreate, "add printers"),
+        (PrintersSlots, "update printer slots"),
+        (FilamentsRead, "see materials"),
+        (FilesWrite, "upload print files"),
+        (ConnectionsWrite, "send heartbeats"),
+        (BridgeSync, "report printers it finds on your network"),
+    ];
+
+    /// <summary>"Log prints, update printer slots, send heartbeats" for a grant's scopes.</summary>
+    public static string Describe(IEnumerable<string> scopes)
+    {
+        var held = scopes.ToHashSet(StringComparer.Ordinal);
+        var parts = Labels.Where(l => held.Contains(l.Scope)).Select(l => l.Label)
+            .Concat(held.Where(s => !Labels.Any(l => l.Scope == s)).Order(StringComparer.Ordinal))
+            .ToList();
+        if (parts.Count == 0)
+        {
+            return "No permissions";
+        }
+
+        var sentence = string.Join(", ", parts);
+        return char.ToUpperInvariant(sentence[0]) + sentence[1..];
+    }
 
     /// <summary>The stored form: space-separated.</summary>
     public static string Join(IEnumerable<string> scopes) => string.Join(' ', scopes);

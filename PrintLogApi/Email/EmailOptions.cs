@@ -68,7 +68,15 @@ public sealed class EmailOptions
     /// <summary>Keyed by <see cref="CampaignKey"/>, not by the campaign name itself.</summary>
     public Dictionary<string, CampaignOptions> Campaigns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool IsCampaignEnabled(string name) => Campaigns.TryGetValue(CampaignKey(name), out var campaign) && campaign.Enabled;
+    public bool IsCampaignEnabled(string name) => IsCampaignEnabled(name, enabledByDefault: false);
+
+    /// <summary>
+    /// Whether a campaign is on, defaulting to <paramref name="enabledByDefault"/> when it has no
+    /// setting. Security notices default on, so turning email on can never leave them off by an
+    /// oversight; <c>Email__Campaigns__device_paired__Enabled=false</c> still stops one.
+    /// </summary>
+    public bool IsCampaignEnabled(string name, bool enabledByDefault) =>
+        Campaigns.TryGetValue(CampaignKey(name), out var campaign) ? campaign.Enabled : enabledByDefault;
 
     /// <summary>
     /// The configuration key for a campaign: its name with underscores for hyphens, so

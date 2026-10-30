@@ -16,6 +16,8 @@ public sealed class TestCampaign(string name = "test-campaign") : IEmailCampaign
 
     public bool ExemptFromFrequencyCap { get; init; }
 
+    public bool IsSecurityNotice { get; init; }
+
     public TimeSpan Lifetime { get; init; } = TimeSpan.FromDays(2);
 
     public List<DueEmail> Due { get; } = [];

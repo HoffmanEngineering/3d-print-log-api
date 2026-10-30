@@ -8,13 +8,13 @@ namespace PrintLogApi.Services;
 
 public class ConnectionService(PrintLogContext context, TimeProvider clock) : IConnectionService
 {
-    public async Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null)
+    public async Task<(Connection Connection, bool Created)> Upsert(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId = null, bool keepBridgeLink = false)
     {
         await RequirePrinter(userId, dto.PrinterId);
 
         try
         {
-            return await UpsertOnce(userId, instanceId, dto, deviceGrantId);
+            return await UpsertOnce(userId, instanceId, dto, deviceGrantId, keepBridgeLink);
         }
         catch (DbUpdateException ex)
         {
@@ -36,7 +36,7 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
             // while the first was still in flight. The row exists now, so take the update path.
             try
             {
-                return await UpsertOnce(userId, instanceId, dto, deviceGrantId);
+                return await UpsertOnce(userId, instanceId, dto, deviceGrantId, keepBridgeLink);
             }
             catch (DbUpdateException)
             {
@@ -57,7 +57,7 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         }
     }
 
-    private async Task<(Connection, bool)> UpsertOnce(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId)
+    private async Task<(Connection, bool)> UpsertOnce(long userId, string instanceId, PutConnectionDto dto, long? deviceGrantId, bool keepBridgeLink)
     {
         var now = clock.GetUtcNow().UtcDateTime;
         var connection = await context.Connections
@@ -81,8 +81,14 @@ public class ConnectionService(PrintLogContext context, TimeProvider clock) : IC
         connection.AgentVersion = dto.AgentVersion?.Trim();
         connection.PrinterId = dto.PrinterId;
 
-        // From the token, never the body: a device whose grant has checked in as a bridge.
-        connection.BridgeId = deviceGrantId is { } grantId && await context.Bridges.AnyAsync(b => b.Id == grantId) ? grantId : null;
+        // From the token, never the body: a device whose grant has checked in as a bridge. A
+        // token a re-pair replaced (api#287) leaves the link as it is: an existing one stays, so a
+        // bridge whose re-pair reply was lost keeps its connections, and a new connection gets
+        // none, so a copy of the old token cannot attach connections to the bridge.
+        if (!keepBridgeLink)
+        {
+            connection.BridgeId = deviceGrantId is { } grantId && await context.Bridges.AnyAsync(b => b.Id == grantId) ? grantId : null;
+        }
         connection.LastSeenAt = now;
         ApplyHealth(connection, dto, now);
 

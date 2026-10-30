@@ -22,6 +22,16 @@ public interface IEmailCampaign
     /// <summary>Whether this campaign ignores the cap itself (true only for onboarding, whose steps are spaced deliberately).</summary>
     bool ExemptFromFrequencyCap { get; }
 
+    /// <summary>
+    /// A security notice about the account (api#287), not engagement mail: it is on unless its
+    /// campaign is switched off explicitly, and it ignores the user's email preferences (the
+    /// master switch included), the in-app notice gate and the holdout, carries no unsubscribe
+    /// header or link, and should neither count toward nor wait for the frequency cap. The
+    /// master switch, dry run, the allow-list, the daily cap, verification and the suppression
+    /// list (bounces and complaints) still apply.
+    /// </summary>
+    bool IsSecurityNotice => false;
+
     /// <summary>How long a queued row stays sendable: <c>ExpiresAt = SendAfter + Lifetime</c>.</summary>
     TimeSpan Lifetime { get; }
 

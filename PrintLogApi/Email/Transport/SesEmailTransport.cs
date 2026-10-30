@@ -62,7 +62,9 @@ public sealed class SesEmailTransport : IEmailTransport, IDisposable
                     Html = new Content { Data = message.Html, Charset = Utf8 },
                     Text = new Content { Data = message.Text, Charset = Utf8 },
                 },
-                Headers = [.. message.Headers.Select(h => new MessageHeader { Name = h.Key, Value = h.Value })],
+                // Null rather than empty when there are none (a security notice has no unsubscribe
+                // headers, api#287), so the request never carries an empty Headers list.
+                Headers = message.Headers.Count == 0 ? null : [.. message.Headers.Select(h => new MessageHeader { Name = h.Key, Value = h.Value })],
             },
         },
         EmailTags =

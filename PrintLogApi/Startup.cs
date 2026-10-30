@@ -173,6 +173,7 @@ public class Startup
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         // Paired devices and their scoped tokens (#148); the scheme and policy are in ConfigureAuthentication.
         services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
+        services.AddScoped<Services.DeviceGrants.IDevicePairingNotifier, Services.DeviceGrants.DevicePairingNotifier>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<Services.Bridges.IBridgeService, Services.Bridges.BridgeService>();
         services.AddTransient<Services.Bridges.IBridgePrintGuard, Services.Bridges.BridgePrintGuard>();
@@ -341,9 +342,9 @@ public class Startup
             });
 
             // The anonymous printer catalog, like the docs endpoint above. The partition is the
-            // socket peer (RemoteIpAddress), which is a client only when forwarded headers are
-            // enabled (App Service sets ASPNETCORE_FORWARDEDHEADERS_ENABLED); without them every
-            // request behind the front end shares one partition.
+            // socket peer (RemoteIpAddress), which is a client only when the host's forwarded
+            // headers are on (ASPNETCORE_FORWARDEDHEADERS_ENABLED; check it is set on the App
+            // Service); without them every request behind the front end shares one partition.
             options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
             {
                 var limit = httpContext.RequestServices
@@ -448,9 +449,10 @@ public class Startup
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-anon-unlimited");
                 }
 
-                // NOTE: this is the socket peer, not necessarily the browser. Nothing in the
-                // pipeline calls UseForwardedHeaders, so if the App Service front end terminates
-                // the connection every anonymous caller collapses into one shared bucket. The
+                // NOTE: this is the socket peer, not necessarily the browser. Startup never calls
+                // UseForwardedHeaders; only the host's ASPNETCORE_FORWARDEDHEADERS_ENABLED switch
+                // makes RemoteIpAddress the client (as for the catalog policy above). Without it,
+                // every anonymous caller behind the front end collapses into one shared bucket. The
                 // default is set high enough that a shared bucket still clears normal public
                 // traffic; tune Api:AnonymousRateLimitPerMinute (or set it to 0) rather than
                 // trusting a client-supplied X-Forwarded-For, which a brute-forcer would rotate.
