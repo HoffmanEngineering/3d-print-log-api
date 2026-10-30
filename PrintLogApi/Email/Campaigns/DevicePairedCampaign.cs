@@ -13,10 +13,11 @@ namespace PrintLogApi.Email.Campaigns;
 /// approval (someone sends the user a <c>verification_uri_complete</c> link) does not produce a
 /// device token nobody notices.
 ///
-/// Nothing here finds who is due: <c>DevicePairingNotifier</c> queues a row after the pairing
-/// commits, with a snapshot of the grant in <see cref="EmailOutbox.Exposure"/> (name, scopes,
-/// time), because the grant can be renamed, re-paired or revoked before the dispatcher gets to
-/// it and the email must describe the pairing that happened.
+/// Nothing here finds who is due: the pairing queues its row (<see cref="Queue"/>) in the same
+/// save as the grant, so a pairing that commits always has its notice queued. The row carries a
+/// snapshot of the pairing in <see cref="EmailOutbox.Exposure"/> (name, scopes, time, the
+/// address the request came from), because the grant can be renamed, re-paired or revoked
+/// before the dispatcher gets to it and the email must describe the pairing that happened.
 /// </summary>
 public sealed class DevicePairedCampaign(
     PrintLogContext db,
@@ -49,14 +50,36 @@ public sealed class DevicePairedCampaign(
     public Task<IReadOnlyList<DueEmail>> FindDueAsync(DateTimeOffset now, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<DueEmail>>([]);
 
-    /// <summary>What the notifier writes into <see cref="EmailOutbox.Exposure"/> when it queues the row.</summary>
-    public static JsonObject Snapshot(long grantId, string deviceName, string scopes, DateTime pairedAtUtc, bool repaired) => new()
+    /// <summary>
+    /// The outbox row for one pairing, added to the pairing's own save. Keyed by device and the
+    /// pairing's time, since a new grant has no id yet; the per-device throttle keeps two notices
+    /// of one device an hour apart.
+    /// </summary>
+    public static EmailOutbox Queue(long userId, Guid deviceId, string deviceName, string scopes, DateTimeOffset pairedAt, bool repaired, string? ipAddress) => new()
     {
-        ["grantId"] = grantId,
+        UserId = userId,
+        Campaign = CampaignName,
+        PeriodKey = $"device:{deviceId:N}:{pairedAt.UtcDateTime.ToString("yyyyMMdd'T'HHmmss.fffffff'Z'", CultureInfo.InvariantCulture)}",
+        Status = EmailOutboxStatus.Pending,
+        SendAfter = pairedAt,
+        NextAttemptAt = pairedAt,
+        ExpiresAt = pairedAt + TimeSpan.FromDays(3),
+        CreatedAt = pairedAt,
+        Exposure = Snapshot(deviceId, deviceName, scopes, pairedAt.UtcDateTime, repaired, ipAddress).ToJsonString(),
+    };
+
+    /// <summary>
+    /// What <see cref="Queue"/> writes into <see cref="EmailOutbox.Exposure"/>. The address is
+    /// for the email only: it stays in this row and never goes to telemetry.
+    /// </summary>
+    public static JsonObject Snapshot(Guid deviceId, string deviceName, string scopes, DateTime pairedAtUtc, bool repaired, string? ipAddress) => new()
+    {
+        ["deviceId"] = deviceId,
         ["deviceName"] = deviceName,
         ["scopes"] = scopes,
         ["pairedAt"] = DateTime.SpecifyKind(pairedAtUtc, DateTimeKind.Utc),
         ["repaired"] = repaired,
+        ["ipAddress"] = ipAddress,
     };
 
     public async Task<RenderedEmail?> RenderAsync(EmailOutbox row, CancellationToken ct)
@@ -81,7 +104,8 @@ public sealed class DevicePairedCampaign(
             snapshot["repaired"]?.GetValue<bool>() ?? false,
             When(pairedAt.ToUniversalTime(), await EmailUserZones.LoadAsync(db, row.UserId, ct)),
             DeviceScopes.Describe(DeviceScopes.Split(scopes)),
-            links.Web(ReviewPath, CampaignName, "notice"));
+            links.Web(ReviewPath, CampaignName, "notice"),
+            snapshot["ipAddress"]?.GetValue<string>());
 
         var footer = footers.SecurityNotice(row.UserId, FooterReason);
         var (html, text) = await DevicePairedTemplates.RenderAsync(renderer, model, footer);

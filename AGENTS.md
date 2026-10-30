@@ -218,25 +218,30 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   its `jti`, or of the whole token when there is no `jti`, until the token's `exp` plus 5 minutes.
   It is spent in the same `SaveChanges` as the grant, so a refused pairing leaves it unspent, and
   the unique index decides a race on any instance. Each pairing deletes expired rows first (one
-  indexed delete); there is no background job. A re-pair that loses a race with a revoke (the
-  rotation updates no row) answers 409 `device_grant_revoked` and spends the token: recreating the
-  row or leaving the token reusable would let an approval given before the revoke undo it.
-- **A retry of the same pairing is answered again** (api#287): the spend row keeps the grant it
-  paired (`PairingTokenUses.GrantId`, FK set null on delete), and the same token for that same
-  grant gets a fresh token (200, `DeviceRepaired` with `Replayed`), so a lost reply no longer
-  strands the device. The binding is to the grant id, never the device id: a revoke nulls it, so
-  an approval given before a revoke can't pair the device back, even after the user paired it
-  again with a new approval. A save that committed but whose acknowledgment was lost (what an EF
-  execution-strategy retry runs into) is recognized by the generated token being the grant's
-  current one and answered as the success it was.
+  indexed delete); there is no background job. **No exception, not even for the device it
+  paired:** a replay would let whoever copied the approval and the device id mint a token that
+  supersedes the real bridge's. A device whose reply was lost runs the device flow again (the
+  re-pair grace below keeps it logging meanwhile). A save that committed but whose acknowledgment
+  was lost (what an EF execution-strategy retry runs into) is recognized by the generated token
+  being the grant's current one and answered as the success it was; that is the only
+  "already spent" that succeeds.
+- **A re-pair rotates the token pair it read, or reads again.** `TokenHash` and
+  `PreviousTokenHash` are `[ConcurrencyCheck]`, so a racing re-pair or the new token's first use
+  (which clears `PreviousTokenHash`) makes the rotation's update match no row. The pairing then
+  checks whether the row still exists: if so it reads and saves again (up to 3 attempts), which
+  keeps the token the device just used valid; if not, the user revoked it, and it answers 409
+  `device_grant_revoked` and spends the token (recreating the row or leaving the token reusable
+  would let an approval given before the revoke undo it).
 - **Re-pair grace** (api#287): a re-pair keeps the replaced token valid (`PreviousTokenHash`)
   until the new token's first use or `DeviceGrantService.RepairGrace` (10 minutes), whichever
   comes first. A re-pair while a grace runs keeps the older token and its deadline (the token in
   between was never used). The lookup reads `TokenHash` first and `PreviousTokenHash` only on a
   miss; the first use of the new token clears the previous one in one conditional update. A
-  revoke deletes the row, so both die together. A request with the superseded token carries
-  `DeviceGrantClaim.SupersededType`, and its check-in drops any reported key (the re-pair cleared
-  the pending key for exactly that holder).
+  revoke deletes the row, so both die together. **A superseded token logs prints and heartbeats,
+  nothing more:** it carries `DeviceGrantClaim.SupersededType`, and bridge check-in
+  (`PUT /api/bridges/me`) and the desired list (which carries sealed credentials) answer 403
+  `device_token_superseded`, so a copy of the old token can't register the bridge, report a key or
+  read credentials.
 - **Where a device token works is an allow-list.** `DeviceTokenMiddleware` (after
   `UseAuthentication`, before `ApiKeyMiddleware`) sets a principal only on an endpoint whose action
   carries `[DeviceAccess(scope)]` and only if the grant holds that scope; everywhere else it answers
@@ -254,19 +259,26 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   retried (bridges behind one NAT, or a collapsed client IP) keeps hearing "re-pair". Memory holds
   8-byte HMAC fingerprints under a per-process key, at most the limit per address, for a minute. It
   only picks 401 or 429 after the database refused the token; it never answers for the database
-  (no negative cache, #193).
+  (no negative cache, #193). **This only partly fixes api#287 item 4:** 20 distinct garbage tokens
+  a minute from the same address (another client behind the NAT, or anyone when the client IP
+  collapses to the front end's) still make a revoked bridge's first try with its own token a 429.
+  Item 4 stays open with item 5 (idle expiry).
 - **Revoke all:** `DELETE /api/device-grants` (`InteractiveUserOnly`) deletes every grant of the
   user in one transaction with exactly what a single revoke does (unlink connections, cascade the
   bridges, their discovered, desired and sealed rows), answers `{ "revoked": n }`, and emits
   `DeviceGrantRevoked` per grant with `Via=all`. Nothing in the API sees an Auth0 password change
   or "sign out everywhere", so nothing calls it automatically.
-- **Pairing notice** (api#287): after every successful pairing (first, re-pair, retry),
-  `DevicePairingNotifier` claims `DeviceGrant.PairingNoticeAt` with one conditional update (at most
-  once per grant per hour; a new device is a new grant) and then queues a `device-paired` outbox
-  row (with a snapshot of name, scopes and time in `Exposure`) and writes an in-app notification.
-  After the commit, never inside it, with `CancellationToken.None`, and best effort: a failure is
-  logged, counted (`DevicePairingNoticeFailed`, `printlog_device_pairing_notice_failures_total`)
-  and never fails the pairing. `device-paired` is the first **security notice**
+- **Pairing notice** (api#287): the `device-paired` outbox row is queued **in the pairing's own
+  `SaveChanges`** (`DevicePairedCampaign.Queue`), with `DeviceGrant.PairingNoticeAt` set on the
+  row being rotated: at most once per device per hour (`DeviceGrantService.PairingNoticeRepeatAfter`),
+  always for a new device. A pairing that commits has its email queued; one whose row can't be
+  queued fails. The snapshot in `Exposure` holds name, scopes, time and the request's client IP
+  (`RemoteIpAddress`: the client when App Service's forwarded headers are on, else the front end).
+  The IP is in the email body and the in-app message ("from IP address ..."), never the subject,
+  telemetry or logs. Only the in-app notification (`DevicePairingNotifier`, when
+  `PairedDevice.Noticed`) runs after the commit, best effort: a failure is logged, counted
+  (`DevicePairingNoticeFailed`, `printlog_device_pairing_notice_failures_total`) and never fails
+  the pairing. `device-paired` is the first **security notice**
   (`IEmailCampaign.IsSecurityNotice`): on unless `Email:Campaigns:device_paired:Enabled=false`, it
   ignores preferences (the master switch too), the in-app notice gate and the holdout, has no
   unsubscribe header or link, and is outside the frequency cap; `Email:Enabled`, dry run, the
@@ -654,7 +666,8 @@ reference sealer and opener are in the test project (`CredentialSealer`).
     `BridgeDto.keyChangesThrottled` flags it; `BridgeKeyChanged` telemetry (`Change`,
     `ChangesToday` from `Bridge.KeyChangesToday`) reports `throttled` once.
   - **Re-pairing clears the pending key** (`DeviceGrantService.PairAsync`, same save as the token
-    rotation): the old token is dead, so its key must not stay confirmable.
+    rotation): the old token is on its way out (it lives on for the re-pair grace, for prints and
+    heartbeats only, and can't check in), so a key it reported must not stay confirmable.
   - **A pending key equal to the current one is cleared** (a check-in reporting the current key,
     and a conditional update after a check-in that set one), and seals compare with the current
     key first, so that race can't block every seal.

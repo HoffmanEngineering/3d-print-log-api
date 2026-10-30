@@ -10,7 +10,8 @@ namespace PrintLogApi.Email.Campaigns;
 /// <param name="When">When it paired, in the user's zone with the zone named, or labeled UTC.</param>
 /// <param name="Permissions">What it may do, in plain words (<c>DeviceScopes.Describe</c>).</param>
 /// <param name="ReviewUrl">Settings, at Connected Agents, where the user revokes it.</param>
-public sealed record DevicePairedModel(string? Name, string DeviceName, bool Repaired, string When, string Permissions, string ReviewUrl);
+/// <param name="IpAddress">The address the pairing request came from, as the API saw it; null when unknown. Never in the subject.</param>
+public sealed record DevicePairedModel(string? Name, string DeviceName, bool Repaired, string When, string Permissions, string ReviewUrl, string? IpAddress = null);
 
 public static class DevicePairedTemplates
 {
@@ -44,6 +45,11 @@ public static class DevicePairedTemplates
         b.Append(Intro(m)).Append("\n\n");
         b.Append("Device: ").Append(m.DeviceName).Append('\n');
         b.Append("Paired: ").Append(m.When).Append('\n');
+        if (m.IpAddress is { } ip)
+        {
+            b.Append("From IP address: ").Append(ip).Append('\n');
+        }
+
         b.Append("It can: ").Append(m.Permissions).Append("\n\n");
         b.Append(IfYou).Append('\n');
         b.Append(IfNotYou).Append('\n');

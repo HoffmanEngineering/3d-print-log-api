@@ -33,7 +33,7 @@ public class DeviceHardeningTests(CustomWebApplicationFactory factory) : IClassF
     }
 
     [Fact]
-    public async Task APairingToken_PairsOneDevice()
+    public async Task APairingToken_IsSingleUse()
     {
         var subject = NewSubject("single-use");
         var token = PairingToken(subject);
@@ -41,9 +41,9 @@ public class DeviceHardeningTests(CustomWebApplicationFactory factory) : IClassF
 
         Assert.Equal(HttpStatusCode.Created, (await Send(PairRequest(token, deviceId))).StatusCode);
 
-        // The same request again is a retry after a lost reply (api#287): answered, same grant.
         var sameDevice = await Send(PairRequest(token, deviceId));
-        Assert.Equal(HttpStatusCode.OK, sameDevice.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, sameDevice.StatusCode);
+        Assert.Equal(DeviceTokenErrors.PairingTokenUsed, await CodeOf(sameDevice));
 
         var otherDevice = await Send(PairRequest(token, Guid.NewGuid()));
         Assert.Equal(HttpStatusCode.Forbidden, otherDevice.StatusCode);

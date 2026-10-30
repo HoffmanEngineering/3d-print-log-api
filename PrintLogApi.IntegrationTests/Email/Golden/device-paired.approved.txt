@@ -6,6 +6,7 @@ A device was just paired with your account. It can now log to your account on it
 
 Device: printlog-bridge on voron
 Paired: October 30, 2026 at 3:04 PM (America/Chicago)
+From IP address: 203.0.113.7
 It can: Log prints, see printers, update printer slots, send heartbeats
 
 If this was you, there's nothing to do.

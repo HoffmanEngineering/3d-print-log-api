@@ -10,8 +10,8 @@ namespace PrintLogApi.IntegrationTests.Devices;
 /// <summary>
 /// Re-pairing without stranding the device (api#287, item 3). A re-pair keeps the token it
 /// replaces working until the new token's first use, for at most
-/// <c>DeviceGrantService.RepairGrace</c>, and a retry of the same pairing request is answered
-/// again instead of <c>pairing_token_used</c>. A revoke ends both at once.
+/// <c>DeviceGrantService.RepairGrace</c>, with no more than prints and heartbeats. A pairing
+/// token still pairs once. A revoke ends both tokens at once.
 /// </summary>
 public class DeviceRepairGraceTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
@@ -90,44 +90,44 @@ public class DeviceRepairGraceTests(CustomWebApplicationFactory factory) : IClas
     }
 
     [Fact]
-    public async Task ARetryOfTheSamePairing_AfterALostReply_IsAnsweredAgain_AndTheOriginalTokenStaysInGrace()
+    public async Task ASpentPairingToken_IsRefused_ForTheSameDevice_EvenAfterTheIssuedTokenWasUsed()
     {
-        var subject = NewSubject("retry");
+        var subject = NewSubject("replay");
         var deviceId = Guid.NewGuid();
         var original = TokenOf(await PairAsync(_client, subject, deviceId: deviceId));
         var pairingToken = PairingToken(subject);
+        var issued = TokenOf(await PairWithAsync(pairingToken, deviceId, HttpStatusCode.OK));
+        Assert.Equal(HttpStatusCode.OK, await MeAsync(issued));
 
-        var lost = TokenOf(await PairWithAsync(pairingToken, deviceId, HttpStatusCode.OK));
-        var retried = await PairWithAsync(pairingToken, deviceId, HttpStatusCode.OK);
+        // Whoever holds the approval and the device id must not mint another token with it:
+        // that would supersede the real bridge's token.
+        var replay = await Send(PairRequest(pairingToken, deviceId));
 
-        Assert.NotEqual(lost, TokenOf(retried));
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(original));
-        Assert.Equal(HttpStatusCode.Unauthorized, await MeAsync(lost));
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(TokenOf(retried)));
-
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-        Assert.Equal(1, await db.DeviceGrants.CountAsync(g => g.DeviceId == deviceId, TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
+        Assert.Equal(DeviceTokenErrors.PairingTokenUsed, await CodeOf(replay));
+        Assert.Equal(HttpStatusCode.OK, await MeAsync(issued));
+        Assert.Equal(HttpStatusCode.Unauthorized, await MeAsync(original));
     }
 
     [Fact]
-    public async Task ARetryOfAFirstPairing_IsAnsweredAgain_OnTheSameGrant()
+    public async Task ASpentPairingToken_IsRefused_RightAfterAFirstPairing()
     {
-        var subject = NewSubject("retry-first");
+        var subject = NewSubject("replay-first");
         var deviceId = Guid.NewGuid();
         var pairingToken = PairingToken(subject);
-
         var first = await PairWithAsync(pairingToken, deviceId, HttpStatusCode.Created);
-        var retried = await PairWithAsync(pairingToken, deviceId, HttpStatusCode.OK);
 
-        Assert.Equal(first.GetProperty("id").GetInt64(), retried.GetProperty("id").GetInt64());
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(TokenOf(retried)));
+        var replay = await Send(PairRequest(pairingToken, deviceId));
+
+        Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
+        Assert.Equal(DeviceTokenErrors.PairingTokenUsed, await CodeOf(replay));
+        Assert.Equal(HttpStatusCode.OK, await MeAsync(TokenOf(first)));
     }
 
     [Fact]
-    public async Task ASpentPairingToken_StillCannotPairAnotherDevice()
+    public async Task ASpentPairingToken_CannotPairAnotherDevice()
     {
-        var subject = NewSubject("retry-other");
+        var subject = NewSubject("replay-other");
         var pairingToken = PairingToken(subject);
         await PairWithAsync(pairingToken, Guid.NewGuid(), HttpStatusCode.Created);
 
@@ -138,48 +138,36 @@ public class DeviceRepairGraceTests(CustomWebApplicationFactory factory) : IClas
     }
 
     [Fact]
-    public async Task ARetryAfterARevoke_NeverBringsTheDeviceBack()
+    public async Task ASupersededToken_CannotCheckInOrReadTheDesiredList_ButStillLogs()
     {
-        var subject = NewSubject("retry-revoked");
-        var deviceId = Guid.NewGuid();
-        var pairingToken = PairingToken(subject);
-        var paired = await PairWithAsync(pairingToken, deviceId, HttpStatusCode.Created);
-        Assert.Equal(HttpStatusCode.NoContent,
-            (await Send(AsUser(new HttpRequestMessage(HttpMethod.Delete, $"/api/device-grants/{paired.GetProperty("id").GetInt64()}"), subject))).StatusCode);
-
-        var retry = await Send(PairRequest(pairingToken, deviceId));
-
-        Assert.Equal(HttpStatusCode.Forbidden, retry.StatusCode);
-        Assert.Equal(DeviceTokenErrors.PairingTokenUsed, await CodeOf(retry));
-
-        // Nor after the user paired the device again with a new approval: the old one is bound
-        // to the revoked grant, not to the device id.
-        var repaired = await PairAsync(_client, subject, deviceId: deviceId);
-        var replay = await Send(PairRequest(pairingToken, deviceId));
-        Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(TokenOf(repaired)));
-    }
-
-    [Fact]
-    public async Task ACheckIn_WithTheSupersededToken_CannotReportAKey()
-    {
-        var subject = NewSubject("grace-key");
+        var subject = NewSubject("grace-scope");
         var deviceId = Guid.NewGuid();
         var old = TokenOf(await PairAsync(_client, subject, scopes: DeviceScopes.All, deviceId: deviceId));
         var current = TokenOf(await PairAsync(_client, subject, scopes: DeviceScopes.All, deviceId: deviceId));
         using var key = new Bridges.BridgeSealedCredentialTests.BridgeKey();
 
-        // A copy of the replaced token (perhaps a thief's) must not register the bridge with
-        // its key, which would be trusted without the owner's confirmation.
+        // A copy of the replaced token (perhaps a thief's) must not register the bridge, report a
+        // key or read sealed credentials.
         var checkIn = await Send(Bridges.BridgeTestKit.CheckIn(old, new { publicKey = key.PublicKey }));
-        Assert.Equal(HttpStatusCode.OK, checkIn.StatusCode);
-        var body = await checkIn.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
-        Assert.Equal(JsonValueKind.Null, body.GetProperty("publicKeyFingerprint").ValueKind);
-        Assert.Equal(JsonValueKind.Null, body.GetProperty("pendingPublicKeyFingerprint").ValueKind);
+        Assert.Equal(HttpStatusCode.Forbidden, checkIn.StatusCode);
+        Assert.Equal(DeviceTokenErrors.TokenSuperseded, await CodeOf(checkIn));
 
-        // The current token's report counts, and since the bridge registered without a key, the
-        // owner confirms it, as for any key a registered bridge reports later.
+        var desired = await Send(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/bridges/me/desired"), old));
+        Assert.Equal(HttpStatusCode.Forbidden, desired.StatusCode);
+        Assert.Equal(DeviceTokenErrors.TokenSuperseded, await CodeOf(desired));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            Assert.False(await db.Bridges.AnyAsync(b => b.Id == db.DeviceGrants.Single(g => g.DeviceId == deviceId).Id, TestContext.Current.CancellationToken));
+        }
+
+        // Prints and heartbeats keep working through the grace.
+        var printerId = await CreatePrinterAsync(_client, subject);
+        Assert.Equal(HttpStatusCode.Created, (await Send(PrintCreate(old, printerId))).StatusCode);
+
+        // The current token registers the bridge, and its key is trusted as a registration's is.
         var accepted = await Bridges.BridgeTestKit.CheckInOkAsync(_client, current, new { publicKey = key.PublicKey });
-        Assert.Equal(key.Fingerprint, accepted.GetProperty("pendingPublicKeyFingerprint").GetString());
+        Assert.Equal(key.Fingerprint, accepted.GetProperty("publicKeyFingerprint").GetString());
     }
 }

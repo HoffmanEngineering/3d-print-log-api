@@ -45,7 +45,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// </remarks>
     /// <response code="200">Checked in. The body carries the desired printers.</response>
     /// <response code="400">The report is malformed (`code`: `invalid_check_in`).</response>
-    /// <response code="403">Not a device token (`code`: `device_token_required`), or the grant lacks `bridge:sync` (`insufficient_scope`).</response>
+    /// <response code="403">Not a device token (`code`: `device_token_required`), the grant lacks `bridge:sync` (`insufficient_scope`), or the token is one a re-pair replaced (`device_token_superseded`: use the new one).</response>
     [HttpPut("me")]
     [Authorize]
     [DeviceAccess(DeviceScopes.BridgeSync)]
@@ -61,18 +61,15 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             return DeviceTokenRequired();
         }
 
+        if (DeviceGrantClaim.IsSuperseded(User))
+        {
+            return Superseded();
+        }
+
         var (report, error) = BridgeCheckInValidator.Validate(body);
         if (report is null)
         {
             return CodedProblem(StatusCodes.Status400BadRequest, error!, "invalid_check_in");
-        }
-
-        if (DeviceGrantClaim.IsSuperseded(User))
-        {
-            // A token a re-pair replaced still works during its grace (api#287), but whoever holds
-            // a copy of it (perhaps a thief, which is why the re-pair cleared the pending key)
-            // must not report a key: on a bridge's first check-in it would even be trusted outright.
-            report = report with { PublicKey = null, PublicKeyFingerprint = null };
         }
 
         BridgeCheckInResult result;
@@ -138,6 +135,7 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     /// </summary>
     /// <response code="200">The desired printers, with an `ETag`.</response>
     /// <response code="304">Unchanged since the `ETag` sent.</response>
+    /// <response code="403">Not a device token, the grant lacks `bridge:sync`, or the token is one a re-pair replaced (`device_token_superseded`).</response>
     /// <response code="404">The bridge has not checked in yet (`code`: `bridge_not_registered`).</response>
     [HttpGet("me/desired")]
     [Authorize]
@@ -152,6 +150,11 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
         if (DeviceGrantClaim.Get(User) is not { } grantId)
         {
             return DeviceTokenRequired();
+        }
+
+        if (DeviceGrantClaim.IsSuperseded(User))
+        {
+            return Superseded();
         }
 
         if (await bridges.PollDesiredVersionAsync(grantId, ct) is not { } version)
@@ -614,6 +617,15 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
     }
 
     private static string Id(long id) => id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A token a re-pair replaced still logs prints and heartbeats during its grace (api#287),
+    /// but nothing more: whoever holds a copy of it (perhaps a thief, which is why the re-pair
+    /// cleared the pending key) must not register the bridge, report a key or read the desired
+    /// list, which carries sealed printer credentials.
+    /// </summary>
+    private ObjectResult Superseded() => CodedProblem(StatusCodes.Status403Forbidden,
+        "This device token was replaced by a re-pair. Use the new token.", DeviceTokenErrors.TokenSuperseded);
 
     private ObjectResult DeviceTokenRequired() => CodedProblem(StatusCodes.Status403Forbidden,
         "Only a paired bridge's device token can check in.", "device_token_required");

@@ -485,15 +485,6 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<PairingTokenUse>()
             .HasIndex(u => u.ExpiresAt);
 
-        // The grant a pairing token paired, for answering a retry of that pairing (api#287).
-        // Set null, not cascade: the spent token must stay spent after a revoke, and Users ->
-        // DeviceGrants -> PairingTokenUses is the only path, so no 1785.
-        modelBuilder.Entity<PairingTokenUse>()
-            .HasOne(u => u.Grant)
-            .WithMany()
-            .HasForeignKey(u => u.GrantId)
-            .OnDelete(DeleteBehavior.SetNull);
-
         // A re-pair's replaced token, looked up only when the current-token lookup misses.
         modelBuilder.Entity<DeviceGrant>()
             .HasIndex(g => g.PreviousTokenHash);

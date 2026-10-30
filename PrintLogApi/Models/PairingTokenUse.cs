@@ -21,14 +21,4 @@ public class PairingTokenUse
 
     /// <summary>After this the pairing policy refuses the token anyway (its <c>iat</c> is too old).</summary>
     public DateTime ExpiresAt { get; set; }
-
-    /// <summary>
-    /// The grant this token paired (api#287), so a retry of the same pairing request can be
-    /// answered again. Set to null when the grant is deleted (a revoke), which is what stops a
-    /// retry from ever bringing a revoked device back. Null too for a token spent by a re-pair
-    /// that lost a race with a revoke.
-    /// </summary>
-    public long? GrantId { get; set; }
-
-    public DeviceGrant? Grant { get; set; }
 }

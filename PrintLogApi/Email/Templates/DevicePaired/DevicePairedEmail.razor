@@ -9,6 +9,10 @@
             <td class="em-panel" style="padding:16px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px;line-height:22px;">
                 <div><strong>Device:</strong> @Model.DeviceName</div>
                 <div><strong>Paired:</strong> @Model.When</div>
+                @if (Model.IpAddress is { } ip)
+                {
+                    <div><strong>From IP address:</strong> @ip</div>
+                }
                 <div><strong>It can:</strong> @Model.Permissions</div>
             </td>
         </tr>

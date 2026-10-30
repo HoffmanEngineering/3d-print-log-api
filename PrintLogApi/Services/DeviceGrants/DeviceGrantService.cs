@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
+using PrintLogApi.Email.Campaigns;
 using PrintLogApi.Models;
 using PrintLogApi.Services.Bridges;
 
@@ -11,15 +12,16 @@ namespace PrintLogApi.Services.DeviceGrants;
 /// <summary>
 /// What a valid device token resolves to, on every device-authenticated request.
 /// <paramref name="Superseded"/> is true for a token a re-pair replaced, accepted only during
-/// <see cref="DeviceGrantService.RepairGrace"/> (api#287).
+/// <see cref="DeviceGrantService.RepairGrace"/> and only for prints and heartbeats (api#287).
 /// </summary>
 public sealed record DeviceGrantIdentity(long GrantId, long UserId, IReadOnlyList<string> Scopes, bool Superseded = false);
 
 /// <summary>
 /// The outcome of pairing: the grant, the token (shown this once), whether the row is new, and
-/// whether this answered a retry of a pairing that had already succeeded (api#287).
+/// whether this pairing queued the owner's pairing notice (api#287), which also decides whether
+/// the in-app notification goes out.
 /// </summary>
-public sealed record PairedDevice(DeviceGrant Grant, string Token, bool Created, bool Replayed = false);
+public sealed record PairedDevice(DeviceGrant Grant, string Token, bool Created, bool Noticed);
 
 /// <summary>
 /// The Auth0 token a pairing spends: the hash it is remembered by (<see cref="PairingTokenUse"/>)
@@ -40,15 +42,15 @@ public sealed class DeviceGrantRevokedException : Exception;
 public interface IDeviceGrantService
 {
     /// <summary>
-    /// Pairs (or re-pairs) a device and spends <paramref name="pairingToken"/> in the same save.
-    /// A token already spent by this device's current grant is a retry of that pairing and is
-    /// answered again with a fresh token (<see cref="PairedDevice.Replayed"/>). Throws
-    /// <see cref="PairingTokenUsedException"/> when the token was spent otherwise,
-    /// <see cref="DeviceGrantLimitException"/> when the user has too many devices, and
+    /// Pairs (or re-pairs) a device and spends <paramref name="pairingToken"/> in the same save,
+    /// with the owner's pairing notice queued in it too (api#287). A pairing token pairs once:
+    /// throws <see cref="PairingTokenUsedException"/> for one already spent, whatever device asks.
+    /// Throws <see cref="DeviceGrantLimitException"/> when the user has too many devices, and
     /// <see cref="DeviceGrantRevokedException"/> (token spent) when the user revoked the device
-    /// while it re-paired.
+    /// while it re-paired. <paramref name="clientIp"/> is the address the request came from, for
+    /// the notice only.
     /// </summary>
-    Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct);
+    Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, string? clientIp, CancellationToken ct);
 
     Task<IReadOnlyList<DeviceGrant>> ListAsync(long userId, CancellationToken ct);
 
@@ -84,40 +86,57 @@ public sealed class DeviceGrantService(
 
     /// <summary>
     /// How long a re-pair keeps the replaced token working when the new one is never used
-    /// (api#287). The new token's first use ends it sooner. It matches the pairing token's own
-    /// lifetime (<see cref="DevicePairingOptions.MaxPairingTokenAgeMinutes"/>): a device whose
-    /// reply was lost can retry that exchange for about as long, and keeps working meanwhile.
+    /// (api#287). The new token's first use ends it sooner. Long enough for a device whose reply
+    /// was lost to notice and pair again; short enough that a copy of the old token is little use.
     /// </summary>
     public static readonly TimeSpan RepairGrace = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// The pairing notice's per-device throttle (api#287): a re-pair within this of the last
+    /// notice queues none. A new device is a new grant and always gets one.
+    /// </summary>
+    public static readonly TimeSpan PairingNoticeRepeatAfter = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// How many times a pairing reads and saves again after losing a race to another write to
+    /// the same grant (a re-pair, or the new token's first use) or to a first pairing of the
+    /// same device.
+    /// </summary>
+    private const int PairAttempts = 3;
+
     private static string LastUsedThrottleKey(long grantId) => $"devicegrant_lastused:{grantId}";
 
-    public Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct)
-        => PairAsync(userId, deviceId, name, scopes, clientId, pairingToken, ct, retried: false);
-
-    private async Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, CancellationToken ct, bool retried)
+    public async Task<PairedDevice> PairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, string? clientIp, CancellationToken ct)
     {
-        var now = clock.GetUtcNow().UtcDateTime;
+        for (var attempt = 1; ; attempt++)
+        {
+            if (await TryPairAsync(userId, deviceId, name, scopes, clientId, pairingToken, clientIp, last: attempt == PairAttempts, ct) is { } paired)
+            {
+                return paired;
+            }
+        }
+    }
+
+    /// <summary>One read and save of a pairing; null when it lost a race and should run again.</summary>
+    private async Task<PairedDevice?> TryPairAsync(long userId, Guid deviceId, string name, IReadOnlyList<string> scopes, string? clientId, PairingTokenSpend pairingToken, string? clientIp, bool last, CancellationToken ct)
+    {
+        var at = clock.GetUtcNow();
+        var now = at.UtcDateTime;
 
         // Spent tokens are only worth remembering while they could still pass the age check, so
         // the table holds about ten minutes of pairings. One indexed delete per pairing keeps it
         // there with no background job.
         await context.PairingTokenUses.Where(u => u.ExpiresAt < now).ExecuteDeleteAsync(ct);
 
-        var grant = await context.DeviceGrants.SingleOrDefaultAsync(g => g.UserId == userId && g.DeviceId == deviceId, ct);
-
-        // A spent token is refused, except by the grant it paired: that is a retry of a pairing
-        // that succeeded but whose reply never arrived (api#287), answered again with a fresh
-        // token. Binding to the grant id (nulled by a revoke) rather than the device id is what
-        // keeps an approval given before a revoke from ever pairing the device back, even after
-        // the user paired it again with a new approval.
-        var spend = await SpendOfAsync(pairingToken, ct);
-        if (spend is not null && (grant is null || spend.GrantId != grant.Id))
+        // A pairing token pairs once, full stop: not even the device it paired may exchange it
+        // again, or whoever copied the approval and the device id could mint a token that
+        // supersedes the real bridge's. A retry after a lost reply runs the device flow again.
+        if (await IsSpentAsync(pairingToken, ct))
         {
             throw new PairingTokenUsedException();
         }
 
-        var replay = spend is not null;
+        var grant = await context.DeviceGrants.SingleOrDefaultAsync(g => g.UserId == userId && g.DeviceId == deviceId, ct);
         var token = DeviceTokenFormat.NewToken();
         var tokenHash = DeviceTokenFormat.Hash(token);
         var created = grant is null;
@@ -148,17 +167,24 @@ public sealed class DeviceGrantService(
         if (!created && await context.Bridges.SingleOrDefaultAsync(b => b.Id == grant.Id, ct) is { } bridge)
         {
             // The old token is on its way out with this save (it lives on for RepairGrace at
-            // most, and a check-in with it cannot report a key), so a key it reported (perhaps a
-            // thief's) must not stay confirmable. The re-paired bridge reports its key again, for
-            // the owner to confirm (docs/bridge-credential-sealing.md, Key changes).
+            // most, and cannot check in), so a key it reported (perhaps a thief's) must not stay
+            // confirmable. The re-paired bridge reports its key again, for the owner to confirm
+            // (docs/bridge-credential-sealing.md, Key changes).
             BridgeService.ClearPendingKey(bridge);
         }
 
-        if (!replay)
+        // Spent in the same save as the grant: a pairing that fails leaves the token unspent,
+        // and two exchanges of one token cannot both commit, whichever instance serves them.
+        context.PairingTokenUses.Add(new PairingTokenUse { TokenKeyHash = pairingToken.KeyHash, ExpiresAt = pairingToken.ExpiresAt });
+
+        // The pairing notice, queued in the same save too: a pairing that commits has its email
+        // queued, and one whose email cannot be queued does not commit. The throttle is decided
+        // on the row this save rotates, so racing re-pairs cannot both claim it.
+        var noticed = grant.PairingNoticeAt is not { } lastNotice || lastNotice <= now - PairingNoticeRepeatAfter;
+        if (noticed)
         {
-            // Spent in the same save as the grant: a pairing that fails leaves the token unspent,
-            // and two exchanges of one token cannot both commit, whichever instance serves them.
-            context.PairingTokenUses.Add(new PairingTokenUse { TokenKeyHash = pairingToken.KeyHash, ExpiresAt = pairingToken.ExpiresAt, Grant = grant });
+            grant.PairingNoticeAt = now;
+            context.EmailOutbox.Add(DevicePairedCampaign.Queue(userId, deviceId, name, grant.Scopes, at, repaired: !created, clientIp));
         }
 
         try
@@ -175,51 +201,48 @@ public sealed class DeviceGrantService(
             if (await context.DeviceGrants.AsNoTracking()
                     .SingleOrDefaultAsync(g => g.UserId == userId && g.DeviceId == deviceId && g.TokenHash == tokenHash, ct) is { } committed)
             {
-                return new PairedDevice(committed, token, created, replay);
+                return new PairedDevice(committed, token, created, noticed);
             }
 
-            if (await SpendOfAsync(pairingToken, ct) is { } spent)
+            if (await IsSpentAsync(pairingToken, ct))
             {
-                if (!replay && !retried && spent.GrantId is not null)
-                {
-                    // Another exchange of this same token won the unique key. If it paired this
-                    // device, this is answered as its retry; the replay check on the rerun decides.
-                    return await PairAsync(userId, deviceId, name, scopes, clientId, pairingToken, ct, retried: true);
-                }
-
-                if (replay && ex is DbUpdateConcurrencyException)
-                {
-                    // A retry that lost a race with a revoke: the pairing it retried spent the
-                    // token, and the grant is gone. Never recreate it.
-                    throw new DeviceGrantRevokedException();
-                }
-
-                // The unique key on the spent token is what loses a race between two exchanges of it.
+                // Another exchange of this same token committed first: the unique key on the
+                // spent token decides the race, and the loser is refused like any reuse.
                 throw new PairingTokenUsedException();
             }
 
             if (ex is DbUpdateConcurrencyException && !created)
             {
-                // The rotation updated no row: the user revoked this device after we read the
-                // grant. Never recreate it (that would undo the revoke), and spend the token, so
-                // an approval given before the revoke cannot pair the device back on a retry.
-                // The user re-approves through a new device flow.
-                await SpendAloneAsync(pairingToken, ct);
-                throw new DeviceGrantRevokedException();
-            }
+                if (!await context.DeviceGrants.AnyAsync(g => g.Id == grant.Id, ct))
+                {
+                    // The rotation updated no row because the user revoked this device after we
+                    // read the grant. Never recreate it (that would undo the revoke), and spend
+                    // the token, so an approval given before the revoke cannot pair the device
+                    // back. The user re-approves through a new device flow.
+                    await SpendAloneAsync(pairingToken, ct);
+                    throw new DeviceGrantRevokedException();
+                }
 
-            if (!created || retried)
+                // The grant is there, but its tokens changed since the read: a racing re-pair, or
+                // the new token's first use ending the grace. Rotating from the stale read could
+                // leave the token the device holds neither current nor previous, so read again.
+                if (!last)
+                {
+                    return null;
+                }
+            }
+            else if (created && !last)
             {
-                throw;
+                // Two first pairings of one device, with two different tokens, raced and the other
+                // inserted the (UserId, DeviceId) row. Pair again, which now rotates that row: the
+                // device keeps whichever token it receives last.
+                return null;
             }
 
-            // Two first pairings of one device, with two different tokens, raced and the other
-            // inserted the (UserId, DeviceId) row. Pair again, which now rotates that row: the
-            // device keeps whichever token it receives last.
-            return await PairAsync(userId, deviceId, name, scopes, clientId, pairingToken, ct, retried: true);
+            throw;
         }
 
-        return new PairedDevice(grant, token, created, replay);
+        return new PairedDevice(grant, token, created, noticed);
     }
 
     /// <summary>
@@ -254,14 +277,8 @@ public sealed class DeviceGrantService(
         }
     }
 
-    private sealed record SpentToken(long? GrantId);
-
-    private async Task<SpentToken?> SpendOfAsync(PairingTokenSpend pairingToken, CancellationToken ct) =>
-        await context.PairingTokenUses
-            .AsNoTracking()
-            .Where(u => u.TokenKeyHash == pairingToken.KeyHash)
-            .Select(u => new SpentToken(u.GrantId))
-            .SingleOrDefaultAsync(ct);
+    private Task<bool> IsSpentAsync(PairingTokenSpend pairingToken, CancellationToken ct) =>
+        context.PairingTokenUses.AnyAsync(u => u.TokenKeyHash == pairingToken.KeyHash, ct);
 
     public async Task<IReadOnlyList<DeviceGrant>> ListAsync(long userId, CancellationToken ct) =>
         await context.DeviceGrants

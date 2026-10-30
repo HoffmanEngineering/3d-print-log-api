@@ -18,6 +18,12 @@ public static class DeviceTokenErrors
     public const string Throttled = "device_token_throttled";
 
     /// <summary>
+    /// 403 at bridge check-in and the desired list: the token is one a re-pair replaced, still in
+    /// its grace (api#287). It logs prints and heartbeats until the grace ends, nothing more.
+    /// </summary>
+    public const string TokenSuperseded = "device_token_superseded";
+
+    /// <summary>
     /// 403 at pairing: the Auth0 token carries <c>offline_access</c>, so it came with (or from) a
     /// refresh token that could pair again after a revoke. Run the device flow without it.
     /// </summary>

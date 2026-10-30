@@ -87,7 +87,7 @@ public class DeviceRepairGraceRaceTests(CustomWebApplicationFactory factory) : I
         public DeviceGrantService Service(PrintLogContext? context = null) => new(context ?? Context(), Cache, Options, Clock);
 
         public Task<PairedDevice> PairAsync(Guid deviceId, PairingTokenSpend spend, PrintLogContext? context = null) =>
-            Service(context).PairAsync(UserId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", spend, Ct);
+            Service(context).PairAsync(UserId, deviceId, "bridge", [DeviceScopes.PrintsRead], "client", spend, null, Ct);
 
         public Task<DeviceGrantIdentity?> AuthenticateAsync(string token) => Service().AuthenticateAsync(token, Ct);
 
@@ -131,18 +131,17 @@ public class DeviceRepairGraceRaceTests(CustomWebApplicationFactory factory) : I
     }
 
     [Fact]
-    public async Task ARevoke_BetweenARetrysReadAndItsSave_IsDeviceGrantRevoked_AndLeavesNoTokenWorking()
+    public async Task ARevoke_BetweenARePairsReadAndItsSave_IsDeviceGrantRevoked_AndLeavesNoTokenWorking()
     {
         using var w = new World(factory);
         var deviceId = Guid.NewGuid();
         var original = (await w.PairAsync(deviceId, Spend("first"))).Token;
-        var repair = Spend("repair");
-        var first = await w.PairAsync(deviceId, repair);
+        var first = await w.PairAsync(deviceId, Spend("repair"));
 
         var revoking = new Interceptor(beforeSave: c => c.Database.ExecuteSqlRawAsync("DELETE FROM DeviceGrants WHERE Id = {0}", [first.Grant.Id], Ct));
         await using var racing = w.Context(revoking);
 
-        await Assert.ThrowsAsync<DeviceGrantRevokedException>(() => w.PairAsync(deviceId, repair, racing));
+        await Assert.ThrowsAsync<DeviceGrantRevokedException>(() => w.PairAsync(deviceId, Spend("repair-again"), racing));
 
         Assert.Null(await w.AuthenticateAsync(original));
         Assert.Null(await w.AuthenticateAsync(first.Token));
@@ -174,6 +173,61 @@ public class DeviceRepairGraceRaceTests(CustomWebApplicationFactory factory) : I
         Assert.NotNull(await w.AuthenticateAsync(original));
         Assert.Null(await w.AuthenticateAsync(inner.Token));
         Assert.NotNull(await w.AuthenticateAsync(outer.Token));
+    }
+
+    [Fact]
+    public async Task ARePair_RacingTheNewTokensFirstUse_LeavesThatTokenWorking()
+    {
+        using var w = new World(factory);
+        var deviceId = Guid.NewGuid();
+        await w.PairAsync(deviceId, Spend("first"));
+        var second = (await w.PairAsync(deviceId, Spend("second"))).Token;
+
+        // The device uses its new token (ending the first token's grace) while a third pairing is
+        // between its read, which still saw that grace, and its save.
+        var firstUse = new Interceptor(beforeSave: async _ => Assert.NotNull(await w.AuthenticateAsync(second)));
+        await using var racing = w.Context(firstUse);
+        var third = await w.PairAsync(deviceId, Spend("third"), racing);
+
+        // The token the device just proved it holds must stay usable through the new grace.
+        var identity = await w.AuthenticateAsync(second);
+        Assert.NotNull(identity);
+        Assert.True(identity.Superseded);
+        Assert.NotNull(await w.AuthenticateAsync(third.Token));
+    }
+
+    [Fact]
+    public async Task TwoExchangesOfOneApproval_AtOnce_OnlyOneSucceeds()
+    {
+        using var w = new World(factory);
+        var deviceId = Guid.NewGuid();
+        await w.PairAsync(deviceId, Spend("first"));
+        var shared = Spend("shared");
+        PairedDevice? inner = null;
+
+        var interleaved = new Interceptor(beforeSave: async _ => inner = await w.PairAsync(deviceId, shared));
+        await using var racing = w.Context(interleaved);
+
+        await Assert.ThrowsAsync<PairingTokenUsedException>(() => w.PairAsync(deviceId, shared, racing));
+        Assert.NotNull(inner);
+        Assert.NotNull(await w.AuthenticateAsync(inner.Token));
+    }
+
+    [Fact]
+    public async Task TwoFirstExchangesOfOneApproval_AtOnce_OnlyOneSucceeds()
+    {
+        using var w = new World(factory);
+        var deviceId = Guid.NewGuid();
+        var shared = Spend("shared-first");
+        PairedDevice? inner = null;
+
+        var interleaved = new Interceptor(beforeSave: async _ => inner = await w.PairAsync(deviceId, shared));
+        await using var racing = w.Context(interleaved);
+
+        await Assert.ThrowsAsync<PairingTokenUsedException>(() => w.PairAsync(deviceId, shared, racing));
+        Assert.NotNull(inner);
+        await using var check = w.Context();
+        Assert.Equal(1, await check.DeviceGrants.CountAsync(g => g.DeviceId == deviceId, Ct));
     }
 
     [Fact]

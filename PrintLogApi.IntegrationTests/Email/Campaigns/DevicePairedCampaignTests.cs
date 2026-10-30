@@ -36,15 +36,13 @@ public class DevicePairedCampaignTests : IClassFixture<CustomWebApplicationFacto
             links);
     }
 
-    private static EmailOutbox Row(long userId, bool repaired = false, string deviceName = "printlog-bridge on voron") => new()
+    private static EmailOutbox Row(long userId, bool repaired = false, string deviceName = "printlog-bridge on voron", string? ipAddress = "203.0.113.7")
     {
-        Id = 7,
-        UserId = userId,
-        Campaign = DevicePairedCampaign.CampaignName,
-        PeriodKey = "grant:42:20261030T200400Z",
-        SendAfter = PairedAt,
-        Exposure = DevicePairedCampaign.Snapshot(42, deviceName, "connections:write prints:write printers:slots", PairedAt.UtcDateTime, repaired).ToJsonString(),
-    };
+        var row = DevicePairedCampaign.Queue(userId, Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff"), deviceName,
+            "connections:write prints:write printers:slots", PairedAt, repaired, ipAddress);
+        row.Id = 7;
+        return row;
+    }
 
     [Fact]
     public void Contract()
@@ -76,6 +74,10 @@ public class DevicePairedCampaignTests : IClassFixture<CustomWebApplicationFacto
         Assert.Contains("https://www.3dprintlog.test/settings?", rendered.Text, StringComparison.Ordinal);
         Assert.Contains("#connected-agents", rendered.Text, StringComparison.Ordinal);
         Assert.Contains("printlog-bridge on voron", rendered.Html, StringComparison.Ordinal);
+        Assert.Contains("From IP address: 203.0.113.7", rendered.Text, StringComparison.Ordinal);
+        Assert.Contains("203.0.113.7", rendered.Html, StringComparison.Ordinal);
+        Assert.DoesNotContain("203.0.113.7", rendered.Subject, StringComparison.Ordinal);
+        Assert.Contains("If you don't recognize it, revoke it", rendered.Text, StringComparison.Ordinal);
 
         // A security notice has no unsubscribe link: opting out of it isn't offered.
         Assert.DoesNotContain("Unsubscribe", rendered.Text, StringComparison.Ordinal);
@@ -107,6 +109,19 @@ public class DevicePairedCampaignTests : IClassFixture<CustomWebApplicationFacto
         Assert.NotNull(rendered);
         Assert.DoesNotContain("<a href=\"https://evil.test\"", rendered.Html, StringComparison.Ordinal);
         Assert.DoesNotContain("evil", rendered.Subject, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_LeavesTheAddressOut_WhenItWasUnknown()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var user = await EmailTestData.CreateUserAsync(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
+
+        var rendered = await Campaign(scope).RenderAsync(Row(user.Id, ipAddress: null), Ct);
+
+        Assert.NotNull(rendered);
+        Assert.DoesNotContain("IP address", rendered.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("IP address", rendered.Html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,5 +157,6 @@ public class DevicePairedCampaignTests : IClassFixture<CustomWebApplicationFacto
         Repaired: false,
         "October 30, 2026 at 3:04 PM (America/Chicago)",
         "Log prints, see printers, update printer slots, send heartbeats",
-        "https://www.3dprintlog.test/settings?utm_source=email#connected-agents");
+        "https://www.3dprintlog.test/settings?utm_source=email#connected-agents",
+        "203.0.113.7");
 }

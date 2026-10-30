@@ -56,14 +56,16 @@ public class DeviceGrantsController(
     /// Pairs a device: exchanges an Auth0 device-flow access token (in `Authorization: Bearer`,
     /// for the pairing audience, at most a few minutes old) for a device token. The grant gets the
     /// device scopes the access token carries. Pairing the same `deviceId` again replaces its
-    /// token and keeps the grant; the replaced token keeps working until the new one is first
-    /// used, for at most 10 minutes. Each access token pairs one device: sending the same request
-    /// again (a retry after a lost reply) answers 200 with a fresh token for that device, while
-    /// its grant exists. One requested with `offline_access` (or refreshed) is refused. The owner
-    /// gets a security email and an in-app notification, at most once per device an hour.
+    /// token and keeps the grant; the replaced token keeps logging prints and heartbeats (not
+    /// check-in, not the desired list) until the new one is first used, for at most 10 minutes.
+    /// Each access token is exchanged once, whatever device sends it: a retry after a lost reply
+    /// runs the device flow again. One requested with `offline_access` (or refreshed) is refused.
+    /// The owner gets a security email (queued with the pairing, so a pairing whose email cannot
+    /// be queued fails) and an in-app notification, both naming the address the request came
+    /// from, at most once per device an hour; a new device always gets them.
     /// </summary>
     /// <response code="201">A new device was paired. The body carries its token, shown only this once.</response>
-    /// <response code="200">The device was already paired, or this retries a pairing that succeeded; its token was replaced.</response>
+    /// <response code="200">The device was already paired; its token was replaced.</response>
     /// <response code="400">`deviceId` or `name` is missing or invalid.</response>
     /// <response code="403">The token is not a pairing token, or carries no device scope (`code`: `insufficient_scope`), carries `offline_access` (`offline_access_not_allowed`), or was already exchanged (`pairing_token_used`).</response>
     /// <response code="409">The account has as many paired devices as allowed (`code`: `device_grant_limit`), or the user revoked this device while it re-paired (`code`: `device_grant_revoked`; the pairing token is spent, so run the device flow again).</response>
@@ -106,11 +108,15 @@ public class DeviceGrantsController(
         }
 
         var clientId = User.FindFirst("azp")?.Value;
+
+        // As the app sees it: the client when forwarded headers are enabled (App Service sets
+        // ASPNETCORE_FORWARDEDHEADERS_ENABLED), else the front end. For the notice only.
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
         PairedDevice paired;
         try
         {
             paired = await grants.PairAsync(userId, deviceId, name, scopes, clientId,
-                DevicePairingAuthentication.SpendOf(User, Request.Headers.Authorization.ToString(), options.Value), ct);
+                DevicePairingAuthentication.SpendOf(User, Request.Headers.Authorization.ToString(), options.Value), clientIp, ct);
         }
         catch (PairingTokenUsedException)
         {
@@ -129,23 +135,19 @@ public class DeviceGrantsController(
         }
 
         var grant = paired.Grant;
-        var properties = GrantProperties(grant.Id, clientId, grant.Scopes);
-        if (paired.Replayed)
+        telemetry.TrackEvent(paired.Created ? "DevicePaired" : "DeviceRepaired", GrantProperties(grant.Id, clientId, grant.Scopes));
+
+        if (paired.Noticed)
         {
-            properties["Replayed"] = "true";
+            // The email is already queued with the pairing; this is the best-effort extra.
+            await notifier.NotifyInAppAsync(grant, repaired: !paired.Created, clientIp);
         }
-
-        telemetry.TrackEvent(paired.Created && !paired.Replayed ? "DevicePaired" : "DeviceRepaired", properties);
-
-        // After the commit, and for a retry too: the per-device throttle keeps a retry from
-        // noticing twice, and a client that hung up on the first reply cannot skip the notice.
-        await notifier.NotifyAsync(grant, paired.Created);
 
         var dto = new PairedDeviceDto(grant.Id, grant.DeviceId, grant.Name, DeviceScopes.Split(grant.Scopes),
             AsUtc(grant.CreatedDate), paired.Token, "Bearer");
 
         // No Location: nothing serves a single grant, and the token is not a resource.
-        return paired.Created && !paired.Replayed ? StatusCode(StatusCodes.Status201Created, dto) : Ok(dto);
+        return paired.Created ? StatusCode(StatusCodes.Status201Created, dto) : Ok(dto);
     }
 
     /// <summary>Lists the current user's paired devices, newest first. Never includes tokens.</summary>

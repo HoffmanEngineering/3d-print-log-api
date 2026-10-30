@@ -35,10 +35,13 @@ public class DeviceGrant
     /// <summary>
     /// SHA-256 of the device token, lowercase hex. The token itself is never stored. It carries
     /// 256 random bits, so an unsalted hash is not guessable, and it is what the per-request
-    /// lookup matches on.
+    /// lookup matches on. A concurrency token, with <see cref="PreviousTokenHash"/>: a re-pair
+    /// rotates the pair it read, and fails (then reads again) if a racing re-pair or the new
+    /// token's first use changed either since (api#287).
     /// </summary>
     [Required]
     [MaxLength(64)]
+    [ConcurrencyCheck]
     public string TokenHash { get; set; } = null!;
 
     /// <summary>The granted device scopes, space-separated and sorted (<c>DeviceScopes</c>).</summary>
@@ -62,9 +65,10 @@ public class DeviceGrant
     /// The token a re-pair replaced (api#287), still accepted until <see cref="PreviousTokenExpiresAt"/>
     /// or the first use of <see cref="TokenHash"/>, whichever comes first, so a device whose
     /// re-pair reply was lost is not stranded. Same format as <see cref="TokenHash"/>. Deleting
-    /// the row (a revoke) ends both.
+    /// the row (a revoke) ends both. A concurrency token: see <see cref="TokenHash"/>.
     /// </summary>
     [MaxLength(64)]
+    [ConcurrencyCheck]
     public string? PreviousTokenHash { get; set; }
 
     /// <summary>When <see cref="PreviousTokenHash"/> stops working, whether or not the new token was used.</summary>
