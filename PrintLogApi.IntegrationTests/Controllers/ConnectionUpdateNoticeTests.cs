@@ -53,6 +53,9 @@ public class ConnectionUpdateNoticeTests : IClassFixture<CustomWebApplicationFac
     [InlineData("prusalink")]
     [InlineData("bambu")]
     [InlineData("sdcp")]
+    [InlineData("duet")]
+    [InlineData("flashforge")]
+    [InlineData("anycubic")]
     public async Task Put_EveryBridgeAdapter_IsToldANewerBridgeIsOut(string kind)
     {
         // Every adapter is printlog-bridge, so they share its releases (printlog-bridge#82).

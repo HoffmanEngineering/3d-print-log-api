@@ -17,6 +17,9 @@ internal static class SyncPrintSource
         PrintSource.PrusaLink => "prusalink",
         PrintSource.Bambu => "bambu",
         PrintSource.Sdcp => "sdcp",
+        PrintSource.Duet => "duet",
+        PrintSource.FlashForge => "flashforge",
+        PrintSource.Anycubic => "anycubic",
         _ => "unknown",
     };
 

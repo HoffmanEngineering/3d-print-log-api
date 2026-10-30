@@ -11,6 +11,9 @@ public class SyncPrintSourceTests
     [InlineData(PrintSource.PrusaLink, "prusalink")]
     [InlineData(PrintSource.Bambu, "bambu")]
     [InlineData(PrintSource.Sdcp, "sdcp")]
+    [InlineData(PrintSource.Duet, "duet")]
+    [InlineData(PrintSource.FlashForge, "flashforge")]
+    [InlineData(PrintSource.Anycubic, "anycubic")]
     public void TheAdapterSources_HaveTheirOwnNames(PrintSource source, string expected)
     {
         Assert.Equal(expected, SyncPrintSource.Name(source));

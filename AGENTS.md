@@ -408,13 +408,16 @@ never gets `updateAvailable`.
 ## Bridge adapters (printlog-bridge#82)
 
 printlog-bridge registers one connection kind per adapter: `moonraker`, `octoprint`, `prusalink`,
-`bambu`, `sdcp` (Elegoo). `Connection.BridgeKinds` and `IsBridgeKind` are the list; add a new
-adapter there, in `AgentReleases:Repositories`, and in `Connection.PrintSourceForKind`.
+`bambu`, `sdcp` (Elegoo), `duet` (RepRapFirmware), `flashforge` and `anycubic` (LAN mode, FDM and
+resin). `Connection.BridgeKinds` and `IsBridgeKind` are the list; add a new adapter there, in
+`AgentReleases:Repositories`, `Connection.PrintSourceForKind`, `BridgeRules.DefaultPort`,
+`SealedCredentials` and the silent-printer email's label and guide link.
 
 - **Source.** A print created with an API key that links to a connection (`connectionInstanceId`)
   takes `PrintSourceForKind`: `octoprint` → OctoPrint (3), `prusalink` → PrusaLink (7), `bambu` →
-  Bambu (8), `sdcp` → Sdcp (9). A Cura setting still wins. **`moonraker` maps to nothing and stays
-  ApiKey**, what bridge prints have always been; `PrintSource.Moonraker` means the notifier, and
+  Bambu (8), `sdcp` → Sdcp (9), `duet` → Duet (10), `flashforge` → FlashForge (11), `anycubic` →
+  Anycubic (12). A Cura setting still wins. **`moonraker` maps to nothing and stays ApiKey**, what
+  bridge prints have always been; `PrintSource.Moonraker` means the notifier, and
   moving bridge prints there changes their achievements, sync `source` and silent-printer email.
 - **"Has a bridge" is not one question.** The Spoolman config block leaves out the notifier for a
   bridge of any kind. The event dedupe (`PrintEventService.LiveBridges`) matches one kind: the
@@ -522,8 +525,8 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
   to the new bridge's current key with AD `printlog-credential:v1:{toBridgeId}:{entryId}:{field}`)
   and `keyFingerprint`, checked exactly as a seal (`EnsureSealableTo`). A field the printer can't
   connect without that was set (`SealedCredentials.CarriedGroups`: Bambu access code, PrusaLink
-  password or API key, OctoPrint API key, and a Moonraker API key, set only with
-  `[authorization]`) must be sent, or 400 `secrets_required` with `fields`: otherwise the old
+  password or API key, OctoPrint API key, FlashForge check code, a Moonraker API key, set only
+  with `[authorization]`, and a Duet password, set only when RepRapFirmware has one) must be sent, or 400 `secrets_required` with `fields`: otherwise the old
   bridge lets go and the new one can't connect, and every print in between is lost. Fields not
   sent are deleted and named in `droppedSecretFields`. Refused when either bridge has the printer
   in its config file (`printer_configured_on_bridge`). Concurrency rests on

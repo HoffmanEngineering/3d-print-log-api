@@ -27,10 +27,11 @@ public class Connection
 
     /// <summary>
     /// The kinds printlog-bridge registers, one per adapter (printlog-bridge#82): Moonraker,
-    /// OctoPrint, PrusaLink, Bambu Lab and Elegoo's SDCP. A connection of any of them is a bridge
+    /// OctoPrint, PrusaLink, Bambu Lab, Elegoo's SDCP, Duet (RepRapFirmware), FlashForge and Anycubic
+    /// LAN mode. A connection of any of them is a bridge
     /// that logs its printer's prints itself.
     /// </summary>
-    public static readonly string[] BridgeKinds = [MoonrakerKind, OctoPrintKind, "prusalink", "bambu", "sdcp"];
+    public static readonly string[] BridgeKinds = [MoonrakerKind, OctoPrintKind, "prusalink", "bambu", "sdcp", "duet", "flashforge", "anycubic"];
 
     /// <summary>Whether <paramref name="kind"/> is one of <see cref="BridgeKinds"/>, ignoring case.</summary>
     public static bool IsBridgeKind(string? kind) =>
@@ -49,6 +50,9 @@ public class Connection
         "prusalink" => PrintSource.PrusaLink,
         "bambu" => PrintSource.Bambu,
         "sdcp" => PrintSource.Sdcp,
+        "duet" => PrintSource.Duet,
+        "flashforge" => PrintSource.FlashForge,
+        "anycubic" => PrintSource.Anycubic,
         _ => null,
     };
 

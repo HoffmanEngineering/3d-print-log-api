@@ -133,7 +133,7 @@ public class ConfirmBridgeKeyDto
 /// <summary>One printer a bridge found. The identity is computed from <c>serial</c>, else <c>mainboardId</c>, else the MACs and port, else the address and port.</summary>
 public class DiscoveredPrinterReportDto
 {
-    /// <summary>The adapter that recognized it: <c>moonraker</c>, <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c>.</summary>
+    /// <summary>The adapter that recognized it: <c>moonraker</c>, <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c>, <c>sdcp</c>, <c>duet</c>, <c>flashforge</c> or <c>anycubic</c>.</summary>
     public string? Kind { get; set; }
 
     /// <summary>Its IP address: a private IPv4 address, or an IPv6 unique-local one, with no zone.</summary>

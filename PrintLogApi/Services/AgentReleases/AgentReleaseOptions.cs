@@ -21,6 +21,9 @@ public sealed class AgentReleaseOptions
         ["prusalink"] = "HoffmanEngineering/printlog-bridge",
         ["bambu"] = "HoffmanEngineering/printlog-bridge",
         ["sdcp"] = "HoffmanEngineering/printlog-bridge",
+        ["duet"] = "HoffmanEngineering/printlog-bridge",
+        ["flashforge"] = "HoffmanEngineering/printlog-bridge",
+        ["anycubic"] = "HoffmanEngineering/printlog-bridge",
     };
 
     /// <summary>How long a version read from GitHub is served before it is read again.</summary>

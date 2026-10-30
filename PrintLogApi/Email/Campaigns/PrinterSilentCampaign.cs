@@ -203,6 +203,9 @@ public sealed class PrinterSilentCampaign(
         PrintSource.PrusaLink => "PrusaLink",
         PrintSource.Bambu => "Bambu Lab",
         PrintSource.Sdcp => "Elegoo",
+        PrintSource.Duet => "Duet",
+        PrintSource.FlashForge => "FlashForge",
+        PrintSource.Anycubic => "Anycubic",
         _ => source.ToString(),
     };
 
@@ -215,6 +218,9 @@ public sealed class PrinterSilentCampaign(
         PrintSource.PrusaLink => ("/docs/printlog-bridge/prusalink", "PrusaLink setup guide"),
         PrintSource.Bambu => ("/docs/printlog-bridge/bambu", "Bambu Lab setup guide"),
         PrintSource.Sdcp => ("/docs/printlog-bridge/sdcp", "Elegoo setup guide"),
+        PrintSource.Duet => ("/docs/printlog-bridge/duet", "Duet setup guide"),
+        PrintSource.FlashForge => ("/docs/printlog-bridge/flashforge", "FlashForge setup guide"),
+        PrintSource.Anycubic => ("/docs/printlog-bridge/anycubic", "Anycubic setup guide"),
         _ => ("/api-keys", "Your API keys"),
     };
 }

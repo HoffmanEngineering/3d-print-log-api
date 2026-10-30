@@ -17,7 +17,7 @@ public class ConnectionDto
 
     /// <summary>
     /// The connector type, lower-case. printlog-bridge registers <c>moonraker</c>, <c>octoprint</c>,
-    /// <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> (Elegoo).
+    /// <c>prusalink</c>, <c>bambu</c>, <c>sdcp</c> (Elegoo), <c>duet</c>, <c>flashforge</c> or <c>anycubic</c>.
     /// </summary>
     public string Kind { get; set; } = null!;
 

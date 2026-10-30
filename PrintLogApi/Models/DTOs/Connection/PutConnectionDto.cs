@@ -10,7 +10,7 @@ public class PutConnectionDto : IValidatableObject
 {
     /// <summary>
     /// The connector type, stored lower-case. printlog-bridge sends <c>moonraker</c>,
-    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> (Elegoo).
+    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c>, <c>sdcp</c> (Elegoo), <c>duet</c>, <c>flashforge</c> or <c>anycubic</c>.
     /// </summary>
     [StringLength(50)]
     public string? Kind { get; set; }

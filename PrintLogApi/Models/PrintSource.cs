@@ -21,4 +21,13 @@ public enum PrintSource
 
     /// <summary>Elegoo printers, over the SDCP protocol.</summary>
     Sdcp = 9,
+
+    /// <summary>Duet printers, over RepRapFirmware's HTTP API (printlog-bridge#89).</summary>
+    Duet = 10,
+
+    /// <summary>FlashForge Adventurer 5M, 5M Pro and AD5X, over their LAN HTTP API (printlog-bridge#88).</summary>
+    FlashForge = 11,
+
+    /// <summary>Anycubic printers in LAN mode, FDM and resin (printlog-bridge#96, #97).</summary>
+    Anycubic = 12,
 }

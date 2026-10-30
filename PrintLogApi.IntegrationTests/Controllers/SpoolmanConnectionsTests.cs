@@ -172,6 +172,9 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
     [InlineData("prusalink")]
     [InlineData("bambu")]
     [InlineData("sdcp")]
+    [InlineData("duet")]
+    [InlineData("flashforge")]
+    [InlineData("anycubic")]
     public async Task ConfigBlock_ForAPrinterWithAnyBridgeKind_LeavesOutTheNotifier(string kind)
     {
         // Any bridge logs the printer's prints itself, so a notifier would only add duplicates

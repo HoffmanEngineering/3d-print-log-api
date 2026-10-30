@@ -12,6 +12,7 @@ public static class AutomatedPrintSources
     [
         PrintSource.SlicerPlugin, PrintSource.OctoPrint, PrintSource.Moonraker, PrintSource.ApiKey,
         PrintSource.PrusaLink, PrintSource.Bambu, PrintSource.Sdcp,
+        PrintSource.Duet, PrintSource.FlashForge, PrintSource.Anycubic,
     ];
 }
 

@@ -205,12 +205,29 @@ public class PrinterSilentCampaignTests : IClassFixture<CustomWebApplicationFact
     }
 
     [Theory]
+    [InlineData(PrintSource.Sdcp, "Elegoo")]
+    [InlineData(PrintSource.Duet, "Duet")]
+    [InlineData(PrintSource.FlashForge, "FlashForge")]
+    [InlineData(PrintSource.Anycubic, "Anycubic")]
+    public async Task Render_NamesTheBridgeAdapterSource(PrintSource source, string label)
+    {
+        var (user, _) = await SilentAsync(TimeSpan.FromDays(15), source: source);
+
+        var email = await RenderAsync(user.Id);
+
+        Assert.Contains($"Last heard from via {label} on", email!.Text);
+    }
+
+    [Theory]
     [InlineData(PrintSource.OctoPrint, "/docs/octoprint-webhook")]
     [InlineData(PrintSource.SlicerPlugin, "/docs/slic3r-uploader")]
     [InlineData(PrintSource.ApiKey, "/api-keys")]
     [InlineData(PrintSource.PrusaLink, "/docs/printlog-bridge/prusalink")]
     [InlineData(PrintSource.Bambu, "/docs/printlog-bridge/bambu")]
     [InlineData(PrintSource.Sdcp, "/docs/printlog-bridge/sdcp")]
+    [InlineData(PrintSource.Duet, "/docs/printlog-bridge/duet")]
+    [InlineData(PrintSource.FlashForge, "/docs/printlog-bridge/flashforge")]
+    [InlineData(PrintSource.Anycubic, "/docs/printlog-bridge/anycubic")]
     public async Task Render_TroubleshootingLinkFollowsTheSource(PrintSource source, string path)
     {
         var (user, _) = await SilentAsync(TimeSpan.FromDays(15), source: source);

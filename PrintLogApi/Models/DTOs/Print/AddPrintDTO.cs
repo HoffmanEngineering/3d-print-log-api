@@ -79,7 +79,7 @@ public class AddPrintDTO : IValidatableObject
     /// The <c>instanceId</c> of the connection (<c>PUT /api/Connections/{instanceId}</c>) logging
     /// this print, so it shows "Logged automatically by" that connection. An id that is not one of
     /// yours is ignored, never rejected. Sent with an API key, a connection of kind
-    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c> or <c>sdcp</c> also records the print's
+    /// <c>octoprint</c>, <c>prusalink</c>, <c>bambu</c>, <c>sdcp</c>, <c>duet</c>, <c>flashforge</c> or <c>anycubic</c> also records the print's
     /// source as that adapter.
     /// </summary>
     [StringLength(100)]
