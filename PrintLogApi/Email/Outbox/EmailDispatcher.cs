@@ -211,10 +211,14 @@ public sealed class EmailDispatcher(
             return Skip(row, EmailSkipReasons.Deactivating);
         }
 
-        if (!_campaigns.TryGetValue(row.Campaign, out var campaign) || !settings.IsCampaignEnabled(row.Campaign))
+        if (!_campaigns.TryGetValue(row.Campaign, out var campaign) || !settings.IsCampaignEnabled(row.Campaign, enabledByDefault: campaign.IsSecurityNotice))
         {
             return Skip(row, EmailSkipReasons.DisabledCampaign);
         }
+
+        // A security notice (api#287) is not engagement mail: preferences, the notice gate and
+        // the holdout below don't apply to it, and it carries no unsubscribe header.
+        var security = campaign.IsSecurityNotice;
 
         if (string.IsNullOrWhiteSpace(user.Email))
         {
@@ -261,12 +265,12 @@ public sealed class EmailDispatcher(
             return Skip(row, EmailSkipReasons.Suppressed);
         }
 
-        if (!await preferences.IsAllowedAsync(row.UserId, campaign.PreferenceSettingTypeId, ct))
+        if (!security && !await preferences.IsAllowedAsync(row.UserId, campaign.PreferenceSettingTypeId, ct))
         {
             return Skip(row, EmailSkipReasons.OptedOut);
         }
 
-        if (settings.Notice.Required && !await preferences.HasSeenNoticeAsync(row.UserId, ct))
+        if (!security && settings.Notice.Required && !await preferences.HasSeenNoticeAsync(row.UserId, ct))
         {
             return Defer(row, now + GateRecheck, "notice");
         }
@@ -311,10 +315,10 @@ public sealed class EmailDispatcher(
         }
 
         // Written for both arms, after relevance, so holdout and treatment rows are comparable.
-        var holdout = EmailHoldout.IsHoldout(row.UserId, settings.HoldoutPercent);
+        var holdout = !security && EmailHoldout.IsHoldout(row.UserId, settings.HoldoutPercent);
         var exposure = rendered.Exposure.DeepClone().AsObject();
         exposure["eligibleAt"] = now;
-        exposure["arm"] = holdout ? "holdout" : "treatment";
+        exposure["arm"] = security ? "required" : holdout ? "holdout" : "treatment";
         row.Exposure = exposure.ToJsonString();
 
         if (holdout)
@@ -328,12 +332,13 @@ public sealed class EmailDispatcher(
             return Skip(row, EmailSkipReasons.DryRun);
         }
 
-        var unsubscribe = links.OneClick(tokens.CreateUnsubscribe(row.UserId, rendered.UnsubscribeCategory));
-        var headers = new Dictionary<string, string>
+        var headers = new Dictionary<string, string>();
+        if (!security)
         {
-            ["List-Unsubscribe"] = $"<{unsubscribe}>",
-            ["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click",
-        };
+            var unsubscribe = links.OneClick(tokens.CreateUnsubscribe(row.UserId, rendered.UnsubscribeCategory));
+            headers["List-Unsubscribe"] = $"<{unsubscribe}>";
+            headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
+        }
 
         return new Prepared(null, new EmailMessage(email, rendered.Subject, rendered.Html, rendered.Text, headers, row.Campaign, row.Id));
     }

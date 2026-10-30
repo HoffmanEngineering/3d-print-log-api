@@ -31,6 +31,9 @@ public interface INotificationService
 
     /// <summary>A bridge reported a new key for sealed credentials, held until the owner confirms it (printlog-bridge#100).</summary>
     Task<Notification> CreateBridgeKeyPendingNotification(long userId, string bridgeName);
+
+    /// <summary>A device paired, or paired again, with the account (api#287). Points at Settings, where it is revoked.</summary>
+    Task<Notification> CreateDevicePairedNotification(long userId, string deviceName, bool repaired);
     Task<Notification> CreateCommentNotification(long recipientUserId, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName, bool isRecipientPrintOwner);
     Task CreateCommentNotifications(IEnumerable<(long RecipientUserId, bool IsRecipientPrintOwner)> recipients, long printId, string? printTitle, long commentId, long commenterUserId, string commenterDisplayName);
 

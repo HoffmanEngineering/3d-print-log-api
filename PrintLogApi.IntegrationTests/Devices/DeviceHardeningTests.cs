@@ -33,7 +33,7 @@ public class DeviceHardeningTests(CustomWebApplicationFactory factory) : IClassF
     }
 
     [Fact]
-    public async Task APairingToken_IsSingleUse()
+    public async Task APairingToken_PairsOneDevice()
     {
         var subject = NewSubject("single-use");
         var token = PairingToken(subject);
@@ -41,9 +41,9 @@ public class DeviceHardeningTests(CustomWebApplicationFactory factory) : IClassF
 
         Assert.Equal(HttpStatusCode.Created, (await Send(PairRequest(token, deviceId))).StatusCode);
 
+        // The same request again is a retry after a lost reply (api#287): answered, same grant.
         var sameDevice = await Send(PairRequest(token, deviceId));
-        Assert.Equal(HttpStatusCode.Forbidden, sameDevice.StatusCode);
-        Assert.Equal(DeviceTokenErrors.PairingTokenUsed, await CodeOf(sameDevice));
+        Assert.Equal(HttpStatusCode.OK, sameDevice.StatusCode);
 
         var otherDevice = await Send(PairRequest(token, Guid.NewGuid()));
         Assert.Equal(HttpStatusCode.Forbidden, otherDevice.StatusCode);
@@ -202,14 +202,61 @@ public class DeviceHardeningTests(CustomWebApplicationFactory factory) : IClassF
         public async Task GuessingPastTheLimit_Is429_WithItsOwnCode_NotTheRePairCode()
         {
             var client = throttled.CreateClient();
-            HttpRequestMessage Guess() => WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), "pld_" + new string('B', 43));
+            HttpRequestMessage Guess(char c) => WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), "pld_" + new string(c, 43));
 
-            var first = await client.SendAsync(Guess(), TestContext.Current.CancellationToken);
+            var first = await client.SendAsync(Guess('B'), TestContext.Current.CancellationToken);
             Assert.Equal(DeviceTokenErrors.InvalidToken, await CodeOf(first));
 
-            var second = await client.SendAsync(Guess(), TestContext.Current.CancellationToken);
+            // Guessing means trying another token: the limit counts distinct ones (api#287).
+            var second = await client.SendAsync(Guess('C'), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.TooManyRequests, second.StatusCode);
             Assert.Equal(DeviceTokenErrors.Throttled, await CodeOf(second));
+        }
+
+    }
+
+    public sealed class OneAttemptForRetriesFactory : CustomWebApplicationFactory
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureAppConfiguration((_, cfg) =>
+                cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Api:InvalidDeviceTokenAttemptsPerMinute"] = "1" }));
+        }
+    }
+
+    /// <summary>Its own host, so no other test's guesses share its address's window.</summary>
+    public class RetriedToken(OneAttemptForRetriesFactory throttled) : IClassFixture<OneAttemptForRetriesFactory>
+    {
+        /// <summary>
+        /// A revoked bridge retrying its one token is not guessing, and must keep hearing "re-pair"
+        /// (api#287, item 4), even after other tokens from its address used up the window.
+        /// </summary>
+        [Fact]
+        public async Task OneRevokedTokenRetried_StaysA401_WhateverElseTheAddressSends()
+        {
+            var client = throttled.CreateClient();
+            var subject = NewSubject("throttle-revoked");
+            var paired = await PairAsync(client, subject);
+            var revoked = paired.GetProperty("token").GetString()!;
+            Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(
+                AsUser(new HttpRequestMessage(HttpMethod.Delete, $"/api/device-grants/{paired.GetProperty("id").GetInt64()}"), subject),
+                TestContext.Current.CancellationToken)).StatusCode);
+            HttpRequestMessage Retry() => WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), revoked);
+
+            for (var i = 0; i < 5; i++)
+            {
+                var response = await client.SendAsync(Retry(), TestContext.Current.CancellationToken);
+                Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+                Assert.Equal(DeviceTokenErrors.InvalidToken, await CodeOf(response));
+            }
+
+            var guess = await client.SendAsync(WithDevice(new HttpRequestMessage(HttpMethod.Get, "/api/Users/me"), "pld_" + new string('D', 43)), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.TooManyRequests, guess.StatusCode);
+
+            var again = await client.SendAsync(Retry(), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, again.StatusCode);
+            Assert.Equal(DeviceTokenErrors.InvalidToken, await CodeOf(again));
         }
     }
 }

@@ -173,6 +173,7 @@ public class Startup
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
         // Paired devices and their scoped tokens (#148); the scheme and policy are in ConfigureAuthentication.
         services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
+        services.AddScoped<Services.DeviceGrants.IDevicePairingNotifier, Services.DeviceGrants.DevicePairingNotifier>();
         services.AddTransient<IConnectionService, ConnectionService>();
         services.AddTransient<Services.Bridges.IBridgeService, Services.Bridges.BridgeService>();
         services.AddTransient<Services.Bridges.IBridgePrintGuard, Services.Bridges.BridgePrintGuard>();

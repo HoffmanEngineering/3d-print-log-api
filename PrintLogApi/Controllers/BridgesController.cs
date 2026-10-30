@@ -67,6 +67,14 @@ public class BridgesController(IBridgeService bridges, TelemetryClient telemetry
             return CodedProblem(StatusCodes.Status400BadRequest, error!, "invalid_check_in");
         }
 
+        if (DeviceGrantClaim.IsSuperseded(User))
+        {
+            // A token a re-pair replaced still works during its grace (api#287), but whoever holds
+            // a copy of it (perhaps a thief, which is why the re-pair cleared the pending key)
+            // must not report a key: on a bridge's first check-in it would even be trusted outright.
+            report = report with { PublicKey = null, PublicKeyFingerprint = null };
+        }
+
         BridgeCheckInResult result;
         try
         {

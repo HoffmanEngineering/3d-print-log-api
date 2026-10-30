@@ -1,5 +1,7 @@
 ﻿using System.Globalization;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Caching.Memory;
 using PrintLogApi.Caching;
@@ -54,7 +56,7 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
         var identity = await grants.AuthenticateAsync(token, context.RequestAborted);
         if (identity is null)
         {
-            if (RegisterFailedAttempt(context))
+            if (RegisterUnknownToken(context, token))
             {
                 TrackRejected(telemetry, "throttled", null);
                 context.Response.Headers.RetryAfter = "60";
@@ -126,17 +128,33 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
             new(ConnectorCredentialClaim.Type, ConnectorCredentialClaim.ForDeviceGrant(grant.GrantId)),
         };
 
+        if (grant.Superseded)
+        {
+            claims.Add(new Claim(DeviceGrantClaim.SupersededType, "true"));
+        }
+
         return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType, ClaimTypes.NameIdentifier, ClaimTypes.Role));
     }
 
     /// <summary>
-    /// Counts an unknown token against the calling address, as <c>ApiKeyMiddleware</c> does for
-    /// keys and for the same reason: this short-circuits before <c>UseRateLimiter</c>, so nothing
-    /// else bounds guessing. Only failures count; a valid token never accumulates. Guessing a
-    /// 256-bit token is hopeless anyway, so this mainly keeps a misconfigured client from turning
-    /// into a query per request. <c>Api:InvalidDeviceTokenAttemptsPerMinute</c>, 0 disables.
+    /// Counts an unknown token against the calling address and says whether to answer 429. This
+    /// short-circuits before <c>UseRateLimiter</c>, as <c>ApiKeyMiddleware</c> does for keys, so
+    /// nothing else bounds guessing. A valid token never accumulates.
+    ///
+    /// It counts <b>distinct</b> tokens per address per minute (api#287): guessing means trying a
+    /// new token each time, so a guesser meets the limit exactly as before, while one revoked
+    /// token retried (by one bridge, or several behind one NAT) counts once and keeps getting 401
+    /// <c>invalid_device_token</c>, the "re-pair" answer, however often it is sent and whatever
+    /// else the address sends. Only a token not yet counted is refused past the limit.
+    ///
+    /// What it remembers is a fingerprint per token (8 bytes of an HMAC under a key that never
+    /// leaves the process), never the stored hash, for one minute, at most the limit's worth per
+    /// address, so its size is bounded by the setting rather than by what a caller sends. It only
+    /// picks 401 or 429 for a token the database just refused; it never answers for the database
+    /// (no negative cache, the #193 rule), and the lookup still runs first on every request.
+    /// <c>Api:InvalidDeviceTokenAttemptsPerMinute</c>, 0 disables.
     /// </summary>
-    private bool RegisterFailedAttempt(HttpContext context)
+    private bool RegisterUnknownToken(HttpContext context, string token)
     {
         if (_maxFailedAttemptsPerMinute <= 0)
         {
@@ -144,18 +162,54 @@ public sealed class DeviceTokenMiddleware(RequestDelegate next, IMemoryCache cac
         }
 
         var address = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        var counter = cache.GetOrCreate(FailedAttemptCachePrefix + address, entry =>
+        var seen = cache.GetOrCreate(FailedAttemptCachePrefix + address, entry =>
         {
-            entry.SetSize(CacheBudget.SmallEntryBytes);
+            // The array is the whole payload: 8 bytes per fingerprint the limit allows.
+            entry.SetSize(CacheBudget.SmallEntryBytes + (long)_maxFailedAttemptsPerMinute * sizeof(ulong));
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1);
-            return new FailedAttemptCounter();
+            return new UnknownTokens(_maxFailedAttemptsPerMinute);
         })!;
 
-        return Interlocked.Increment(ref counter.Count) > _maxFailedAttemptsPerMinute;
+        return !seen.TryCount(Fingerprint(token));
     }
 
-    private sealed class FailedAttemptCounter
+    private static readonly byte[] FingerprintKey = RandomNumberGenerator.GetBytes(32);
+
+    private static ulong Fingerprint(string token)
     {
-        public int Count;
+        Span<byte> mac = stackalloc byte[HMACSHA256.HashSizeInBytes];
+        HMACSHA256.HashData(FingerprintKey, Encoding.UTF8.GetBytes(token), mac);
+        return BitConverter.ToUInt64(mac);
+    }
+
+    /// <summary>
+    /// The distinct unknown tokens one address sent in the current minute: a fixed array as long
+    /// as the limit, searched linearly (the limit is small), so it never grows past what it is
+    /// charged for.
+    /// </summary>
+    private sealed class UnknownTokens(int limit)
+    {
+        private readonly ulong[] _seen = new ulong[limit];
+        private int _count;
+
+        /// <summary>False when <paramref name="fingerprint"/> is new and the address has already sent as many others as the limit.</summary>
+        public bool TryCount(ulong fingerprint)
+        {
+            lock (_seen)
+            {
+                if (Array.IndexOf(_seen, fingerprint, 0, _count) >= 0)
+                {
+                    return true;
+                }
+
+                if (_count == _seen.Length)
+                {
+                    return false;
+                }
+
+                _seen[_count++] = fingerprint;
+                return true;
+            }
+        }
     }
 }

@@ -557,6 +557,16 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("PairedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("PairingNoticeAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PreviousTokenExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PreviousTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Scopes")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -571,6 +581,8 @@ namespace PrintLogApi.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PreviousTokenHash");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -1612,6 +1624,9 @@ namespace PrintLogApi.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<long?>("GrantId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("TokenKeyHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1620,6 +1635,8 @@ namespace PrintLogApi.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("GrantId");
 
                     b.HasIndex("TokenKeyHash")
                         .IsUnique();
@@ -3736,6 +3753,16 @@ namespace PrintLogApi.Migrations
                     b.Navigation("TriggeredByUser");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.PairingTokenUse", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.DeviceGrant", "Grant")
+                        .WithMany()
+                        .HasForeignKey("GrantId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Grant");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Print", b =>

@@ -218,10 +218,25 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   its `jti`, or of the whole token when there is no `jti`, until the token's `exp` plus 5 minutes.
   It is spent in the same `SaveChanges` as the grant, so a refused pairing leaves it unspent, and
   the unique index decides a race on any instance. Each pairing deletes expired rows first (one
-  indexed delete); there is no background job. A bridge whose pairing response was lost runs the
-  device flow again. A re-pair that loses a race with a revoke (the rotation updates no row) answers
-  409 `device_grant_revoked` and spends the token: recreating the row or leaving the token
-  reusable would let an approval given before the revoke undo it.
+  indexed delete); there is no background job. A re-pair that loses a race with a revoke (the
+  rotation updates no row) answers 409 `device_grant_revoked` and spends the token: recreating the
+  row or leaving the token reusable would let an approval given before the revoke undo it.
+- **A retry of the same pairing is answered again** (api#287): the spend row keeps the grant it
+  paired (`PairingTokenUses.GrantId`, FK set null on delete), and the same token for that same
+  grant gets a fresh token (200, `DeviceRepaired` with `Replayed`), so a lost reply no longer
+  strands the device. The binding is to the grant id, never the device id: a revoke nulls it, so
+  an approval given before a revoke can't pair the device back, even after the user paired it
+  again with a new approval. A save that committed but whose acknowledgment was lost (what an EF
+  execution-strategy retry runs into) is recognized by the generated token being the grant's
+  current one and answered as the success it was.
+- **Re-pair grace** (api#287): a re-pair keeps the replaced token valid (`PreviousTokenHash`)
+  until the new token's first use or `DeviceGrantService.RepairGrace` (10 minutes), whichever
+  comes first. A re-pair while a grace runs keeps the older token and its deadline (the token in
+  between was never used). The lookup reads `TokenHash` first and `PreviousTokenHash` only on a
+  miss; the first use of the new token clears the previous one in one conditional update. A
+  revoke deletes the row, so both die together. A request with the superseded token carries
+  `DeviceGrantClaim.SupersededType`, and its check-in drops any reported key (the re-pair cleared
+  the pending key for exactly that holder).
 - **Where a device token works is an allow-list.** `DeviceTokenMiddleware` (after
   `UseAuthentication`, before `ApiKeyMiddleware`) sets a principal only on an endpoint whose action
   carries `[DeviceAccess(scope)]` and only if the grant holds that scope; everywhere else it answers
@@ -230,10 +245,33 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   private data. `DeviceAccessCoverageTests` walks every `/api` endpoint with a full-scope token and
   pins the allow-list: **adding `[DeviceAccess]` anywhere is a security decision and must update
   that list.** An allowed action must use the default policy; a scheme-pinned one drops the principal.
-- **The token lookup is never cached.** One indexed read per device request, so a revoke (a row
-  delete) is effective on the next request on every instance. Unknown tokens are counted per IP
-  (`Api:InvalidDeviceTokenAttemptsPerMinute`), never cached. Only the last-used throttle flag is in
-  `IMemoryCache` (5 minutes).
+- **The token lookup is never cached.** One indexed read per device request (two for a token
+  that isn't current), so a revoke (a row delete) is effective on the next request on every
+  instance. Only the last-used throttle flag is in `IMemoryCache` (5 minutes).
+- **The unknown-token limit counts distinct tokens per address** (`Api:InvalidDeviceTokenAttemptsPerMinute`,
+  20, api#287): a token already counted in the minute always gets 401 `invalid_device_token`, a new
+  one past the limit 429. Guessing is distinct tokens, so it is limited as before; one revoked token
+  retried (bridges behind one NAT, or a collapsed client IP) keeps hearing "re-pair". Memory holds
+  8-byte HMAC fingerprints under a per-process key, at most the limit per address, for a minute. It
+  only picks 401 or 429 after the database refused the token; it never answers for the database
+  (no negative cache, #193).
+- **Revoke all:** `DELETE /api/device-grants` (`InteractiveUserOnly`) deletes every grant of the
+  user in one transaction with exactly what a single revoke does (unlink connections, cascade the
+  bridges, their discovered, desired and sealed rows), answers `{ "revoked": n }`, and emits
+  `DeviceGrantRevoked` per grant with `Via=all`. Nothing in the API sees an Auth0 password change
+  or "sign out everywhere", so nothing calls it automatically.
+- **Pairing notice** (api#287): after every successful pairing (first, re-pair, retry),
+  `DevicePairingNotifier` claims `DeviceGrant.PairingNoticeAt` with one conditional update (at most
+  once per grant per hour; a new device is a new grant) and then queues a `device-paired` outbox
+  row (with a snapshot of name, scopes and time in `Exposure`) and writes an in-app notification.
+  After the commit, never inside it, with `CancellationToken.None`, and best effort: a failure is
+  logged, counted (`DevicePairingNoticeFailed`, `printlog_device_pairing_notice_failures_total`)
+  and never fails the pairing. `device-paired` is the first **security notice**
+  (`IEmailCampaign.IsSecurityNotice`): on unless `Email:Campaigns:device_paired:Enabled=false`, it
+  ignores preferences (the master switch too), the in-app notice gate and the holdout, has no
+  unsubscribe header or link, and is outside the frequency cap; `Email:Enabled`, dry run, the
+  allow-list, the daily cap, verification and the suppression list still apply. The device name is
+  the device's own text: it is never in the subject.
 - Device principals are role `DeviceUser` (refused by `InteractiveUserOnly`, like `ApiUser`), carry
   `auth_method=device` (prints get `PrintSource.ApiKey`, as bridge prints always have) and
   `ConnectorCredentialClaim` `device:<id>`, so #151's budget applies unchanged.

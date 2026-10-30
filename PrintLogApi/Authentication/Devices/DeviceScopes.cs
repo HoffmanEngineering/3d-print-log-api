@@ -50,6 +50,39 @@ public static class DeviceScopes
             .Order(StringComparer.Ordinal)
             .ToList();
 
+    /// <summary>
+    /// What each scope lets a device do, in the order they are listed, worded as the web app's
+    /// Connected Agents list words them (3d-print-log-ui <c>device-scopes.ts</c>).
+    /// </summary>
+    private static readonly (string Scope, string Label)[] Labels =
+    [
+        (PrintsWrite, "log prints"),
+        (PrintsRead, "see prints"),
+        (PrintersRead, "see printers"),
+        (PrintersCreate, "add printers"),
+        (PrintersSlots, "update printer slots"),
+        (FilamentsRead, "see materials"),
+        (FilesWrite, "upload print files"),
+        (ConnectionsWrite, "send heartbeats"),
+        (BridgeSync, "report printers it finds on your network"),
+    ];
+
+    /// <summary>"Log prints, update printer slots, send heartbeats" for a grant's scopes.</summary>
+    public static string Describe(IEnumerable<string> scopes)
+    {
+        var held = scopes.ToHashSet(StringComparer.Ordinal);
+        var parts = Labels.Where(l => held.Contains(l.Scope)).Select(l => l.Label)
+            .Concat(held.Where(s => !Labels.Any(l => l.Scope == s)).Order(StringComparer.Ordinal))
+            .ToList();
+        if (parts.Count == 0)
+        {
+            return "No permissions";
+        }
+
+        var sentence = string.Join(", ", parts);
+        return char.ToUpperInvariant(sentence[0]) + sentence[1..];
+    }
+
     /// <summary>The stored form: space-separated.</summary>
     public static string Join(IEnumerable<string> scopes) => string.Join(' ', scopes);
 

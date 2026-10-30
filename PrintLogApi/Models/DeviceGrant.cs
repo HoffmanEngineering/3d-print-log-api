@@ -57,4 +57,19 @@ public class DeviceGrant
 
     /// <summary>Last authenticated request, stamped at most every few minutes.</summary>
     public DateTime? LastUsedDate { get; set; }
+
+    /// <summary>
+    /// The token a re-pair replaced (api#287), still accepted until <see cref="PreviousTokenExpiresAt"/>
+    /// or the first use of <see cref="TokenHash"/>, whichever comes first, so a device whose
+    /// re-pair reply was lost is not stranded. Same format as <see cref="TokenHash"/>. Deleting
+    /// the row (a revoke) ends both.
+    /// </summary>
+    [MaxLength(64)]
+    public string? PreviousTokenHash { get; set; }
+
+    /// <summary>When <see cref="PreviousTokenHash"/> stops working, whether or not the new token was used.</summary>
+    public DateTime? PreviousTokenExpiresAt { get; set; }
+
+    /// <summary>When the owner was last told this device paired (api#287): the per-device throttle on that notice.</summary>
+    public DateTime? PairingNoticeAt { get; set; }
 }

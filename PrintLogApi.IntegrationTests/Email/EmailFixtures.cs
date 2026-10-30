@@ -47,6 +47,12 @@ internal static class EmailFixtures
             sp => PrinterSilentTemplates.RenderAsync(sp.GetRequiredService<IEmailTemplateRenderer>(), printers, CampaignTestData.Footer),
             [PrinterSilentTemplates.Subject(printers), .. printers.Printers.Select(p => p.Name)]));
 
+        var paired = DevicePairedCampaignTests.GoldenModel();
+        list.Add(new Fixture(
+            "device-paired",
+            sp => DevicePairedTemplates.RenderAsync(sp.GetRequiredService<IEmailTemplateRenderer>(), paired, DevicePairedCampaignTests.SecurityFooter),
+            [DevicePairedTemplates.Subject(paired), paired.DeviceName, paired.When]));
+
         return list;
     }
 

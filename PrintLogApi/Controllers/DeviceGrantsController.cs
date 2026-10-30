@@ -20,6 +20,7 @@ namespace PrintLogApi.Controllers;
 [ApiController]
 public class DeviceGrantsController(
     IDeviceGrantService grants,
+    IDevicePairingNotifier notifier,
     IOptions<DevicePairingOptions> options,
     TelemetryClient telemetry) : ControllerBase
 {
@@ -55,11 +56,14 @@ public class DeviceGrantsController(
     /// Pairs a device: exchanges an Auth0 device-flow access token (in `Authorization: Bearer`,
     /// for the pairing audience, at most a few minutes old) for a device token. The grant gets the
     /// device scopes the access token carries. Pairing the same `deviceId` again replaces its
-    /// token and keeps the grant. Each access token pairs once, and one requested with
-    /// `offline_access` (or refreshed) is refused.
+    /// token and keeps the grant; the replaced token keeps working until the new one is first
+    /// used, for at most 10 minutes. Each access token pairs one device: sending the same request
+    /// again (a retry after a lost reply) answers 200 with a fresh token for that device, while
+    /// its grant exists. One requested with `offline_access` (or refreshed) is refused. The owner
+    /// gets a security email and an in-app notification, at most once per device an hour.
     /// </summary>
     /// <response code="201">A new device was paired. The body carries its token, shown only this once.</response>
-    /// <response code="200">The device was already paired; its token was replaced.</response>
+    /// <response code="200">The device was already paired, or this retries a pairing that succeeded; its token was replaced.</response>
     /// <response code="400">`deviceId` or `name` is missing or invalid.</response>
     /// <response code="403">The token is not a pairing token, or carries no device scope (`code`: `insufficient_scope`), carries `offline_access` (`offline_access_not_allowed`), or was already exchanged (`pairing_token_used`).</response>
     /// <response code="409">The account has as many paired devices as allowed (`code`: `device_grant_limit`), or the user revoked this device while it re-paired (`code`: `device_grant_revoked`; the pairing token is spent, so run the device flow again).</response>
@@ -125,13 +129,23 @@ public class DeviceGrantsController(
         }
 
         var grant = paired.Grant;
-        telemetry.TrackEvent(paired.Created ? "DevicePaired" : "DeviceRepaired", GrantProperties(grant.Id, clientId, grant.Scopes));
+        var properties = GrantProperties(grant.Id, clientId, grant.Scopes);
+        if (paired.Replayed)
+        {
+            properties["Replayed"] = "true";
+        }
+
+        telemetry.TrackEvent(paired.Created && !paired.Replayed ? "DevicePaired" : "DeviceRepaired", properties);
+
+        // After the commit, and for a retry too: the per-device throttle keeps a retry from
+        // noticing twice, and a client that hung up on the first reply cannot skip the notice.
+        await notifier.NotifyAsync(grant, paired.Created);
 
         var dto = new PairedDeviceDto(grant.Id, grant.DeviceId, grant.Name, DeviceScopes.Split(grant.Scopes),
             AsUtc(grant.CreatedDate), paired.Token, "Bearer");
 
         // No Location: nothing serves a single grant, and the token is not a resource.
-        return paired.Created ? StatusCode(StatusCodes.Status201Created, dto) : Ok(dto);
+        return paired.Created && !paired.Replayed ? StatusCode(StatusCodes.Status201Created, dto) : Ok(dto);
     }
 
     /// <summary>Lists the current user's paired devices, newest first. Never includes tokens.</summary>
@@ -175,6 +189,35 @@ public class DeviceGrantsController(
 
         telemetry.TrackEvent("DeviceGrantRevoked", GrantProperties(revoked.Id, revoked.ClientId, revoked.Scopes));
         return NoContent();
+    }
+
+    /// <summary>
+    /// Revokes every paired device of the signed-in user (api#287), as if each were revoked on
+    /// its own: their tokens (and any token a re-pair replaced) stop working on the next request,
+    /// their bridges and everything those found, watch or hold sealed credentials for are
+    /// deleted, and their connections are kept, unlinked. Interactive sessions only. Answers how
+    /// many were revoked; 0 when there were none.
+    /// </summary>
+    /// <response code="200">`{ "revoked": n }`.</response>
+    [HttpDelete]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<RevokedDeviceGrantsDto>> RevokeAll(CancellationToken ct)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        var (count, revoked) = await grants.RevokeAllAsync(userId, ct);
+        foreach (var grant in revoked)
+        {
+            var properties = GrantProperties(grant.Id, grant.ClientId, grant.Scopes);
+            properties["Via"] = "all";
+            telemetry.TrackEvent("DeviceGrantRevoked", properties);
+        }
+
+        return new RevokedDeviceGrantsDto(count);
     }
 
     /// <summary>What the pairing and revoke events carry: which grant, through which app, with what. Never the token.</summary>

@@ -47,12 +47,12 @@ public class EmailPipelineEndToEndTests : IClassFixture<CustomWebApplicationFact
     }
 
     [Fact]
-    public void AllThreeCampaignsAreRegistered()
+    public void EveryCampaignIsRegistered()
     {
         using var scope = _factory.Services.CreateScope();
         var names = scope.ServiceProvider.GetServices<IEmailCampaign>().Select(c => c.Name).Order().ToList();
 
-        Assert.Equal(["monthly-recap", "onboarding", "printer-silent"], names);
+        Assert.Equal(["device-paired", "monthly-recap", "onboarding", "printer-silent"], names);
     }
 
     [Fact]

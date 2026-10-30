@@ -318,6 +318,15 @@ public class NotificationService(
         $"{bridgeName} reported a new encryption key; confirm it on the Bridges screen",
         "/printers/bridges");
 
+    public Task<Notification> CreateDevicePairedNotification(long userId, string deviceName, bool repaired) => CreateNotification(
+        userId,
+        NotificationType.SystemAnnouncement,
+        repaired ? "Device paired again" : "Device paired",
+        repaired
+            ? $"{deviceName} was paired with your account again. Not you? Revoke it in Settings."
+            : $"{deviceName} was paired with your account. Not you? Revoke it in Settings.",
+        "/settings");
+
     public async Task<Notification> CreateApiKeyDeletedNotification(long userId, string? keyDescription)
     {
         var title = "API key deleted";

@@ -1,0 +1,22 @@
+A new device was paired with your 3D Print Log account
+
+Hi Ada,
+
+A device was just paired with your account. It can now log to your account on its own.
+
+Device: printlog-bridge on voron
+Paired: October 30, 2026 at 3:04 PM (America/Chicago)
+It can: Log prints, see printers, update printer slots, send heartbeats
+
+If this was you, there's nothing to do.
+If you don't recognize it, revoke it now in Settings, under Connected Agents. Revoking stops it on its next request.
+Review paired devices: https://www.3dprintlog.test/settings?utm_source=email#connected-agents
+
+--
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
+You're receiving this security notice because a device was paired with your 3D Print Log account. Security notices are sent whatever your email preferences.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+PO Box 0, Testville, USA

@@ -78,7 +78,7 @@ Arrays take an index: `Email__AllowListUserIds__0`. Every key and its default is
 | `Email__DryRun` | Render and record everything, send nothing. |
 | `Email__AllowListUserIds__N` | When any are set, only these users receive mail; everyone else waits. |
 | `Email__DailyCap` | Maximum sends per UTC day. Empty means unlimited. |
-| `Email__Campaigns__<key>__Enabled` | Per-campaign switch: `onboarding`, `printer_silent`, `monthly_recap`. |
+| `Email__Campaigns__<key>__Enabled` | Per-campaign switch: `onboarding`, `printer_silent`, `monthly_recap`. These default off. `device_paired` (the security notice, api#287) defaults **on**; set it to `false` only to stop it. |
 | `Email__Onboarding__StartDate` | Only users who sign up on or after this instant get onboarding. |
 | `Email__Notice__Required` | Leave `true`: only users who have seen the in-app notice get engagement mail. |
 

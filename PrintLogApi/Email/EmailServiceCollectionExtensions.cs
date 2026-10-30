@@ -33,6 +33,7 @@ public static class EmailServiceCollectionExtensions
         services.AddScoped<IEmailCampaign, OnboardingCampaign>();
         services.AddScoped<IEmailCampaign, MonthlyRecapCampaign>();
         services.AddScoped<IEmailCampaign, PrinterSilentCampaign>();
+        services.AddScoped<IEmailCampaign, DevicePairedCampaign>();
 
         services.AddScoped<CampaignEvaluator>();
         services.AddHostedService<CampaignEvaluatorService>();

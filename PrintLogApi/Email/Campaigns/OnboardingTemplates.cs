@@ -109,6 +109,9 @@ public static class OnboardingTemplates
             _ => "",
         };
 
+        // A security notice carries no unsubscribe link (api#287).
+        var unsubscribe = footer.UnsubscribeUrl is { } url ? $"\nUnsubscribe: {url}" : "";
+
         return $"""
 
             --
@@ -117,8 +120,7 @@ public static class OnboardingTemplates
             Blog: {EmailFooter.BlogUrl}
 
             {supporter}{footer.ReasonLine}
-            Manage email preferences: {footer.ManageUrl}
-            Unsubscribe: {footer.UnsubscribeUrl}
+            Manage email preferences: {footer.ManageUrl}{unsubscribe}
             {footer.PostalAddress}
 
             """.Replace("\r\n", "\n");
