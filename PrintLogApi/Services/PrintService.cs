@@ -1885,7 +1885,9 @@ public sealed class PrintService(
     }
 
     /// <summary>
-    /// Writes actual usage onto the print's rows, matching by filament first. A row with a
+    /// Writes actual usage onto the print's rows. A measurement that names a row of the print
+    /// (<see cref="CompletePrintFilamentUsageDto.RowId"/>) fills that row, which keeps a spool
+    /// already linked to it; the others are matched by filament first. A row with a
     /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
     /// and links that row to the filament (#162): a spool loaded after the print started then
     /// completes the row its estimate is on instead of adding a second row for the same tool. A
@@ -1927,17 +1929,35 @@ public sealed class PrintService(
             return row;
         }
 
-        // Slots first, so an in-order match below cannot take a row a later slot names.
+        // A row named by id first (printlog-bridge#128), so no other pass can take it. It keeps a
+        // spool the user linked; an id that isn't on the print leaves the measurement to the
+        // passes below.
         var incomingRows = usage.ToList();
+        var named = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament>();
+        foreach (var incoming in incomingRows.Where(u => u.RowId is not null))
+        {
+            var row = rows.FirstOrDefault(r => r.Id == incoming.RowId);
+            if (row == null || named.ContainsValue(row))
+            {
+                continue;
+            }
+            named[incoming] = row;
+            unlinked.Remove(row);
+            row.FilamentId ??= incoming.FilamentId;
+            row.Slot ??= incoming.Slot;
+        }
+        var unnamed = incomingRows.Where(u => !named.ContainsKey(u)).ToList();
+
+        // Slots next, so an in-order match below cannot take a row a later slot names.
         var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
-        foreach (var incoming in incomingRows.Where(u => u.FilamentId is null && u.Slot is not null))
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is null && u.Slot is not null))
         {
             matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
         }
 
         // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
         // slot's unlinked row. Claimed here rather than in the loop below for the same reason.
-        foreach (var incoming in incomingRows.Where(u => u.FilamentId is not null && u.Slot is not null))
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is not null && u.Slot is not null))
         {
             if (rows.Any(r => r.FilamentId == incoming.FilamentId))
             {
@@ -1949,9 +1969,13 @@ public sealed class PrintService(
         foreach (var incoming in incomingRows)
         {
             PrintFilament? row;
-            if (incoming.FilamentId is { } filamentId)
+            if (named.TryGetValue(incoming, out var namedRow))
             {
-                row = rows.FirstOrDefault(r => r.FilamentId == filamentId)
+                row = namedRow;
+            }
+            else if (incoming.FilamentId is { } filamentId)
+            {
+                row = rows.FirstOrDefault(r => r.FilamentId == filamentId && !named.ContainsValue(r))
                     ?? matches.GetValueOrDefault(incoming);
                 // Linked before UpdateFilamentUsageWeights runs, so the row's weight is derived
                 // from this filament and counts against its remaining amount.
