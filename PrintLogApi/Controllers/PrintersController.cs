@@ -286,7 +286,7 @@ public class PrintersController(
             }
         }
 
-        await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList());
+        await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList(), fillPrintingRows: true);
 
         context.Entry(existingPrinter).State = EntityState.Modified;
 

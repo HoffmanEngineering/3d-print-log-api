@@ -183,7 +183,7 @@ public class PrinterService(
     /// <param name="printerId"></param>
     /// <param name="loadedFilamentIds"></param>
     /// <returns></returns>
-    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds)
+    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false)
     {
         var printer = await getPrinterById(printerId);
 
@@ -207,7 +207,15 @@ public class PrinterService(
 
         // Add any new filament to the list
         var newFilament = loadedFilamentIds
-            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId));
+            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId))
+            .Where(id => id != default)
+            .ToList();
+
+        // One spool on a one-tool printer can only be the one feeding it.
+        if (fillPrintingRows && printer.SlotCount <= 1 && newFilament.Count == 1)
+        {
+            await LinkPrintingRows(printer, 0, newFilament[0]);
+        }
 
         foreach (var filamentId in newFilament)
         {
@@ -261,6 +269,8 @@ public class PrinterService(
             row.UnloadedDateTime = now;
         }
 
+        await LinkPrintingRows(printer, slot, filamentId);
+
         if (current != null)
         {
             current.SlotLabel = slotLabel ?? current.SlotLabel;
@@ -275,6 +285,30 @@ public class PrinterService(
             SlotLabel = slotLabel,
             LoadedDateTime = now,
         });
+    }
+
+    /// <summary>
+    /// Links <paramref name="filamentId"/> to the row with no spool on <paramref name="slot"/> of
+    /// each print still printing on <paramref name="printer"/>: one row per print. On a printer
+    /// with one slot or fewer a row with no slot is slot 0's, and is stamped so.
+    /// </summary>
+    private async Task LinkPrintingRows(Printer printer, int slot, Guid filamentId)
+    {
+        var singleTool = printer.SlotCount <= 1 && slot == 0;
+        var rows = await context.PrintFilament
+            .Where(pf => pf.FilamentId == null
+                && pf.Print.PrinterId == printer.Id
+                && pf.Print.Status == Print.PrintStatus.Printing
+                && (pf.Slot == slot || (singleTool && pf.Slot == null)))
+            .ToListAsync();
+
+        foreach (var row in rows
+            .GroupBy(r => r.PrintId)
+            .Select(g => g.OrderBy(r => r.Slot is null).ThenBy(r => r.Id).First()))
+        {
+            row.FilamentId = filamentId;
+            row.Slot ??= slot;
+        }
     }
 
     public async Task UnloadSlot(Printer printer, int slot)
