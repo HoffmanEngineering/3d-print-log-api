@@ -1371,6 +1371,8 @@ public class PrintsController(
     /// <returns>The created PrintImage with its ID.</returns>
     [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/image")]
+    // Refused before the form is buffered; the 1 MB over the 10 MB image limit covers multipart framing.
+    [RequestSizeLimit((10 * 1024 * 1024) + (1024 * 1024))]
     public async Task<ActionResult<PrintImageDto>> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
     {
         var userId = User.GetUserId();

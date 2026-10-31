@@ -252,6 +252,8 @@ public class ProjectsController(
 
     /// <summary>Upload an image to a project.</summary>
     [HttpPost("{id}/images")]
+    // Refused before the form is buffered; the 1 MB over the 10 MB image limit covers multipart framing.
+    [RequestSizeLimit((10 * 1024 * 1024) + (1024 * 1024))]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

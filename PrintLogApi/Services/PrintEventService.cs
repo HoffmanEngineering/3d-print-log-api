@@ -432,6 +432,12 @@ public class PrintEventService(
             logger.LogWarning("Skipped a snapshot that is not a supported image: {Reason}", ex.Message);
             return null;
         }
+        catch (ImageProcessingBusyException)
+        {
+            // Same rule as a bad frame: a snapshot is never worth failing the event over.
+            logger.LogWarning("Skipped a snapshot: image processing was busy");
+            return null;
+        }
 
         var uploadedBlobNames = new List<string>();
         StoredImageFiles files;

@@ -3,8 +3,23 @@ using SkiaSharp;
 
 namespace PrintLogApi.Services;
 
-public class ImageProcessingService : IImageProcessingService
+public class ImageProcessingService(ImageMemoryGate gate) : IImageProcessingService
 {
+    /// <summary>
+    /// For callers outside DI (the image backfill), with the default budget. The backfill
+    /// processes one image at a time, so the gate never makes it wait.
+    /// </summary>
+    public ImageProcessingService()
+        : this(new ImageMemoryGate(ImageMemoryGate.DefaultBudgetBytes, ImageMemoryGate.DefaultMaxWait))
+    {
+    }
+
+    /// <summary>
+    /// What the gate is charged beyond the decoded pixels: the encoded original and derivatives,
+    /// the small scaled bitmaps, and the encoders' own working memory.
+    /// </summary>
+    private const long EncodeOverheadBytes = 16L * 1024 * 1024;
+
     private const int MaxEdgePx = 12_000;
     private const long MaxPixels = 50_000_000;
     private const int ThumbnailLongEdgePx = 320;
@@ -43,15 +58,26 @@ public class ImageProcessingService : IImageProcessingService
 
     public async Task<ProcessedImage> ProcessAsync(Stream input, ImageProcessingOptions options, CancellationToken ct = default)
     {
-        // Buffer once: SKCodec needs a seekable source and we read it twice.
-        using var buffer = new MemoryStream();
-        await input.CopyToAsync(buffer, ct);
-        if (buffer.Length == 0)
-            throw new InvalidImageException("The file is empty.");
-        buffer.Position = 0;
+        // SKCodec needs a seekable source. One managed buffer and one native copy taken straight
+        // from it; the buffer goes as soon as the copy exists (ToArray would have made a third).
+        SKData data;
+        using (var buffer = new MemoryStream())
+        {
+            await input.CopyToAsync(buffer, ct);
+            if (buffer.Length == 0)
+                throw new InvalidImageException("The file is empty.");
 
-        using var data = SKData.CreateCopy(buffer.ToArray());
+            data = SKData.CreateCopy(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
+        }
 
+        using (data)
+        {
+            return await ProcessAsync(data, options, ct);
+        }
+    }
+
+    private async Task<ProcessedImage> ProcessAsync(SKData data, ImageProcessingOptions options, CancellationToken ct)
+    {
         // ---- Header preflight. Nothing below decodes pixels. ----
         // This ordering is load-bearing: SkiaSharp has no allocation limiter, so
         // these checks are the ONLY defense against a decompression bomb.
@@ -82,27 +108,46 @@ public class ImageProcessingService : IImageProcessingService
 
         // Captured before decode: SKBitmap.Decode discards it.
         var origin = codec.EncodedOrigin;
+        var rotates = origin is not (SKEncodedOrigin.Default or SKEncodedOrigin.TopLeft);
 
-        // ---- Decode. Preflight has passed. ----
-        using var decoded = SKBitmap.Decode(codec);
-        if (decoded is null)
-            throw new InvalidImageException("The image could not be decoded.");
+        // ---- Reserve the memory the decode needs, then decode. ----
+        // The decode is sized by the codec's own pixel format (8 bytes a pixel for a 16-bit PNG,
+        // not 4), and a rotation briefly holds two copies.
+        using var lease = await gate.AcquireAsync(
+            (info.BytesSize64 * (rotates ? 2 : 1)) + data.Size + EncodeOverheadBytes, ct);
 
-        // SkiaSharp encoders write no EXIF, so GPS and every other tag are gone by
-        // construction. Orientation goes with them, so apply it here or portrait
-        // photos land sideways.
-        using var oriented = ApplyOrigin(decoded, origin);
+        var oriented = SKBitmap.Decode(codec)
+            ?? throw new InvalidImageException("The image could not be decoded.");
+        try
+        {
+            // SkiaSharp encoders write no EXIF, so GPS and every other tag are gone by
+            // construction. Orientation goes with them, so apply it here or portrait
+            // photos land sideways. The unrotated pixels are freed before anything is encoded.
+            if (rotates)
+            {
+                var rotated = Rotate(oriented, origin);
+                oriented.Dispose();
+                oriented = rotated;
+            }
 
+            return Encode(oriented, codec.EncodedFormat, options, ct);
+        }
+        finally
+        {
+            oriented.Dispose();
+        }
+    }
+
+    /// <summary>The original and its derivatives, encoded from one oriented bitmap without copying it.</summary>
+    private static ProcessedImage Encode(SKBitmap oriented, SKEncodedImageFormat sourceFormat, ImageProcessingOptions options, CancellationToken ct)
+    {
         var original = Encode(oriented, SKEncodedImageFormat.Jpeg, OriginalQuality)
             ?? throw new InvalidImageException("The image could not be re-encoded.");
 
         byte[]? thumbnail;
         try
         {
-            using var thumb = CreateThumbnail(oriented);
-            thumbnail = thumb is null
-                ? null
-                : Encode(thumb, SKEncodedImageFormat.Webp, ThumbnailQuality);
+            thumbnail = EncodeAtMost(oriented, ThumbnailLongEdgePx, SKEncodedImageFormat.Webp, ThumbnailQuality).Bytes;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -117,12 +162,12 @@ public class ImageProcessingService : IImageProcessingService
         {
             try
             {
-                using var scaled = ScaleLongEdge(oriented, SocialLongEdgePx);
-                social = Encode(scaled, SKEncodedImageFormat.Jpeg, SocialQuality);
-                if (social is not null)
+                var (bytes, width, height) = EncodeAtMost(oriented, SocialLongEdgePx, SKEncodedImageFormat.Jpeg, SocialQuality);
+                if (bytes is not null)
                 {
-                    socialWidth = scaled.Width;
-                    socialHeight = scaled.Height;
+                    social = bytes;
+                    socialWidth = width;
+                    socialHeight = height;
                 }
             }
             catch (Exception) when (!ct.IsCancellationRequested)
@@ -137,7 +182,7 @@ public class ImageProcessingService : IImageProcessingService
         {
             Width = oriented.Width,
             Height = oriented.Height,
-            SourceContentType = SourceContentTypeOf(codec.EncodedFormat),
+            SourceContentType = SourceContentTypeOf(sourceFormat),
             Social = social,
             SocialWidth = socialWidth,
             SocialHeight = socialHeight,
@@ -155,14 +200,12 @@ public class ImageProcessingService : IImageProcessingService
     };
 
     /// <summary>
-    /// Applies an EXIF origin to pixels. SkiaSharp does not do this during decode,
-    /// and re-encoding drops the tag, so skipping it rotates every phone photo.
+    /// Applies an EXIF origin other than top-left to pixels, into a new bitmap. SkiaSharp does
+    /// not do this during decode, and re-encoding drops the tag, so skipping it rotates every
+    /// phone photo.
     /// </summary>
-    private static SKBitmap ApplyOrigin(SKBitmap source, SKEncodedOrigin origin)
+    private static SKBitmap Rotate(SKBitmap source, SKEncodedOrigin origin)
     {
-        if (origin is SKEncodedOrigin.Default or SKEncodedOrigin.TopLeft)
-            return source.Copy();
-
         var swapsAxes = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
             or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
 
@@ -211,31 +254,34 @@ public class ImageProcessingService : IImageProcessingService
     }
 
     /// <summary>
-    /// Scales the long edge down to the thumbnail size. Never upscales: a 100px
-    /// photo blown up to 320px is a bigger file that looks worse.
+    /// <paramref name="source"/> encoded with its long edge at most <paramref name="longEdgePx"/>,
+    /// and the size it was encoded at. Never upscales: a 100px photo blown up to 320px is a bigger
+    /// file that looks worse. A source already small enough is encoded as it is, not copied.
     /// </summary>
-    private static SKBitmap? CreateThumbnail(SKBitmap source) => ScaleLongEdge(source, ThumbnailLongEdgePx);
-
-    /// <summary>A copy of <paramref name="source"/> with its long edge at most <paramref name="longEdgePx"/>.</summary>
-    private static SKBitmap ScaleLongEdge(SKBitmap source, int longEdgePx)
+    private static (byte[]? Bytes, int Width, int Height) EncodeAtMost(SKBitmap source, int longEdgePx, SKEncodedImageFormat format, int quality)
     {
         var longEdge = Math.Max(source.Width, source.Height);
         if (longEdge <= longEdgePx)
-            return source.Copy();
+            return (Encode(source, format, quality), source.Width, source.Height);
 
         var scale = (double)longEdgePx / longEdge;
         var width = Math.Max(1, (int)Math.Round(source.Width * scale));
         var height = Math.Max(1, (int)Math.Round(source.Height * scale));
 
-        return source.Resize(
+        using var scaled = source.Resize(
             new SKImageInfo(width, height, source.ColorType, source.AlphaType),
             new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+        return scaled is null ? (null, 0, 0) : (Encode(scaled, format, quality), scaled.Width, scaled.Height);
     }
 
+    /// <summary>
+    /// Encodes straight from the bitmap's pixels. <c>SKImage.FromBitmap</c> would copy every pixel
+    /// of a mutable bitmap first, which for a 50 MP image is another 200 MB.
+    /// </summary>
     private static byte[]? Encode(SKBitmap bitmap, SKEncodedImageFormat format, int quality)
     {
-        using var image = SKImage.FromBitmap(bitmap);
-        using var encoded = image.Encode(format, quality);
+        using var pixmap = bitmap.PeekPixels();
+        using var encoded = pixmap?.Encode(format, quality);
         return encoded?.ToArray();
     }
 }
