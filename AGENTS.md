@@ -815,6 +815,21 @@ the app shell for crawlers, and the web app's `MetaTagService`.** Change its sha
   `defaultImageThumbnailUrl`, `defaultProjectImageThumbnailUrl`) are paths relative to the API
   base URL (`ImageUrls`), which the web app prefixes as it does for image ids.
 
+## Image processing memory
+
+Every upload decodes its image (`ImageProcessingService`: print, project, printer and material
+images, printer snapshots), and a 10 MB PNG can decode to 200 MB of pixels. `ImageMemoryGate` is
+one in-process byte budget all decodes share (`ImageProcessing:MemoryBudgetMb`, 384, sized for
+the B1 plan): each reserves its decoded size (twice that when an EXIF rotation holds two copies)
+before decoding, first in, first out, and one larger than the budget runs alone. A wait past
+`ImageProcessing:MaxWaitSeconds` (20) is 503 `image_processing_busy` with `Retry-After`
+(`ImageProcessingBusyFilter`, global); a snapshot is skipped instead, like a bad frame.
+
+- **Keep the decode to one bitmap.** Encoding goes through `PeekPixels` (`SKImage.FromBitmap`
+  copies a mutable bitmap), the unrotated bitmap is freed before encoding, and a source already
+  small enough is encoded as it is. Each of those was a full extra copy before.
+- **Raise the budget with the plan**, never by removing the gate.
+
 ## The clock
 
 `TimeProvider.System` is registered as a singleton in `Startup.ConfigureServices`. Everything under

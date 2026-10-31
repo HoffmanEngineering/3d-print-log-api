@@ -307,4 +307,57 @@ public class ImageProcessingServiceTests
         Assert.Equal(1200, result.SocialWidth);
         Assert.Equal(900, result.SocialHeight);
     }
+
+    [Fact]
+    public async Task EveryDecode_ReturnsWhatItReservedFromTheGate_WhateverTheOutcome()
+    {
+        var gate = new ImageMemoryGate(ImageMemoryGate.DefaultBudgetBytes, TimeSpan.FromSeconds(5));
+        var service = new ImageProcessingService(gate);
+
+        using (var plain = Encode(800, 600, SKEncodedImageFormat.Png))
+        {
+            await service.ProcessAsync(plain, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+        }
+
+        await using (var rotated = Fixture("exif-orientation-6.jpg"))
+        {
+            await service.ProcessAsync(rotated, TestContext.Current.CancellationToken);
+        }
+
+        using (var oversized = Encode(13000, 4, SKEncodedImageFormat.Jpeg))
+        {
+            await Assert.ThrowsAsync<InvalidImageException>(
+                () => service.ProcessAsync(oversized, TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal(gate.BudgetBytes, gate.AvailableBytes);
+    }
+
+    [Fact]
+    public async Task WhileTheBudgetIsSpent_ADecodeWaits_ThenGivesUpAsBusy()
+    {
+        var gate = new ImageMemoryGate(64L * 1024 * 1024, TimeSpan.FromMilliseconds(100));
+        var service = new ImageProcessingService(gate);
+        using var held = await gate.AcquireAsync(gate.BudgetBytes, TestContext.Current.CancellationToken);
+        using var input = Encode(800, 600, SKEncodedImageFormat.Png);
+
+        await Assert.ThrowsAsync<ImageProcessingBusyException>(
+            () => service.ProcessAsync(input, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ASmallSource_IsEncodedAsItIs_ForTheThumbnailAndSocialImage()
+    {
+        // Below both derivative sizes nothing is scaled: each is encoded from the oriented
+        // bitmap itself, at the source's own size.
+        using var input = Encode(200, 100, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(input, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result.Thumbnail);
+        using var thumb = SKCodec.Create(new MemoryStream(result.Thumbnail!));
+        Assert.Equal((200, 100), (thumb.Info.Width, thumb.Info.Height));
+        Assert.Equal(200, result.SocialWidth);
+        Assert.Equal(100, result.SocialHeight);
+    }
 }

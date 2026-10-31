@@ -56,7 +56,8 @@ public class Startup
     // This method gets called by the runtime. Use this method to add services to the container.
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddControllers()
+        // An upload that waited too long for image memory is a 503 with Retry-After, never a 500.
+        services.AddControllers(options => options.Filters.Add<Middleware.ImageProcessingBusyFilter>())
             .AddJsonOptions(options =>
             {
                 // Insert, not assign: the chain already holds ASP.NET Core's
@@ -231,6 +232,10 @@ public class Startup
 
         services.AddSingleton<IBlobContainerProvisioner, BlobContainerProvisioner>();
         // Singleton is safe: the class holds no state.
+        // One memory budget for every image decode in the process (see ImageMemoryGate).
+        services.AddSingleton(_ => new ImageMemoryGate(
+            Math.Max(1, Configuration.GetValue("ImageProcessing:MemoryBudgetMb", ImageMemoryGate.DefaultBudgetBytes / (1024 * 1024))) * 1024 * 1024,
+            TimeSpan.FromSeconds(Configuration.GetValue("ImageProcessing:MaxWaitSeconds", ImageMemoryGate.DefaultMaxWait.TotalSeconds))));
         services.AddSingleton<IImageProcessingService, ImageProcessingService>();
         services.AddTransient<IBlobStorageService, AzureBlobStorageService>();
 
