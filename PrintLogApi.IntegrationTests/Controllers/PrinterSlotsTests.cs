@@ -14,7 +14,7 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 /// Per-slot loaded filament (#146): a multi-tool printer knows which spool is in which position,
 /// a spool is loaded in one place at a time, and single-tool printers behave as before.
 /// </summary>
-public class PrinterSlotsTests : IClassFixture<CustomWebApplicationFactory>
+public partial class PrinterSlotsTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _httpClient;

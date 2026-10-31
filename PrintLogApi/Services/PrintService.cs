@@ -790,7 +790,16 @@ public sealed class PrintService(
 
         if (replay.FilamentUsage is { Count: > 0 } rows)
         {
-            await ReplaceUsageRows(existing, mapper.Map<List<PrintFilament>>(rows), userId);
+            var replayed = mapper.Map<List<PrintFilament>>(rows);
+            // A spool the user linked to a row since the first create stays: the replay is the
+            // connector's same start, and its rows still have no spool for that slot (#128).
+            foreach (var row in replayed.Where(r => (r.FilamentId is null || r.FilamentId == Guid.Empty) && r.Slot is not null))
+            {
+                row.FilamentId = existing.FilamentUsage!
+                    .FirstOrDefault(r => r.Slot == row.Slot && r.FilamentId is not null)?.FilamentId
+                    ?? row.FilamentId;
+            }
+            await ReplaceUsageRows(existing, replayed, userId);
             changed = true;
         }
 
@@ -912,8 +921,9 @@ public sealed class PrintService(
 
         // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
         // the slots say what is loaded, and replacing them with one print's spools would unload
-        // every tool the print did not use.
-        if (newPrint.Printer.SlotCount <= 1)
+        // every tool the print did not use. Nor when the print links no spool (a connector that
+        // doesn't know what's loaded, printlog-bridge#128): an empty list would unload them all.
+        if (newPrint.Printer.SlotCount <= 1 && newLoadedFilamentIds.Any())
         {
             await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
         }

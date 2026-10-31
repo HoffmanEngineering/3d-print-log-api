@@ -182,6 +182,7 @@ public class PrinterService(
     /// </summary>
     /// <param name="printerId"></param>
     /// <param name="loadedFilamentIds"></param>
+    /// <param name="fillPrintingRows">The printer page's save: see <see cref="IPrinterService.setLoadedFilament"/>.</param>
     /// <returns></returns>
     public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false)
     {

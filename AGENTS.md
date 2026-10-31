@@ -336,7 +336,19 @@ cached, partly anonymous, and has no `fileHash`.
   slot 0's** and stamps it 0 when a slot pass takes it. The Slic3r uploader writes its estimate
   with no slot, and the bridge completes that tool as `{slot: 0, filamentId}`; without the rule
   that added a second row. On a multi-tool printer an unslotted row stays ambiguous, so it is left
-  to the in-order match.
+  to the in-order match. A connector that knows which unslotted row a measurement belongs to
+  names it with **`rowId`** (printlog-bridge#128: a sliced filament the bridge couldn't place on a
+  slot). It's a hint, matched before every other pass: the row keeps a spool the user linked, and
+  an id not on the print (the row deleted, or renumbered by a PATCH, which gives every row a new
+  id) is ignored rather than refused, so a completion never fails over a stale id.
+- **"Other" rows fill from what is loaded (printlog-bridge#128).** `PrinterService.LoadSlot`
+  links the loaded spool to the row with no spool on that slot of every **Printing** print on the
+  printer (never a finished one); the printer page's PUT does the same for slot 0 on a one-slot
+  printer, when it adds exactly one spool. The other way round, picking a spool for a row with a
+  slot whose slot had none (PATCH or PUT of the print) loads it there, on a printer with more
+  than one slot, for a Printing print or the printer's latest (by start date, else by id). A
+  create that links no spool leaves a one-slot printer's loaded spool alone, and a replayed
+  create keeps a spool the user linked to a slot's row since.
 - `hasSlicerSettings` is `Slicer != null`. The print stores no link to its `CuraSetting`; `Slicer`
   is set exactly when settings were recorded, and #164 should keep that true.
 - **Finishing is claimed the same way (#199).** `/complete` and `PrintEventService.Finished` save
