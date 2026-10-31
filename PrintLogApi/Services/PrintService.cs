@@ -1477,6 +1477,7 @@ public sealed class PrintService(
             throw new ArgumentNullException(nameof(id));
         }
 
+        var slotsWithSpool = SlotsWithSpool(existingPrint);
         var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
         var printer = await context.Printers.FindAsync(dto.PrinterId);
@@ -1538,6 +1539,8 @@ public sealed class PrintService(
             updatedPrint.ProjectId = dto.ProjectId; // null
         }
 
+        await LoadPickedSpools(updatedPrint, slotsWithSpool);
+
         context.Entry(updatedPrint).State = EntityState.Modified;
 
         try
@@ -1562,6 +1565,59 @@ public sealed class PrintService(
         return (await GetPrintById(updatedPrint.Id))!;
     }
 
+    /// <summary>The slots of <paramref name="print"/> whose row has a spool.</summary>
+    private static HashSet<int> SlotsWithSpool(Print print) =>
+        (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is not null)
+            .Select(r => r.Slot!.Value)
+            .ToHashSet();
+
+    /// <summary>
+    /// Loads the spool the user picked for a row on its slot (printlog-bridge#128): a row with a
+    /// slot whose slot had no spool before the edit (an "Other" row a connector created). Only on
+    /// a printer with more than one slot, where the slots say what is loaded (one with fewer keeps
+    /// the create's rule), and only for a print still printing or the printer's latest, so editing
+    /// an old print never changes what is loaded now.
+    /// </summary>
+    private async Task LoadPickedSpools(Print print, IReadOnlySet<int> slotsWithSpool)
+    {
+        var picked = (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is { } slot && !slotsWithSpool.Contains(slot))
+            .ToList();
+        if (picked.Count == 0)
+        {
+            return;
+        }
+
+        var printer = await context.Printers.FirstOrDefaultAsync(p => p.Id == print.PrinterId);
+        if (printer == null || printer.SlotCount <= 1)
+        {
+            return;
+        }
+
+        // The latest by start date; a print with none (logged by hand without one) is the latest
+        // when it was logged last.
+        var current = print.Status == PrintStatus.Printing
+            || (print.StartDate is { } started
+                ? !await context.Prints.AnyAsync(p =>
+                    p.PrinterId == print.PrinterId && p.Id != print.Id && p.StartDate > started)
+                : !await context.Prints.AnyAsync(p => p.PrinterId == print.PrinterId && p.Id > print.Id));
+        if (!current)
+        {
+            return;
+        }
+
+        foreach (var row in picked.Where(r => r.Slot < printer.SlotCount).DistinctBy(r => r.Slot))
+        {
+            var slot = row.Slot!.Value;
+            var label = await context.PrinterFilament
+                .Where(pf => pf.PrinterId == printer.Id && pf.Slot == slot)
+                .Select(pf => pf.SlotLabel)
+                .FirstOrDefaultAsync();
+            await printerService.LoadSlot(printer, slot, row.FilamentId!.Value, label);
+        }
+    }
+
     public async Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId)
     {
         var print = await context.Prints
@@ -1582,6 +1638,7 @@ public sealed class PrintService(
         }
 
         // ---- Mutate. ----
+        var slotsWithSpool = SlotsWithSpool(print);
         if (dto.FilamentUsage != null)
         {
             // First, because it is the one step that can still refuse (a foreign filament), and
@@ -1613,6 +1670,11 @@ public sealed class PrintService(
         if (dto.Url != null) { print.Url = dto.Url; } else if (dto.Clears("url")) { print.Url = null; }
         if (dto.FileName != null) { print.FileName = dto.FileName; } else if (dto.Clears("fileName")) { print.FileName = null; }
         if (dto.ProjectId.HasValue) { print.ProjectId = dto.ProjectId; } else if (dto.Clears("projectId")) { print.ProjectId = null; }
+
+        if (dto.FilamentUsage != null)
+        {
+            await LoadPickedSpools(print, slotsWithSpool);
+        }
 
         print.UpdatedById = userId;
         await context.SaveChangesAsync();
