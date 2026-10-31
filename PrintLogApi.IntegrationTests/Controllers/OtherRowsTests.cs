@@ -93,9 +93,77 @@ public partial class PrinterSlotsTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Complete_ARowIdKeepingTheUsersSpool_UsesThatSpoolsMeasurement()
+    {
+        // printlog-bridge#97: a spool measured by length takes the length when both are sent.
+        var printerId = await CreatePrinterAsync(slotCount: 4);
+        var spool = await CreateFilamentAsync(source: Filament.SourceMeasurement.Length);
+        var print = await CreatePrintAsync(printerId, [WeightRow(spool, slot: null, estimateMg: 5000)]);
+        var rowId = Assert.Single(print.FilamentUsage!).Id;
+
+        var completed = await CompleteAsync(print.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { RowId = rowId, Slot = 3, AmountMg = 4000, LengthInM = 1.3 }],
+        });
+
+        Assert.Equal(PrintFilament.SourceMeasurement.Length, Assert.Single(completed.FilamentUsage!).Source);
+    }
+
+    [Fact]
+    public async Task Complete_ASlotOnlyMeasurement_FillsTheRowLoadingLinked()
+    {
+        // The row the print started with, linked since by loading its spool: the slot's
+        // measurement still fills it, so the spool is charged the actual.
+        var printerId = await CreatePrinterAsync(slotCount: 4);
+        var spool = await CreateFilamentAsync();
+        var print = await CreatePrintAsync(printerId, [WeightRow(null, slot: 2, estimateMg: 5000)]);
+        await LoadSlotAsync(printerId, 2, spool);
+
+        var completed = await CompleteAsync(print.Id, new CompletePrintDto
+        {
+            Status = PrintStatus.Success,
+            FilamentUsage = [new CompletePrintFilamentUsageDto { Slot = 2, AmountMg = 3000 }],
+        });
+
+        var row = Assert.Single(completed.FilamentUsage!);
+        Assert.Equal(spool, row.Filament?.Id);
+        Assert.Equal(3000, row.AmountMg);
+    }
+
     #endregion
 
     #region Loading a spool fills an in-progress print's Other row
+
+    [Fact]
+    public async Task LoadSlot_ReassertingTheSpoolAlreadyThere_FillsNothing()
+    {
+        // The bridge reasserts every slot on reconnecting; that isn't the user loading a spool.
+        var printerId = await CreatePrinterAsync(slotCount: 4);
+        var spool = await CreateFilamentAsync();
+        await LoadSlotAsync(printerId, 2, spool);
+        var print = await CreatePrintAsync(printerId, [UsageRow(null, slot: 2)]);
+
+        await LoadSlotAsync(printerId, 2, spool);
+
+        Assert.Null(Assert.Single((await GetPrintAsync(print.Id)).FilamentUsage!).Filament);
+    }
+
+    [Fact]
+    public async Task LoadSlot_FillsOnlyTheNewestPrintingPrint()
+    {
+        // An older print left Printing (never finished) isn't the one feeding now.
+        var printerId = await CreatePrinterAsync(slotCount: 4);
+        var spool = await CreateFilamentAsync();
+        var stale = await CreatePrintAsync(printerId, [UsageRow(null, slot: 2)], DateTimeOffset.UtcNow.AddDays(-9));
+        var current = await CreatePrintAsync(printerId, [UsageRow(null, slot: 2)], DateTimeOffset.UtcNow);
+
+        await LoadSlotAsync(printerId, 2, spool);
+
+        Assert.Null(Assert.Single((await GetPrintAsync(stale.Id)).FilamentUsage!).Filament);
+        Assert.Equal(spool, Assert.Single((await GetPrintAsync(current.Id)).FilamentUsage!).Filament?.Id);
+    }
 
     [Fact]
     public async Task LoadSlot_FillsAPrintingPrintsOtherRowOnThatSlot()

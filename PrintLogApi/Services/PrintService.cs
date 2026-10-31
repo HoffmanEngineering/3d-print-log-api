@@ -1760,7 +1760,7 @@ public sealed class PrintService(
             .Where(p => p.Id == print.PrinterId)
             .Select(p => p.SlotCount)
             .FirstOrDefaultAsync() == 1;
-        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage));
+        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage, print));
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
@@ -2022,9 +2022,22 @@ public sealed class PrintService(
 
         // Slots next, so an in-order match below cannot take a row a later slot names.
         var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
+        // A slot's measurement with no spool takes that slot's row with no spool, else its row
+        // whose spool no other measurement names: one linked since the print started (loading
+        // the spool fills it, printlog-bridge#128), which a retry also finds again.
+        var namedSpools = incomingRows.Select(u => u.FilamentId).OfType<Guid>().ToHashSet();
+        var claimed = new HashSet<PrintFilament>(named.Values);
         foreach (var incoming in unnamed.Where(u => u.FilamentId is null && u.Slot is not null))
         {
-            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
+            var row = TakeUnlinkedRowOnSlot(incoming.Slot)
+                ?? rows.FirstOrDefault(r => r.Slot == incoming.Slot
+                    && r.FilamentId is { } linked && !namedSpools.Contains(linked)
+                    && !claimed.Contains(r));
+            if (row != null)
+            {
+                claimed.Add(row);
+            }
+            matches[incoming] = row;
         }
 
         // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
@@ -2106,9 +2119,14 @@ public sealed class PrintService(
     /// <see cref="CompletePrintFilamentUsageDto.ResolveSourceFor"/>. A spool missing here falls
     /// back to the row's own source.
     /// </summary>
-    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(IEnumerable<CompletePrintFilamentUsageDto> usage)
+    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(
+        IEnumerable<CompletePrintFilamentUsageDto> usage, Print print)
     {
-        var ids = usage.Select(u => u.FilamentId).OfType<Guid>().Distinct().ToList();
+        // The print's own spools too: a row named by rowId, or found by its slot, keeps the
+        // spool linked to it when the completion sends none.
+        var ids = usage.Select(u => u.FilamentId)
+            .Concat((print.FilamentUsage ?? []).Select(r => r.FilamentId))
+            .OfType<Guid>().Distinct().ToList();
         if (ids.Count == 0)
         {
             return [];

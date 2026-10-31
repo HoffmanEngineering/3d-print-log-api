@@ -577,11 +577,13 @@ public partial class PrinterSlotsTests : IClassFixture<CustomWebApplicationFacto
     private async Task<PrintDetailDTO> CompleteAsync(long printId, CompletePrintDto body) =>
         await ReadAsync<PrintDetailDTO>(await SendAsync(HttpMethod.Post, $"/api/Prints/{printId}/complete", body));
 
-    private async Task<Guid> CreateFilamentAsync(string userOAuthId = IntegrationTestSeeder.TestUserOAuthId)
+    private async Task<Guid> CreateFilamentAsync(
+        string userOAuthId = IntegrationTestSeeder.TestUserOAuthId, Filament.SourceMeasurement? source = null)
     {
         var response = await SendAsync(HttpMethod.Post, "/api/Filaments", new AddFilamentDto
         {
             DisplayName = $"Slot spool {Guid.NewGuid():N}",
+            Source = source,
             Brand = "Test Brand",
             MaterialType = "PLA",
             ColorName = "Green",

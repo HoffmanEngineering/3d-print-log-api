@@ -270,13 +270,15 @@ public class PrinterService(
             row.UnloadedDateTime = now;
         }
 
-        await LinkPrintingRows(printer, slot, filamentId);
-
         if (current != null)
         {
             current.SlotLabel = slotLabel ?? current.SlotLabel;
             return;
         }
+
+        // Only a spool newly loaded: the bridge reasserting a slot on reconnecting isn't the
+        // user loading one, and must not refill a row they left without a spool.
+        await LinkPrintingRows(printer, slot, filamentId);
 
         context.PrinterFilament.Add(new PrinterFilament
         {
@@ -290,16 +292,28 @@ public class PrinterService(
 
     /// <summary>
     /// Links <paramref name="filamentId"/> to the row with no spool on <paramref name="slot"/> of
-    /// each print still printing on <paramref name="printer"/>: one row per print. On a printer
-    /// with one slot or fewer a row with no slot is slot 0's, and is stamped so.
+    /// the newest print still printing on <paramref name="printer"/>. On a printer with one slot
+    /// or fewer a row with no slot is slot 0's, and is stamped so.
     /// </summary>
     private async Task LinkPrintingRows(Printer printer, int slot, Guid filamentId)
     {
+        // The newest print still printing is the one feeding: an older one left Printing (never
+        // finished) would be charged a spool it never used.
+        var printId = await context.Prints
+            .Where(p => p.PrinterId == printer.Id && p.Status == Print.PrintStatus.Printing)
+            .OrderByDescending(p => p.StartDate)
+            .ThenByDescending(p => p.Id)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+        if (printId == null)
+        {
+            return;
+        }
+
         var singleTool = printer.SlotCount <= 1 && slot == 0;
         var rows = await context.PrintFilament
             .Where(pf => pf.FilamentId == null
-                && pf.Print.PrinterId == printer.Id
-                && pf.Print.Status == Print.PrintStatus.Printing
+                && pf.PrintId == printId
                 && (pf.Slot == slot || (singleTool && pf.Slot == null)))
             .ToListAsync();
 

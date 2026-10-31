@@ -341,10 +341,12 @@ cached, partly anonymous, and has no `fileHash`.
   slot). It's a hint, matched before every other pass: the row keeps a spool the user linked, and
   an id not on the print (the row deleted, or renumbered by a PATCH, which gives every row a new
   id) is ignored rather than refused, so a completion never fails over a stale id.
-- **"Other" rows fill from what is loaded (printlog-bridge#128).** `PrinterService.LoadSlot`
-  links the loaded spool to the row with no spool on that slot of every **Printing** print on the
-  printer (never a finished one); the printer page's PUT does the same for slot 0 on a one-slot
-  printer, when it adds exactly one spool. The other way round, picking a spool for a row with a
+- **"Other" rows fill from what is loaded (printlog-bridge#128).** `PrinterService.LoadSlot`,
+  when the spool is newly loaded there (not a bridge reasserting slots on reconnect), links it to
+  the row with no spool on that slot of the printer's **newest Printing** print (never a finished
+  one, nor an older one left Printing); the printer page's PUT does the same for slot 0 on a
+  one-slot printer, when it adds exactly one spool. `/complete`'s slot-only measurement then
+  finds that row by its slot, though it now has a spool. The other way round, picking a spool for a row with a
   slot whose slot had none (PATCH or PUT of the print) loads it there, on a printer with more
   than one slot, for a Printing print or the printer's latest (by start date, else by id). A
   create that links no spool leaves a one-slot printer's loaded spool alone, and a replayed
