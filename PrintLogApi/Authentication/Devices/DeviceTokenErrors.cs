@@ -39,6 +39,13 @@ public static class DeviceTokenErrors
     /// <summary>403: the endpoint takes device tokens, but this grant lacks its scope.</summary>
     public const string InsufficientScope = "insufficient_scope";
 
+    /// <summary>
+    /// 403 on <c>PATCH /api/Prints/{id}</c>: a device may not change who can see a print, or
+    /// whether its files can be downloaded or commented on (<c>viewStatus</c>,
+    /// <c>allowFileDownloads</c>, <c>allowComments</c>). Those are the owner's decisions.
+    /// </summary>
+    public const string FieldNotAllowed = "device_field_not_allowed";
+
     /// <summary>400: a device token and an API key on one request.</summary>
     public const string MultipleCredentials = "multiple_credentials";
 
