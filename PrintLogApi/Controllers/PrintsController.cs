@@ -450,7 +450,7 @@ public class PrintsController(
     /// <response code="200">The updated print.</response>
     /// <response code="400">The patch is invalid, or names a printer or filament the caller does not own.</response>
     /// <response code="401">Returned when no user is authenticated.</response>
-    /// <response code="403">Returned when the caller may not edit this print.</response>
+    /// <response code="403">Returned when the caller may not edit this print, or a device token sends `viewStatus`, `allowFileDownloads` or `allowComments` (`code`: `device_field_not_allowed`).</response>
     /// <response code="404">Returned when the print, or the project named, does not exist.</response>
     [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPatch("{id}")]
@@ -460,6 +460,22 @@ public class PrintsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrintDetailDTO>> PatchPrint(long id, PatchPrintDto patch)
     {
+        // A device token edits what it logged (notes, times, usage), never who can see a print or
+        // its files. Without this a copied bridge token could publish every private print with
+        // its G-code downloadable. The bridge never sends these fields.
+        if (AuthMethodClaim.IsDevice(User)
+            && (patch.ViewStatus is not null || patch.AllowFileDownloads is not null || patch.AllowComments is not null))
+        {
+            var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: StatusCodes.Status403Forbidden,
+                detail: "A device cannot change viewStatus, allowFileDownloads or allowComments. Change them in the web app.");
+            problem.Extensions["code"] = DeviceTokenErrors.FieldNotAllowed;
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status403Forbidden,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
+
         return await EditPrint(id, userId => printService.PatchPrint(id, patch, userId));
     }
 

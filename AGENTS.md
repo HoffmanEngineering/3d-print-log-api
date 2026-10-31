@@ -300,6 +300,10 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   unsubscribe header or link, and is outside the frequency cap; `Email:Enabled`, dry run, the
   allow-list, the daily cap, verification and the suppression list still apply. The device name is
   the device's own text: it is never in the subject.
+- **A device never changes who can see a print.** `PATCH /api/Prints/{id}` answers a device token
+  403 `device_field_not_allowed` when the body carries `viewStatus`, `allowFileDownloads` or
+  `allowComments`, so a copied bridge token (current or superseded) cannot publish private prints
+  or their G-code. The bridge's PATCH sends `notes` only. `DevicePrintPatchTests` pins it.
 - Device principals are role `DeviceUser` (refused by `InteractiveUserOnly`, like `ApiUser`), carry
   `auth_method=device` (prints get `PrintSource.ApiKey`, as bridge prints always have) and
   `ConnectorCredentialClaim` `device:<id>`, so #151's budget applies unchanged.
