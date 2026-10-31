@@ -790,7 +790,16 @@ public sealed class PrintService(
 
         if (replay.FilamentUsage is { Count: > 0 } rows)
         {
-            await ReplaceUsageRows(existing, mapper.Map<List<PrintFilament>>(rows), userId);
+            var replayed = mapper.Map<List<PrintFilament>>(rows);
+            // A spool the user linked to a row since the first create stays: the replay is the
+            // connector's same start, and its rows still have no spool for that slot (#128).
+            foreach (var row in replayed.Where(r => (r.FilamentId is null || r.FilamentId == Guid.Empty) && r.Slot is not null))
+            {
+                row.FilamentId = existing.FilamentUsage!
+                    .FirstOrDefault(r => r.Slot == row.Slot && r.FilamentId is not null)?.FilamentId
+                    ?? row.FilamentId;
+            }
+            await ReplaceUsageRows(existing, replayed, userId);
             changed = true;
         }
 
@@ -912,8 +921,9 @@ public sealed class PrintService(
 
         // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
         // the slots say what is loaded, and replacing them with one print's spools would unload
-        // every tool the print did not use.
-        if (newPrint.Printer.SlotCount <= 1)
+        // every tool the print did not use. Nor when the print links no spool (a connector that
+        // doesn't know what's loaded, printlog-bridge#128): an empty list would unload them all.
+        if (newPrint.Printer.SlotCount <= 1 && newLoadedFilamentIds.Any())
         {
             await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
         }
@@ -1477,6 +1487,7 @@ public sealed class PrintService(
             throw new ArgumentNullException(nameof(id));
         }
 
+        var slotsWithSpool = SlotsWithSpool(existingPrint);
         var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
 
         var printer = await context.Printers.FindAsync(dto.PrinterId);
@@ -1538,6 +1549,8 @@ public sealed class PrintService(
             updatedPrint.ProjectId = dto.ProjectId; // null
         }
 
+        await LoadPickedSpools(updatedPrint, slotsWithSpool);
+
         context.Entry(updatedPrint).State = EntityState.Modified;
 
         try
@@ -1562,6 +1575,59 @@ public sealed class PrintService(
         return (await GetPrintById(updatedPrint.Id))!;
     }
 
+    /// <summary>The slots of <paramref name="print"/> whose row has a spool.</summary>
+    private static HashSet<int> SlotsWithSpool(Print print) =>
+        (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is not null)
+            .Select(r => r.Slot!.Value)
+            .ToHashSet();
+
+    /// <summary>
+    /// Loads the spool the user picked for a row on its slot (printlog-bridge#128): a row with a
+    /// slot whose slot had no spool before the edit (an "Other" row a connector created). Only on
+    /// a printer with more than one slot, where the slots say what is loaded (one with fewer keeps
+    /// the create's rule), and only for a print still printing or the printer's latest, so editing
+    /// an old print never changes what is loaded now.
+    /// </summary>
+    private async Task LoadPickedSpools(Print print, IReadOnlySet<int> slotsWithSpool)
+    {
+        var picked = (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is { } slot && !slotsWithSpool.Contains(slot))
+            .ToList();
+        if (picked.Count == 0)
+        {
+            return;
+        }
+
+        var printer = await context.Printers.FirstOrDefaultAsync(p => p.Id == print.PrinterId);
+        if (printer == null || printer.SlotCount <= 1)
+        {
+            return;
+        }
+
+        // The latest by start date; a print with none (logged by hand without one) is the latest
+        // when it was logged last.
+        var current = print.Status == PrintStatus.Printing
+            || (print.StartDate is { } started
+                ? !await context.Prints.AnyAsync(p =>
+                    p.PrinterId == print.PrinterId && p.Id != print.Id && p.StartDate > started)
+                : !await context.Prints.AnyAsync(p => p.PrinterId == print.PrinterId && p.Id > print.Id));
+        if (!current)
+        {
+            return;
+        }
+
+        foreach (var row in picked.Where(r => r.Slot < printer.SlotCount).DistinctBy(r => r.Slot))
+        {
+            var slot = row.Slot!.Value;
+            var label = await context.PrinterFilament
+                .Where(pf => pf.PrinterId == printer.Id && pf.Slot == slot)
+                .Select(pf => pf.SlotLabel)
+                .FirstOrDefaultAsync();
+            await printerService.LoadSlot(printer, slot, row.FilamentId!.Value, label);
+        }
+    }
+
     public async Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId)
     {
         var print = await context.Prints
@@ -1582,6 +1648,7 @@ public sealed class PrintService(
         }
 
         // ---- Mutate. ----
+        var slotsWithSpool = SlotsWithSpool(print);
         if (dto.FilamentUsage != null)
         {
             // First, because it is the one step that can still refuse (a foreign filament), and
@@ -1613,6 +1680,11 @@ public sealed class PrintService(
         if (dto.Url != null) { print.Url = dto.Url; } else if (dto.Clears("url")) { print.Url = null; }
         if (dto.FileName != null) { print.FileName = dto.FileName; } else if (dto.Clears("fileName")) { print.FileName = null; }
         if (dto.ProjectId.HasValue) { print.ProjectId = dto.ProjectId; } else if (dto.Clears("projectId")) { print.ProjectId = null; }
+
+        if (dto.FilamentUsage != null)
+        {
+            await LoadPickedSpools(print, slotsWithSpool);
+        }
 
         print.UpdatedById = userId;
         await context.SaveChangesAsync();
@@ -1688,7 +1760,7 @@ public sealed class PrintService(
             .Where(p => p.Id == print.PrinterId)
             .Select(p => p.SlotCount)
             .FirstOrDefaultAsync() == 1;
-        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage));
+        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage, print));
         await UpdateFilamentUsageWeights(print);
 
         print.UpdatedById = userId;
@@ -1885,7 +1957,9 @@ public sealed class PrintService(
     }
 
     /// <summary>
-    /// Writes actual usage onto the print's rows, matching by filament first. A row with a
+    /// Writes actual usage onto the print's rows. A measurement that names a row of the print
+    /// (<see cref="CompletePrintFilamentUsageDto.RowId"/>) fills that row, which keeps a spool
+    /// already linked to it; the others are matched by filament first. A row with a
     /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
     /// and links that row to the filament (#162): a spool loaded after the print started then
     /// completes the row its estimate is on instead of adding a second row for the same tool. A
@@ -1927,17 +2001,48 @@ public sealed class PrintService(
             return row;
         }
 
-        // Slots first, so an in-order match below cannot take a row a later slot names.
+        // A row named by id first (printlog-bridge#128), so no other pass can take it. It keeps a
+        // spool the user linked; an id that isn't on the print leaves the measurement to the
+        // passes below.
         var incomingRows = usage.ToList();
-        var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
-        foreach (var incoming in incomingRows.Where(u => u.FilamentId is null && u.Slot is not null))
+        var named = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament>();
+        foreach (var incoming in incomingRows.Where(u => u.RowId is not null))
         {
-            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
+            var row = rows.FirstOrDefault(r => r.Id == incoming.RowId);
+            if (row == null || named.ContainsValue(row))
+            {
+                continue;
+            }
+            named[incoming] = row;
+            unlinked.Remove(row);
+            row.FilamentId ??= incoming.FilamentId;
+            row.Slot ??= incoming.Slot;
+        }
+        var unnamed = incomingRows.Where(u => !named.ContainsKey(u)).ToList();
+
+        // Slots next, so an in-order match below cannot take a row a later slot names.
+        var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
+        // A slot's measurement with no spool takes that slot's row with no spool, else its row
+        // whose spool no other measurement names: one linked since the print started (loading
+        // the spool fills it, printlog-bridge#128), which a retry also finds again.
+        var namedSpools = incomingRows.Select(u => u.FilamentId).OfType<Guid>().ToHashSet();
+        var claimed = new HashSet<PrintFilament>(named.Values);
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is null && u.Slot is not null))
+        {
+            var row = TakeUnlinkedRowOnSlot(incoming.Slot)
+                ?? rows.FirstOrDefault(r => r.Slot == incoming.Slot
+                    && r.FilamentId is { } linked && !namedSpools.Contains(linked)
+                    && !claimed.Contains(r));
+            if (row != null)
+            {
+                claimed.Add(row);
+            }
+            matches[incoming] = row;
         }
 
         // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
         // slot's unlinked row. Claimed here rather than in the loop below for the same reason.
-        foreach (var incoming in incomingRows.Where(u => u.FilamentId is not null && u.Slot is not null))
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is not null && u.Slot is not null))
         {
             if (rows.Any(r => r.FilamentId == incoming.FilamentId))
             {
@@ -1949,9 +2054,13 @@ public sealed class PrintService(
         foreach (var incoming in incomingRows)
         {
             PrintFilament? row;
-            if (incoming.FilamentId is { } filamentId)
+            if (named.TryGetValue(incoming, out var namedRow))
             {
-                row = rows.FirstOrDefault(r => r.FilamentId == filamentId)
+                row = namedRow;
+            }
+            else if (incoming.FilamentId is { } filamentId)
+            {
+                row = rows.FirstOrDefault(r => r.FilamentId == filamentId && !named.ContainsValue(r))
                     ?? matches.GetValueOrDefault(incoming);
                 // Linked before UpdateFilamentUsageWeights runs, so the row's weight is derived
                 // from this filament and counts against its remaining amount.
@@ -2010,9 +2119,14 @@ public sealed class PrintService(
     /// <see cref="CompletePrintFilamentUsageDto.ResolveSourceFor"/>. A spool missing here falls
     /// back to the row's own source.
     /// </summary>
-    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(IEnumerable<CompletePrintFilamentUsageDto> usage)
+    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(
+        IEnumerable<CompletePrintFilamentUsageDto> usage, Print print)
     {
-        var ids = usage.Select(u => u.FilamentId).OfType<Guid>().Distinct().ToList();
+        // The print's own spools too: a row named by rowId, or found by its slot, keeps the
+        // spool linked to it when the completion sends none.
+        var ids = usage.Select(u => u.FilamentId)
+            .Concat((print.FilamentUsage ?? []).Select(r => r.FilamentId))
+            .OfType<Guid>().Distinct().ToList();
         if (ids.Count == 0)
         {
             return [];

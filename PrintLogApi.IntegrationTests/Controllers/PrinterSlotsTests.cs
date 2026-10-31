@@ -14,7 +14,7 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 /// Per-slot loaded filament (#146): a multi-tool printer knows which spool is in which position,
 /// a spool is loaded in one place at a time, and single-tool printers behave as before.
 /// </summary>
-public class PrinterSlotsTests : IClassFixture<CustomWebApplicationFactory>
+public partial class PrinterSlotsTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _httpClient;
@@ -577,11 +577,13 @@ public class PrinterSlotsTests : IClassFixture<CustomWebApplicationFactory>
     private async Task<PrintDetailDTO> CompleteAsync(long printId, CompletePrintDto body) =>
         await ReadAsync<PrintDetailDTO>(await SendAsync(HttpMethod.Post, $"/api/Prints/{printId}/complete", body));
 
-    private async Task<Guid> CreateFilamentAsync(string userOAuthId = IntegrationTestSeeder.TestUserOAuthId)
+    private async Task<Guid> CreateFilamentAsync(
+        string userOAuthId = IntegrationTestSeeder.TestUserOAuthId, Filament.SourceMeasurement? source = null)
     {
         var response = await SendAsync(HttpMethod.Post, "/api/Filaments", new AddFilamentDto
         {
             DisplayName = $"Slot spool {Guid.NewGuid():N}",
+            Source = source,
             Brand = "Test Brand",
             MaterialType = "PLA",
             ColorName = "Green",

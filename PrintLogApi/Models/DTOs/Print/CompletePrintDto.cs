@@ -75,6 +75,13 @@ public class CompletePrintDto : IValidatableObject
             yield return new ValidationResult("Each filamentId may appear at most once.", [nameof(FilamentUsage)]);
         }
 
+        var rowIds = usage.Where(u => u.RowId.HasValue).Select(u => u.RowId).ToList();
+        if (rowIds.Count != rowIds.Distinct().Count())
+        {
+            // Two measurements can't both fill one row.
+            yield return new ValidationResult("Each rowId may appear at most once.", [nameof(FilamentUsage)]);
+        }
+
         var unlinkedSlots = usage.Where(u => !u.FilamentId.HasValue && u.Slot.HasValue).Select(u => u.Slot).ToList();
         if (unlinkedSlots.Count != unlinkedSlots.Distinct().Count())
         {
@@ -94,6 +101,15 @@ public class CompletePrintDto : IValidatableObject
 /// <summary>One material's actual usage for <see cref="CompletePrintDto"/>.</summary>
 public class CompletePrintFilamentUsageDto
 {
+    /// <summary>
+    /// The print's usage row this measurement fills, from the print as read before completing:
+    /// say a row the connector created with no slot because it couldn't tell which slot would
+    /// feed it (printlog-bridge#128). A hint: the row keeps a spool the user linked to it, and a
+    /// row that isn't on the print (deleted, or given a new id by an edit) is ignored, the
+    /// measurement then matched as if no row were named.
+    /// </summary>
+    public Guid? RowId { get; set; }
+
     /// <summary>The filament used, or null when no spool is linked.</summary>
     public Guid? FilamentId { get; set; }
 

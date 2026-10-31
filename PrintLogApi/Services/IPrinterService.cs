@@ -25,12 +25,21 @@ public interface IPrinterService
     Task<string?> SignImageOrNullAsync(
         string? path, string contentType, long printerId, CancellationToken ct = default);
     Task<Printer?> getPrinterById(long printerId);
-    Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds);
+    /// <summary>
+    /// Makes <paramref name="loadedFilamentIds"/> the printer's loaded spools, with no slot.
+    /// With <paramref name="fillPrintingRows"/> (the printer page's save) on a printer with one
+    /// slot or fewer, a single spool newly loaded is also linked to the row with no spool of each
+    /// print still printing on it, as <see cref="LoadSlot"/> does.
+    /// </summary>
+    Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false);
 
     /// <summary>
     /// Loads a spool into one slot of <paramref name="printer"/>, unloading whatever is in that
     /// slot and the spool from wherever else it is loaded. Reloading the spool already there
-    /// keeps its row and loaded time. The caller validates the slot and saves.
+    /// keeps its row and loaded time. The spool is also linked to the row with no spool on that
+    /// slot of each print still printing on the printer (printlog-bridge#128), so an "Other" row
+    /// the connector created takes the spool the user loads. Finished prints are never changed.
+    /// The caller validates the slot and saves.
     /// </summary>
     Task LoadSlot(Printer printer, int slot, Guid filamentId, string? slotLabel);
 

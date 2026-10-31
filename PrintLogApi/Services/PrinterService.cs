@@ -182,8 +182,9 @@ public class PrinterService(
     /// </summary>
     /// <param name="printerId"></param>
     /// <param name="loadedFilamentIds"></param>
+    /// <param name="fillPrintingRows">The printer page's save: see <see cref="IPrinterService.setLoadedFilament"/>.</param>
     /// <returns></returns>
-    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds)
+    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false)
     {
         var printer = await getPrinterById(printerId);
 
@@ -207,7 +208,15 @@ public class PrinterService(
 
         // Add any new filament to the list
         var newFilament = loadedFilamentIds
-            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId));
+            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId))
+            .Where(id => id != default)
+            .ToList();
+
+        // One spool on a one-tool printer can only be the one feeding it.
+        if (fillPrintingRows && printer.SlotCount <= 1 && newFilament.Count == 1)
+        {
+            await LinkPrintingRows(printer, 0, newFilament[0]);
+        }
 
         foreach (var filamentId in newFilament)
         {
@@ -267,6 +276,10 @@ public class PrinterService(
             return;
         }
 
+        // Only a spool newly loaded: the bridge reasserting a slot on reconnecting isn't the
+        // user loading one, and must not refill a row they left without a spool.
+        await LinkPrintingRows(printer, slot, filamentId);
+
         context.PrinterFilament.Add(new PrinterFilament
         {
             PrinterId = printer.Id,
@@ -275,6 +288,42 @@ public class PrinterService(
             SlotLabel = slotLabel,
             LoadedDateTime = now,
         });
+    }
+
+    /// <summary>
+    /// Links <paramref name="filamentId"/> to the row with no spool on <paramref name="slot"/> of
+    /// the newest print still printing on <paramref name="printer"/>. On a printer with one slot
+    /// or fewer a row with no slot is slot 0's, and is stamped so.
+    /// </summary>
+    private async Task LinkPrintingRows(Printer printer, int slot, Guid filamentId)
+    {
+        // The newest print still printing is the one feeding: an older one left Printing (never
+        // finished) would be charged a spool it never used.
+        var printId = await context.Prints
+            .Where(p => p.PrinterId == printer.Id && p.Status == Print.PrintStatus.Printing)
+            .OrderByDescending(p => p.StartDate)
+            .ThenByDescending(p => p.Id)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+        if (printId == null)
+        {
+            return;
+        }
+
+        var singleTool = printer.SlotCount <= 1 && slot == 0;
+        var rows = await context.PrintFilament
+            .Where(pf => pf.FilamentId == null
+                && pf.PrintId == printId
+                && (pf.Slot == slot || (singleTool && pf.Slot == null)))
+            .ToListAsync();
+
+        foreach (var row in rows
+            .GroupBy(r => r.PrintId)
+            .Select(g => g.OrderBy(r => r.Slot is null).ThenBy(r => r.Id).First()))
+        {
+            row.FilamentId = filamentId;
+            row.Slot ??= slot;
+        }
     }
 
     public async Task UnloadSlot(Printer printer, int slot)
