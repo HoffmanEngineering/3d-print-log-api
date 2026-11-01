@@ -1,6 +1,6 @@
 {
-  "version": "8a9a705aa59e94a2c82159c3d00f87b9b7895d16cafe9488036dc1a3ea53cb5d",
-  "generatedAt": "2026-10-18T23:01:16.9660737+00:00",
+  "version": "d6873b7c0f26c178b0d494a3a34a6fce4dd60650249a5986d318a88b4b7ed147",
+  "generatedAt": "2026-11-01T12:55:44.5610879+00:00",
   "attribution": "Printer specifications derived from Ultimaker Cura (LGPL-3.0) and OrcaSlicer (AGPL-3.0) printer profiles.",
   "sources": [
     {
@@ -22485,7 +22485,7 @@
         1
       ],
       "defaultNozzleMm": 0.4,
-      "filamentDiameterMm": 1.75,
+      "filamentDiameterMm": 2.85,
       "hasHeatedBed": true,
       "hasHeatedChamber": false,
       "extruderCount": 1,
@@ -22516,7 +22516,7 @@
         0.4
       ],
       "defaultNozzleMm": 0.4,
-      "filamentDiameterMm": 1.75,
+      "filamentDiameterMm": 2.85,
       "hasHeatedBed": true,
       "hasHeatedChamber": false,
       "extruderCount": 2,
