@@ -1,8 +1,11 @@
 ﻿namespace PrintLogApi.Services;
 
 /// <summary>Result of validating and normalizing an uploaded image.</summary>
-/// <param name="Original">Re-encoded original, orientation applied, metadata absent.</param>
-/// <param name="ContentType">Authoritative MIME type of the original.</param>
+/// <param name="Original">
+/// Re-encoded original, orientation applied, metadata absent: PNG when any pixel is not fully
+/// opaque, otherwise JPEG.
+/// </param>
+/// <param name="ContentType">Authoritative MIME type of the original: image/png or image/jpeg.</param>
 /// <param name="Thumbnail">320px WebP derivative, or null if generation failed.</param>
 public record ProcessedImage(byte[] Original, string ContentType, byte[]? Thumbnail)
 {
@@ -16,7 +19,8 @@ public record ProcessedImage(byte[] Original, string ContentType, byte[]? Thumbn
     public string? SourceContentType { get; init; }
 
     /// <summary>
-    /// The link-preview derivative: a JPEG of about 1200px on the long edge, never upscaled.
+    /// The link-preview derivative: a JPEG of about 1200px on the long edge, never upscaled,
+    /// drawn on white when the image has transparency.
     /// Null unless <see cref="ImageProcessingOptions.IncludeSocial"/> was set, or when its
     /// generation failed.
     /// </summary>

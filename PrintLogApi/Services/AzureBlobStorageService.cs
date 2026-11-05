@@ -30,7 +30,37 @@ public class AzureBlobStorageService : IBlobStorageService
     /// <summary>
     /// Uploads a file stream to Azure Blob Storage.
     /// </summary>
-    public async Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
+    public Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
+        => UploadCoreAsync(containerName, blobName, stream, metadata: null);
+
+    /// <summary>Uploads a file stream with blob metadata, overwriting any existing blob.</summary>
+    public Task<BlobUploadResult> UploadAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata)
+        => UploadCoreAsync(containerName, blobName, stream, metadata);
+
+    /// <summary>Every blob in a container, with its metadata; nothing when the container does not exist.</summary>
+    public async IAsyncEnumerable<StoredBlob> ListBlobsAsync(
+        string containerName,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        if (!await containerClient.ExistsAsync(cancellationToken))
+            yield break;
+
+        await foreach (var item in containerClient.GetBlobsAsync(
+            new GetBlobsOptions { Traits = BlobTraits.Metadata }, cancellationToken))
+        {
+            yield return new StoredBlob(
+                item.Name,
+                item.Properties.LastModified,
+                item.Properties.ContentLength,
+                new Dictionary<string, string>(
+                    item.Metadata ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task<BlobUploadResult> UploadCoreAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string>? metadata)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
         await _containerProvisioner.EnsureAsync(
@@ -39,7 +69,11 @@ public class AzureBlobStorageService : IBlobStorageService
 
         var blobClient = containerClient.GetBlobClient(blobName);
 
-        await blobClient.UploadAsync(stream, overwrite: true);
+        if (metadata is null)
+            await blobClient.UploadAsync(stream, overwrite: true);
+        else
+            // No access conditions, so this overwrites, as the plain upload does.
+            await blobClient.UploadAsync(stream, new BlobUploadOptions { Metadata = metadata.ToDictionary() });
 
         return new BlobUploadResult
         {

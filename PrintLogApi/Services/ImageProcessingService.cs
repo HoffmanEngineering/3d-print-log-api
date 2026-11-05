@@ -93,7 +93,12 @@ public class ImageProcessingService : IImageProcessingService
         // photos land sideways.
         using var oriented = ApplyOrigin(decoded, origin);
 
-        var original = Encode(oriented, SKEncodedImageFormat.Jpeg, OriginalQuality)
+        // A render on a transparent background (slicer plugins, printlog-bridge) stays a PNG:
+        // JPEG has no alpha, and encoding one drops the transparent pixels to black. Only pixels
+        // that are actually not opaque count; an RGBA photo with every pixel opaque stays a JPEG.
+        var transparent = HasTransparentPixels(oriented);
+        var originalFormat = transparent ? SKEncodedImageFormat.Png : SKEncodedImageFormat.Jpeg;
+        var original = Encode(oriented, originalFormat, OriginalQuality)
             ?? throw new InvalidImageException("The image could not be re-encoded.");
 
         byte[]? thumbnail;
@@ -118,7 +123,9 @@ public class ImageProcessingService : IImageProcessingService
             try
             {
                 using var scaled = ScaleLongEdge(oriented, SocialLongEdgePx);
-                social = Encode(scaled, SKEncodedImageFormat.Jpeg, SocialQuality);
+                // Link previews need a solid background, and a JPEG would make it black.
+                using var flattened = transparent ? OnWhite(scaled) : null;
+                social = Encode(flattened ?? scaled, SKEncodedImageFormat.Jpeg, SocialQuality);
                 if (social is not null)
                 {
                     socialWidth = scaled.Width;
@@ -133,7 +140,7 @@ public class ImageProcessingService : IImageProcessingService
             }
         }
 
-        return new ProcessedImage(original, "image/jpeg", thumbnail)
+        return new ProcessedImage(original, transparent ? "image/png" : "image/jpeg", thumbnail)
         {
             Width = oriented.Width,
             Height = oriented.Height,
@@ -153,6 +160,58 @@ public class ImageProcessingService : IImageProcessingService
         SKEncodedImageFormat.Bmp => "image/bmp",
         _ => null,
     };
+
+    /// <summary>Rows read per <see cref="SKPixmap.ReadPixels(SKImageInfo, IntPtr, int, int, int)"/> call when scanning alpha.</summary>
+    private const int AlphaScanRows = 64;
+
+    /// <summary>
+    /// True when any pixel is not fully opaque. The color type alone is not enough: most PNGs
+    /// carry an alpha channel whether or not they use it. Reads the alpha plane a band of rows at
+    /// a time (Skia converts any color type to A8), and stops at the first translucent pixel.
+    /// </summary>
+    internal static bool HasTransparentPixels(SKBitmap bitmap)
+    {
+        if (bitmap.AlphaType == SKAlphaType.Opaque || bitmap.ColorType is SKColorType.Rgb565
+            or SKColorType.Rgb888x or SKColorType.Gray8 or SKColorType.Rgb101010x)
+            return false;
+
+        using var pixmap = bitmap.PeekPixels();
+        if (pixmap is null)
+            return true; // Cannot read the pixels: keeping the alpha is the safe answer.
+
+        var width = bitmap.Width;
+        var rows = Math.Min(AlphaScanRows, bitmap.Height);
+        var buffer = new byte[width * rows];
+        var handle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            for (var y = 0; y < bitmap.Height; y += rows)
+            {
+                var band = Math.Min(rows, bitmap.Height - y);
+                var info = new SKImageInfo(width, band, SKColorType.Alpha8, SKAlphaType.Premul);
+                if (!pixmap.ReadPixels(info, handle.AddrOfPinnedObject(), width, 0, y))
+                    return true;
+                if (buffer.AsSpan(0, width * band).IndexOfAnyExcept((byte)255) >= 0)
+                    return true;
+            }
+            return false;
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    /// <summary>A copy of <paramref name="source"/> drawn over an opaque white background.</summary>
+    private static SKBitmap OnWhite(SKBitmap source)
+    {
+        var target = new SKBitmap(new SKImageInfo(source.Width, source.Height, SKColorType.Rgba8888, SKAlphaType.Opaque));
+        using var canvas = new SKCanvas(target);
+        canvas.Clear(SKColors.White);
+        canvas.DrawBitmap(source, 0, 0);
+        canvas.Flush();
+        return target;
+    }
 
     /// <summary>
     /// Applies an EXIF origin to pixels. SkiaSharp does not do this during decode,

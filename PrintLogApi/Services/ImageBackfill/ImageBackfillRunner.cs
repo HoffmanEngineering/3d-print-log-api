@@ -22,12 +22,12 @@ public sealed class ImageBackfillRunner(
     IProcessedImageWriter imageWriter,
     TextWriter log)
 {
-    private sealed record ImageKind(string Name, string Container, string ArchiveContainer);
+    internal sealed record ImageKind(string Name, string Container, string ArchiveContainer);
 
-    private static readonly ImageKind PrintImages =
+    internal static readonly ImageKind PrintImages =
         new(ImageRef.PrintImage, BlobContainers.PrintImages, BlobContainers.PrintImagesArchive);
 
-    private static readonly ImageKind ProjectImages =
+    internal static readonly ImageKind ProjectImages =
         new(ImageRef.ProjectImage, BlobContainers.ProjectImages, BlobContainers.ProjectImagesArchive);
 
     private static readonly HashSet<string> LegacySourceTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -169,6 +169,7 @@ public sealed class ImageBackfillRunner(
             var converted = plan.ReplaceOriginal && processed.SourceContentType is { } source
                 && LegacySourceTypes.Contains(source);
             if (converted) report.ConvertedFromLegacyFormat++;
+            if (plan.ReplaceOriginal && processed.ContentType == "image/png") report.KeptTransparency++;
             report.BytesBefore += original.LongLength;
             report.BytesAfter += bytesAfter;
 
@@ -204,8 +205,12 @@ public sealed class ImageBackfillRunner(
             {
                 // First, before anything changes: the untouched bytes, in a private container.
                 // Overwriting is fine; a retry after a failed attempt writes the same bytes.
+                // Tagged with the row, because nothing else records which archive copy is whose:
+                // the File row's Path moves to the new blob, and only print blobs were ever
+                // named after their File id.
                 using (var archive = new MemoryStream(original))
-                    await blobStorage.UploadAsync(kind.ArchiveContainer, oldBlobName, archive);
+                    await blobStorage.UploadAsync(
+                        kind.ArchiveContainer, oldBlobName, archive, ArchiveMetadata.For(row, fileId));
 
                 await imageWriter.ReplaceOriginalAsync(kind.Container, image.File, processed, uploaded, ct);
                 newOriginalPath = image.File.Path;
@@ -280,7 +285,12 @@ public sealed class ImageBackfillRunner(
     /// Whether a save that threw had committed anyway: true, false, or null when that cannot be
     /// read. Any new File value is proof, since all were written in the same save.
     /// </summary>
-    private async Task<bool?> CommittedAsync(Guid originalFileId, string? newOriginalPath, Guid? derivativeFileId)
+    private Task<bool?> CommittedAsync(Guid originalFileId, string? newOriginalPath, Guid? derivativeFileId)
+        => CommittedAsync(context, originalFileId, newOriginalPath, derivativeFileId);
+
+    /// <inheritdoc cref="CommittedAsync(Guid, string?, Guid?)"/>
+    internal static async Task<bool?> CommittedAsync(
+        PrintLogContext context, Guid originalFileId, string? newOriginalPath, Guid? derivativeFileId)
     {
         if (newOriginalPath is null && derivativeFileId is null)
             return false; // Nothing was staged, so nothing could have committed.

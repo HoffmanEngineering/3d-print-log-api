@@ -263,6 +263,13 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
         public Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
             => _inner.UploadAsync(containerName, blobName, stream);
 
+        public Task<BlobUploadResult> UploadAsync(
+            string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata)
+            => _inner.UploadAsync(containerName, blobName, stream, metadata);
+
+        public IAsyncEnumerable<StoredBlob> ListBlobsAsync(string containerName, CancellationToken cancellationToken = default)
+            => _inner.ListBlobsAsync(containerName, cancellationToken);
+
         public Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry)
             => _inner.GenerateSasUploadUrlAsync(containerName, blobName, expiry);
 

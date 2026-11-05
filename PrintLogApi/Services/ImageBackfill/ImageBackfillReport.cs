@@ -27,6 +27,12 @@ public sealed class ImageBackfillReport
     public int ConvertedFromLegacyFormat { get; set; }
 
     /// <summary>
+    /// Of <see cref="Processed"/>, originals with transparent pixels, re-encoded as PNG rather
+    /// than JPEG so the background stays transparent.
+    /// </summary>
+    public int KeptTransparency { get; set; }
+
+    /// <summary>
     /// Of <see cref="Processed"/>, rows whose original was already canonical and only gained
     /// derivatives (a thumbnail, the social image, or both).
     /// </summary>
@@ -59,6 +65,7 @@ public sealed class ImageBackfillReport
         output.WriteLine($"  Examined              {Examined,10}");
         output.WriteLine($"  {(Applied ? "Processed" : "Would process"),-21} {Processed,10}");
         output.WriteLine($"    from GIF or BMP     {ConvertedFromLegacyFormat,10}");
+        output.WriteLine($"    transparent, PNG    {KeptTransparency,10}");
         output.WriteLine($"    derivatives only    {DerivativesOnly,10}");
         output.WriteLine($"  Skipped, undecodable  {Undecodable.Count,10}");
         output.WriteLine($"  Skipped, blob missing {Missing.Count,10}");
