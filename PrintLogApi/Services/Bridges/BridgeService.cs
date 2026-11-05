@@ -425,6 +425,7 @@ public sealed class BridgeService(
     {
         var existing = (await context.BridgeDiscoveredPrinters.Where(d => d.BridgeId == bridgeId).ToListAsync(ct))
             .ToDictionary(d => d.IdentityKey, StringComparer.OrdinalIgnoreCase);
+        var ownPrinters = await OwnPrinterIdsAsync(bridgeId, discovered, ct);
 
         foreach (var found in discovered)
         {
@@ -443,10 +444,32 @@ public sealed class BridgeService(
             row.MainboardId = found.MainboardId;
             row.Macs = found.Macs.Count == 0 ? null : string.Join(' ', found.Macs);
             row.Configured = found.Configured;
+            row.PrinterId = found.PrinterId is { } printerId && ownPrinters.Contains(printerId) ? printerId : null;
             row.LastSeenAt = now;
         }
 
         context.BridgeDiscoveredPrinters.RemoveRange(existing.Values);
+    }
+
+    /// <summary>
+    /// Which of the printers the report's config-file entries name belong to the bridge's owner
+    /// (the grant's user). One query, and none when no entry names one. Another user's printer,
+    /// or one that doesn't exist, is dropped silently: the bridge can't be told apart from a typo.
+    /// </summary>
+    private async Task<HashSet<long>> OwnPrinterIdsAsync(long bridgeId, IReadOnlyList<ValidDiscovery> discovered, CancellationToken ct)
+    {
+        var named = discovered.Select(d => d.PrinterId).OfType<long>().Distinct().ToList();
+        if (named.Count == 0)
+        {
+            return [];
+        }
+
+        var owner = context.DeviceGrants.Where(g => g.Id == bridgeId).Select(g => g.UserId);
+        return (await context.Printers.AsNoTracking()
+                .Where(p => named.Contains(p.Id) && owner.Contains(p.UserId))
+                .Select(p => p.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
     }
 
     public async Task<string?> PollDesiredVersionAsync(long grantId, CancellationToken ct)
@@ -680,7 +703,19 @@ public sealed class BridgeService(
             return null;
         }
 
-        return (await StatesAsync([bridgeId], ct)).Select(s => new DiscoveredPrinterDto
+        var states = await StatesAsync([bridgeId], ct);
+
+        // The linked printers' current names, in one query. Only the user's own: a printer deleted
+        // since the check-in (or, defensively, anyone else's) has no name.
+        var linked = states.Select(s => s.Row.PrinterId).OfType<long>().Distinct().ToList();
+        var names = linked.Count == 0
+            ? []
+            : await context.Printers.AsNoTracking()
+                .Where(p => linked.Contains(p.Id) && p.UserId == userId)
+                .Select(p => new { p.Id, p.Name })
+                .ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+
+        return states.Select(s => new DiscoveredPrinterDto
         {
             Id = s.Row.Id,
             Kind = s.Row.Kind,
@@ -694,6 +729,8 @@ public sealed class BridgeService(
             IdentityKey = s.Row.IdentityKey,
             State = s.State,
             PrinterEntryId = s.EntryId,
+            PrinterId = s.Row.PrinterId,
+            PrinterName = s.Row.PrinterId is { } printerId ? names.GetValueOrDefault(printerId) : null,
             FirstSeenAt = Utc(s.Row.FirstSeenAt),
             LastSeenAt = Utc(s.Row.LastSeenAt),
         }).ToList();

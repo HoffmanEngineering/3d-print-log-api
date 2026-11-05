@@ -196,6 +196,14 @@ public class BridgeDiscoveredPrinter
     /// <summary>The bridge already watches it from its config file, which the app can't change.</summary>
     public bool Configured { get; set; }
 
+    /// <summary>
+    /// For a <see cref="Configured"/> printer, the 3D Print Log printer its config section logs to,
+    /// kept only when it was one of the bridge owner's printers at the check-in. A value, not a
+    /// key, like <see cref="Bridge.LastSharedJobPrinterId"/>: the printer may be deleted (its name
+    /// is looked up when listed), and the next check-in replaces it.
+    /// </summary>
+    public long? PrinterId { get; set; }
+
     public DateTime FirstSeenAt { get; set; }
 
     /// <summary>The last check-in that reported it, UTC.</summary>

@@ -165,6 +165,9 @@ namespace PrintLogApi.Migrations
                     b.Property<int?>("Port")
                         .HasColumnType("int");
 
+                    b.Property<long?>("PrinterId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Serial")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");

@@ -16,7 +16,14 @@ public sealed record ValidDiscovery(
     string? Serial,
     string? MainboardId,
     IReadOnlyList<string> Macs,
-    bool Configured);
+    bool Configured)
+{
+    /// <summary>
+    /// The 3D Print Log printer a configured entry logs to, when the bridge named a positive id.
+    /// Not yet checked against the owner: the service keeps it only for one of their printers.
+    /// </summary>
+    public long? PrinterId { get; init; }
+}
 
 /// <summary>
 /// One reported credential issue, shaped but not yet matched to the bridge's entries (the
@@ -241,7 +248,14 @@ public static partial class BridgeCheckInValidator
         }
 
         var key = BridgeRules.IdentityKey(kind, serial, mainboardId, macs, address, d.Port);
-        return (new ValidDiscovery(key, kind, address, d.Port, model, name, serial, mainboardId, macs, d.Configured ?? false), null);
+        var configured = d.Configured ?? false;
+
+        // Only a config-file printer names its 3D Print Log printer. Anything else is ignored, not
+        // rejected: an old or misconfigured bridge must keep checking in.
+        return (new ValidDiscovery(key, kind, address, d.Port, model, name, serial, mainboardId, macs, configured)
+        {
+            PrinterId = configured && d.PrinterId is > 0 ? d.PrinterId : null,
+        }, null);
     }
 
     private static RejectedEntryDto Reject(string list, int index, string code)
