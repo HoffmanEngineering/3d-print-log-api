@@ -579,6 +579,17 @@ printers it watches. Code: `Models/Bridge.cs`, `Services/Bridges/`, `Controllers
 - **A check-in replaces the discovered list by identity** (`BridgeRules.IdentityKey`: serial, else
   mainboard id, else lowest MAC plus port, else address plus port), so a printer keeps its row and
   id across address changes. A missing or null field or list keeps what is stored; `{}` is a fetch.
+- **A config-file printer names the printer it logs to.** A `discovered[]` entry may carry
+  `printerId` (the config section's `printer_id`). It is kept on `BridgeDiscoveredPrinter.PrinterId`
+  only when the entry is `configured: true` and the id is one of the grant owner's printers (one
+  query per check-in); anything else (not configured, `<= 0`, another user's, missing) is stored
+  as null **silently**, never `rejected` and never a 400, so an old or misconfigured bridge keeps
+  working. Like the rest of the entry, a report without it replaces it with null. A plain column,
+  no FK (as `Bridge.LastSharedJobPrinterId`): an FK from here to `Printers` would be a second
+  cascade path (1785), and a printer delete must not touch bridge rows. `GET
+  /api/bridges/{id}/discovered-printers` returns `printerId` as stored and `printerName`, the
+  printer's current name from one query scoped to the user, null once it is deleted (the id stays
+  until the next check-in drops it).
 - **The desired list is versioned by `Bridge.DesiredRevision`**, a new GUID on every change
   (connect, disconnect, printer delete, scan request), so concurrent edits need no counter.
   `GET /api/bridges/me/desired` answers 304 on a matching weak `ETag` after one small read. A

@@ -159,6 +159,14 @@ public class DiscoveredPrinterReportDto
 
     /// <summary>The bridge already watches it from its config file.</summary>
     public bool? Configured { get; set; }
+
+    /// <summary>
+    /// Optional, only with <c>configured: true</c>: the 3D Print Log printer the config file logs
+    /// this printer's prints to (its section's <c>printer_id</c>). Kept only when it is one of the
+    /// owner's printers; otherwise, or on an entry that isn't configured, it is ignored, never
+    /// rejected.
+    /// </summary>
+    public long? PrinterId { get; set; }
 }
 
 /// <summary>An entry the check-in dropped, and why. The rest of the check-in was stored.</summary>
@@ -490,6 +498,19 @@ public class DiscoveredPrinterDto
 
     /// <summary>The connected entry, when <c>state</c> is Connected.</summary>
     public long? PrinterEntryId { get; set; }
+
+    /// <summary>
+    /// For a printer in the bridge's config file (<c>state</c> Configured): the 3D Print Log
+    /// printer it logs to, as the bridge last reported it, or null when it named none (or one that
+    /// wasn't yours at the time).
+    /// </summary>
+    public long? PrinterId { get; set; }
+
+    /// <summary>
+    /// The current name of <c>printerId</c>, or null when there is none or that printer has since
+    /// been deleted (the id stays until the bridge's next check-in).
+    /// </summary>
+    public string? PrinterName { get; set; }
 
     public DateTimeOffset FirstSeenAt { get; set; }
 
