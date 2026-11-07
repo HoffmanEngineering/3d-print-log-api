@@ -237,6 +237,26 @@ If you see an error about multiple database providers, ensure all EF Core servic
 ### Data Not Persisting Between Requests
 The SQLite connection must stay open for the entire test lifetime. The factory handles this by keeping `_connection` open until disposal.
 
+### "SQLite Error 5: database is locked" in an unrelated test
+
+The shared in-memory connection takes one user at a time. EF registers its SQL functions on the
+connection again for every new `DbContext`, and SQLite refuses (error 5, worded "database is locked"
+or "unable to delete/modify user-function due to active statements") while any statement on that
+connection is still running. So a context created while another thread's query is mid-read fails,
+and the test that fails is whichever one created it, not the one at fault. Look for:
+
+- **Work that outlives its test.** A response read with `HttpCompletionOption.ResponseHeadersRead`
+  and not read to the end leaves a streaming endpoint (the CSV export) querying into the next test.
+  Read the body before the test returns.
+- **Requests or workers that really run in parallel**: `Task.WhenAll` over `HttpClient` calls, a
+  `Task.Run` that touches the database, a background worker put back into the host. Put that host on
+  a `SqliteFileDatabase` (`UserSettingsInsertRaceTests`, `WebhookDeliveryServiceTests`): every context
+  gets its own connection to a temporary file in WAL mode. Both parts matter: in SQLite's default
+  rollback journal, EF's `INSERT ... RETURNING` commits when the statement is reset, where
+  Microsoft.Data.Sqlite does not retry a busy database, so it fails at once whatever
+  `Default Timeout` says. `Task.WhenAll` over plain service calls in one test is fine: Microsoft.Data.Sqlite
+  runs its async methods synchronously, so they interleave on one thread.
+
 ### Authentication Not Working
 Ensure you're adding the correct header:
 ```csharp

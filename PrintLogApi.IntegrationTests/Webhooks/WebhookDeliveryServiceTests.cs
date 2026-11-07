@@ -1,10 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Net;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Webhooks;
@@ -21,8 +19,8 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
 {
     /// <summary>
     /// The webhook host with its background worker put back, and a short attempt timeout. Its
-    /// database is a SQLite file rather than the suite's one shared in-memory connection: that
-    /// connection is not thread-safe, and here the workers query it while requests are running.
+    /// database is a <see cref="SqliteFileDatabase"/> rather than the suite's one shared in-memory
+    /// connection: here the workers query it while requests are running.
     /// </summary>
     public sealed class Factory : WebhookTestFactory
     {
@@ -32,7 +30,7 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
         /// <summary>Extra EF interceptors for a host of its own.</summary>
         public IInterceptor[] Interceptors { get; init; } = [];
 
-        private readonly string _path = Path.Combine(Path.GetTempPath(), $"printlog-webhooks-{Guid.NewGuid():N}.db");
+        private readonly SqliteFileDatabase _database = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -51,16 +49,15 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
             }
             builder.ConfigureServices(services =>
             {
-                services.RemoveAll<DbContextOptions<PrintLogContext>>();
-                services.AddDbContext<PrintLogContext>((sp, options) =>
-                {
-                    options.UseSqlite($"Data Source={_path};Default Timeout=30");
-                    options.AddAchievementInterceptors(sp);
-                    options.AddInterceptors(Interceptors);
-                    options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
-                });
+                _database.Register(services, Interceptors);
                 services.AddHostedService<WebhookDeliveryService>();
             });
+        }
+
+        protected override void PrepareDatabase(PrintLogContext db)
+        {
+            base.PrepareDatabase(db);
+            SqliteFileDatabase.UseWriteAheadLogging(db);
         }
 
         protected override void Dispose(bool disposing)
@@ -68,8 +65,7 @@ public class WebhookDeliveryServiceTests(WebhookDeliveryServiceTests.Factory fac
             base.Dispose(disposing);
             if (disposing)
             {
-                SqliteConnection.ClearAllPools();
-                try { System.IO.File.Delete(_path); } catch (IOException) { }
+                _database.Dispose();
             }
         }
     }

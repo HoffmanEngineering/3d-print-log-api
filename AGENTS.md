@@ -490,8 +490,8 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
   subscription first. A circuit opens after 3 failures; one event claims the probe after the
   cooldown with a conditional update on `LastDeliveryAt`, and a successful test event closes it. A
   restart loses what is queued. Tests deliver synchronously through
-  `WebhookTestFactory.DeliverPendingAsync`; the worker's own tests use a SQLite file, because the
-  shared in-memory connection is not thread-safe.
+  `WebhookTestFactory.DeliverPendingAsync`; the worker's own tests use a `SqliteFileDatabase` (WAL),
+  because the shared in-memory connection is not thread-safe.
 
 ## Agent update notice (printlog-bridge#39)
 
@@ -1419,6 +1419,15 @@ without the token; do not suppress the rule.
 differently from v2, and that alone broke two tests that had been asserting on seeded rows a
 sibling deletes (`DeleteAllNotifications_*`) or pages past (the summary endpoints default to
 `PageSize = 10`). Both were latent; nothing about v3 made them wrong. Arrange what you assert on.
+
+**The shared in-memory connection takes one user at a time.** EF registers its SQL functions on
+the connection for every new `DbContext`, and SQLite refuses with error 5 ("database is locked",
+or "unable to delete/modify user-function due to active statements") while another statement on it
+is running, so the failure lands on whichever test created a context, often an unrelated one. Read a
+`ResponseHeadersRead` response to the end before the test returns (the streaming CSV export ran into
+the next test that way), and put a host whose requests or workers really run in parallel on a
+`SqliteFileDatabase` (a temporary file in WAL mode, a connection per context). The tests README
+has the details.
 
 ### Gotcha: inotify limits in containers
 

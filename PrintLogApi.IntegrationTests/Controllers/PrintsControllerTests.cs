@@ -969,10 +969,17 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
         Assert.Null(response.Content.Headers.ContentLength);
+
+        // Read to the end before returning. The headers arrive with the first row, while the export
+        // is still reading the rest from the class's shared SQLite connection; a test that returned
+        // here left that query running into the next test, whose first DbContext then failed with
+        // SQLite error 5 ("database is locked") because EF cannot register its functions on a
+        // connection with a statement in progress.
+        await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>
