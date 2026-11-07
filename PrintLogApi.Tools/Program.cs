@@ -5,6 +5,7 @@ using PrintLogApi.Email.Backfill;
 // Usage: PrintLogApi.Tools email-backfill --file <export.json[.gz]> --connection <connection string> [--dry-run]
 //        PrintLogApi.Tools printer-catalog [--cura <dir>] [--orca <dir>] ... --out <file>
 //        PrintLogApi.Tools image-backfill [--apply] [--batch-size <n>] [--limit <n>] [--print-id <id>] [--project-id <guid>]
+//        PrintLogApi.Tools image-backfill --repair-transparency [--apply] [--limit <n>] [--from-log <file>]...
 const string Usage = "usage: email-backfill --file <path> --connection <connection string> [--dry-run]";
 
 if (args.Length > 0 && args[0] == "printer-catalog")

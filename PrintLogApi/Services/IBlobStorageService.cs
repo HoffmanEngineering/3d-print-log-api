@@ -24,6 +24,10 @@ public class BlobUploadResult
 /// <remarks>The caller owns <see cref="Content"/> and must dispose it.</remarks>
 public sealed record BlobContent(Stream Content, long Length);
 
+/// <summary>One blob in a container listing, with its metadata.</summary>
+public sealed record StoredBlob(
+    string Name, DateTimeOffset? LastModified, long? Length, IReadOnlyDictionary<string, string> Metadata);
+
 /// <summary>
 /// Service for managing blob storage operations (file uploads).
 /// </summary>
@@ -37,6 +41,19 @@ public interface IBlobStorageService
     /// <param name="stream">The file stream to upload</param>
     /// <returns>Upload result containing blob path and URI</returns>
     Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream);
+
+    /// <summary>
+    /// Uploads a file stream with blob metadata (names must be valid C# identifiers, values
+    /// ASCII). Overwrites an existing blob, metadata included.
+    /// </summary>
+    Task<BlobUploadResult> UploadAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata);
+
+    /// <summary>
+    /// Every blob in a container, with its metadata; nothing when the container does not exist.
+    /// For tools (the image backfill's transparency repair). No request path lists a container.
+    /// </summary>
+    IAsyncEnumerable<StoredBlob> ListBlobsAsync(string containerName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates a time-limited SAS URL that allows a client to PUT a file directly to Azure Blob Storage.

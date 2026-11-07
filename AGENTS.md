@@ -835,7 +835,15 @@ the app shell for crawlers, and the web app's `MetaTagService`.** Change its sha
 - **Social derivative.** Made on every print and project upload and printer snapshot
   (`ImageProcessingOptions.PrintUploads`), never for printer or material images. Its size is on
   the row (`SocialWidth`/`SocialHeight`) for `og:image:width/height`. Older rows get one from
-  the image backfill (`docs/image-backfill.md`).
+  the image backfill (`docs/image-backfill.md`). A transparent image's social JPEG is drawn on
+  white: link previews need a solid background.
+- **Originals are JPEG or PNG, never assume JPEG.** `ImageProcessingService` re-encodes an image
+  with any pixel that is not fully opaque (it scans the alpha, not the color type) as PNG and
+  everything else as JPEG; `ProcessedImage.ContentType` says which, it goes on the row, and blob
+  extensions follow it (`ImageContentTypes.ExtensionFor`). Serving reads the row's type. Until
+  this was fixed every original was JPEG and transparent renders (slicer plugins, the bridge)
+  came out on black; uploads from that window cannot be recovered, and backfilled rows are
+  repaired from the archive by `image-backfill --repair-transparency`.
 - **Thumbnail URLs in DTOs** (`thumbnailUrl`, `defaultPrintImageThumbnailUrl`,
   `defaultImageThumbnailUrl`, `defaultProjectImageThumbnailUrl`) are paths relative to the API
   base URL (`ImageUrls`), which the web app prefixes as it does for image ids.

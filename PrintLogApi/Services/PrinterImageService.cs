@@ -54,7 +54,7 @@ public class PrinterImageService(
                     throw new ArgumentException($"Maximum of {maxImages} images per printer allowed");
 
                 var originalFile = await UploadAndRecordAsync(
-                    processed.Original, ".jpg", userId, uploadedBlobNames, ct);
+                    processed.Original, ImageContentTypes.ExtensionFor(processed.ContentType), userId, uploadedBlobNames, ct);
                 var thumbnailFile = processed.Thumbnail is null
                     ? null
                     : await UploadAndRecordAsync(

@@ -13,8 +13,8 @@ namespace PrintLogApi.IntegrationTests.Services;
 
 /// <summary>
 /// The image backfill re-processes print and project images stored before uploads were
-/// processed, so they match what a new upload stores: a re-encoded JPEG original, a WebP
-/// thumbnail, and the decoded type and dimensions on the row.
+/// processed, so they match what a new upload stores: a re-encoded original (JPEG, or PNG when
+/// transparent), a WebP thumbnail, and the decoded type and dimensions on the row.
 /// </summary>
 public class ImageBackfillTests(CustomWebApplicationFactory factory)
     : IClassFixture<CustomWebApplicationFactory>
@@ -255,6 +255,56 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
             stored.LongLength + Blobs().Blobs[image.ThumbnailFile.Path!].LongLength
                 + Blobs().Blobs[image.SocialFile.Path!].LongLength,
             report.BytesAfter);
+    }
+
+    /// <summary>A render on a transparent background: a red square in the middle.</summary>
+    internal static byte[] TransparentPngBytes(int width = 200, int height = 100)
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+            using var paint = new SKPaint { Color = SKColors.Red };
+            canvas.DrawRect(width / 4f, height / 4f, width / 2f, height / 2f, paint);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    [Fact]
+    public async Task Apply_KeepsATransparentPng_AsAPng_WithASocialImageOnWhite()
+    {
+        var printId = await CreatePrintAsync();
+        var (imageId, _) = await SeedLegacyPrintImageAsync(printId, ".png", TransparentPngBytes());
+
+        var report = await RunAsync(ApplyTo(printId));
+
+        Assert.Equal(1, report.Processed);
+        Assert.Equal(1, report.KeptTransparency);
+        var image = await LoadPrintImageAsync(imageId);
+        Assert.Equal("image/png", image.ContentType);
+        Assert.EndsWith(".png", image.File.Path, StringComparison.Ordinal);
+        using var original = SKBitmap.Decode(Blobs().Blobs[image.File.Path!]);
+        Assert.Equal(0, original.GetPixel(2, 2).Alpha);
+        using var social = SKBitmap.Decode(Blobs().Blobs[image.SocialFile!.Path!]);
+        var corner = social.GetPixel(2, 2);
+        Assert.True(corner.Red > 245 && corner.Green > 245 && corner.Blue > 245, $"expected white, got {corner}");
+    }
+
+    [Fact]
+    public async Task Apply_TagsTheArchiveCopy_WithTheRowItCameFrom()
+    {
+        var printId = await CreatePrintAsync();
+        var (imageId, blobName) = await SeedLegacyPrintImageAsync(printId, ".png", PngBytes());
+        var before = await LoadPrintImageAsync(imageId);
+
+        await RunAsync(ApplyTo(printId));
+
+        var metadata = Blobs().Metadata[$"{BlobContainers.PrintImagesArchive}/{blobName}"];
+        Assert.Equal(ImageRef.PrintImage, metadata[ArchiveMetadata.ImageKind]);
+        Assert.Equal(imageId.ToString(System.Globalization.CultureInfo.InvariantCulture), metadata[ArchiveMetadata.ImageId]);
+        Assert.Equal(before.FileId.ToString(), metadata[ArchiveMetadata.FileId]);
     }
 
     [Fact]
@@ -628,6 +678,16 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
             if (BeforeUpload is not null) await BeforeUpload(containerName, blobName);
             return await inner.UploadAsync(containerName, blobName, stream);
         }
+
+        public async Task<BlobUploadResult> UploadAsync(
+            string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata)
+        {
+            if (BeforeUpload is not null) await BeforeUpload(containerName, blobName);
+            return await inner.UploadAsync(containerName, blobName, stream, metadata);
+        }
+
+        public IAsyncEnumerable<StoredBlob> ListBlobsAsync(string containerName, CancellationToken cancellationToken = default)
+            => inner.ListBlobsAsync(containerName, cancellationToken);
 
         public async Task DeleteBlobAsync(string containerName, string blobName)
         {

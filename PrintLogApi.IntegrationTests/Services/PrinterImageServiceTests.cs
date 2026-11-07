@@ -105,6 +105,24 @@ public class PrinterImageServiceTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task AddImage_TransparentPng_IsStoredAsAPngBlob()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var f = await ArrangeAsync(ct);
+        using var scope = f.Scope;
+        using var bitmap = new SKBitmap(new SKImageInfo(60, 40, SKColorType.Rgba8888, SKAlphaType.Premul));
+        bitmap.Erase(SKColors.Transparent);
+        using var encoded = SKImage.FromBitmap(bitmap).Encode(SKEncodedImageFormat.Png, 100);
+        using var png = new MemoryStream(encoded.ToArray());
+
+        var image = await f.Service.AddImageAsync(f.Printer.Id, png, f.UserId, ct);
+
+        Assert.Equal("image/png", image.ContentType);
+        var path = await f.Context.Files.Where(x => x.Id == image.FileId).Select(x => x.Path).SingleAsync(ct);
+        Assert.EndsWith(".png", path, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AddImage_SecondImage_IsNotDefault()
     {
         var ct = TestContext.Current.CancellationToken;

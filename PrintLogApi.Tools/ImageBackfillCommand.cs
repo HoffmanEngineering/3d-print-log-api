@@ -6,7 +6,9 @@ using PrintLogApi.Services.ImageBackfill;
 
 /// <summary>
 /// <c>image-backfill</c>: re-processes legacy print and project images to the canonical format
-/// with thumbnails (<see cref="ImageBackfillRunner"/>). A dry run unless <c>--apply</c> is given.
+/// with thumbnails (<see cref="ImageBackfillRunner"/>), or with <c>--repair-transparency</c> repairs
+/// rows an earlier run flattened to black (<see cref="ImageTransparencyRepairRunner"/>). A dry run
+/// unless <c>--apply</c> is given.
 /// Runbook: docs/image-backfill.md.
 ///
 /// <para>Both connection strings come from the environment, under the names the API reads:
@@ -16,7 +18,8 @@ using PrintLogApi.Services.ImageBackfill;
 internal static class ImageBackfillCommand
 {
     public const string Usage =
-        "usage: image-backfill [--apply] [--batch-size <n>] [--limit <n>] [--print-id <id>] [--project-id <guid>]";
+        "usage: image-backfill [--apply] [--batch-size <n>] [--limit <n>] [--print-id <id>] [--project-id <guid>]\n" +
+        "       image-backfill --repair-transparency [--apply] [--limit <n>] [--from-log <file>]...";
 
     private const string DatabaseSetting = "ConnectionString:PrintLogDb";
     private const string StorageSetting = "AZURE_STORAGE_CONNECTION_STRING";
@@ -24,10 +27,18 @@ internal static class ImageBackfillCommand
     public static async Task<int> RunAsync(string[] args)
     {
         var options = new ImageBackfillOptions();
+        var repair = false;
+        var logFiles = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
+                case "--repair-transparency":
+                    repair = true;
+                    break;
+                case "--from-log" when i + 1 < args.Length:
+                    logFiles.Add(args[++i]);
+                    break;
                 case "--apply":
                     options = options with { Apply = true };
                     break;
@@ -55,6 +66,25 @@ internal static class ImageBackfillCommand
             }
         }
 
+        if (repair && (options.PrintId is not null || options.ProjectId is not null
+            || options.BatchSize != ImageBackfillOptions.DefaultBatchSize))
+            return Fail("--repair-transparency takes only --apply, --limit and --from-log");
+        if (!repair && logFiles.Count > 0)
+            return Fail("--from-log is only for --repair-transparency");
+
+        // Read the logs before connecting to anything, so a typo fails fast.
+        var fromLog = new List<ArchivedOriginal>();
+        foreach (var file in logFiles)
+        {
+            if (!File.Exists(file))
+                return Fail($"log file not found: {file}");
+            var parsed = BackfillLog.Parse(await File.ReadAllLinesAsync(file));
+            Console.WriteLine($"Log {file}: {parsed.Entries.Count} archived rows");
+            foreach (var line in parsed.Rejected)
+                Console.WriteLine($"  ignored, archive container does not match the kind: {line}");
+            fromLog.AddRange(parsed.Entries);
+        }
+
         var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
         var database = configuration[DatabaseSetting];
         if (string.IsNullOrWhiteSpace(database))
@@ -74,12 +104,37 @@ internal static class ImageBackfillCommand
         Console.WriteLine($"Database: {Describe(database, "Initial Catalog", "Database")}");
         Console.WriteLine($"Storage account: {Describe(configuration[StorageSetting]!, "AccountName")}");
         Console.WriteLine(options.Apply ? "Mode: APPLY" : "Mode: dry run");
+        if (repair)
+            Console.WriteLine("Command: repair transparency");
 
         var dbOptions = new DbContextOptionsBuilder<PrintLogContext>()
             .UseSqlServer(database, sql => sql.EnableRetryOnFailure())
             .Options;
         await using var db = new PrintLogContext(dbOptions);
         var blobs = new AzureBlobStorageService(configuration, TimeProvider.System, new BlobContainerProvisioner());
+
+        if (repair)
+        {
+            var repairRunner = new ImageTransparencyRepairRunner(
+                db, blobs, new ImageProcessingService(), new ProcessedImageWriter(db, blobs), Console.Out);
+            TransparencyRepairReport repairReport;
+            try
+            {
+                repairReport = await repairRunner.RunAsync(
+                    new TransparencyRepairOptions { Apply = options.Apply, Limit = options.Limit, FromLog = fromLog },
+                    cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine("canceled; rows already repaired stay repaired, and a re-run continues from the rest");
+                return 130;
+            }
+
+            Console.WriteLine();
+            repairReport.WriteSummary(Console.Out);
+            return repairReport.Failed.Count > 0 ? 1 : 0;
+        }
+
         var runner = new ImageBackfillRunner(
             db, blobs, new ImageProcessingService(), new ProcessedImageWriter(db, blobs), Console.Out);
 

@@ -45,9 +45,45 @@ public class InMemoryBlobStorageService : IBlobStorageService
     /// <summary>
     /// Uploads a file stream to in-memory storage.
     /// </summary>
-    public async Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
+    public Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
+        => UploadCoreAsync(containerName, blobName, stream, null);
+
+    /// <summary>Uploads with metadata, which <see cref="Metadata"/> and the listing then show.</summary>
+    public Task<BlobUploadResult> UploadAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata)
+        => UploadCoreAsync(containerName, blobName, stream, metadata);
+
+    /// <summary>Metadata of the blobs uploaded with some, keyed as <see cref="Blobs"/> is.</summary>
+    public Dictionary<string, IReadOnlyDictionary<string, string>> Metadata { get; } = new();
+
+    /// <summary>The blobs under <paramref name="containerName"/>, in name order.</summary>
+    public async IAsyncEnumerable<StoredBlob> ListBlobsAsync(
+        string containerName,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var prefix = containerName + "/";
+        var listed = Blobs
+            .Where(b => b.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .OrderBy(b => b.Key, StringComparer.Ordinal)
+            .ToList();
+        foreach (var (path, bytes) in listed)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Yield();
+            yield return new StoredBlob(
+                path[prefix.Length..], null, bytes.LongLength,
+                Metadata.TryGetValue(path, out var metadata) ? metadata : new Dictionary<string, string>());
+        }
+    }
+
+    private async Task<BlobUploadResult> UploadCoreAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string>? metadata)
     {
         var blobPath = $"{containerName}/{blobName}";
+        if (metadata is null)
+            Metadata.Remove(blobPath);
+        else
+            Metadata[blobPath] = new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
 
         // Read stream to byte array
         using (var memoryStream = new MemoryStream())
@@ -163,6 +199,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
     {
         DeletedBlobNames.Add($"{containerName}/{blobName}");
         Blobs.Remove($"{containerName}/{blobName}");
+        Metadata.Remove($"{containerName}/{blobName}");
         return Task.CompletedTask;
     }
 
@@ -172,6 +209,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
     public void Clear()
     {
         Blobs.Clear();
+        Metadata.Clear();
         UploadedBlobNames.Clear();
         DeletedBlobNames.Clear();
         SignCallCount = 0;
