@@ -168,11 +168,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 
             // The email workers would tick on their own timers mid-test. Tests drive
             // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead. The same goes
-            // for the spool tag maintenance worker. The printer catalog seeder is replaced by the
-            // synchronous seed in PrepareDatabase, so every test starts with the catalog in place.
+            // for the spool tag maintenance worker and the slicer settings retention job. The printer
+            // catalog seeder is replaced by the synchronous seed in PrepareDatabase, so every test
+            // starts with the catalog in place.
             foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
                 && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService)
                     || d.ImplementationType == typeof(SpoolTagMaintenanceService)
+                    || d.ImplementationType == typeof(global::PrintLogApi.Services.SlicerSettings.CuraSettingsRetentionJob)
                     || d.ImplementationType == typeof(PrinterCatalogSeeder)
                     || d.ImplementationType == typeof(PrinterPopularityJob))).ToList())
             {

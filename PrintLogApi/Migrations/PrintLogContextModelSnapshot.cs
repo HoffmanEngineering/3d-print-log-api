@@ -528,6 +528,9 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex(new[] { "PrintId" }, "IX_CuraSettings_PrintId_ForeignKey");
 
+                    b.HasIndex(new[] { "CreatedDate" }, "IX_CuraSettings_Unlinked_CreatedDate")
+                        .HasFilter("[PrintId] IS NULL");
+
                     b.ToTable("CuraSettings");
                 });
 

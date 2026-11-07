@@ -264,6 +264,9 @@ public class Startup
         services.AddEmail(Configuration);
         services.AddSpoolTags(Configuration);
         services.AddPrinterCatalog(Configuration);
+        services.AddOptions<Services.SlicerSettings.CuraSettingsRetentionOptions>()
+            .Bind(Configuration.GetSection(Services.SlicerSettings.CuraSettingsRetentionOptions.SectionName));
+        services.AddHostedService<Services.SlicerSettings.CuraSettingsRetentionJob>();
         services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
