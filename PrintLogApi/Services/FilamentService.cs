@@ -1170,9 +1170,9 @@ public class FilamentService(
         List<FilamentFinishType>? finishTypes = null,
         List<FilamentEffect>? effects = null)
     {
-        // PagedRequest.PageSize is an unconstrained int that flows straight into Take().
-        // Hydration now signs one URL per row, so an unbounded page is a request-thread
-        // cost as well as a response-size one.
+        // Tighter than PagedRequest.MaxPageSize (250, #314), which this predates: hydration
+        // signs one URL per row, so a page is a request-thread cost as well as a
+        // response-size one.
         const int MaxPageSize = 100;
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
 

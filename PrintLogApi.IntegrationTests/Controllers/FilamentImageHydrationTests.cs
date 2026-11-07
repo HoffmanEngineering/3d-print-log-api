@@ -210,7 +210,7 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
     [Fact]
     public async Task FilamentList_ClampsPageSize()
     {
-        // PagedRequest.PageSize is an unconstrained int passed straight to Take().
+        // Clamped twice: PagedRequest to 250 (#314), then FilamentService to 100.
         var resp = await _client.SendAsync(
             AuthenticatedRequest(HttpMethod.Get, "/api/Filaments?pageSize=100000"),
             TestContext.Current.CancellationToken);

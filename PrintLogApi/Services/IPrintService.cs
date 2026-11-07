@@ -102,6 +102,12 @@ public interface IPrintService
         Print.PrintStatus? filterByStatus = null,
         SortRequest<PrintSummarySortColumn>? sortRequest = null);
 
+    /// <summary>
+    /// One page of a grouped feed order the caller already has (from the cache, in
+    /// <c>PrintsController.GetGrouped</c>). Loads only that page's rows.
+    /// </summary>
+    Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedPageAsync(GroupedFeedOrder order, int pageNumber, int pageSize);
+
     Task<int> GetMaxImagesPerPrint(long userId);
     Task SetDefaultImage(long printId, int newDefaultImageId);
     Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);

@@ -239,6 +239,55 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
         Assert.DoesNotContain("null", raw);
     }
 
+    /// <summary>
+    /// First and last use span every print of the spool, whatever the offset each start was
+    /// recorded in, and an undated print counts at its creation time. Each spool's dates are its
+    /// own: another spool's prints, and a spool never printed with, do not leak in (#309 moved
+    /// this aggregation into SQL).
+    /// </summary>
+    [Fact]
+    public async Task FirstAndLastUse_SpanEveryPrintOfTheSpool()
+    {
+        var (user, secret) = await ConnectedUserAsync();
+        var spanned = await AddSpoolAsync(user, "Spanned");
+        var single = await AddSpoolAsync(user, "Single");
+        var unused = await AddSpoolAsync(user, "Unused");
+
+        await AddUsageAsync(user, spanned.Id, amountMg: 1_000, at: new DateTimeOffset(2026, 3, 4, 5, 6, 7, TimeSpan.Zero));
+        // 03:00 UTC on May 10, written in Tokyo time.
+        await AddUsageAsync(user, spanned.Id, amountMg: 1_000, at: new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.FromHours(9)));
+        // Undated, and created (backdated here) before both dated prints.
+        var undated = await AddUsageAsync(user, spanned.Id, amountMg: 1_000, at: null);
+        await WithDbAsync(db => db.Prints.Where(p => p.Id == undated)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.CreatedDate, new DateTime(2026, 1, 15, 8, 0, 0, DateTimeKind.Utc)), Ct));
+        // Two usage rows on one print of the other spool.
+        var twice = await AddUsageAsync(user, single.Id, amountMg: 500, at: new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+        await WithDbAsync(async db =>
+        {
+            db.PrintFilament.Add(new PrintFilament
+            {
+                PrintId = twice,
+                FilamentId = single.Id,
+                AmountMg = 500,
+                Source = PrintFilament.SourceMeasurement.Weight,
+                EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+            });
+            return await db.SaveChangesAsync(Ct);
+        });
+        factory.Services.GetRequiredService<ICacheVersionService>().InvalidateUserCache(user.Id);
+
+        var spannedJson = await JsonAsync(await GetAsync(secret, $"/spool/{spanned.SpoolNumber}"));
+        var singleJson = await JsonAsync(await GetAsync(secret, $"/spool/{single.SpoolNumber}"));
+        var unusedJson = await JsonAsync(await GetAsync(secret, $"/spool/{unused.SpoolNumber}"));
+
+        Assert.Equal("2026-01-15T08:00:00Z", spannedJson.GetProperty("first_used").GetString());
+        Assert.Equal("2026-05-10T03:00:00Z", spannedJson.GetProperty("last_used").GetString());
+        Assert.Equal("2026-06-01T00:00:00Z", singleJson.GetProperty("first_used").GetString());
+        Assert.Equal("2026-06-01T00:00:00Z", singleJson.GetProperty("last_used").GetString());
+        Assert.False(unusedJson.TryGetProperty("first_used", out _));
+        Assert.False(unusedJson.TryGetProperty("last_used", out _));
+    }
+
     [Fact]
     public async Task SeveralColours_AreMultiColorHexes_AndNeverAlsoColorHex()
     {
@@ -604,10 +653,10 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
         return await scope.ServiceProvider.GetRequiredService<IFilamentService>().AddFilament(dto, user.Id);
     }
 
-    private async Task AddUsageAsync(User user, Guid filamentId, int amountMg, DateTimeOffset at)
+    private async Task<long> AddUsageAsync(User user, Guid filamentId, int amountMg, DateTimeOffset? at)
     {
         var printerId = await _support.CreatePrinterAsync(user);
-        await WithDbAsync(async db =>
+        var printId = await WithDbAsync(async db =>
         {
             var print = new Print
             {
@@ -630,10 +679,11 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
                 EstimatedSource = PrintFilament.SourceMeasurement.Weight,
             });
             await db.SaveChangesAsync(Ct);
-            return 0;
+            return print.Id;
         });
         // A print written around PrintService does not bump the cache version; do it here.
         factory.Services.GetRequiredService<ICacheVersionService>().InvalidateUserCache(user.Id);
+        return printId;
     }
 
     private Task<HttpResponseMessage> GetAsync(string secret, string path) => SendAsync(secret, HttpMethod.Get, path, null);

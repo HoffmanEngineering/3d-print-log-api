@@ -60,7 +60,7 @@ public class PrintsController(
     /// <remarks>
     /// Without `userId`, lists the authenticated user's own prints. With `userId`, lists that user's
     /// public prints, and needs no credentials. Results are paged with `pageNumber` (from 1) and
-    /// `pageSize` (default 10).
+    /// `pageSize` (default 10, at most 250: a larger value is treated as 250).
     ///
     /// Statuses are integers: `1` Pending, `2` Printing, `3` Success, `4` Cancelled, `5` Failed,
     /// `6` PartialSuccess. `fromDate` and `toDate` must be supplied together.
@@ -218,12 +218,50 @@ public class PrintsController(
         if (!userId.HasValue)
             return Unauthorized();
 
-        var result = await printService.GetGroupedFeedAsync(
-            pageNumber, pageSize, userId.Value,
-            searchText, filterByPrinterIds, filterByFilamentIds,
-            filterByStatus, sortRequest);
+        var query = new GroupedFeedQuery(
+            userId.Value, searchText, filterByPrinterIds?.ToList(), filterByFilamentIds?.ToList(), filterByStatus,
+            sortRequest?.SortColumn, sortRequest?.SortDirection);
 
-        return Ok(result);
+        // The order, not the page, is what is cached (#309). Building it reads every print the
+        // user has, and was 5 to 25 s at the database's busiest; one entry per query now serves
+        // every page of it, and a page loads only its own rows. The key carries the user's cache
+        // version, so any write that changes the feed starts a new entry, exactly as for the
+        // summaries. The factory runs on CachedComputation's scope with HybridCache's token: see
+        // CachedComputation.
+        var order = await cache.GetOrCreateAsync(
+            GroupedFeedCacheKey(query, cacheVersionService.GetUserCacheVersion(userId.Value)),
+            (computation, query),
+            static (state, token) => state.computation.RunAsync(
+                (services, innerToken) => PrintService.LoadGroupedFeedOrderAsync(
+                    services.GetRequiredService<PrintLogContext>(), state.query, innerToken),
+                token),
+            SummaryCacheOptions,
+            cancellationToken: HttpContext.RequestAborted);
+
+        // The same cap as PagedRequest (#314); this action binds its page size on its own.
+        return Ok(await printService.GetGroupedFeedPageAsync(order, pageNumber, Math.Min(pageSize, PagedRequest.MaxPageSize)));
+    }
+
+    /// <summary>
+    /// The grouped feed order's cache key. The id lists are sorted and deduplicated, since neither
+    /// order nor repeats change the rows. The search text goes last: nothing before it can contain
+    /// a colon, so no two queries share a key.
+    /// </summary>
+    internal static string GroupedFeedCacheKey(GroupedFeedQuery query, string version)
+    {
+        static string Ids<T>(IEnumerable<T>? ids) =>
+            ids is null ? "" : string.Join(",", ids.Distinct().Order());
+
+        return string.Join(":",
+            "grouped_feed_order",
+            query.UserId.ToString(CultureInfo.InvariantCulture),
+            version,
+            query.Status is { } status ? ((int)status).ToString(CultureInfo.InvariantCulture) : "",
+            query.SortColumn is { } column ? ((int)column).ToString(CultureInfo.InvariantCulture) : "",
+            query.SortDirection is { } direction ? ((int)direction).ToString(CultureInfo.InvariantCulture) : "",
+            Ids(query.PrinterIds),
+            Ids(query.FilamentIds),
+            query.SearchText ?? "");
     }
 
     /// <summary>

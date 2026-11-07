@@ -109,6 +109,35 @@ public class SpoolmanNotifierTests(CustomWebApplicationFactory factory) : IClass
         Assert.Equal("This connection isn't linked to a printer.", body.RootElement.GetProperty("message").GetString());
     }
 
+    /// <summary>
+    /// The credential is cached, so for a moment after its printer is deleted it can still name
+    /// that printer. A start then is a 404 in Spoolman's shape, not the 500 an unknown printer was
+    /// (#57, #309). Deleting a printer unbinds the connection first, so this is that window only.
+    /// </summary>
+    [Fact]
+    public async Task Started_ForAPrinterDeletedBehindTheCachedCredential_Is404WithAMessage()
+    {
+        var (user, secret, printer) = await ConnectedAsync();
+        // Any event authenticates, which caches the credential with its printer.
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(secret, Event("paused", printer, UniqueFile()))).StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Around PrinterService, so nothing evicts the cached credential.
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await db.SpoolmanConnections.Where(c => c.PrinterId == printer)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.PrinterId, (long?)null), Ct);
+            await db.Printers.Where(p => p.Id == printer).ExecuteDeleteAsync(Ct);
+        }
+        var file = UniqueFile();
+
+        var response = await PostAsync(secret, Event("started", printer, file));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("This connection's printer no longer exists.", body.RootElement.GetProperty("message").GetString());
+        Assert.Empty(await PrintsAsync(user, file));
+    }
+
     [Fact]
     public async Task BadJson_Is400WithAMessage()
     {

@@ -96,23 +96,22 @@ public sealed class SpoolmanInventoryService(
             .Select(Projection)
             .ToListAsync(ct);
 
-        // First and last use from the prints, as dates only. Grouped in memory rather than with
-        // Min/Max in SQL, which SQLite cannot translate over DateTimeOffset.
-        var uses = await db.PrintFilament
-            .AsNoTracking()
-            .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId && pf.Filament.MaterialCategoryNickname == FilamentCategory)
-            .Select(pf => new { pf.FilamentId, pf.Print.StartDate, pf.Print.CreatedDate })
-            .ToListAsync(ct);
-        var useDates = uses
-            .Where(u => u.FilamentId.HasValue)
-            .GroupBy(u => u.FilamentId!.Value)
-            .ToDictionary(
-                g => g.Key,
-                g =>
-                {
-                    var dates = g.Select(u => u.StartDate?.UtcDateTime ?? DateTime.SpecifyKind(u.CreatedDate, DateTimeKind.Utc)).ToList();
-                    return (First: dates.Min(), Last: dates.Max());
-                });
+        // First and last use from the prints: a print's start, or when it was created if it has
+        // none. One row per spool, aggregated in SQL (#309); reading every usage row and grouping
+        // here was most of a 1.9 s p95 on a miss.
+        var uses = await UseDatesQuery(db, userId).ToListAsync(ct);
+        var useDates = new Dictionary<Guid, (DateTime First, DateTime Last)>();
+        foreach (var use in uses)
+        {
+            // A spool's rows all have a start, or none do, or some do: every group has at least
+            // one of each pair, so neither fallback below is ever reached.
+            var first = Earlier(use.FirstStart?.UtcDateTime, Utc(use.FirstUndated));
+            var last = Later(use.LastStart?.UtcDateTime, Utc(use.LastUndated));
+            if (use.FilamentId is { } id && first is { } f && last is { } l)
+            {
+                useDates[id] = (f, l);
+            }
+        }
 
         var vendors = rows
             .Where(r => !string.IsNullOrWhiteSpace(r.Brand))
@@ -130,6 +129,49 @@ public sealed class SpoolmanInventoryService(
 
         return new SpoolmanInventory(spools, vendors);
     }
+
+    /// <summary>
+    /// Each of the user's filament spools that a print used, with the earliest and latest start
+    /// of those prints, and the earliest and latest creation time of the undated ones.
+    ///
+    /// <para>The starts are split from the creation times rather than coalesced, so the start's
+    /// own type is compared. SQL Server compares a <c>datetimeoffset</c> by its UTC instant, which
+    /// is what grouping in memory compared, so production picks the same prints it did. SQLite,
+    /// which runs the tests, stores one as its wall-clock ticks plus the offset
+    /// (<c>PrintLogContext</c>'s converter), so there two starts in different offsets less than
+    /// the difference between those offsets apart can compare the wrong way round. No test
+    /// depends on that, and none should.</para>
+    /// </summary>
+    internal static IQueryable<UseDatesRow> UseDatesQuery(PrintLogContext db, long userId) =>
+        db.PrintFilament
+            .AsNoTracking()
+            .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId && pf.Filament.MaterialCategoryNickname == FilamentCategory)
+            .Select(pf => new { pf.FilamentId, pf.Print.StartDate, pf.Print.CreatedDate })
+            .GroupBy(u => u.FilamentId)
+            .Select(g => new UseDatesRow
+            {
+                FilamentId = g.Key,
+                FirstStart = g.Min(u => u.StartDate),
+                LastStart = g.Max(u => u.StartDate),
+                FirstUndated = g.Min(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
+                LastUndated = g.Max(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
+            });
+
+    /// <summary>One spool's use dates, as <see cref="UseDatesQuery"/> aggregates them.</summary>
+    internal sealed class UseDatesRow
+    {
+        public Guid? FilamentId { get; init; }
+        public DateTimeOffset? FirstStart { get; init; }
+        public DateTimeOffset? LastStart { get; init; }
+        public DateTime? FirstUndated { get; init; }
+        public DateTime? LastUndated { get; init; }
+    }
+
+    private static DateTime? Earlier(DateTime? a, DateTime? b) => a is null ? b : b is null ? a : a < b ? a : b;
+
+    private static DateTime? Later(DateTime? a, DateTime? b) => a is null ? b : b is null ? a : a > b ? a : b;
+
+    private static DateTime? Utc(DateTime? value) => value is { } v ? Utc(v) : null;
 
     private static readonly System.Linq.Expressions.Expression<Func<Filament, SourceRow>> Projection = BuildProjection();
 

@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Moonraker;
 using PrintLogApi.OpenApi;
@@ -40,11 +41,13 @@ public class MoonrakerController(
     /// <response code="400">Returned if required data is missing in the webhook (like the printerId, etc).</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the printer specified.</response>
+    /// <response code="404">Returned if a `started` event's printer_id names no printer.</response>
     [HttpPost("notifier")]
     [OpenApiRequestBody(typeof(PrintEventDto))]
     [ProducesResponseType<PrintEventMessageDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> Webhook()
     {
         logger.LogInformation("Webhook Recieved:");
@@ -69,7 +72,15 @@ public class MoonrakerController(
 
         var dto = JsonSerializer.Deserialize<PrintEventMessageDto>(printEventDto.Message!)!;
 
-        await handler.HandleAsync(userId.Value, dto);
+        try
+        {
+            await handler.HandleAsync(userId.Value, dto);
+        }
+        catch (PrinterDoesNotExistException)
+        {
+            // printer_id names no printer: deleted, or mistyped in moonraker.conf. It was a 500.
+            return NotFound();
+        }
 
         return Ok(dto);
     }
