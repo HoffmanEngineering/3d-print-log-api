@@ -8,7 +8,8 @@ public interface IPrintEventService
 {
     /// <summary>
     /// Creates the print for a started job, or returns the one an earlier delivery of the same
-    /// event created. Throws UserCannotAccessPrinterException for another user's printer.
+    /// event created. Throws UserCannotAccessPrinterException for another user's printer, and
+    /// PrinterDoesNotExistException for a printer id that names no printer.
     /// </summary>
     Task<PrintStartedResult> Started(PrintStartedEvent started);
 

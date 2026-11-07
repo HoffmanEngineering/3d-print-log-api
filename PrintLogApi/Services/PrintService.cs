@@ -2587,8 +2587,33 @@ public sealed class PrintService(
         Print.PrintStatus? filterByStatus = null,
         SortRequest<PrintSummarySortColumn>? sortRequest = null)
     {
-        var printerIdList = filterByPrinterIds?.ToList();
-        var filamentIdList = filterByFilamentIds?.ToList();
+        var query = new GroupedFeedQuery(
+            userId, searchText, filterByPrinterIds?.ToList(), filterByFilamentIds?.ToList(), filterByStatus,
+            sortRequest?.SortColumn, sortRequest?.SortDirection);
+        var order = await LoadGroupedFeedOrderAsync(context, query, CancellationToken.None);
+        return await GetGroupedFeedPageAsync(order, pageNumber, pageSize);
+    }
+
+    /// <summary>
+    /// Phases 1 to 4 of the grouped feed: which rows match, and in what order. This is the part
+    /// whose cost grows with the user's prints (every standalone print's sort key, every project's
+    /// start dates, the usage rows of all of them), so the controller caches its result on the
+    /// user's cache version and every page of one query is served from that one entry (#309).
+    ///
+    /// <para>Static, and handed its context, because it runs inside a
+    /// <see cref="Caching.CachedComputation"/> scope: see that type for why a shared computation
+    /// must not use the request's <see cref="PrintLogContext"/>. Everything it reads is changed
+    /// only by writes that already bump the version (prints, their usage rows, projects, and the
+    /// spools whose density and diameter resolve a usage row), as the summaries require.</para>
+    /// </summary>
+    internal static async Task<GroupedFeedOrder> LoadGroupedFeedOrderAsync(
+        PrintLogContext context, GroupedFeedQuery query, CancellationToken ct)
+    {
+        var userId = query.UserId;
+        var searchText = query.SearchText;
+        var filterByStatus = query.Status;
+        var printerIdList = query.PrinterIds;
+        var filamentIdList = query.FilamentIds;
 
         bool hasFilters = !string.IsNullOrWhiteSpace(searchText)
             || filterByStatus.HasValue
@@ -2637,7 +2662,7 @@ public sealed class PrintService(
                 .Where(p => p.ProjectId != null)
                 .GroupBy(p => p.ProjectId)
                 .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
-                .ToListAsync();
+                .ToListAsync(ct);
             filteredGroupLookup = groups
                 // Non-null by the Where; the group is still needed for the value selector, so
                 // a Select+OfType unwrap here would discard FilteredPrintCount.
@@ -2656,7 +2681,7 @@ public sealed class PrintService(
             .Where(p => p.CreatedById == userId)
             .Select(p => new { p.Id, p.CreatedDate, p.Name, p.StartDateOverride })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         // Each row resolved by FilamentProfile.UsageRowMg and rounded once in SQL, then summed
         // per project, exactly as the project pages total them.
@@ -2669,7 +2694,7 @@ public sealed class PrintService(
             .GroupBy(x => x.ProjectId)
             .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg), Ml = g.Sum(x => x.Ml) })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var projectFilamentLookup = projectFilamentTotals
             // Non-null by the Where; the row is still needed for the value selector.
@@ -2693,7 +2718,7 @@ public sealed class PrintService(
             .Where(p => p.CreatedById == userId && p.ProjectId != null && p.StartDate != null)
             .Select(p => new { p.ProjectId, p.StartDate })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var projectStartLookup = projectStartRows
             .Where(x => x.ProjectId.HasValue)
@@ -2718,7 +2743,7 @@ public sealed class PrintService(
         var standalonePrintList = await standalonePrintQuery
             .Select(p => new { p.Id, p.StartDate, p.CreatedDate, p.Title })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         // Joining PrintFilament back to the filtered query would re-run the text search — the
         // most expensive predicate in the request, a scan of the user's prints with a LOB read
@@ -2737,7 +2762,7 @@ public sealed class PrintService(
                 .GroupBy(x => x.PrintId)
                 .Select(g => new { PrintId = g.Key, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
-                .ToListAsync();
+                .ToListAsync(ct);
 
             standaloneFilamentLookup = standaloneFilamentTotals
                 .ToDictionary(x => x.PrintId, x => x.Mg);
@@ -2756,9 +2781,9 @@ public sealed class PrintService(
         // ── Phase 4: Merge, sort, paginate the lightweight keys ───────────────────
         IEnumerable<FeedSortItem> merged = projectSortKeys.Concat(standaloneSortKeys);
 
-        if (sortRequest?.SortColumn == PrintSummarySortColumn.Title)
+        if (query.SortColumn == PrintSummarySortColumn.Title)
         {
-            merged = sortRequest.SortDirection == SortDirection.Asc
+            merged = query.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.SortTitle)
                         .ThenBy(x => x.Type)
                         .ThenBy(x => x.ProjectId ?? Guid.Empty)
@@ -2768,9 +2793,9 @@ public sealed class PrintService(
                         .ThenBy(x => x.ProjectId ?? Guid.Empty)
                         .ThenBy(x => x.PrintId ?? 0);
         }
-        else if (sortRequest?.SortColumn == PrintSummarySortColumn.FilamentUsage)
+        else if (query.SortColumn == PrintSummarySortColumn.FilamentUsage)
         {
-            merged = sortRequest.SortDirection == SortDirection.Asc
+            merged = query.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.TotalFilamentWeightMg)
                         .ThenBy(x => x.Type)
                         .ThenBy(x => x.ProjectId ?? Guid.Empty)
@@ -2782,7 +2807,7 @@ public sealed class PrintService(
         }
         else
         {
-            bool asc = sortRequest?.SortDirection == SortDirection.Asc;
+            bool asc = query.SortDirection == SortDirection.Asc;
             // Ties are now the COMMON case: a date-only override sorts every pinned project to
             // the same UTC midnight. Without a deterministic tie-breaker equal keys can reorder
             // between page requests, duplicating a row on one page and dropping it from the next.
@@ -2797,22 +2822,54 @@ public sealed class PrintService(
                         .ThenBy(x => x.PrintId ?? 0);
         }
 
-        var mergedList = merged.ToList();
-        var total = mergedList.Count;
-        var pagedKeys = mergedList
+        // Only what a page needs from the sort is kept: the cached entry is charged its serialized
+        // size against the shared budget, so a print row is its id and nothing else. A project row
+        // carries the figures computed over all of the project's prints above, which a page would
+        // otherwise have to recompute.
+        var entries = merged
+            .Select(x => x.Type == FeedItemType.Project
+                ? new GroupedFeedEntry
+                {
+                    ProjectId = x.ProjectId,
+                    ProjectSortDate = x.SortDate,
+                    FilteredPrintCount = hasFilters
+                        ? filteredGroupLookup.GetValueOrDefault(x.ProjectId!.Value)
+                        : null,
+                    ProjectWeightMg = projectFilamentLookup.TryGetValue(x.ProjectId!.Value, out var fw) ? fw : 0L,
+                    ProjectVolumeMl = projectVolumeLookup.TryGetValue(x.ProjectId!.Value, out var fv) ? fv : 0.0,
+                }
+                : new GroupedFeedEntry { PrintId = x.PrintId })
+            .ToList();
+
+        return new GroupedFeedOrder { Entries = entries, HasFilters = hasFilters };
+    }
+
+    /// <summary>
+    /// Phases 5 and 6 of the grouped feed: one page of a <see cref="GroupedFeedOrder"/>, with the
+    /// detail of only that page's rows loaded. The order may come from the cache, so it is only
+    /// read, never changed.
+    /// </summary>
+    public async Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedPageAsync(GroupedFeedOrder order, int pageNumber, int pageSize)
+    {
+        var hasFilters = order.HasFilters;
+        var total = order.Entries.Count;
+        var pagedKeys = order.Entries
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToList();
 
         // ── Phase 5: Load full detail only for the current page's items ───────────
+        // An entry is a project row exactly when it has a project id: the projection and the id
+        // are proved together, so nothing below needs .Value.
         var pageProjectGuids = pagedKeys
-            .Where(x => x.Type == FeedItemType.Project)
-            .Select(x => x.ProjectId!.Value)
+            .Select(x => x.ProjectId)
+            .OfType<Guid>()
             .ToList();
 
         var pagePrintIds = pagedKeys
-            .Where(x => x.Type == FeedItemType.Print)
-            .Select(x => x.PrintId!.Value)
+            .Where(x => x.ProjectId is null)
+            .Select(x => x.PrintId)
+            .OfType<long>()
             .ToList();
 
         // — Project detail via targeted projections (avoids loading all prints per project) —
@@ -3007,32 +3064,34 @@ public sealed class PrintService(
 
         var pagedItems = pagedKeys.Select(key =>
         {
-            if (key.Type == FeedItemType.Project)
+            if (key.ProjectId is { } projectId)
             {
-                if (!projectEntityLookup.TryGetValue(key.ProjectId!.Value, out var p))
+                if (!projectEntityLookup.TryGetValue(projectId, out var p))
                     return null;
 
                 projectPrintStats.TryGetValue(p.Id, out var stats);
-                filteredGroupLookup.TryGetValue(p.Id, out var filteredCount);
+
+                // Set on every project entry by LoadGroupedFeedOrderAsync.
+                var sortDate = key.ProjectSortDate.GetValueOrDefault();
 
                 return new GroupedFeedItemDto
                 {
                     Type = "project",
-                    SortDate = key.SortDate,
+                    SortDate = sortDate,
                     // The UTC civil date of the sort instant is exactly the resolved start
                     // date: an override sorts at UTC midnight of that day, and the derived
                     // cases already reduce to their UTC civil date in ProjectDateResolver.
-                    ProjectStartDate = DateOnly.FromDateTime(key.SortDate.UtcDateTime),
+                    ProjectStartDate = DateOnly.FromDateTime(sortDate.UtcDateTime),
                     ProjectId = p.Id,
                     ProjectName = p.Name,
                     ProjectReference = p.Reference,
                     ProjectStatus = p.Status,
                     PrintCount = stats.PrintCount,
-                    FilteredPrintCount = hasFilters ? (int?)filteredCount : null,
+                    FilteredPrintCount = hasFilters ? key.FilteredPrintCount ?? 0 : null,
                     TotalPrintTimeInSeconds = stats.TotalPrintTime,
                     TotalEstimatedPrintTimeInSeconds = stats.TotalEstPrintTime,
-                    TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var fw) ? fw : 0L,
-                    TotalFilamentVolumeMl = projectVolumeLookup.TryGetValue(p.Id, out var fv) ? fv : 0.0,
+                    TotalFilamentWeightMg = key.ProjectWeightMg ?? 0L,
+                    TotalFilamentVolumeMl = key.ProjectVolumeMl ?? 0.0,
                     DefaultProjectImageId = projectDefaultImageLookup.TryGetValue(p.Id, out var imgId) ? imgId : 0,
                     FilamentUsage = projectFilamentUsageLookup.TryGetValue(p.Id, out var fu) ? fu : new List<PrintFilamentSummaryDto>(),
                     Printers = projectPrinterLookup.TryGetValue(p.Id, out var printers) ? printers : new List<PrinterSummary>(),
@@ -3040,7 +3099,7 @@ public sealed class PrintService(
             }
             else
             {
-                if (!printLookup.TryGetValue(key.PrintId!.Value, out var p))
+                if (key.PrintId is not { } printId || !printLookup.TryGetValue(printId, out var p))
                     return null;
                 var sortDate = p.StartDate ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc));
                 return new GroupedFeedItemDto

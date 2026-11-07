@@ -27,8 +27,19 @@ title or PR body, even when the harness's attribution instructions ask for one. 
 
 Version-based invalidation through `ICacheVersionService` (singleton). Cache keys combine user ID +
 version GUID + query parameters, so bumping a user's version invalidates every entry for that user
-at once. Applied to `GetPrintSummary()` and `GetPrinterSummary()`; every create/update/delete must
-invalidate, or callers keep reading stale summaries.
+at once. Applied to `GetPrintSummary()`, `GetPrinterSummary()` and the grouped feed's order; every
+create/update/delete must invalidate, or callers keep reading stale summaries.
+
+**The grouped feed caches its order, not its pages (#309).** `GET /api/Prints/grouped` used to read
+the sort key of every print and project the user has on every request (5 to 25 s at the database's
+busiest). `PrintService.LoadGroupedFeedOrderAsync` now builds the ordered rows once per user,
+version and query (search, filters, sort; not the page), and every page of that query is served
+from the one entry: a page loads only its own rows. The entry is compact on purpose (`GroupedFeedEntry`:
+a print row is its id) because the budget charges its serialized size and HybridCache refuses an
+entry over 1 MiB, which would put such a user back to computing it on every request. The order
+reads prints, their usage rows, projects and spools (density and diameter resolve a usage row), so
+those writes must bump the version, as they already do for the summaries. A test that seeds any of
+them straight into the database must bump it too (`ProjectDateSeedHelpers` does).
 
 ### HybridCache for compute-on-miss, IMemoryCache for counters (#68)
 
@@ -36,7 +47,7 @@ Everything that computes a value on a miss goes through `HybridCache.GetOrCreate
 stampede protection: concurrent callers on one key await a single computation. The cold window is
 not hypothetical — a version bump invalidates all of a user's entries at once, so their misses
 arrive together. Converted: both summary endpoints, all six analytics tabs, `ClaimsTransformer`
-and `UserApiKeyService.GetUserIdByApiKey`.
+and `UserApiKeyService.GetUserIdByApiKey`, and later the grouped feed's order (#309).
 
 The version GUID stays in the key exactly as before. No tag-based eviction, and **no L2** — L1-only
 was the scope, and a distributed store is a separate decision.
@@ -151,8 +162,8 @@ The two things most likely to be "tidied" into a regression:
   more tempting one (35% fewer bytes for 0.2 ms) and was deliberately rejected: gzip is reached
   only by clients that cannot do brotli, but it is also whichever codec an attacker names in
   `Accept-Encoding`, so the extra CPU is spent mostly on adversaries. That trade is only as good as
-  the bound on response size, and there is none — `PagedRequest.PageSize` is an unconstrained `int`
-  that flows into `Take()`. Capping it is a caller-visible change and belongs in its own issue.
+  the bound on response size. `PagedRequest.PageSize` is clamped to `PagedRequest.MaxPageSize`
+  (250, #314); before that it was an unconstrained `int` that flowed into `Take()`.
 
 `text/event-stream` is deliberately absent from `MimeTypes`: compressing a streaming body buffers
 it, and `/mcp` negotiates that content type. `ResponseCompressionTests` pins that, the encoding
@@ -394,7 +405,9 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   never the body. For a printer without printlog-bridge, the connection's config block carries
   `[spoolman]` and the notifier, so one paste sets up both. A printer with a live printlog-bridge
   has its events dropped: **the bridge stays authoritative** and the notifier tier is only for
-  printers without one.
+  printers without one. A start for a printer that no longer exists is a 404 `{"message"}`: deleting
+  a printer unbinds its connection, but the credential is cached, so for a moment the credential can
+  still name it (#309).
 - **A printer with a printlog-bridge connection gets `[spoolman]` alone.** Any `Connection` row
   of a bridge kind (`Connection.BridgeKinds`, printlog-bridge#82) for the printer counts, stale or
   not: the block is pasted once and kept, and a
@@ -414,7 +427,10 @@ the routes are `/spoolman/api/v1/...` (`SpoolmanController`), outside `/api`.
   single spool keeps the started row's, several get null, so accuracy analytics skip them. A
   single spool on a multi-slot printer gets no slot.
 - **The inventory is cached on the user's version GUID.** Filament and print writes must bump it,
-  as for the summaries.
+  as for the summaries. A miss aggregates each spool's first and last use in SQL, one row per spool
+  (#309). SQL Server compares `datetimeoffset` by its UTC instant, as the in-memory grouping it
+  replaced did; SQLite (the tests) compares wall-clock ticks, so no test may depend on the order
+  of two starts closer together than their offsets differ.
 - **Websockets are in-process, on one instance.** `SpoolmanSocketHost` holds them open and sends no
   events (#172). It re-checks each socket every 5 minutes and closes it when the connection is
   revoked or paused. Scaling out needs a backplane before #172's events can reach a socket held
@@ -1106,11 +1122,17 @@ nothing about behaviour changed. Four idioms account for nearly all of it.
   Always commented, so the reason survives the next reader.
 
 Anything that needs a real null _guard_ rather than an annotation is a commented `!` pointing at
-**#57** (`grep -rn "#57" --include=*.cs` — 14 sites in 9 files). Those are deferred behaviour
+**#57** (`grep -rn "#57" --include=*.cs` — 12 sites in 8 files). Those are deferred behaviour
 changes, not annotation debt: unvalidated webhook payloads, unknown ids that 500 where they should
 404, null elements surviving `Colors` validation. Each preserves a pre-existing
 `NullReferenceException` on purpose, so fixing one is caller-visible and needs its own test. Match
-their wording if you add another.
+their wording if you add another. One has been fixed so far: a Moonraker notifier `started` event
+for a printer id that names no printer throws `PrinterDoesNotExistException` from
+`PrintEventService.Started`, which both notifier routes (`/api/Moonraker/notifier` and
+`/spoolman/notifier`) answer with a 404 (#309). The OctoPrint webhook shares `Started` and does not
+catch it, so there it is still a 500, now with a named exception rather than a
+`NullReferenceException`. When you fix one, take its `#57` out of the comment so the grep stays the
+list of what is left.
 
 The `/mcp` endpoint (Streamable HTTP, stateless, MCP revision 2026-07-28 via SDK 2.0.0) exposes
 tools to agents in two classes: `PrintLogReadTools` (`McpRead`, `read:printdata`) and

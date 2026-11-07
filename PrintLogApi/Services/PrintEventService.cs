@@ -46,9 +46,15 @@ public class PrintEventService(
             .Include(p => p.LoadedFilaments)
             .FirstOrDefaultAsync();
 
-        // Null-forgiven: an unknown printer has always failed here as a 500 rather than a clean
-        // error, and the integrations' tests pin that. Turning it into a not-found is tracked in #57.
-        if (started.UserId != printer!.UserId)
+        // A printer id that names no printer: deleted, or mistyped in the user's moonraker.conf.
+        // It was a NullReferenceException and a 500; the Moonraker notifier routes map this
+        // to a 404 (#309). OctoPrint's webhook does not catch it yet, so there it is still a 500.
+        if (printer is null)
+        {
+            throw new PrinterDoesNotExistException($"No printer with id {started.PrinterId} exists.");
+        }
+
+        if (started.UserId != printer.UserId)
         {
             throw new UserCannotAccessPrinterException();
         }

@@ -2,6 +2,7 @@
 using Humanizer;
 using Microsoft.ApplicationInsights;
 using PrintLogApi.Controllers;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Moonraker;
 using static PrintLogApi.Models.Print;
@@ -55,7 +56,9 @@ public class MoonrakerNotifierHandler(
                     break;
             }
         }
-        catch (Exception ex)
+        // An unknown printer is the caller's mistake, answered with a 404 by both routes, so it is
+        // not logged as a server error.
+        catch (Exception ex) when (ex is not PrinterDoesNotExistException)
         {
             logger.LogError(ex, "An error occurred in the Moonraker Webhook");
             throw;

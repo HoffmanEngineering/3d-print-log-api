@@ -539,12 +539,11 @@ public class Startup
     /// expensive one. Paying 3x the CPU on a path selected mostly by adversaries is the wrong
     /// side of that trade, and gzip Fastest still removes ~86% of the bytes.
     ///
-    /// That reasoning is bounded by response size, and response size here is not bounded:
-    /// PagedRequest.PageSize is an unconstrained int that flows into Take(), so a caller can
-    /// ask any of the paged endpoints for an arbitrarily large body. Compression is not the
-    /// origin of that (the SQL and the serialization on that path cost far more than any
-    /// codec) and capping it is a caller-visible change that belongs in its own issue — but it
-    /// is the reason not to spend extra CPU per byte here.
+    /// That reasoning is bounded by response size. PagedRequest.PageSize is clamped to
+    /// PagedRequest.MaxPageSize (250 rows, #314); before that it was an unconstrained int that
+    /// flowed into Take(), so a caller could ask any of the paged endpoints for an arbitrarily
+    /// large body. 250 rows can still be a large body, and an attacker still picks the codec, so
+    /// it remains the reason not to spend extra CPU per byte here.
     ///
     /// Brotli is registered first so it wins when a client offers both at equal quality.
     ///

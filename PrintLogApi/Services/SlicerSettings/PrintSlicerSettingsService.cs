@@ -87,20 +87,35 @@ public sealed class PrintSlicerSettingsService(
             .FirstOrDefaultAsync(p => p.Id == printId && p.CreatedById == userId, ct)
             ?? throw new DoesNotExistException();
 
-        var record = await context.CuraSettings.FirstOrDefaultAsync(c => c.PrintId == printId, ct);
+        // The id only (#309). The row's Settings is up to 512 KiB of nvarchar on a table of about
+        // 51 GB, and a resend overwrites it without looking at it, so reading it was pure cost:
+        // the timeouts this endpoint had were that read. IX_CuraSettings_PrintId covers the id.
+        var existingId = await context.CuraSettings
+            .Where(c => c.PrintId == printId)
+            .Select(c => (Guid?)c.Id)
+            .FirstOrDefaultAsync(ct);
 
         // A slicer with no connector record means the Cura plugin or the Slic3r uploader recorded
         // the settings (ApplyProvenance). They read the whole file on the slicer's machine, with
         // the user's presets and the toolpaths, so they are always the richer record; a connector
         // does not get to replace them. GET /api/Prints/claimable reports this as hasSlicerSettings.
-        if (record is null && print.Slicer is not null)
+        if (existingId is null && print.Slicer is not null)
         {
             throw new SlicerSettingsConflictException(
                 "This print's slicer settings were recorded by a slicer plugin, and a connector cannot replace them.");
         }
 
-        var replaced = record is not null;
-        if (record is null)
+        var replaced = existingId is not null;
+        CuraSetting record;
+        if (existingId is { } id)
+        {
+            // A stub of the existing row: only the four columns marked below are written, in the
+            // same SaveChanges as the print, so the record and the note still land together.
+            // CreatedDate and UserId are left as they are, as they were when the row was loaded.
+            record = new CuraSetting { Id = id };
+            context.CuraSettings.Attach(record);
+        }
+        else
         {
             record = new CuraSetting
             {
@@ -115,6 +130,17 @@ public sealed class PrintSlicerSettingsService(
         record.CuraVersion = Truncate(parsed.Version, 100);
         record.PluginVersion = null;
         record.Settings = StoredSettings(parsed);
+
+        if (replaced)
+        {
+            // Marked by hand: change detection compares against the stub's defaults, so a value
+            // that happens to equal one (PluginVersion's null) would otherwise not be written.
+            var entry = context.Entry(record);
+            entry.Property(c => c.Slicer).IsModified = true;
+            entry.Property(c => c.CuraVersion).IsModified = true;
+            entry.Property(c => c.PluginVersion).IsModified = true;
+            entry.Property(c => c._Settings).IsModified = true;
+        }
 
         var slicer = SlicerNames.Normalize(parsed.Slicer);
         var version = Truncate(parsed.Version, 50);

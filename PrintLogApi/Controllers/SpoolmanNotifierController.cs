@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using PrintLogApi.Authentication.Spoolman;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Moonraker;
 using PrintLogApi.Services.Moonraker;
@@ -53,7 +54,17 @@ public class SpoolmanNotifierController(IMoonrakerNotifierHandler handler) : Con
         }
 
         message.PrinterId = printerId;
-        await handler.HandleAsync(userId, message);
+        try
+        {
+            await handler.HandleAsync(userId, message);
+        }
+        catch (PrinterDoesNotExistException)
+        {
+            // Deleting a printer unbinds its connection first, but the credential is cached, so a
+            // start can still name the printer for a moment afterwards. It was a 500.
+            return Message(StatusCodes.Status404NotFound, "This connection's printer no longer exists.");
+        }
+
         return Content("{}", "application/json");
     }
 

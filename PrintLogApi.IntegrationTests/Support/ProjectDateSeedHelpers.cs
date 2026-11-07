@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.IntegrationTests.Support;
 
@@ -108,6 +109,7 @@ public static class ProjectDateSeedHelpers
         }
 
         await context.SaveChangesAsync();
+        Invalidate(scope, userId);
         return project.Id;
     }
 
@@ -149,6 +151,7 @@ public static class ProjectDateSeedHelpers
         };
         context.Prints.Add(print);
         await context.SaveChangesAsync();
+        Invalidate(scope, userId);
         return print.Id;
     }
 
@@ -161,5 +164,14 @@ public static class ProjectDateSeedHelpers
         var project = await context.Projects.FirstAsync(p => p.Id == projectId);
         project.StartDateOverride = day;
         await context.SaveChangesAsync();
+        Invalidate(scope, project.CreatedById);
     }
+
+    /// <summary>
+    /// These helpers write straight to the database, past the write paths that bump the user's
+    /// cache version, so they bump it themselves: the grouped feed's order is cached on it (#309),
+    /// and a test that read the feed before seeding would otherwise read the order from before.
+    /// </summary>
+    private static void Invalidate(IServiceScope scope, long userId) =>
+        scope.ServiceProvider.GetRequiredService<ICacheVersionService>().InvalidateUserCache(userId);
 }
