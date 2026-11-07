@@ -242,8 +242,16 @@ public class Startup
         // the runtime still adds traceparent to every other HttpClient's calls; only the webhook
         // client drops that too, through the no-output propagator on its handler
         // (WebhookHttpHandlerFactory). Dependency telemetry itself is unaffected.
+        //
+        // SQL command text is collected so a DTU spike can be traced to a statement, and then
+        // cleared again by SqlCommandTextTelemetryProcessor on every call that was fast and
+        // succeeded; see that type for the volume and privacy reasoning.
         services.ConfigureTelemetryModule<Microsoft.ApplicationInsights.DependencyCollector.DependencyTrackingTelemetryModule>(
-            (module, _) => module.SetComponentCorrelationHttpHeaders = false);
+            (module, _) =>
+            {
+                module.SetComponentCorrelationHttpHeaders = false;
+                module.EnableSqlCommandTextInstrumentation = true;
+            });
         // Who and how, on every item; then drop the rows that only ever say "still polling".
         // See each type's remarks for the numbers behind them.
         services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
@@ -251,11 +259,14 @@ public class Startup
         services.AddSingleton<ITelemetryInitializer, TagUidRedactionInitializer>();
         services.AddSingleton<ITelemetryInitializer, WebhookTelemetryRedactionInitializer>();
         services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
-        if (Environment.IsEnvironment("E2ETesting") || Environment.IsEnvironment("IntegrationTesting"))
+        services.AddApplicationInsightsTelemetryProcessor<SqlCommandTextTelemetryProcessor>();
+        if (TelemetryEnvironment.IsDisabled(Environment, Configuration))
         {
-            // Test runs were reaching the production resource: the per-environment appsettings
-            // set the key to "", which the SDK treats as unset, so the base file's key won.
-            // Switching telemetry off here is deterministic whatever the config layers say.
+            // Test runs, and then a developer machine, were reaching the production resource:
+            // the per-environment appsettings set the key to "", which the SDK treats as unset,
+            // so the base file's key won. Switching telemetry off here is deterministic whatever
+            // the config layers say. Development opts back in with
+            // ApplicationInsights:EnableInDevelopment; see TelemetryEnvironment.
             services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = true);
         }
 
@@ -264,6 +275,9 @@ public class Startup
         services.AddEmail(Configuration);
         services.AddSpoolTags(Configuration);
         services.AddPrinterCatalog(Configuration);
+        services.AddOptions<Services.SlicerSettings.CuraSettingsRetentionOptions>()
+            .Bind(Configuration.GetSection(Services.SlicerSettings.CuraSettingsRetentionOptions.SectionName));
+        services.AddHostedService<Services.SlicerSettings.CuraSettingsRetentionJob>();
         services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
@@ -616,7 +630,12 @@ public class Startup
                 Expiration = TimeSpan.FromMinutes(15),
                 LocalCacheExpiration = TimeSpan.FromMinutes(15),
             };
-        });
+        })
+            // Binary, not JSON: as JSON the public print index would near the 1 MiB payload limit.
+            .AddSerializer<Services.PublicPrints.PublicPrintIndex, Services.PublicPrints.PublicPrintIndexSerializer>();
+
+        // Singleton: it holds only HybridCache and CachedComputation, both singletons.
+        services.AddSingleton<Services.PublicPrints.PublicPrintIndexCache>();
 
         // Singleton: it holds only the scope factory, and the scopes it creates must be
         // independent of any request scope — which is the entire point. See CachedComputation.
@@ -1100,6 +1119,12 @@ public class Startup
                 Predicate = check => check.Tags.Contains(ReadyTag),
                 ResponseWriter = WriteHealthResponse,
             }).AllowAnonymous();
+
+            // App Service's Always On pings "/" to keep the site warm; unmapped, that was ~300
+            // 404s a day. Anonymous, outside OpenAPI, and on no rate-limit policy (the global
+            // limiters only match /api/email and connector writes). NoiseTelemetryProcessor drops
+            // its successful requests.
+            endpoints.MapGet("/", () => Results.Ok()).AllowAnonymous().ExcludeFromDescription();
 
             // MCP endpoint (Streamable HTTP, stateless). The endpoint-level "Mcp" policy
             // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write

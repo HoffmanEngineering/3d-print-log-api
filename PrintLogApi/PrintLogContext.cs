@@ -442,6 +442,9 @@ public class PrintLogContext : DbContext
             .IsUnique();
         modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.Status, o.NextAttemptAt });
         modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.UserId, o.SentAt });
+        // The dispatcher's sent-today count for the daily cap (Status = Sent AND SentAt >= today).
+        // Without it that count read every Sent row ever, on every tick (api#309).
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.Status, o.SentAt });
         modelBuilder.Entity<EmailOutbox>().HasIndex(o => o.ProviderMessageId);
         modelBuilder.Entity<EmailOutbox>()
             .HasOne(o => o.User)
@@ -714,6 +717,12 @@ public class PrintLogContext : DbContext
         // The migration creates it online and only if missing, so it can be created by hand first.
         modelBuilder.Entity<CuraSetting>()
             .HasIndex(c => c.PrintId, "IX_CuraSettings_PrintId_ForeignKey");
+
+        // The retention sweep's lookup (CuraSettingsRetentionJob): uploader records, oldest first.
+        // Filtered to the rows it may delete, so connector records never enter it.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.CreatedDate, "IX_CuraSettings_Unlinked_CreatedDate")
+            .HasFilter("[PrintId] IS NULL");
 
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
@@ -1057,6 +1066,15 @@ public class PrintLogContext : DbContext
             .HasIndex(p => p.ProjectId)
             .HasDatabaseName("IX_Prints_ProjectId");
 
+        // The public print index (PublicPrintIndexCache): Id and UpdatedDate of every public
+        // print, in Id order. Without it that read scanned the whole of the wide Prints table
+        // and took over a minute on the production database (api#309). Id rides along as the
+        // clustered key.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => p.ViewStatus)
+            .IncludeProperties(p => p.UpdatedDate)
+            .HasDatabaseName("IX_Prints_ViewStatus");
+
         // Connector idempotency (#144): one print per (user, source, external id). The unique
         // index is the concurrency guard; a racing duplicate create fails here and is replayed.
         // The filter is required on SQL Server, where a unique index otherwise admits only one
@@ -1119,10 +1137,14 @@ public class PrintLogContext : DbContext
             .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedDate })
             .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedDate");
 
+        // Serves both unread counts the web app polls every 30 s (total and achievements) from
+        // unread rows only, with no key lookup for Type. It replaced IX_Notifications_UserId_UnreadCount
+        // ((UserId) INCLUDE (IsRead)), which the index above already covered and which lacked Type
+        // (api#309). The filter must match what NotificationService.Unread compiles to.
         modelBuilder.Entity<Notification>()
-            .HasIndex(n => n.UserId)
-            .IncludeProperties(n => n.IsRead)
-            .HasDatabaseName("IX_Notifications_UserId_UnreadCount");
+            .HasIndex(n => new { n.UserId, n.Type })
+            .HasFilter(Services.NotificationService.UnreadFilter)
+            .HasDatabaseName("IX_Notifications_UserId_Type_Unread");
 
         modelBuilder.Entity<Subscription>()
             .HasIndex(s => s.UserId)

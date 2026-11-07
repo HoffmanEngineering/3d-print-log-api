@@ -141,16 +141,60 @@ jobs:
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 
+      # OneDeploy (POST /api/publish?type=zip) with the publish profile. What makes this safe is
+      # an app setting, not anything in this step: with WEBSITE_RUN_FROM_PACKAGE=1 on the App
+      # Service, Kudu stores the zip under /home/data/SitePackages, points packagename.txt at it
+      # and restarts, and the new process mounts the zip read-only as /home/site/wwwroot. Without
+      # it Kudu extracts the zip over wwwroot while the old process is still loading assemblies
+      # from it, which is what produced the BadImageFormatException bursts and HTTP 500s on every
+      # deploy through Nov 2026 (#309). See AGENTS.md, Deployment.
+      #
+      # restart is the API's default; it is spelled out because run-from-package depends on it
+      # (the new package is only mounted by a restart). Do NOT add `type: zip`: in v3 a valid
+      # `type` skips the step that zips a folder, so `package: ./publish` would be sent as-is.
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ./publish
+          restart: true
+
+      # The deploy action returns once Kudu reports the deployment done, which is not the same as
+      # the new process serving. /health/ready probes SQL Server too, so a release that starts but
+      # cannot reach its database fails here. It answers 200 for Healthy and Degraded (push
+      # unconfigured is Degraded on purpose) and 503 for Unhealthy.
+      #
+      # Three consecutive passes, not one: right after the restart the front end can still route a
+      # request or two to the old process, or to a new one that is about to fail. publish-release
+      # and publish-mcp-registry both need this job, so neither announces a version that is not
+      # serving.
+      - name: Wait for the API to serve
+        env:
+          READY_URL: https://api.3dprintlog.com/health/ready
+        run: |
+          deadline=$((SECONDS + 300))
+          passes=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status=$(curl -sS -o ready.json -w '%{http_code}' --max-time 20 "$READY_URL") || status=000
+            if [ "$status" = "200" ]; then
+              passes=$((passes + 1))
+              echo "Pass $passes/3: HTTP 200 $(cat ready.json)"
+              if [ "$passes" -ge 3 ]; then
+                exit 0
+              fi
+            else
+              passes=0
+              echo "Not ready yet: HTTP $status"
+            fi
+            sleep 10
+          done
+          echo "::error::$READY_URL did not answer 200 three times in a row within 5 minutes of the deploy."
+          exit 1
 
   # Separate job so `contents: write` is scoped to publishing alone, and it runs only
-  # after a successful deploy -- the Releases feed should never announce a version that
-  # is not actually live.
+  # after a successful deploy, including its "Wait for the API to serve" step -- the
+  # Releases feed should never announce a version that is not actually live.
   #
   # Unlike the UI repo, there is no hand-written per-version prose here to extract, so
   # --generate-notes is the right source: squash-merged PR titles on this repo are

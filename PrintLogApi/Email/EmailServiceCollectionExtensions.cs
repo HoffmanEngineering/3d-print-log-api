@@ -38,6 +38,7 @@ public static class EmailServiceCollectionExtensions
         services.AddScoped<CampaignEvaluator>();
         services.AddHostedService<CampaignEvaluatorService>();
         services.AddScoped<EmailDispatcher>();
+        services.AddSingleton<EmailDispatchSignal>();
         services.AddHostedService<EmailDispatcherService>();
 
         services.AddScoped<IEmailSuppressionService, EmailSuppressionService>();

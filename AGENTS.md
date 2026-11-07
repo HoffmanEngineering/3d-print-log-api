@@ -102,6 +102,14 @@ Two consequences worth knowing before editing:
 
   Because the scope is disposed as soon as the factory returns, a factory must materialise its
   result — returning a lazily-enumerated query would reach into a scope that is already gone.
+- **The public print index (api#309)** is one HybridCache entry (`PublicPrintIndexCache`, 10
+  minutes) behind both `GET api/Prints/public` and `public/sitemap`; a print made public or private
+  can take that long to show. It has its own binary serializer (`PublicPrintIndexSerializer`,
+  registered on `AddHybridCache`): HybridCache serializes every entry to charge its size, and
+  **silently stops caching an entry over its 1 MiB `MaximumPayloadBytes`**. As JSON the ~31,000
+  public prints of November 2026 were near that; the binary form is about 10 bytes a row.
+  `PublicPrintIndexCacheTests` checks three times today's size. Tests that change a print and then
+  read either list evict `PublicPrintIndexCache.CacheKey` first.
 
 ### Output caching was evaluated and declined (#66)
 
@@ -830,7 +838,8 @@ the app shell for crawlers, and the web app's `MetaTagService`.** Change its sha
   `ETag` from its blob path, not the File id (the backfill points an existing File row at a new
   blob), and a matching `If-None-Match` is a 304 before storage is touched. `/seo` is
   `public, max-age=300`. Nothing here is in HybridCache: the keys are anonymous and enumerable,
-  and a crawler would churn the shared 8 MiB budget the per-user summaries rely on.
+  and a crawler would churn the shared 8 MiB budget the per-user summaries rely on. The public
+  print id and sitemap lists are, as one fixed key a crawler cannot multiply (see Caching).
 - **Non-disclosing 404s.** `/seo` and `social-image` answer 404 for anything not Public: private,
   unlisted, missing, or (social image) no image, and the same for the owner. Unlisted is left
   out on purpose, the same line the sitemap and `/public` lists draw. `SocialImageLookup` is the one
@@ -956,6 +965,40 @@ them from the deploy workflow (see Deployment) — never rely on startup migrati
 
 New migrations must be **backwards compatible** (additive only): the old app version is still
 running against the database while migrations execute.
+
+Production is Azure SQL **Standard S0 (10 DTU)**. It reaches 100% DTU in short bursts, so a query
+that runs on a timer or a poll needs an index that serves it (api#309 added three). Index builds on
+big tables follow `ReduceDatabaseLoadIndexes`: hand-written, `IF NOT EXISTS`, `WITH (ONLINE =
+ON)` with an offline retry on error 1712 (Express), and `suppressTransaction: true` so one index's
+schema lock is not held while the next one builds (EF logs warning 20410 for that; it is expected).
+A **filtered index** is used only by queries whose predicate is the filter as a literal: EF writes
+`[IsRead] = CAST(0 AS bit)` for `!n.IsRead`, but a value passed in as a variable becomes a parameter
+and the index is ignored. Pin the shape as `DatabaseLoadIndexTests` does. A session writing to a
+table with a filtered index needs `QUOTED_IDENTIFIER ON` (SqlClient's default; `sqlcmd` needs `-I`).
+
+### The email dispatcher polls every 2 minutes
+
+`EmailDispatcherService` runs about five statements per tick even with nothing due, and at 30 s
+that was most of the API's background SQL. `EmailOptions.DispatchInterval` is now 2 minutes. What
+must go out promptly wakes it instead: `DeviceGrantsController` calls `EmailDispatchSignal.Wake()`
+after a pairing that queued the `device-paired` notice commits. Wakes coalesce and are per process
+(the dispatcher is single-instance anyway). Anything else that queues time-sensitive mail must wake
+it the same way. Verification email is Auth0's, not ours; the welcome email is queued by the
+15-minute evaluator, so two more minutes do not matter there.
+
+### Slicer uploader settings are deleted after 7 days
+
+`CuraSettings` holds two kinds of record. The Cura plugin's and Slic3r uploader's
+(`POST /api/Cura/settings`, no `PrintId`) carry the slicer's snapshot image as base64 and exist
+only to fill the add-print form; the print keeps nothing that points back to one. A connector's
+(#164) is linked by `PrintId` and holds parsed settings, no image.
+`CuraSettingsRetentionJob` deletes the first kind once `CuraSettingsRetention:RetentionDays` (7)
+old, daily, in batches of `BatchSize` (200) with `BatchPause` (2 s) between them, oldest first
+through the filtered index `IX_CuraSettings_Unlinked_CreatedDate`. **It never deletes a record with
+a `PrintId`**: keep the literal `PrintId IS NULL` in `Expired`, which is also what matches the
+index's filter (`CuraSettingsRetentionSqlServerTranslationTests`). A form opened from an older
+upload gets a 404 from `GET /api/Cura/settings`, and a print created with an expired id still
+saves, just without slicer-plugin provenance (`ApplyProvenance`).
 
 ### Migrations are never executed by the test suite
 
@@ -1409,17 +1452,44 @@ their init timeout. See `CustomWebApplicationFactory.ConfigureLocalJwt`.
 
 ## Health Checks
 
-- `/health` — **liveness**, and the path configured under _App Service → Monitoring → Health check_.
-  Process-only, no dependencies, and it must stay that way: App Service pulls a failing instance
-  from rotation and replaces it after a sustained failure, so a check that touched SQL would report
+- `/health` — **liveness**, and the path that must be configured under _App Service → Monitoring →
+  Health check_. **It was found unset (`healthCheckPath` null) on 2026-11-06** and the owner is
+  setting it by hand; check it after any change to the App Service. Process-only, no
+  dependencies, and it must stay that way: App Service pulls a failing instance from rotation and replaces it after a sustained failure, so a check that touched SQL would report
   every instance unhealthy during a database blip and turn a recoverable outage into an app-wide
   restart loop.
-- `/health/ready` — **readiness**. Probes SQL Server and returns per-check JSON. Nothing polls it
-  automatically — it is for manual checks, and is what a post-deploy smoke test should call if one
-  is added to `deploy.yml`. Never point the platform's health check at it.
+- `/health/ready` — **readiness**. Probes SQL Server and returns per-check JSON. `deploy.yml` polls
+  it after every deploy (see Deployment); nothing else does. Never point the platform's health
+  check at it.
 
 The JSON omits each check's exception and description on purpose — the endpoint is anonymous, and a
 SQL connection failure message carries the server name and often the credentials it tried.
+
+`GET /` answers an empty 200 (anonymous, not in OpenAPI). App Service's Always On pings it; before
+it was mapped that was about 300 404s a day.
+
+## Telemetry (Application Insights)
+
+The instrumentation key in `appsettings.json` is production's, so any environment that doesn't
+switch telemetry off sends there. Code: `Telemetry/`, wired in `Startup.ConfigureServices`.
+
+- **Off in IntegrationTesting, E2ETesting and Development** (`TelemetryEnvironment`). Development
+  opts in with `ApplicationInsights:EnableInDevelopment=true`; point the key at a non-production
+  resource when you do. A developer machine's requests and its SQL calls to `localhost,1434` were
+  found in the production resource. Tests that assert on telemetry re-enable it on an in-memory
+  channel (`CustomWebApplicationFactory.CaptureTelemetry`).
+- **SQL command text is kept only on slow (500 ms or more) or failed calls.**
+  `EnableSqlCommandTextInstrumentation` is on so a DTU spike can be traced to a statement, and
+  `SqlCommandTextTelemetryProcessor` clears `Data` on every other SQL dependency: there are about
+  1.1M a month, and keeping all the text would push ingestion past the free allowance. The text is
+  EF's parameterized SQL and the SDK records no parameter values; keep it that way, so never build
+  SQL text from user values (interpolated `SqlQuery`/`ExecuteSql` is parameterized, `*Raw` with
+  concatenation is not).
+- **`NoiseTelemetryProcessor` drops successful rows that carry no information**: CORS preflights,
+  the unread-count poll and its SQL, `/metrics`, `GET /`. The only exception it drops is the MCP
+  SDK's `UnsupportedProtocolVersionException` (a client offering 2026-07-28 through `initialize`;
+  the SDK answers -32022 in a 200 and logs it at Warning). Match by exact type, not category, so
+  real MCP errors stay visible.
 
 ## UTF-8 and BOM file formatting
 
@@ -1449,3 +1519,38 @@ To generate a migration script manually (e.g. for emergency patching):
 ```bash
 dotnet ef migrations script <LastAppliedMigrationId> --project PrintLogApi --output migrations.sql --idempotent
 ```
+
+### The app runs from the deployed zip, never from extracted files (#309)
+
+Production is App Service **Linux** (`DOTNETCORE|10.0`) on plan **B1**: one instance and no
+deployment slots, so there is no staging slot to swap. `azure/webapps-deploy@v3` with the publish
+profile deploys through Kudu's OneDeploy (`/api/publish?type=zip`). By default OneDeploy *extracts*
+the zip over `/home/site/wwwroot` while the old process is still running and loading assemblies from
+it. Every deploy from Oct 8 to Nov 7, 2026 produced a burst of `System.BadImageFormatException`
+("Bad IL range", "Format of the executable (.exe) or library (.dll) is invalid"); on Oct 17 and 20
+that was 139 and 72 HTTP 500s across ordinary endpoints.
+
+The fix is the app setting **`WEBSITE_RUN_FROM_PACKAGE=1`**. With it, OneDeploy writes the zip to
+`/home/data/SitePackages`, points `packagename.txt` at it and restarts, and the new process mounts
+the zip read-only as `wwwroot`. Nothing ever changes a file under a running process, and a process
+only ever sees one complete package. ([Run your app from a ZIP package](https://learn.microsoft.com/azure/app-service/deploy-run-package);
+Kudu on Linux checks the setting in `PushDeploymentController`.) It needs no new credential, and the
+workflow does not set it: it is App Service configuration, which only the owner changes.
+
+- **`wwwroot` is read-only.** The app writes nothing there today (data protection keys live under
+  `/home/ASP.NET`, uploads go to Blob Storage). Anything new that writes next to the binaries fails
+  in production only.
+- **A deploy still restarts the app**, so expect a few seconds of 502/503 on B1. Stopping the app
+  around the deploy was considered and rejected: it needs an Azure service principal this repo does
+  not have, and it turns those seconds into the whole upload.
+- **Rollback** is a redeploy of an older tag. Old packages stay in `SitePackages` (Kudu prunes
+  them), but switching `packagename.txt` by hand is not a supported path.
+- If the setting is ever removed, deploys silently go back to extracting over the live process.
+  Nothing in the workflow can see app settings with a publish profile, so check it with
+  `az webapp config appsettings list` when the deploy-time exceptions come back.
+
+After the deploy step, **"Wait for the API to serve"** polls `https://api.3dprintlog.com/health/ready`
+every 10 seconds for up to 5 minutes and passes on three 200s in a row. `publish-release` and
+`publish-mcp-registry` need the deploy job, so a release is announced only once the new build is
+serving and can reach SQL Server. The check cannot tell the old process from the new one (no
+version is exposed); three passes in a row after the restart is the approximation.

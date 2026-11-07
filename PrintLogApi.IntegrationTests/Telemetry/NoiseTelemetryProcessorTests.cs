@@ -28,6 +28,7 @@ public class NoiseTelemetryProcessorTests
     [InlineData("OPTIONS /api/Prints/summary")]
     [InlineData("GET Notifications/GetUnreadCount")]
     [InlineData("GET /metrics")]
+    [InlineData("GET /")]
     public void Drops_successful_noise_requests(string name)
     {
         var (processor, sink) = Build();
@@ -41,6 +42,7 @@ public class NoiseTelemetryProcessorTests
     [InlineData("OPTIONS /api/Prints/summary")]
     [InlineData("GET Notifications/GetUnreadCount")]
     [InlineData("GET /metrics")]
+    [InlineData("GET /")]
     public void Keeps_failed_noise_requests(string name)
     {
         var (processor, sink) = Build();
@@ -54,7 +56,7 @@ public class NoiseTelemetryProcessorTests
     [InlineData("GET Prints/GetPrintSummary")]
     [InlineData("POST Prints/PostPrint")]
     [InlineData("GET /health")]
-    [InlineData("GET /")]
+    [InlineData("GET /api/Prints")]
     public void Keeps_ordinary_requests(string name)
     {
         var (processor, sink) = Build();
@@ -112,6 +114,32 @@ public class NoiseTelemetryProcessorTests
         processor.Process(dependency);
 
         Assert.Single(sink.Items);
+    }
+
+    [Fact]
+    public void Drops_the_mcp_unsupported_protocol_version_exception()
+    {
+        // A client error the SDK already answers with a JSON-RPC error in a 200; see
+        // McpProtocolVersionTelemetryTests for the end-to-end case.
+        var (processor, sink) = Build();
+        var exception = new ExceptionTelemetry(
+            new ModelContextProtocol.UnsupportedProtocolVersionException("2026-07-28", ["2025-11-25"], null));
+
+        processor.Process(exception);
+
+        Assert.Empty(sink.Items);
+    }
+
+    [Fact]
+    public void Keeps_other_mcp_exceptions()
+    {
+        var (processor, sink) = Build();
+
+        processor.Process(new ExceptionTelemetry(new ModelContextProtocol.McpException("real failure")));
+        processor.Process(new ExceptionTelemetry(
+            new InvalidOperationException("wrapper", new ModelContextProtocol.UnsupportedProtocolVersionException("2026-07-28", ["2025-11-25"], null))));
+
+        Assert.Equal(2, sink.Items.Count);
     }
 
     [Fact]

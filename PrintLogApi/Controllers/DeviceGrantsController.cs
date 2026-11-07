@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication.Devices;
+using PrintLogApi.Email.Outbox;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.DeviceGrants;
@@ -21,6 +22,7 @@ namespace PrintLogApi.Controllers;
 public class DeviceGrantsController(
     IDeviceGrantService grants,
     IDevicePairingNotifier notifier,
+    EmailDispatchSignal emailDispatch,
     IOptions<DevicePairingOptions> options,
     TelemetryClient telemetry) : ControllerBase
 {
@@ -143,6 +145,10 @@ public class DeviceGrantsController(
 
         if (paired.Noticed)
         {
+            // The email is queued and committed with the pairing. Send it now rather than on the
+            // dispatcher's next poll, up to two minutes away.
+            emailDispatch.Wake();
+
             // The email is already queued with the pairing; this is the best-effort extra.
             await notifier.NotifyInAppAsync(grant, repaired: !paired.Created, clientIp);
         }

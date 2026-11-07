@@ -263,7 +263,8 @@ public class CachingConfigurationTests : IClassFixture<CustomWebApplicationFacto
         var cachedTypes = analyticsResponses
             .Append(typeof(PagedList<>))
             .Append(typeof(PrintLogApi.Services.Sync.SyncSnapshotService.CoreEntry))
-            .Append(typeof(PrintLogApi.Services.GroupedFeedOrder));
+            .Append(typeof(PrintLogApi.Services.GroupedFeedOrder))
+            .Append(typeof(PrintLogApi.Services.PublicPrints.PublicPrintIndex));
 
         var unmarked = cachedTypes
             .Where(t => t.GetCustomAttribute<ImmutableObjectAttribute>() is not { Immutable: true })
