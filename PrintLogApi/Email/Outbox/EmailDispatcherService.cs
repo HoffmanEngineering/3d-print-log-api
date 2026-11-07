@@ -3,12 +3,14 @@
 namespace PrintLogApi.Email.Outbox;
 
 /// <summary>
-/// Runs <see cref="EmailDispatcher"/> every <see cref="EmailOptions.DispatchInterval"/>. Single
-/// instance only (spec §6.12): the daily cap and send-rate limit are per process.
+/// Runs <see cref="EmailDispatcher"/> every <see cref="EmailOptions.DispatchInterval"/>, and at
+/// once whenever <see cref="EmailDispatchSignal"/> is woken. Single instance only (spec §6.12):
+/// the daily cap and send-rate limit are per process.
 /// </summary>
 public sealed class EmailDispatcherService(
     IServiceScopeFactory scopeFactory,
     IOptions<EmailOptions> options,
+    EmailDispatchSignal signal,
     TimeProvider timeProvider,
     ILogger<EmailDispatcherService> logger) : BackgroundService
 {
@@ -20,11 +22,32 @@ public sealed class EmailDispatcherService(
         {
             await Task.Delay(InitialDelay, timeProvider, stoppingToken);
             using var timer = new PeriodicTimer(options.Value.DispatchInterval, timeProvider);
-            do
+
+            // Both waits stay pending across ticks: a PeriodicTimer allows one outstanding wait,
+            // and a wake that arrives during a tick is held by the signal until the next look.
+            Task<bool>? tick = null;
+            Task? wake = null;
+            while (true)
             {
                 await TickAsync(stoppingToken);
+
+                tick ??= timer.WaitForNextTickAsync(stoppingToken).AsTask();
+                wake ??= signal.WaitAsync(stoppingToken);
+                if (await Task.WhenAny(tick, wake) == tick)
+                {
+                    if (!await tick)
+                    {
+                        return;
+                    }
+
+                    tick = null;
+                }
+                else
+                {
+                    await wake;
+                    wake = null;
+                }
             }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

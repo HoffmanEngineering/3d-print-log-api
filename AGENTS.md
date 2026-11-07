@@ -91,6 +91,14 @@ Two consequences worth knowing before editing:
 
   Because the scope is disposed as soon as the factory returns, a factory must materialise its
   result — returning a lazily-enumerated query would reach into a scope that is already gone.
+- **The public print index (api#309)** is one HybridCache entry (`PublicPrintIndexCache`, 10
+  minutes) behind both `GET api/Prints/public` and `public/sitemap`; a print made public or private
+  can take that long to show. It has its own binary serializer (`PublicPrintIndexSerializer`,
+  registered on `AddHybridCache`): HybridCache serializes every entry to charge its size, and
+  **silently stops caching an entry over its 1 MiB `MaximumPayloadBytes`**. As JSON the ~31,000
+  public prints of November 2026 were near that; the binary form is about 10 bytes a row.
+  `PublicPrintIndexCacheTests` checks three times today's size. Tests that change a print and then
+  read either list evict `PublicPrintIndexCache.CacheKey` first.
 
 ### Output caching was evaluated and declined (#66)
 
@@ -814,7 +822,8 @@ the app shell for crawlers, and the web app's `MetaTagService`.** Change its sha
   `ETag` from its blob path, not the File id (the backfill points an existing File row at a new
   blob), and a matching `If-None-Match` is a 304 before storage is touched. `/seo` is
   `public, max-age=300`. Nothing here is in HybridCache: the keys are anonymous and enumerable,
-  and a crawler would churn the shared 8 MiB budget the per-user summaries rely on.
+  and a crawler would churn the shared 8 MiB budget the per-user summaries rely on. The public
+  print id and sitemap lists are, as one fixed key a crawler cannot multiply (see Caching).
 - **Non-disclosing 404s.** `/seo` and `social-image` answer 404 for anything not Public: private,
   unlisted, missing, or (social image) no image, and the same for the owner. Unlisted is left
   out on purpose, the same line the sitemap and `/public` lists draw. `SocialImageLookup` is the one
@@ -940,6 +949,26 @@ them from the deploy workflow (see Deployment) — never rely on startup migrati
 
 New migrations must be **backwards compatible** (additive only): the old app version is still
 running against the database while migrations execute.
+
+Production is Azure SQL **Standard S0 (10 DTU)**. It reaches 100% DTU in short bursts, so a query
+that runs on a timer or a poll needs an index that serves it (api#309 added three). Index builds on
+big tables follow `ReduceDatabaseLoadIndexes`: hand-written, `IF NOT EXISTS`, `WITH (ONLINE =
+ON)` with an offline retry on error 1712 (Express), and `suppressTransaction: true` so one index's
+schema lock is not held while the next one builds (EF logs warning 20410 for that; it is expected).
+A **filtered index** is used only by queries whose predicate is the filter as a literal: EF writes
+`[IsRead] = CAST(0 AS bit)` for `!n.IsRead`, but a value passed in as a variable becomes a parameter
+and the index is ignored. Pin the shape as `DatabaseLoadIndexTests` does. A session writing to a
+table with a filtered index needs `QUOTED_IDENTIFIER ON` (SqlClient's default; `sqlcmd` needs `-I`).
+
+### The email dispatcher polls every 2 minutes
+
+`EmailDispatcherService` runs about five statements per tick even with nothing due, and at 30 s
+that was most of the API's background SQL. `EmailOptions.DispatchInterval` is now 2 minutes. What
+must go out promptly wakes it instead: `DeviceGrantsController` calls `EmailDispatchSignal.Wake()`
+after a pairing that queued the `device-paired` notice commits. Wakes coalesce and are per process
+(the dispatcher is single-instance anyway). Anything else that queues time-sensitive mail must wake
+it the same way. Verification email is Auth0's, not ours; the welcome email is queued by the
+15-minute evaluator, so two more minutes do not matter there.
 
 ### Migrations are never executed by the test suite
 

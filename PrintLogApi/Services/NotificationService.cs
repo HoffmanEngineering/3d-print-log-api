@@ -53,19 +53,28 @@ public class NotificationService(
         return mapper.Map<NotificationDetailDto>(notification);
     }
 
+    /// <summary>
+    /// The filter of <c>IX_Notifications_UserId_Type_Unread</c>, which serves both unread counts
+    /// without touching the table. SQL Server uses a filtered index only for a query whose
+    /// predicate is this literal, which is what <see cref="Unread"/> compiles to (pinned by
+    /// <c>DatabaseLoadIndexTests</c>).
+    /// </summary>
+    internal const string UnreadFilter = "[IsRead] = CAST(0 AS bit)";
+
+    /// <summary>A user's unread notifications, in the shape the filtered unread index matches.</summary>
+    internal static IQueryable<Notification> Unread(IQueryable<Notification> notifications, long userId) =>
+        notifications.Where(n => n.UserId == userId && !n.IsRead);
+
     public async Task<int> GetUnreadCountForUser(long userId)
     {
-        return await context.Notifications
-            .Where(n => n.UserId == userId && !n.IsRead)
-            .CountAsync();
+        return await Unread(context.Notifications, userId).CountAsync();
     }
 
     public async Task<(int Total, int Achievements)> GetUnreadCountsForUser(long userId)
     {
         // A conditional count in one GROUP BY: no subquery inside the aggregate, so this is as
-        // valid on SQL Server as on the SQLite test database.
-        var counts = await context.Notifications
-            .Where(n => n.UserId == userId && !n.IsRead)
+        // valid on SQL Server as on the SQLite test database. The web app polls this every 30 s.
+        var counts = await Unread(context.Notifications, userId)
             .GroupBy(n => n.UserId)
             .Select(g => new { Total = g.Count(), Achievements = g.Count(n => n.Type == NotificationType.Achievement) })
             .FirstOrDefaultAsync();

@@ -74,7 +74,7 @@ Arrays take an index: `Email__AllowListUserIds__0`. Every key and its default is
 
 | Setting | Use |
 |---|---|
-| `Email__Enabled` | Master switch. `false` stops all sending within one dispatch tick (30 s). |
+| `Email__Enabled` | Master switch. `false` stops all sending within one dispatch tick (2 min). |
 | `Email__DryRun` | Render and record everything, send nothing. |
 | `Email__AllowListUserIds__N` | When any are set, only these users receive mail; everyone else waits. |
 | `Email__DailyCap` | Maximum sends per UTC day. Empty means unlimited. |
@@ -159,7 +159,7 @@ skipped as `unverified`.
 The numbers SES enforces are the CloudWatch alarms on `Reputation.ComplaintRate` and
 `Reputation.BounceRate`, which page the alert subscription. SES pauses sending at its own
 thresholds. The dispatcher then logs `Email_SendingPaused`, puts the row back untouched and
-ends the tick; it tries again every tick, so the event repeats every 30 seconds until AWS
+ends the tick; it tries again every tick, so the event repeats every 2 minutes until AWS
 resumes the account. Set `Email__Enabled=false` to quiet it while you deal with AWS.
 
 To find which campaign is behind a rise, compare complaints with sends per campaign over the

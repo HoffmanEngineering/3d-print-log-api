@@ -21,6 +21,7 @@ using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Bridges;
+using PrintLogApi.Services.PublicPrints;
 using PrintLogApi.Services.SlicerSettings;
 using static PrintLogApi.Models.Print;
 
@@ -47,7 +48,8 @@ public class PrintsController(
     IImageProcessingService imageProcessing,
     IProcessedImageWriter imageWriter,
     SocialImageLookup socialImages,
-    IBridgePrintGuard bridgePrintGuard) : ControllerBase
+    IBridgePrintGuard bridgePrintGuard,
+    PublicPrintIndexCache publicPrints) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
@@ -1669,14 +1671,17 @@ public class PrintsController(
     /// <summary>
     /// Returns an array of all the IDs for public prints, for use with creating and updating sitemaps.
     /// </summary>
-    /// <returns></returns>
+    /// <remarks>
+    /// Ordered by id. Read from a list refreshed every ten minutes, so a print made public or
+    /// private can take that long to appear or drop out.
+    /// </remarks>
     [AllowAnonymous]
     [HttpGet("public")]
     [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
-    public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds()
+    public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds(CancellationToken cancellationToken)
     {
         telemetry.TrackEvent("PublicPrintsQueried");
-        return await printService.GetPublicPrintIds();
+        return Ok((await publicPrints.GetAsync(cancellationToken)).Ids);
     }
 
     /// <summary>
@@ -1685,7 +1690,8 @@ public class PrintsController(
     /// <remarks>
     /// A sibling of <c>GET public</c> rather than a change to it, so a sitemap generator that still
     /// expects a bare id array keeps working. <c>lastModified</c> is the print's own last save
-    /// (UTC) and is null when no trustworthy timestamp exists.
+    /// (UTC) and is null when no trustworthy timestamp exists. Read from the same list as
+    /// <c>GET public</c>, refreshed every ten minutes.
     /// </remarks>
     /// <response code="200">The public prints, ordered by id.</response>
     [AllowAnonymous]
@@ -1695,7 +1701,7 @@ public class PrintsController(
     public async Task<ActionResult<IEnumerable<SitemapEntryDto>>> GetPublicPrintSitemapEntries(CancellationToken cancellationToken)
     {
         telemetry.TrackEvent("PublicPrintSitemapQueried");
-        return await printService.GetPublicPrintSitemapEntries(cancellationToken);
+        return (await publicPrints.GetAsync(cancellationToken)).ToSitemapEntries();
     }
 
     /// <summary>

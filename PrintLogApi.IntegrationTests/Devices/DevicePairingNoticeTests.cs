@@ -145,6 +145,24 @@ public class DevicePairingNoticeTests(DevicePairingNoticeTests.FromAddressFactor
     }
 
     [Fact]
+    public async Task APairing_WakesTheEmailDispatcher_AndAThrottledRePairDoesNot()
+    {
+        // The dispatcher polls every two minutes; the security notice must not wait for that.
+        var signal = factory.Services.GetRequiredService<PrintLogApi.Email.Outbox.EmailDispatchSignal>();
+        while (signal.TryConsume())
+        {
+        }
+
+        var subject = NewSubject("notice-wake");
+        var deviceId = Guid.NewGuid();
+        await PairAsync(_client, subject, deviceId: deviceId);
+        Assert.True(signal.TryConsume());
+
+        await PairAsync(_client, subject, deviceId: deviceId);
+        Assert.False(signal.TryConsume());
+    }
+
+    [Fact]
     public async Task ARePairWithinTheHour_IsNotNoticedAgain_ButANewDeviceAlwaysIs()
     {
         var subject = NewSubject("notice-throttle");

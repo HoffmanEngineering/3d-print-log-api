@@ -711,6 +711,8 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("Status", "NextAttemptAt");
 
+                    b.HasIndex("Status", "SentAt");
+
                     b.HasIndex("UserId", "SentAt");
 
                     b.HasIndex("UserId", "Campaign", "PeriodKey")
@@ -1611,10 +1613,9 @@ namespace PrintLogApi.Migrations
 
                     b.HasIndex("TriggeredByUserId");
 
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("IX_Notifications_UserId_UnreadCount");
-
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("UserId"), new[] { "IsRead" });
+                    b.HasIndex("UserId", "Type")
+                        .HasDatabaseName("IX_Notifications_UserId_Type_Unread")
+                        .HasFilter("[IsRead] = CAST(0 AS bit)");
 
                     b.HasIndex("UserId", "IsRead", "CreatedDate")
                         .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedDate");
@@ -1760,6 +1761,11 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_Prints_ProjectId");
 
                     b.HasIndex("UpdatedById");
+
+                    b.HasIndex("ViewStatus")
+                        .HasDatabaseName("IX_Prints_ViewStatus");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("ViewStatus"), new[] { "UpdatedDate" });
 
                     b.HasIndex("CreatedById", "ExternalSource", "ExternalId")
                         .IsUnique()
