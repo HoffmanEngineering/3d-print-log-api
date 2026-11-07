@@ -1212,6 +1212,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
 
     #region GET Public Print Ids
 
+    /// <summary>The public lists are cached for ten minutes; a test that just changed a print reads past that.</summary>
+    private Task EvictPublicPrintIndexAsync() => _factory.Services.GetRequiredService<Microsoft.Extensions.Caching.Hybrid.HybridCache>()
+        .RemoveAsync(PrintLogApi.Services.PublicPrints.PublicPrintIndexCache.CacheKey, TestContext.Current.CancellationToken).AsTask();
+
     [Fact]
     public async Task GetPublicPrintIds_ReturnsSuccess()
     {
@@ -1234,6 +1238,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         var before = DateTimeOffset.UtcNow.AddSeconds(-5);
         var created = await CreatePrintAsync("Sitemap Lastmod Print");
+        await EvictPublicPrintIndexAsync();
 
         var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
 
@@ -1255,6 +1260,8 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
                 .Where(p => p.Id == privatePrint.Id)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.ViewStatus, PrintViewStatus.Private), TestContext.Current.CancellationToken);
         }
+
+        await EvictPublicPrintIndexAsync();
 
         var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
         var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public", cancellationToken: TestContext.Current.CancellationToken))!;

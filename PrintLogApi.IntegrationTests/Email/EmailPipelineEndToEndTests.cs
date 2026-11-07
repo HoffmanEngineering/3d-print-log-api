@@ -106,7 +106,7 @@ public class EmailPipelineEndToEndTests : IClassFixture<CustomWebApplicationFact
         var evaluatorScopes = new SignalingScopeFactory(_factory.Services.GetRequiredService<IServiceScopeFactory>());
         var dispatcherScopes = new SignalingScopeFactory(_factory.Services.GetRequiredService<IServiceScopeFactory>());
         using var evaluator = new CampaignEvaluatorService(evaluatorScopes, options, new ImmediateTimeProvider(), loggers.CreateLogger<CampaignEvaluatorService>());
-        using var dispatcher = new EmailDispatcherService(dispatcherScopes, options, new ImmediateTimeProvider(), loggers.CreateLogger<EmailDispatcherService>());
+        using var dispatcher = new EmailDispatcherService(dispatcherScopes, options, new EmailDispatchSignal(), new ImmediateTimeProvider(), loggers.CreateLogger<EmailDispatcherService>());
 
         await evaluator.StartAsync(Ct);
         await dispatcher.StartAsync(Ct);

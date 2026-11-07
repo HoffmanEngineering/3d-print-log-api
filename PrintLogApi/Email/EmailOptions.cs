@@ -26,7 +26,13 @@ public sealed class EmailOptions
 
     public TimeSpan EvaluatorInterval { get; set; } = TimeSpan.FromMinutes(15);
 
-    public TimeSpan DispatchInterval { get; set; } = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// How often the dispatcher polls the outbox. Each poll is about five statements even when
+    /// nothing is due, so this is kept long to spare the 10-DTU database (api#309); a security
+    /// notice does not wait for it, because queuing one wakes the dispatcher
+    /// (<see cref="Outbox.EmailDispatchSignal"/>).
+    /// </summary>
+    public TimeSpan DispatchInterval { get; set; } = TimeSpan.FromMinutes(2);
 
     public TimeSpan FrequencyCapWindow { get; set; } = TimeSpan.FromDays(3);
 

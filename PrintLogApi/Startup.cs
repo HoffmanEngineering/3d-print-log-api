@@ -631,7 +631,12 @@ public class Startup
                 Expiration = TimeSpan.FromMinutes(15),
                 LocalCacheExpiration = TimeSpan.FromMinutes(15),
             };
-        });
+        })
+            // Binary, not JSON: as JSON the public print index would near the 1 MiB payload limit.
+            .AddSerializer<Services.PublicPrints.PublicPrintIndex, Services.PublicPrints.PublicPrintIndexSerializer>();
+
+        // Singleton: it holds only HybridCache and CachedComputation, both singletons.
+        services.AddSingleton<Services.PublicPrints.PublicPrintIndexCache>();
 
         // Singleton: it holds only the scope factory, and the scopes it creates must be
         // independent of any request scope — which is the entire point. See CachedComputation.
