@@ -718,6 +718,12 @@ public class PrintLogContext : DbContext
         modelBuilder.Entity<CuraSetting>()
             .HasIndex(c => c.PrintId, "IX_CuraSettings_PrintId_ForeignKey");
 
+        // The retention sweep's lookup (CuraSettingsRetentionJob): uploader records, oldest first.
+        // Filtered to the rows it may delete, so connector records never enter it.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.CreatedDate, "IX_CuraSettings_Unlinked_CreatedDate")
+            .HasFilter("[PrintId] IS NULL");
+
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");
