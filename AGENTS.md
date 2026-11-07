@@ -941,6 +941,20 @@ them from the deploy workflow (see Deployment) — never rely on startup migrati
 New migrations must be **backwards compatible** (additive only): the old app version is still
 running against the database while migrations execute.
 
+### Slicer uploader settings are deleted after 7 days
+
+`CuraSettings` holds two kinds of record. The Cura plugin's and Slic3r uploader's
+(`POST /api/Cura/settings`, no `PrintId`) carry the slicer's snapshot image as base64 and exist
+only to fill the add-print form; the print keeps nothing that points back to one. A connector's
+(#164) is linked by `PrintId` and holds parsed settings, no image.
+`CuraSettingsRetentionJob` deletes the first kind once `CuraSettingsRetention:RetentionDays` (7)
+old, daily, in batches of `BatchSize` (200) with `BatchPause` (2 s) between them, oldest first
+through the filtered index `IX_CuraSettings_Unlinked_CreatedDate`. **It never deletes a record with
+a `PrintId`**: keep the literal `PrintId IS NULL` in `Expired`, which is also what matches the
+index's filter (`CuraSettingsRetentionSqlServerTranslationTests`). A form opened from an older
+upload gets a 404 from `GET /api/Cura/settings`, and a print created with an expired id still
+saves, just without slicer-plugin provenance (`ApplyProvenance`).
+
 ### Migrations are never executed by the test suite
 
 Integration tests build their schema with `EnsureCreated()` on SQLite, so a migration can be
