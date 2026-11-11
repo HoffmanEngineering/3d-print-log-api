@@ -319,7 +319,7 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
     }
 
     [Fact]
-    public async Task DeleteApiKey_ForOtherUser_ThrowsUserCannotAccessApiKeyException()
+    public async Task DeleteApiKey_ForOtherUser_ReturnsNotFound()
     {
         // Arrange - Create a second user's API key
         Guid otherUserApiKeyId;
@@ -356,11 +356,12 @@ public class UserApiKeysControllerTests : IClassFixture<CustomWebApplicationFact
         // Try to delete the other user's key
         var request = CreateAuthenticatedRequest(HttpMethod.Delete, $"/api/UserApiKeys/{otherUserApiKeyId}");
 
-        // Act & Assert - The controller calls Forbid() which throws in TestServer
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-        {
-            await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
-        });
+        // Act
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Assert - the same answer as an id that does not exist, so a key id cannot be probed.
+        // It used to pass a message to Forbid(), which takes scheme names, and answer 500.
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
         // Verify the API key is not deleted
         var stillExists = GetApiKeyById(otherUserApiKeyId)!;
