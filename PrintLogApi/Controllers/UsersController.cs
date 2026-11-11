@@ -34,6 +34,7 @@ public class UsersController(
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IBlobStorageService blobStorageService,
+    IImageProcessingService imageProcessing,
     ISubscriptionService subscriptionService,
     IOptions<UserOnboardingOptions> onboardingOptions,
     IEmailVerificationRefresher emailVerificationRefresher,
@@ -44,7 +45,9 @@ public class UsersController(
 {
     private readonly string profileImageContainerName = "userprofile";
 
-    private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+    // A cheap early answer for an obviously wrong file, matching what the image processor
+    // accepts for uploads. The decode in StoreProcessedImageAsync is what decides.
+    private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/webp" };
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
@@ -397,7 +400,7 @@ public class UsersController(
 
         if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         if (image.Length > MaxImageSizeBytes)
@@ -405,24 +408,13 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-        using (var uploadFileStream = image.OpenReadStream())
+        try
         {
-            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
-
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = uploadResult.BlobPath,
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            context.Files.Add(file);
-
-            user.ProfilePicture = uploadResult.BlobUri.AbsoluteUri;
+            user.ProfilePicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         await context.SaveChangesAsync();
@@ -459,7 +451,7 @@ public class UsersController(
 
         if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         if (image.Length > MaxImageSizeBytes)
@@ -467,30 +459,53 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-        using (var uploadFileStream = image.OpenReadStream())
+        try
         {
-            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
-
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = uploadResult.BlobPath,
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            context.Files.Add(file);
-
-            user.CoverPicture = uploadResult.BlobUri.AbsoluteUri;
+            user.CoverPicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         await context.SaveChangesAsync();
         telemetry.TrackEvent("UserCoverPictureUploaded");
 
         return new UserUrlDto() { Url = user.CoverPicture };
+    }
+
+    /// <summary>
+    /// Decodes and re-encodes a profile or cover image as every other image upload does, then
+    /// stores the result and adds (does not save) its File row. The re-encode drops all metadata
+    /// (EXIF, GPS included), the blob is named with the extension of the decoded type rather than
+    /// the client's file name, and bytes that do not decode as JPEG, PNG or WebP throw
+    /// <see cref="InvalidImageException"/> before anything is stored.
+    /// </summary>
+    /// <returns>The blob's URI, which is what the user row stores.</returns>
+    private async Task<Uri> StoreProcessedImageAsync(IFormFile image, long userId)
+    {
+        ProcessedImage processed;
+        await using (var uploadFileStream = image.OpenReadStream())
+        {
+            processed = await imageProcessing.ProcessAsync(
+                uploadFileStream, ImageProcessingOptions.Uploads, HttpContext.RequestAborted);
+        }
+
+        var fileId = Guid.NewGuid();
+        var blobName = fileId + ImageContentTypes.ExtensionFor(processed.ContentType);
+        using var stream = new MemoryStream(processed.Original, writable: false);
+        var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, blobName, stream);
+
+        context.Files.Add(new Models.File()
+        {
+            Size = processed.Original.LongLength,
+            Path = uploadResult.BlobPath,
+            Id = fileId,
+            CreatedById = userId,
+            UpdatedById = userId,
+        });
+
+        return uploadResult.BlobUri;
     }
 
     /// <summary>
