@@ -289,6 +289,9 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
         public Task<BlobContent?> OpenReadAsync(string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
             => _inner.OpenReadAsync(containerName, blobName, seekable, cancellationToken);
 
+        public Task<long?> GetBlobLengthAsync(string containerName, string blobName, CancellationToken cancellationToken = default)
+            => _inner.GetBlobLengthAsync(containerName, blobName, cancellationToken);
+
         public Task DeleteBlobAsync(string containerName, string blobName)
             => _inner.DeleteBlobAsync(containerName, blobName);
     }
