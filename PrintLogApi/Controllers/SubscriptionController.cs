@@ -34,9 +34,10 @@ public class SubscriptionController(
     }
 
     /// <summary>
-    /// Create a Stripe Checkout session for upgrading to Pro.
+    /// Create a Stripe Checkout session for upgrading to Pro. Interactive sessions only.
     /// </summary>
     [HttpPost("checkout")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<CheckoutSessionResponseDto>> CreateCheckoutSession(
         [FromBody] CreateCheckoutSessionDto dto)
     {
@@ -65,9 +66,11 @@ public class SubscriptionController(
     }
 
     /// <summary>
-    /// Create a Stripe Customer Portal session for managing billing.
+    /// Create a Stripe Customer Portal session for managing billing. Interactive sessions only:
+    /// the portal can cancel the subscription and change the payment method.
     /// </summary>
     [HttpPost("portal")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<PortalSessionResponseDto>> CreatePortalSession()
     {
         var userId = User.GetUserId();

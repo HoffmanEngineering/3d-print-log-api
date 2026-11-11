@@ -8,11 +8,13 @@ using PrintLogApi.Services;
 namespace PrintLogApi.Controllers;
 
 /// <summary>
-/// Managing API keys for a user.
+/// Managing API keys for a user. Interactive sessions only: a key lives in printer and slicer
+/// config files, and one that leaked must not be able to mint a replacement that survives its
+/// revocation, or revoke the owner's other keys.
 /// </summary>
 [Route("api/UserApiKeys")]
 [ApiController]
-[Authorize]
+[Authorize(Policy = "InteractiveUserOnly")]
 public class UserApiKeysController(IUserApiKeyService userApiKeyService) : ControllerBase
 {
     /// <summary>

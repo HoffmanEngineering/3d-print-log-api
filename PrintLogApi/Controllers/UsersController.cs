@@ -228,10 +228,12 @@ public class UsersController(
     }
 
     /// <summary>
-    /// Marks the current user as deactivated
+    /// Marks the current user as deactivated. Interactive sessions only, like every account-level
+    /// write below: an API key or device token must not be a way to delete or edit the account.
     /// </summary>
     /// <returns></returns>
     [HttpPost("me/deactivate")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> DeactivateCurrentUser()
     {
         var userId = User.GetUserId();
@@ -259,6 +261,7 @@ public class UsersController(
     /// </summary>
     /// <returns></returns>
     [HttpPost("me/reactivate")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> ReactivateCurrentUser()
     {
         var userId = User.GetUserId();
@@ -328,6 +331,7 @@ public class UsersController(
     /// <param name="updatedUser"></param>
     /// <returns></returns>
     [HttpPut("me")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
     {
         var userId = User.GetUserId();
@@ -375,6 +379,7 @@ public class UsersController(
     /// <param name="image">The image file to save.</param>
     /// <returns></returns>
     [HttpPost("me/profile-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> PostProfileImage(IFormFile image)
     {
         var userId = User.GetUserId();
@@ -437,6 +442,7 @@ public class UsersController(
     /// <param name="image">The image file to save.</param>
     /// <returns></returns>
     [HttpPost("me/cover-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
     {
         var userId = User.GetUserId();
@@ -498,6 +504,7 @@ public class UsersController(
     /// </summary>
     /// <returns></returns>
     [HttpDelete("me/cover-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
     {
         var userId = User.GetUserId();
