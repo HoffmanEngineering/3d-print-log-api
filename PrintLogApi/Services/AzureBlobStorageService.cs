@@ -232,6 +232,24 @@ public class AzureBlobStorageService : IBlobStorageService
     }
 
     /// <summary>
+    /// The blob's length from its properties (one HEAD request), or null if it does not exist.
+    /// </summary>
+    public async Task<long?> GetBlobLengthAsync(
+        string containerName, string blobName, CancellationToken cancellationToken = default)
+    {
+        var blobClient = _blobServiceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName);
+        try
+        {
+            var properties = await blobClient.GetPropertiesAsync(cancellationToken: cancellationToken);
+            return properties.Value.ContentLength;
+        }
+        catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Deletes a blob from Azure Blob Storage. Does nothing if the blob does not exist.
     /// </summary>
     public async Task DeleteBlobAsync(string containerName, string blobName)

@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Controllers;
@@ -44,7 +45,7 @@ public class FileAttachmentTypesTests(CustomWebApplicationFactory factory) : ICl
     {
         var (user, printId) = await ArrangeProPrintAsync();
         const string fileName = "timelapse_benchy.gcode_2026-10-15_12-00-00.mp4";
-        const long size = 12_345_678;
+        const int size = 123_456;
         var urlResponse = await PostAsync(user, $"/api/Prints/{printId}/files/upload-url", new GetUploadUrlRequest
         {
             FileName = fileName,
@@ -52,6 +53,9 @@ public class FileAttachmentTypesTests(CustomWebApplicationFactory factory) : ICl
             SizeBytes = size,
         });
         var upload = (await urlResponse.Content.ReadFromJsonAsync<GetUploadUrlResponse>(cancellationToken: Ct))!;
+        // Stands in for the client's PUT to the SAS URL: confirm reads the blob's real length.
+        var blobs = (InMemoryBlobStorageService)factory.Services.GetRequiredService<IBlobStorageService>();
+        blobs.Blobs[upload.BlobPath!] = new byte[size];
 
         var confirm = await PostAsync(user, $"/api/Prints/{printId}/files/confirm", new ConfirmUploadRequest
         {
