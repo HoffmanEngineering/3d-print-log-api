@@ -243,6 +243,10 @@ public sealed class WebhookDeliveryProcessor(
 
     private async Task<byte[]?> BuildBody(WebhookEvent webhookEvent, CancellationToken ct)
     {
+        // A usage row can name another user's spool (written before the ownership checks): its
+        // details are that user's, so only the event user's own spools are described, as
+        // get_print does. A plain comparison against the captured id, so SQL Server translates it.
+        var userId = webhookEvent.UserId;
         var print = await context.Prints.AsNoTracking()
             .Where(p => p.Id == webhookEvent.PrintId && p.CreatedById == webhookEvent.UserId)
             .Select(p => new
@@ -258,10 +262,10 @@ public sealed class WebhookDeliveryProcessor(
                 Filament = p.FilamentUsage!.Select(f => new
                 {
                     f.FilamentId,
-                    Name = f.Filament != null ? f.Filament.DisplayName : null,
-                    Brand = f.Filament != null ? f.Filament.Brand : null,
-                    MaterialType = f.Filament != null ? f.Filament.MaterialType : null,
-                    ColorHex = f.Filament != null ? f.Filament.ColorHex : null,
+                    Name = f.Filament != null && f.Filament.CreatedById == userId ? f.Filament.DisplayName : null,
+                    Brand = f.Filament != null && f.Filament.CreatedById == userId ? f.Filament.Brand : null,
+                    MaterialType = f.Filament != null && f.Filament.CreatedById == userId ? f.Filament.MaterialType : null,
+                    ColorHex = f.Filament != null && f.Filament.CreatedById == userId ? f.Filament.ColorHex : null,
                     f.Slot,
                     f.AmountMg,
                     f.EstimatedAmountMg,
