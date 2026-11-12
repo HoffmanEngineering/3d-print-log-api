@@ -221,6 +221,46 @@ public class StripeWebhookTests(CustomWebApplicationFactory factory) : IClassFix
         Assert.DoesNotContain(host.Logs.Messages, m => m.Contains(marker, StringComparison.Ordinal));
     }
 
+    /// <summary>The test host, but in Production with no webhook secret.</summary>
+    public sealed class ProductionWithoutSecretFactory : CustomWebApplicationFactory
+    {
+        public StripeOptionsTests.LevelCapturingLoggerProvider Logs { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.UseEnvironment("Production");
+            builder.ConfigureAppConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Stripe:WebhookSecret"] = "",
+            }));
+            builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+        }
+    }
+
+    /// <summary>
+    /// A missing secret in Production must not take the API down: the host starts, says so once
+    /// at Critical, and the webhook fails closed.
+    /// </summary>
+    [Fact]
+    public async Task Production_WithoutASecret_StartsLogsOneCriticalEntryAndRefusesWebhooks()
+    {
+        using var host = new ProductionWithoutSecretFactory();
+        var client = host.CreateClient();
+        var user = await StripeTestData.UserAsync(host, SubscriptionStatus.Canceled);
+        var json = StripeTestData.EventJson("customer.subscription.updated", SubscriptionObject(user, "active"));
+
+        var response = await client.SendAsync(Webhook(json, StripeTestData.Sign("", json)), Ct);
+        var health = await client.GetAsync("/api/Subscription/me", Ct);
+
+        Assert.Equal("Production", host.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(SubscriptionStatus.Canceled, (await StripeTestData.SubscriptionAsync(host, user.Id))!.Status);
+        var critical = Assert.Single(host.Logs.Entries, e => e.Level == LogLevel.Critical);
+        Assert.Contains("Stripe:WebhookSecret is not configured", critical.Message);
+        Assert.NotEqual(HttpStatusCode.ServiceUnavailable, health.StatusCode);
+    }
+
     #endregion
 
     #region Request size (W3c)

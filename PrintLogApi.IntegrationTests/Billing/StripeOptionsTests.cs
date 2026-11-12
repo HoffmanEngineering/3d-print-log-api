@@ -11,39 +11,91 @@ public class StripeOptionsTests
 {
     #region Startup validation
 
-    private static ValidateOptionsResult Validate(string environment, StripeOptions options) =>
-        new StripeOptionsValidator(new TestHostEnvironment(environment)).Validate(null, options);
+    private static ValidateOptionsResult Validate(StripeOptions options) =>
+        new StripeOptionsValidator().Validate(null, options);
+
+    private static ServiceProvider Build(string environment, Dictionary<string, string?> settings, LevelCapturingLoggerProvider? logs = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging(b =>
+        {
+            if (logs is not null) b.AddProvider(logs);
+        });
+        services.AddStripeOptions(new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new TestHostEnvironment(environment));
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task StartHostedServicesAsync(IServiceProvider provider)
+    {
+        provider.GetRequiredService<IStartupValidator>().Validate();
+        foreach (var service in provider.GetServices<IHostedService>())
+        {
+            await service.StartAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// A blank secret never stops the host, in any environment: the webhook already fails closed
+    /// (503), and a missing app setting must not turn a deploy into a full API outage.
+    /// </summary>
+    [Theory]
+    [InlineData("Production", null)]
+    [InlineData("Production", "")]
+    [InlineData("Production", "   ")]
+    [InlineData("Development", "")]
+    [InlineData("E2ETesting", "")]
+    [InlineData("IntegrationTesting", "")]
+    [InlineData("Staging", "")]
+    public void ABlankWebhookSecret_DoesNotStopStartup(string environment, string? secret)
+    {
+        using var provider = Build(environment, new() { ["Stripe:WebhookSecret"] = secret });
+
+        provider.GetRequiredService<IStartupValidator>().Validate();
+        Assert.True(Validate(new StripeOptions { WebhookSecret = secret }).Succeeded);
+    }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Production_RequiresAWebhookSecret(string? secret)
+    public async Task Production_WithoutAWebhookSecret_LogsOneCriticalEntryAtStartup(string? secret)
     {
-        var result = Validate("Production", new StripeOptions { WebhookSecret = secret });
+        var logs = new LevelCapturingLoggerProvider();
+        using var provider = Build("Production", new() { ["Stripe:WebhookSecret"] = secret }, logs);
 
-        Assert.True(result.Failed);
-        Assert.Contains("WebhookSecret", result.FailureMessage);
+        await StartHostedServicesAsync(provider);
+
+        var entry = Assert.Single(logs.Entries, e => e.Level == LogLevel.Critical);
+        Assert.Contains("Stripe:WebhookSecret is not configured", entry.Message);
     }
 
     [Fact]
-    public void Production_WithAWebhookSecret_IsValid()
+    public async Task Production_WithAWebhookSecret_LogsNothingAndNeverTheSecret()
     {
-        Assert.True(Validate("Production", new StripeOptions { WebhookSecret = "whsec_x" }).Succeeded);
+        var logs = new LevelCapturingLoggerProvider();
+        using var provider = Build("Production", new() { ["Stripe:WebhookSecret"] = "whsec_do_not_log" }, logs);
+
+        await StartHostedServicesAsync(provider);
+
+        Assert.DoesNotContain(logs.Entries, e => e.Level >= LogLevel.Warning);
+        Assert.DoesNotContain(logs.Entries, e => e.Message.Contains("whsec_do_not_log", StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// These run without Stripe on purpose: local development, the Cypress API, the integration
-    /// test host, and a staging slot without a Stripe section. Their webhook answers 503 instead.
-    /// </summary>
+    /// <summary>The environments that run without Stripe on purpose get no Critical entry for it.</summary>
     [Theory]
     [InlineData("Development")]
     [InlineData("E2ETesting")]
     [InlineData("IntegrationTesting")]
     [InlineData("Staging")]
-    public void EnvironmentsWithoutStripe_StartWithABlankWebhookSecret(string environment)
+    public async Task OtherEnvironments_DoNotLogABlankWebhookSecretAsCritical(string environment)
     {
-        Assert.True(Validate(environment, new StripeOptions { WebhookSecret = "" }).Succeeded);
+        var logs = new LevelCapturingLoggerProvider();
+        using var provider = Build(environment, new() { ["Stripe:WebhookSecret"] = "" }, logs);
+
+        await StartHostedServicesAsync(provider);
+
+        Assert.DoesNotContain(provider.GetServices<IHostedService>(), s => s is StripeWebhookSecretCheck);
+        Assert.DoesNotContain(logs.Entries, e => e.Level == LogLevel.Critical);
     }
 
     [Theory]
@@ -53,45 +105,43 @@ public class StripeOptionsTests
     [InlineData("https://localhost:4310?x=1")]
     [InlineData("https://user@localhost:4310")]
     [InlineData("")]
-    public void AnAllowedReturnOriginThatIsNotAnOrigin_FailsInEveryEnvironment(string entry)
+    public void AnAllowedReturnOriginThatIsNotAnOrigin_FailsValidation(string entry)
     {
-        var result = Validate("Development", new StripeOptions { AllowedReturnOrigins = [entry] });
+        var result = Validate(new StripeOptions { AllowedReturnOrigins = [entry] });
 
         Assert.True(result.Failed);
         Assert.Contains("AllowedReturnOrigins", result.FailureMessage);
     }
 
-    [Fact]
-    public void AllowedReturnOrigins_AcceptsOriginsWithOrWithoutATrailingSlash()
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void AnAllowedReturnOriginThatIsNotAnOrigin_StopsStartup(string environment)
     {
-        Assert.True(Validate("Development", new StripeOptions { AllowedReturnOrigins = ["https://localhost:4310", "http://localhost:4311/"] }).Succeeded);
+        using var provider = Build(environment, new()
+        {
+            ["Stripe:WebhookSecret"] = "whsec_x",
+            ["Stripe:AllowedReturnOrigins:0"] = "https://localhost:4310/settings",
+        });
+
+        var ex = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IStartupValidator>().Validate());
+        Assert.Contains("AllowedReturnOrigins", ex.Message);
     }
 
     [Fact]
-    public void Registration_ValidatesOnStart_SoProductionWithoutASecretDoesNotStart()
+    public void AllowedReturnOrigins_AcceptsOriginsWithOrWithoutATrailingSlash()
     {
-        var services = new ServiceCollection();
-        services.AddStripeOptions(
-            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Stripe:WebhookSecret"] = "" }).Build(),
-            new TestHostEnvironment("Production"));
-        using var provider = services.BuildServiceProvider();
-
-        var ex = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IStartupValidator>().Validate());
-        Assert.Contains("WebhookSecret", ex.Message);
+        Assert.True(Validate(new StripeOptions { AllowedReturnOrigins = ["https://localhost:4310", "http://localhost:4311/"] }).Succeeded);
     }
 
     [Fact]
     public void Registration_BindsTheStripeSection()
     {
-        var services = new ServiceCollection();
-        services.AddStripeOptions(
-            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Stripe:WebhookSecret"] = "whsec_x",
-                ["Stripe:AllowedReturnOrigins:0"] = "https://localhost:4310",
-            }).Build(),
-            new TestHostEnvironment("Production"));
-        using var provider = services.BuildServiceProvider();
+        using var provider = Build("Production", new()
+        {
+            ["Stripe:WebhookSecret"] = "whsec_x",
+            ["Stripe:AllowedReturnOrigins:0"] = "https://localhost:4310",
+        });
 
         provider.GetRequiredService<IStartupValidator>().Validate();
         var options = provider.GetRequiredService<IOptions<StripeOptions>>().Value;
@@ -146,6 +196,28 @@ public class StripeOptionsTests
     }
 
     #endregion
+
+    /// <summary>Records each entry with its level.</summary>
+    public sealed class LevelCapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Message)> _entries = new();
+
+        public IReadOnlyCollection<(LogLevel Level, string Message)> Entries => _entries.ToArray();
+
+        public ILogger CreateLogger(string categoryName) => new Logger(_entries);
+
+        public void Dispose() { }
+
+        private sealed class Logger(System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Message)> entries) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                entries.Enqueue((logLevel, formatter(state, exception)));
+        }
+    }
 
     private sealed class TestHostEnvironment(string name) : IHostEnvironment
     {

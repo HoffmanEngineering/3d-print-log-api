@@ -505,16 +505,20 @@ Checkout, the billing portal and the inbound webhook: `Controllers/SubscriptionC
   `Origin`, and a genuine, branded Stripe checkout that ends on an attacker's page is a phishing aid.
   With no usable `Email:WebBaseUrl` both endpoints answer 503 rather than guess. Entries that are
   not an http(s) origin (a path, a query, user info) stop the app at startup in every environment.
-- **A blank `Stripe:WebhookSecret` turns the webhook off (503), and Production does not start
-  without one.** Stripe.net 50.x accepts a payload signed with an empty key when the secret is empty,
-  so a blank secret would let anyone post billing events. The webhook checks before it reads the
-  body and logs one warning per refused request. `StripeOptionsValidator` (`ValidateOnStart`) fails
-  only in Production: Development, E2ETesting, IntegrationTesting and staging run without Stripe.
-  The integration suite has a test-only secret in `appsettings.IntegrationTesting.json`.
+- **A blank `Stripe:WebhookSecret` turns the webhook off (503), and never stops the host.**
+  Stripe.net 50.x accepts a payload signed with an empty key when the secret is empty, so a blank
+  secret would let anyone post billing events. The webhook checks before it reads the body and logs
+  one warning per refused request; the service refuses a blank secret too. In Production,
+  `StripeWebhookSecretCheck` also writes one Critical entry at startup. Failing startup was
+  considered and rejected: the webhook already fails closed, so it adds no protection, and a missing
+  app setting would turn a deploy into a full API outage. Development, E2ETesting,
+  IntegrationTesting and staging run without Stripe and get no Critical entry. The integration
+  suite has a test-only secret in `appsettings.IntegrationTesting.json`.
 - **Production must have** the App Service settings `Stripe__WebhookSecret` (the endpoint's
   `whsec_…` from the Stripe Dashboard) and `Stripe__SecretKey`, and `Email:WebBaseUrl`
-  (`https://www.3dprintlog.com` from `appsettings.json`, unless overridden). Nothing needs to be set
-  for `Stripe:AllowedReturnOrigins`.
+  (`https://www.3dprintlog.com` from `appsettings.json`, unless overridden). Without the webhook
+  secret the API still runs, but every Stripe event gets 503 until it is set (Stripe retries for up
+  to three days). Nothing needs to be set for `Stripe:AllowedReturnOrigins`.
 - **`checkout.session.completed` stores the retrieved subscription's own status** through
   `MapStripeStatus`, and sends the "activated" notice only when that is Active. Stripe neither orders
   nor deduplicates deliveries, so the event can arrive after the subscription was canceled, and

@@ -121,8 +121,8 @@ public class SubscriptionController(
     public async Task<IActionResult> HandleWebhook()
     {
         // Checked before the body is read. With a blank secret Stripe.net accepts a payload
-        // signed with an empty key, so anyone could post billing events. Production does not
-        // start without one (StripeOptionsValidator); everywhere else the webhook is off.
+        // signed with an empty key, so anyone could post billing events. Without a secret the
+        // webhook is off; Production also logs that at Critical on startup (StripeWebhookSecretCheck).
         if (string.IsNullOrWhiteSpace(stripeOptions.Value.WebhookSecret))
         {
             logger.LogWarning("Refused a Stripe webhook: Stripe:WebhookSecret is not configured.");

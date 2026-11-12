@@ -294,7 +294,8 @@ public class Startup
             options.SenderName = Configuration["ExternalProviders:Smtp:SenderName"];
         });
 
-        // Validated on start: Production refuses to start without Stripe:WebhookSecret.
+        // Validated on start (AllowedReturnOrigins). A blank Stripe:WebhookSecret only turns the
+        // webhook off (503), and is logged at Critical on startup in Production.
         services.AddStripeOptions(Configuration, Environment);
         Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
