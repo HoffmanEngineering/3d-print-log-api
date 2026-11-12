@@ -156,7 +156,7 @@ result below zero or above original capacity, and any material with no capacity 
   `Include(p => p.LoadedFilaments)`; what is never loaded cannot be marked modified, so the
   invariant doesn't depend on the patch code being careful. Avoid both website paths:
   `PostPrinter`/`PutPrinter` run an AutoMapper map that clobbers `LoadedFilaments`/`UserId`, and
-  `PutPrinter` also calls `setLoadedFilament`.
+  `PutPrinter` also calls `setLoadedFilament` whenever the body carries a `loadedFilaments` list.
 - Non-blank `make`/`model`/`name` and "has a category" are MCP **new-write** invariants, not schema
   facts — the columns are only length-limited and the category FK is nullable, so legacy rows may
   hold nulls. Normalize a legacy null rather than throwing; leave an omitted category alone on

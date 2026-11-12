@@ -31,7 +31,9 @@ public class AddPrinterDTO
     public double? BeamDiameter { get; set; }
 
     /// <summary>
-    /// The collection of currently loaded filament for this printer.
+    /// The spools loaded on this printer. On an update, omit it or send `null` to leave the loaded
+    /// spools unchanged; a list (empty included) replaces them, unloading any spool not in it.
+    /// On create, omitting it loads nothing. Every listed spool must be the caller's own.
     /// </summary>
     public ICollection<AddPrinterFilamentDto>? LoadedFilaments { get; set; }
 
