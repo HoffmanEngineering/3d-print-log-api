@@ -256,6 +256,7 @@ public class Startup
         // See each type's remarks for the numbers behind them.
         services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
         services.AddSingleton<ITelemetryInitializer, EmailTokenRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, ApiKeyRedactionInitializer>();
         services.AddSingleton<ITelemetryInitializer, TagUidRedactionInitializer>();
         services.AddSingleton<ITelemetryInitializer, WebhookTelemetryRedactionInitializer>();
         services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();

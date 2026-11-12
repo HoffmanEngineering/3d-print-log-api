@@ -1499,6 +1499,11 @@ switch telemetry off sends there. Code: `Telemetry/`, wired in `Startup.Configur
   SDK's `UnsupportedProtocolVersionException` (a client offering 2026-07-28 through `initialize`;
   the SDK answers -32022 in a 200 and logs it at Warning). Match by exact type, not category, so
   real MCP errors stay visible.
+- **Credentials in URLs are redacted by initializers**: the email token `t`
+  (`EmailTokenRedactionInitializer`), spool tag UIDs (`TagUidRedactionInitializer`), and the
+  `api_key` query parameter on every request (`ApiKeyRedactionInitializer`, which decodes each
+  parameter name the way ASP.NET Core does, so `API_KEY` and `api%5Fkey` are caught too). A new
+  query-string credential needs the same treatment.
 
 ## UTF-8 and BOM file formatting
 
