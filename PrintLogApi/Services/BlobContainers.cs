@@ -11,6 +11,9 @@ public static class BlobContainers
     public const string FilamentImages = "filamentimages";
     public const string PrinterImages = "printerimages";
 
+    /// <summary>Profile and cover pictures (UsersController), one blob and one Files row per upload.</summary>
+    public const string UserProfile = "userprofile";
+
     /// <summary>
     /// Private copies of print and project image originals as they were before the image
     /// backfill re-processed them. Kept only until the backfill has been checked, then deleted

@@ -54,7 +54,8 @@ public class UserDeletionService : IUserDeletionService
     /// database step failing after Auth0 succeeded is finished next run, whose Auth0 delete of the
     /// account that is already gone succeeds (<see cref="Auth0Service.DeleteUser"/> treats 404 as
     /// done). The database steps are each idempotent: deletes by owner, and a blob already gone
-    /// is logged and skipped.
+    /// is logged and skipped. The Stripe cancel is the first of them, so a user whose cancel
+    /// failed has lost only the Auth0 account (they can no longer sign in) and keeps every row.
     /// </para>
     /// <para>
     /// <b>One user's failure never stops the others.</b> It is logged with the user id, counted in
@@ -184,6 +185,10 @@ public class UserDeletionService : IUserDeletionService
 
         try
         {
+            // Before any row goes: a cancel that fails throws here, and the user is retried with
+            // every row, the subscription's included, still in place.
+            await CancelStripeSubscriptionsAsync(userId);
+
             // Get print IDs for this user (needed for cascading deletes)
             var printIds = await _context.Prints
                 .Where(p => p.CreatedById == userId)
@@ -195,6 +200,18 @@ public class UserDeletionService : IUserDeletionService
                 .Where(c => c.CreatedById == userId)
                 .Select(c => c.Id)
                 .ToListAsync();
+
+            // Other users' comments on this user's prints. Nothing reaches them once the prints
+            // are gone (a comment has no print FK of its own), so they go too, unless one is also
+            // linked to a print that stays.
+            // By print owner rather than printIds, which SQL Server would get as one parameter per id.
+            var foreignCommentIds = await _context.PrintComments
+                .Where(pc => pc.Print.CreatedById == userId && pc.Comment.CreatedById != userId)
+                .Select(pc => pc.CommentId)
+                .Where(id => !_context.PrintComments.Any(other => other.CommentId == id && other.Print.CreatedById != userId))
+                .Distinct()
+                .ToListAsync();
+            commentIds.AddRange(foreignCommentIds);
 
             // Delete in order to respect foreign key constraints
             // Child tables first, then parent tables
@@ -226,6 +243,15 @@ public class UserDeletionService : IUserDeletionService
             await _context.Comments
                 .Where(c => c.CreatedById == userId)
                 .ExecuteDeleteAsync();
+
+            // And other users' comments on the user's prints. Their notifications went above with
+            // the user's own (commentIds includes them), as that FK does not cascade.
+            if (foreignCommentIds.Count > 0)
+            {
+                await _context.Comments
+                    .Where(c => foreignCommentIds.Contains(c.Id))
+                    .ExecuteDeleteAsync();
+            }
 
             // Delete PrintImages, their blobs, and their associated Files for user's prints
             if (printIds.Count > 0)
@@ -547,6 +573,26 @@ public class UserDeletionService : IUserDeletionService
                 .Where(s => s.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Detach other users' usage rows from this user's spools, as deleting a spool does
+            // (FilamentService.DeleteFilament): the row keeps its amount, with no spool. Its FK is
+            // Restrict, so a legacy row like this (from before spool ownership was checked) would
+            // otherwise fail this user's deletion on every run. This user's own prints and their
+            // rows are already gone. The rows feed their owners' cached summaries and feed order.
+            var foreignUsage = _context.PrintFilament
+                .Where(pf => pf.Filament!.CreatedById == userId && pf.Print.CreatedById != userId);
+            var foreignUsageOwners = await foreignUsage
+                .Select(pf => pf.Print.CreatedById)
+                .Distinct()
+                .ToListAsync();
+            if (foreignUsageOwners.Count > 0)
+            {
+                await foreignUsage.ExecuteUpdateAsync(setters => setters.SetProperty(pf => pf.FilamentId, (Guid?)null));
+                foreach (var ownerId in foreignUsageOwners)
+                {
+                    _cacheVersionService.InvalidateUserCache(ownerId);
+                }
+            }
+
             // Delete Filaments
             await _context.Filaments
                 .Where(f => f.CreatedById == userId)
@@ -556,6 +602,20 @@ public class UserDeletionService : IUserDeletionService
             await _context.UserApiKeys
                 .Where(key => key.UserId == userId)
                 .ExecuteDeleteAsync();
+
+            // Delete MCP idempotency records. Their UserId has no FK, so nothing else would.
+            await _context.McpIdempotencyRecords
+                .Where(r => r.UserId == userId)
+                .ExecuteDeleteAsync();
+
+            // Profile and cover pictures, current and replaced: the user's own Files rows name their
+            // blobs, and nothing else does. The picture columns are never used, as they may hold an
+            // external URL (the Auth0 picture).
+            var profilePicturePaths = await _context.Files
+                .Where(f => f.CreatedById == userId && f.Path != null && f.Path.StartsWith(BlobContainers.UserProfile + "/"))
+                .Select(f => f.Path)
+                .ToListAsync();
+            await DeleteImageBlobsAsync(BlobContainers.UserProfile, profilePicturePaths);
 
             // Delete remaining Files
             await _context.Files
@@ -598,26 +658,7 @@ public class UserDeletionService : IUserDeletionService
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(n => n.TriggeredByUserId, (long?)null));
 
-            // Cancel the active Stripe subscription, then delete the Subscription record
-            var stripeSubscriptionId = await _context.Subscriptions
-                .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
-                .Select(s => s.StripeSubscriptionId!)
-                .AsNoTracking()
-                .SingleOrDefaultAsync();
-
-            if (!string.IsNullOrEmpty(stripeSubscriptionId))
-            {
-                try
-                {
-                    var stripeService = new Stripe.SubscriptionService();
-                    await stripeService.CancelAsync(stripeSubscriptionId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to cancel Stripe subscription {StripeSubscriptionId} during user deletion; continuing", stripeSubscriptionId);
-                }
-            }
-
+            // Stripe was canceled first (CancelStripeSubscriptionsAsync), so the record can go.
             await _context.Subscriptions
                 .Where(s => s.UserId == userId)
                 .ExecuteDeleteAsync();
@@ -640,7 +681,75 @@ public class UserDeletionService : IUserDeletionService
     }
 
     /// <summary>
-    /// Deletes print or project image blobs from their fixed container. Paths are either
+    /// Cancels, immediately, every subscription of the user that Stripe may still bill: any with a
+    /// Stripe id that is not canceled here, whatever its local status. A <c>past_due</c> one in
+    /// particular keeps being retried by Stripe, and a retry that succeeds makes it active again,
+    /// billing a customer with no account and no local row to reconcile it against.
+    /// <para>
+    /// A subscription Stripe does not know (404), or that it reports canceled after refusing the
+    /// cancel, is done. Any other failure throws, so the user is not deleted: the subscription
+    /// row is the only local record of what Stripe may still charge, and the next run retries.
+    /// </para>
+    /// </summary>
+    private async Task CancelStripeSubscriptionsAsync(long userId)
+    {
+        var stripeSubscriptionIds = await _context.Subscriptions
+            .Where(s => s.UserId == userId
+                && s.StripeSubscriptionId != null
+                && s.StripeSubscriptionId != ""
+                && s.Status != SubscriptionStatus.Canceled)
+            .Select(s => s.StripeSubscriptionId!)
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (stripeSubscriptionIds.Count == 0)
+        {
+            return;
+        }
+
+        var stripeService = new Stripe.SubscriptionService();
+        foreach (var stripeSubscriptionId in stripeSubscriptionIds)
+        {
+            try
+            {
+                await stripeService.CancelAsync(stripeSubscriptionId);
+            }
+            catch (Stripe.StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning(ex, "Stripe has no subscription {StripeSubscriptionId} for user {UserId}; nothing to cancel", stripeSubscriptionId, userId);
+            }
+            catch (Stripe.StripeException ex)
+            {
+                if (!await IsCanceledInStripeAsync(stripeService, stripeSubscriptionId))
+                {
+                    throw;
+                }
+
+                _logger.LogInformation(ex, "Stripe subscription {StripeSubscriptionId} of user {UserId} was already canceled", stripeSubscriptionId, userId);
+            }
+        }
+    }
+
+    /// <summary>Whether Stripe reports the subscription as ended; false when it cannot be read.</summary>
+    private static async Task<bool> IsCanceledInStripeAsync(Stripe.SubscriptionService stripeService, string stripeSubscriptionId)
+    {
+        try
+        {
+            var subscription = await stripeService.GetAsync(stripeSubscriptionId);
+            return subscription.Status is "canceled" or "incomplete_expired";
+        }
+        catch (Stripe.StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return true;
+        }
+        catch (Stripe.StripeException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Deletes print, project or profile image blobs from their fixed container. Paths are either
     /// "container/name" or a bare name; the file name is the blob name either way. Failures are
     /// logged and skipped, as everywhere else in account deletion.
     /// </summary>

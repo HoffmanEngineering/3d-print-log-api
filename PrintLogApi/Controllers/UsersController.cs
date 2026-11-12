@@ -42,7 +42,7 @@ public class UsersController(
     TimeProvider clock,
     ILogger<UsersController> logger) : ControllerBase
 {
-    private readonly string profileImageContainerName = "userprofile";
+    private readonly string profileImageContainerName = BlobContainers.UserProfile;
 
     // A cheap early answer for an obviously wrong file, matching what the image processor
     // accepts for uploads. The decode in StoreProcessedImageAsync is what decides.
@@ -452,6 +452,7 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
+        var replaced = user.ProfilePicture;
         try
         {
             user.ProfilePicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
@@ -462,6 +463,7 @@ public class UsersController(
         }
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, replaced);
         telemetry.TrackEvent("UserProfilePictureUploaded");
 
         return new UserUrlDto() { Url = user.ProfilePicture };
@@ -504,6 +506,7 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
+        var replaced = user.CoverPicture;
         try
         {
             user.CoverPicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
@@ -514,6 +517,7 @@ public class UsersController(
         }
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, replaced);
         telemetry.TrackEvent("UserCoverPictureUploaded");
 
         return new UserUrlDto() { Url = user.CoverPicture };
@@ -574,11 +578,56 @@ public class UsersController(
             return NotFound();
         }
 
+        var removed = user.CoverPicture;
         user.CoverPicture = null;
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, removed);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Deletes the blob and <c>Files</c> row of a profile or cover picture the user has just
+    /// replaced or removed. Only a picture one of the user's own <c>Files</c> rows names in the
+    /// profile container is deleted, so an external URL (the Auth0 picture) or any blob that is
+    /// not the user's is left alone. Best effort, after the change is saved: a failure is logged
+    /// and the request still succeeds. When the blob delete fails the row is kept, so account
+    /// deletion still finds the blob.
+    /// </summary>
+    private async Task DeleteReplacedPictureAsync(User user, string? replacedUrl)
+    {
+        if (string.IsNullOrWhiteSpace(replacedUrl)
+            || replacedUrl == user.ProfilePicture
+            || replacedUrl == user.CoverPicture
+            || !Uri.TryCreate(replacedUrl, UriKind.Absolute, out var uri))
+        {
+            return;
+        }
+
+        var path = Uri.UnescapeDataString(uri.AbsolutePath).TrimStart('/');
+        var prefix = profileImageContainerName + "/";
+        if (!path.StartsWith(prefix, StringComparison.Ordinal) || path.Length == prefix.Length || path.IndexOf('/', prefix.Length) >= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var file = await context.Files.FirstOrDefaultAsync(f => f.CreatedById == user.Id && f.Path == path);
+            if (file is null)
+            {
+                return;
+            }
+
+            await blobStorageService.DeleteBlobAsync(profileImageContainerName, path[prefix.Length..]);
+            context.Files.Remove(file);
+            await context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Deleting the replaced picture {BlobPath} of user {UserId} failed; it is left in storage", path, user.Id);
+        }
     }
 
     /// <summary>
