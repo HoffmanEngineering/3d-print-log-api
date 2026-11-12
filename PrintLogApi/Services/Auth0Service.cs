@@ -298,12 +298,14 @@ public class Auth0Service(
     }
 
     /// <summary>
-    ///   Permanently delete a user from Auth0 by their oauth id.
+    ///   Permanently delete a user from Auth0 by their oauth id. An account that is already gone
+    ///   (404) counts as deleted: the pending-deletion job deletes the Auth0 account before the
+    ///   database rows, and repeats both for a user whose database delete failed.
     /// </summary>
     public async Task DeleteUser(string? oauthUserId)
     {
         var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId!)}";
-        await SendManagementAsync(HttpMethod.Delete, requestUrl, CancellationToken.None);
+        await SendManagementAsync(HttpMethod.Delete, requestUrl, CancellationToken.None, treat404AsSuccess: true);
     }
 
     private sealed class GrantsPage

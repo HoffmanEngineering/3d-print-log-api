@@ -15,6 +15,7 @@ public class UserDeletionService : IUserDeletionService
     private readonly IBlobStorageService _blobStorageService;
     private readonly ICacheVersionService _cacheVersionService;
     private readonly ISpoolmanCredentialCache _spoolmanCredentials;
+    private readonly TimeProvider _timeProvider;
     private readonly int _deactivationTimeInMinutes;
 
     public UserDeletionService(PrintLogContext context,
@@ -24,7 +25,8 @@ public class UserDeletionService : IUserDeletionService
                                IAuth0Service auth0Service,
                                IBlobStorageService blobStorageService,
                                ICacheVersionService cacheVersionService,
-                               ISpoolmanCredentialCache spoolmanCredentials)
+                               ISpoolmanCredentialCache spoolmanCredentials,
+                               TimeProvider? timeProvider = null)
     {
         _context = context;
         _logger = logger;
@@ -33,6 +35,9 @@ public class UserDeletionService : IUserDeletionService
         _blobStorageService = blobStorageService;
         _cacheVersionService = cacheVersionService;
         _spoolmanCredentials = spoolmanCredentials;
+        // Optional so the tests that construct this service by hand need not pass one; DI
+        // supplies the registered TimeProvider.System.
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         // Null-forgiven: an absent PendingUserDeactivationTimeInMinutes is a deployment
         // misconfiguration that already threw here, at service construction.
@@ -40,36 +45,95 @@ public class UserDeletionService : IUserDeletionService
     }
 
     /// <inheritdoc/>
-    public async Task DeletePendingDeactivatedUsers()
+    /// <remarks>
+    /// <para>
+    /// <b>Auth0 first, then the database.</b> The other order orphaned the Auth0 account whenever
+    /// Auth0 failed after the rows were gone: with no user row left, no later run could find it
+    /// again. In this order the user row is the last thing deleted, so every partial failure leaves
+    /// it in place and the next run repeats the whole user. Auth0 failing leaves every row; a
+    /// database step failing after Auth0 succeeded is finished next run, whose Auth0 delete of the
+    /// account that is already gone succeeds (<see cref="Auth0Service.DeleteUser"/> treats 404 as
+    /// done). The database steps are each idempotent: deletes by owner, and a blob already gone
+    /// is logged and skipped.
+    /// </para>
+    /// <para>
+    /// <b>One user's failure never stops the others.</b> It is logged with the user id, counted in
+    /// <c>DeletePendingDeactivatedUserFailed</c>, and the loop goes on. Before this, one exception
+    /// aborted the batch, and as every run read the same users first, every later run too.
+    /// </para>
+    /// </remarks>
+    public async Task<PendingUserDeletionResult> DeletePendingDeactivatedUsers(CancellationToken ct = default)
     {
-        var pendingDeactivationTime = DateTimeOffset.Now.AddMinutes(-_deactivationTimeInMinutes);
+        // An instant compared with DeactivationDateTime, never stored, so the offset it carries
+        // (UTC here, server local before) does not change which rows match.
+        var pendingDeactivationTime = _timeProvider.GetUtcNow().AddMinutes(-_deactivationTimeInMinutes);
 
-        // Find user's who's deactivation date is before the pending deactivation time.
+        // Find users whose deactivation date is before the pending deactivation time. Oldest
+        // account first, so the order is stable from run to run.
         var usersToDelete = await _context.Users
             .Where(u => u.DeactivationDateTime != null && u.DeactivationDateTime <= pendingDeactivationTime)
-            .ToListAsync();
+            .OrderBy(u => u.Id)
+            .ToListAsync(ct);
 
         _logger.LogInformation("Deleting {count} deactivated users before {deactivationDate}", usersToDelete.Count, pendingDeactivationTime.ToString(CultureInfo.InvariantCulture));
 
-        if (usersToDelete.Count > 0)
-        {
-            _telemetry.TrackEvent("DeletePendingDeactivatedUsers", new Dictionary<string, string>() { { "Count", usersToDelete.Count.ToString(CultureInfo.InvariantCulture) } });
-        }
-
-
+        var deleted = 0;
+        var failed = 0;
         foreach (var user in usersToDelete)
         {
+            ct.ThrowIfCancellationRequested();
+
             var internalId = user.Id;
             var oauthUserId = user.OAuthUserId;
             _logger.LogInformation("Deleting User {id} with oauth id {oauthId}", internalId, oauthUserId);
 
-            // Delete all data from the database.
-            await DeleteAllDataForUser(user);
+            var stage = "Auth0";
+            try
+            {
+                // Delete the user from the Auth Server first; see the remarks for why.
+                if (string.IsNullOrWhiteSpace(oauthUserId))
+                {
+                    _logger.LogWarning("User {id} has no oauth id; deleting their data without an Auth0 call", internalId);
+                }
+                else
+                {
+                    await _auth0Service.DeleteUser(oauthUserId);
+                }
 
-            // Delete the user from the Auth Server.
-            await _auth0Service.DeleteUser(oauthUserId);
+                // Delete all data from the database, the user row last.
+                stage = "Database";
+                await DeleteAllDataForUser(user);
+                deleted++;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                failed++;
+                _logger.LogError(ex, "Deleting pending deactivated user {id} failed at the {stage} step; it is retried on the next run", internalId, stage);
+                _telemetry.TrackEvent("DeletePendingDeactivatedUserFailed", new Dictionary<string, string>
+                {
+                    ["UserId"] = internalId.ToString(CultureInfo.InvariantCulture),
+                    ["Stage"] = stage,
+                    ["ExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                });
+
+                // A failed SaveChanges leaves this user's removal tracked, and the next user's
+                // SaveChanges would send it again and fail too. Every other step bypasses the
+                // tracker (ExecuteDelete/ExecuteUpdate), so clearing it loses nothing.
+                _context.ChangeTracker.Clear();
+            }
         }
 
+        if (usersToDelete.Count > 0)
+        {
+            _telemetry.TrackEvent("DeletePendingDeactivatedUsers", new Dictionary<string, string>()
+            {
+                { "Count", usersToDelete.Count.ToString(CultureInfo.InvariantCulture) },
+                { "Deleted", deleted.ToString(CultureInfo.InvariantCulture) },
+                { "Failed", failed.ToString(CultureInfo.InvariantCulture) },
+            });
+        }
+
+        return new PendingUserDeletionResult(usersToDelete.Count, deleted, failed);
     }
 
     /// <summary>
