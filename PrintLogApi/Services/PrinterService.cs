@@ -510,6 +510,8 @@ public class PrinterService(
     public async Task<PrinterDetailResult> GetPrinterForMcp(
         long userId, long printerId, CancellationToken ct)
     {
+        // The REST printer reads and the spool list apply the same rule.
+        var counts = SpoolOwnership.LoadedRowCounts;
         var row = await context.Printers.AsNoTracking()
             .Where(p => p.Id == printerId && p.UserId == userId) // creator-only; no existence oracle
             .Select(p => new
@@ -538,17 +540,17 @@ public class PrinterService(
                 // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                 // without the UnloadedDateTime filter every spool ever mounted would be reported
                 // as loaded now.
-                LoadedCount = p.LoadedFilaments!.Count(pf =>
-                    pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId),
+                LoadedCount = p.LoadedFilaments!.AsQueryable().Where(counts).Count(pf =>
+                    pf.UnloadedDateTime == null),
 
                 // A corrupt row can reference another user's spool. Its material, colour and
                 // remaining weight all live on that foreign row, so a redacted entry would carry
                 // no usable information - exclude it, but count it so the omission is visible.
-                ExcludedCount = p.LoadedFilaments!.Count(pf =>
-                    pf.UnloadedDateTime == null && pf.Filament.CreatedById != userId),
+                ExcludedCount = p.LoadedFilaments!.Count(pf => pf.UnloadedDateTime == null)
+                    - p.LoadedFilaments!.AsQueryable().Where(counts).Count(pf => pf.UnloadedDateTime == null),
 
-                Loaded = p.LoadedFilaments!
-                    .Where(pf => pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId)
+                Loaded = p.LoadedFilaments!.AsQueryable().Where(counts)
+                    .Where(pf => pf.UnloadedDateTime == null)
                     // Slot order, so "what is in T2" reads straight off the list; spools with no
                     // slot follow, newest first as before.
                     .OrderBy(pf => pf.Slot == null)

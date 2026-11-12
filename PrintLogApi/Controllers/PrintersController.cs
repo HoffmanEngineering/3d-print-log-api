@@ -175,7 +175,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Include(p => p.Category!)
                 .ThenInclude(type => type.MaterialCategory)
             .Where(p => p.Id == id)
@@ -370,10 +372,19 @@ public class PrintersController(
 
         newPrinter.UserId = userId.Value;
 
+        // The same rule and answer as PutPrinter: only the caller's own spools can be loaded.
+        var requestedFilamentIds = (printer.LoadedFilaments ?? [])
+            .Select(f => f.FilamentId)
+            .Where(id => id != default)
+            .ToList();
+        if (!await filamentService.CanUserAccessAllFilaments(userId.Value, requestedFilamentIds))
+        {
+            return StatusCode(403, "User does not have access to filament.");
+        }
+
         var loadedAt = DateTimeOffset.Now;
-        newPrinter.LoadedFilaments = (printer.LoadedFilaments ?? [])
-            .Where(f => f.FilamentId != default)
-            .Select(f => new PrinterFilament { FilamentId = f.FilamentId, LoadedDateTime = loadedAt })
+        newPrinter.LoadedFilaments = requestedFilamentIds
+            .Select(id => new PrinterFilament { FilamentId = id, LoadedDateTime = loadedAt })
             .ToList();
 
         context.Printers.Add(newPrinter);
@@ -452,7 +463,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Where(p => p.Id == id)
             .SingleOrDefaultAsync();
 
@@ -473,6 +486,7 @@ public class PrintersController(
         }
 
         return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments!
+            .Where(SpoolOwnership.Counts)
             .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime));
     }
 
