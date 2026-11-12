@@ -54,7 +54,8 @@ public class UserDeletionService : IUserDeletionService
     /// database step failing after Auth0 succeeded is finished next run, whose Auth0 delete of the
     /// account that is already gone succeeds (<see cref="Auth0Service.DeleteUser"/> treats 404 as
     /// done). The database steps are each idempotent: deletes by owner, and a blob already gone
-    /// is logged and skipped.
+    /// is logged and skipped. The Stripe cancel is the first of them, so a user whose cancel
+    /// failed has lost only the Auth0 account (they can no longer sign in) and keeps every row.
     /// </para>
     /// <para>
     /// <b>One user's failure never stops the others.</b> It is logged with the user id, counted in
@@ -184,6 +185,10 @@ public class UserDeletionService : IUserDeletionService
 
         try
         {
+            // Before any row goes: a cancel that fails throws here, and the user is retried with
+            // every row, the subscription's included, still in place.
+            await CancelStripeSubscriptionsAsync(userId);
+
             // Get print IDs for this user (needed for cascading deletes)
             var printIds = await _context.Prints
                 .Where(p => p.CreatedById == userId)
@@ -598,26 +603,7 @@ public class UserDeletionService : IUserDeletionService
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(n => n.TriggeredByUserId, (long?)null));
 
-            // Cancel the active Stripe subscription, then delete the Subscription record
-            var stripeSubscriptionId = await _context.Subscriptions
-                .Where(s => s.UserId == userId && s.Status == SubscriptionStatus.Active)
-                .Select(s => s.StripeSubscriptionId!)
-                .AsNoTracking()
-                .SingleOrDefaultAsync();
-
-            if (!string.IsNullOrEmpty(stripeSubscriptionId))
-            {
-                try
-                {
-                    var stripeService = new Stripe.SubscriptionService();
-                    await stripeService.CancelAsync(stripeSubscriptionId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to cancel Stripe subscription {StripeSubscriptionId} during user deletion; continuing", stripeSubscriptionId);
-                }
-            }
-
+            // Stripe was canceled first (CancelStripeSubscriptionsAsync), so the record can go.
             await _context.Subscriptions
                 .Where(s => s.UserId == userId)
                 .ExecuteDeleteAsync();
@@ -636,6 +622,74 @@ public class UserDeletionService : IUserDeletionService
         {
             // Restore previous timeout
             _context.Database.SetCommandTimeout(previousTimeout);
+        }
+    }
+
+    /// <summary>
+    /// Cancels, immediately, every subscription of the user that Stripe may still bill: any with a
+    /// Stripe id that is not canceled here, whatever its local status. A <c>past_due</c> one in
+    /// particular keeps being retried by Stripe, and a retry that succeeds makes it active again,
+    /// billing a customer with no account and no local row to reconcile it against.
+    /// <para>
+    /// A subscription Stripe does not know (404), or that it reports canceled after refusing the
+    /// cancel, is done. Any other failure throws, so the user is not deleted: the subscription
+    /// row is the only local record of what Stripe may still charge, and the next run retries.
+    /// </para>
+    /// </summary>
+    private async Task CancelStripeSubscriptionsAsync(long userId)
+    {
+        var stripeSubscriptionIds = await _context.Subscriptions
+            .Where(s => s.UserId == userId
+                && s.StripeSubscriptionId != null
+                && s.StripeSubscriptionId != ""
+                && s.Status != SubscriptionStatus.Canceled)
+            .Select(s => s.StripeSubscriptionId!)
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (stripeSubscriptionIds.Count == 0)
+        {
+            return;
+        }
+
+        var stripeService = new Stripe.SubscriptionService();
+        foreach (var stripeSubscriptionId in stripeSubscriptionIds)
+        {
+            try
+            {
+                await stripeService.CancelAsync(stripeSubscriptionId);
+            }
+            catch (Stripe.StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning(ex, "Stripe has no subscription {StripeSubscriptionId} for user {UserId}; nothing to cancel", stripeSubscriptionId, userId);
+            }
+            catch (Stripe.StripeException ex)
+            {
+                if (!await IsCanceledInStripeAsync(stripeService, stripeSubscriptionId))
+                {
+                    throw;
+                }
+
+                _logger.LogInformation(ex, "Stripe subscription {StripeSubscriptionId} of user {UserId} was already canceled", stripeSubscriptionId, userId);
+            }
+        }
+    }
+
+    /// <summary>Whether Stripe reports the subscription as ended; false when it cannot be read.</summary>
+    private static async Task<bool> IsCanceledInStripeAsync(Stripe.SubscriptionService stripeService, string stripeSubscriptionId)
+    {
+        try
+        {
+            var subscription = await stripeService.GetAsync(stripeSubscriptionId);
+            return subscription.Status is "canceled" or "incomplete_expired";
+        }
+        catch (Stripe.StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return true;
+        }
+        catch (Stripe.StripeException)
+        {
+            return false;
         }
     }
 

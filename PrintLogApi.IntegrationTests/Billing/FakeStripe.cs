@@ -31,11 +31,32 @@ public sealed class FakeStripe : HttpMessageHandler
     /// <summary>The body of <c>GET /v1/subscriptions/{id}</c>, given the id.</summary>
     public Func<string, string>? SubscriptionJson { get; set; }
 
+    /// <summary>
+    /// Answers a request (method, path) before the route table, as a Stripe error would; null
+    /// falls through to the table.
+    /// </summary>
+    public Func<HttpMethod, string, HttpResponseMessage?>? Respond { get; set; }
+
+    /// <summary>A Stripe error response with the given status and error code.</summary>
+    public static HttpResponseMessage Error(HttpStatusCode status, string code, string message) =>
+        new(status)
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new { error = new { type = "invalid_request_error", code, message } }),
+                Encoding.UTF8,
+                "application/json"),
+        };
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri!.AbsolutePath;
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Enqueue((request.Method, path, body));
+        if (Respond?.Invoke(request.Method, path) is { } response)
+        {
+            return response;
+        }
+
         var json = path switch
         {
             "/v1/customers" => """{"id":"cus_fake_new","object":"customer"}""",
