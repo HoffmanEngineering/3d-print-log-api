@@ -4,6 +4,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -1202,7 +1203,10 @@ public class FilamentService(
         // Filter out unloaded-filaments if requested.
         if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
         {
-            filament = filament.Where(f => f.PrinterFilaments!.Any(pf => !pf.UnloadedDateTime.HasValue));
+            // Only a load on a printer the spool's owner owns, as LoadedInPrinter reports it.
+            filament = filament.Where(ExpressionSplice.Inline<Filament, Func<PrinterFilament, bool>, bool>(
+                (f, counts) => f.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Any(counts),
+                SpoolOwnership.LoadedRowCounts));
         }
 
         if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))

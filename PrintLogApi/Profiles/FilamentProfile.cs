@@ -5,6 +5,7 @@ using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.SpoolTags;
+using PrintLogApi.Services;
 using PrintLogApi.SpoolTags;
 
 namespace PrintLogApi.Profiles;
@@ -154,6 +155,25 @@ public class FilamentProfile : Profile
         PrintUsageMg);
 
     /// <summary>
+    /// The printer the spool is loaded in, ignoring a load on a printer its owner does not own
+    /// (<see cref="SpoolOwnership.LoadedRowCounts"/>), so another user's printer name never shows
+    /// in the owner's list and the owner's own load is the one reported.
+    /// </summary>
+    private static readonly Expression<Func<Filament, Printer?>> LoadedInOwnPrinter =
+        ExpressionSplice.Inline<Filament, Func<PrinterFilament, bool>, Printer?>(
+            (f, counts) => f.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Where(counts).Select(p => p.Printer).FirstOrDefault(),
+            SpoolOwnership.LoadedRowCounts);
+
+    /// <summary>
+    /// Distinct prints, not usage rows: there is no unique index on (PrintId, FilamentId), so one
+    /// print may hold two rows for the same spool. Only rows <see cref="SpoolOwnership.UsageRowCounts"/> admits.
+    /// </summary>
+    private static readonly Expression<Func<Filament, int>> PrintCount =
+        ExpressionSplice.Inline<Filament, Func<PrintFilament, bool>, int>(
+            (f, counts) => f.PrintFilaments!.Where(counts).Select(p => p.PrintId).Distinct().Count(),
+            SpoolOwnership.UsageRowCounts);
+
+    /// <summary>
     /// A tag as the detail page reports it. Stored JSON that no longer reads (a hand edit, an old
     /// shape) gives a null reading rather than failing the whole response.
     /// </summary>
@@ -188,7 +208,7 @@ public class FilamentProfile : Profile
             .ForMember(dest => dest.Effects, src => src.MapFrom(src => src.Effects ?? new List<FilamentEffect>()));
 
         CreateMap<Filament, FilamentSummaryDto>()
-            .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(src => src.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Select(p => p.Printer).FirstOrDefault()))
+            .ForMember(dest => dest.LoadedInPrinter, src => src.MapFrom(LoadedInOwnPrinter))
             // Volume and length are NOT mapped here: FilamentSummaryDto derives them from
             // this figure so the list, the detail page and each other cannot disagree.
             // Prints and adjustments both count, and an untracked spool is null as on the

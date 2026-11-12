@@ -43,7 +43,8 @@ public class PrintEventService(
 
         var printer = await context.Printers
             .Where(p => p.Id == started.PrinterId)
-            .Include(p => p.LoadedFilaments)
+            .Include(p => p.LoadedFilaments!)
+                .ThenInclude(pf => pf.Filament)
             .FirstOrDefaultAsync();
 
         // A printer id that names no printer: deleted, or mistyped in the user's moonraker.conf.
@@ -196,7 +197,8 @@ public class PrintEventService(
             .Include(p => p.FilamentUsage!)
                 .ThenInclude(pf => pf.Filament)
             .Include(p => p.Printer)
-                .ThenInclude(pr => pr.LoadedFilaments)
+                .ThenInclude(pr => pr.LoadedFilaments!)
+                    .ThenInclude(pf => pf.Filament)
             .FirstOrDefaultAsync();
 
         if (print is null)
@@ -393,11 +395,14 @@ public class PrintEventService(
 
     /// <summary>
     /// The spool loaded in <paramref name="slot"/>. Slot 0 falls back to a spool loaded with no
-    /// slot, which is how every single-tool printer was loaded before slots existed.
+    /// slot, which is how every single-tool printer was loaded before slots existed. A row naming
+    /// a spool the printer's owner does not own is skipped (<see cref="SpoolOwnership.LoadedRowCounts"/>),
+    /// so the print's row records its usage with no spool, as for an empty slot. The rows need
+    /// their Filament loaded.
     /// </summary>
     private static Guid? SpoolInSlot(IEnumerable<PrinterFilament> loaded, int slot)
     {
-        var rows = loaded.ToList();
+        var rows = loaded.Where(SpoolOwnership.Counts).ToList();
         var inSlot = rows.FirstOrDefault(pf => pf.Slot == slot);
         if (inSlot is null && slot == 0)
         {

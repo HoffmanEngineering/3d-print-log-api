@@ -482,6 +482,7 @@ public class PrintersController(
         }
 
         return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments!
+            .Where(SpoolOwnership.Counts)
             .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime));
     }
 
