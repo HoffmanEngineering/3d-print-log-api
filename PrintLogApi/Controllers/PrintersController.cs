@@ -215,6 +215,9 @@ public class PrintersController(
     /// </summary>
     /// <remarks>
     /// Replaces the whole printer rather than patching it: send every field, not only the changed ones.
+    /// The one exception is `loadedFilaments`: omit it (or send `null`) to leave the loaded spools as
+    /// they are. A list replaces them, unloading any spool not in it and moving each listed spool off
+    /// any other printer it is loaded on; an empty list unloads everything.
     /// </remarks>
     /// <param name="id">The ID of the printer to update.</param>
     /// <param name="printer">The updated printer details.</param>
@@ -274,21 +277,27 @@ public class PrintersController(
 
         existingPrinter.Category = printerCategory;
 
-        var requestedFilaments = printer.LoadedFilaments ?? [];
-        foreach (var filament in requestedFilaments)
+        // A missing (or null) list means "leave what is loaded alone". A client that saves other
+        // fields must not revert spools a print, the bridge or another tab loaded meanwhile; an
+        // explicit empty list still unloads everything.
+        var requestedFilaments = printer.LoadedFilaments;
+        if (requestedFilaments is not null)
         {
-            if (filament.FilamentId != default)
+            foreach (var filament in requestedFilaments)
             {
-                var canAccessFilament = await filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
-                if (!canAccessFilament)
+                if (filament.FilamentId != default)
                 {
-                    //throw new UserCannotAccessFilamentException();
-                    return StatusCode(403, "User does not have access to filament.");
+                    var canAccessFilament = await filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
+                    if (!canAccessFilament)
+                    {
+                        //throw new UserCannotAccessFilamentException();
+                        return StatusCode(403, "User does not have access to filament.");
+                    }
                 }
             }
-        }
 
-        await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList(), fillPrintingRows: true);
+            await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList(), fillPrintingRows: true);
+        }
 
         context.Entry(existingPrinter).State = EntityState.Modified;
 

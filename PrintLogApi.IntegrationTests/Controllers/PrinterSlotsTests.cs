@@ -1,4 +1,6 @@
 ﻿using System.Net;
+using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -470,6 +472,105 @@ public partial class PrinterSlotsTests : IClassFixture<CustomWebApplicationFacto
 
     #endregion
 
+    #region Saving the printer without a loaded list
+
+    // The printer page sends loadedFilaments only when the user changed them there. A save that
+    // leaves it out must not revert what a print, the bridge or another tab loaded meanwhile.
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsOmitted_KeepsWhatIsLoaded()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 1);
+        var spool = await CreateFilamentAsync();
+        await PutPrinterAsync(printerId, loaded: [spool]);
+        var before = Assert.Single(await GetLoadedAsync(printerId));
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: null, omit: true);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var after = Assert.Single(await GetLoadedAsync(printerId));
+        Assert.Equal(before.Id, after.Id);
+        Assert.Equal(spool, after.Filament!.Id);
+        Assert.Equal(before.LoadedAt, after.LoadedAt);
+        Assert.Equal("Renamed printer", (await GetPrinterAsync(printerId)).Name);
+    }
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsNull_KeepsWhatIsLoaded()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 1);
+        var spool = await CreateFilamentAsync();
+        await PutPrinterAsync(printerId, loaded: [spool]);
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(spool, Assert.Single(await GetLoadedAsync(printerId)).Filament!.Id);
+    }
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsOmitted_KeepsEachSlot()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 4);
+        var (t0, t2) = (await CreateFilamentAsync(), await CreateFilamentAsync());
+        await LoadSlotAsync(printerId, 0, t0, slotLabel: "T0");
+        await LoadSlotAsync(printerId, 2, t2);
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: null, omit: true);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var loaded = await GetLoadedAsync(printerId);
+        Assert.Equal([0, 2], loaded.Select(l => l.Slot));
+        Assert.Equal([t0, t2], loaded.Select(l => l.Filament!.Id));
+        Assert.Equal("T0", loaded[0].SlotLabel);
+    }
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsEmpty_UnloadsEverything()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 1);
+        await PutPrinterAsync(printerId, loaded: [await CreateFilamentAsync()]);
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: new JsonArray());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(await GetLoadedAsync(printerId));
+    }
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsList_ReplacesWhatIsLoadedAndMovesTheSpool()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 1);
+        var otherPrinterId = await CreatePrinterAsync(slotCount: 1);
+        var (a, b) = (await CreateFilamentAsync(), await CreateFilamentAsync());
+        await PutPrinterAsync(printerId, loaded: [a]);
+        await PutPrinterAsync(otherPrinterId, loaded: [b]);
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: new JsonArray(
+            new JsonObject { ["id"] = Guid.Empty, ["filamentId"] = b }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(b, Assert.Single(await GetLoadedAsync(printerId)).Filament!.Id);
+        Assert.Empty(await GetLoadedAsync(otherPrinterId));
+    }
+
+    [Fact]
+    public async Task PutPrinter_LoadedFilamentsList_StillRejectsAnotherUsersSpool()
+    {
+        var printerId = await CreatePrinterAsync(slotCount: 1);
+        var mine = await CreateFilamentAsync();
+        await PutPrinterAsync(printerId, loaded: [mine]);
+        var theirs = await CreateFilamentAsync(IntegrationTestSeeder.SecondaryUserOAuthId);
+
+        var response = await PutPrinterJsonAsync(printerId, "Renamed printer", loadedFilaments: new JsonArray(
+            new JsonObject { ["id"] = Guid.Empty, ["filamentId"] = theirs }));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(mine, Assert.Single(await GetLoadedAsync(printerId)).Filament!.Id);
+    }
+
+    #endregion
+
     private static PrintFilamentSummaryDto UsageRow(Guid? filamentId, int? slot = null) => new()
     {
         Id = Guid.NewGuid(),
@@ -562,6 +663,35 @@ public partial class PrinterSlotsTests : IClassFixture<CustomWebApplicationFacto
                 })
                 .ToList(),
         });
+    }
+
+    /// <summary>
+    /// PUTs the printer as raw JSON, so the body can leave <c>loadedFilaments</c> out entirely
+    /// (<paramref name="omit"/>), send it as <c>null</c>, or send the given array.
+    /// </summary>
+    private async Task<HttpResponseMessage> PutPrinterJsonAsync(
+        long printerId, string name, JsonArray? loadedFilaments, bool omit = false)
+    {
+        var current = await GetPrinterAsync(printerId);
+        var body = new JsonObject
+        {
+            ["id"] = printerId,
+            ["name"] = name,
+            ["make"] = current.Make,
+            ["model"] = current.Model,
+            ["isActive"] = true,
+        };
+        if (!omit)
+        {
+            body["loadedFilaments"] = loadedFilaments;
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Put, $"/api/Printers/{printerId}")
+        {
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
     private async Task<PrintDetailDTO> CreatePrintAsync(long printerId, ICollection<PrintFilamentSummaryDto> usage) =>
