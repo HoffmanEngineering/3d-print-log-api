@@ -317,13 +317,33 @@ public class PrintsController(
         // properly is a behaviour change, tracked in #57.
         printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
 
-        // The external pair is the creator's business: it embeds a connector's instance id,
-        // and this endpoint serves public prints to anyone.
-        if (User.GetUserId() != print.CreatedById)
+        // This endpoint serves public and unlisted prints to anyone, so a reader who is not the
+        // creator gets what the public print page shows (PrintVisitorRedaction): no external pair
+        // (it embeds a connector's instance id), none of the owner's spool data, and no id of a
+        // project they could not open, which GET /api/Projects/{id} would confirm with its 403.
+        // The creator keeps everything, through any credential: the bridge reads its own prints'
+        // filamentUsage and filament ids here with a device token.
+        var viewerId = User.GetUserId();
+        if (viewerId != print.CreatedById)
         {
             printDetailDto.ExternalSource = null;
             printDetailDto.ExternalId = null;
             printDetailDto.ConnectionDisplayName = null;
+            PrintVisitorRedaction.RedactFilamentUsage(printDetailDto.FilamentUsage);
+
+            if (printDetailDto.ProjectId is { } projectId)
+            {
+                var project = await context.Projects
+                    .Where(p => p.Id == projectId)
+                    .Select(p => new { p.ViewStatus, p.CreatedById })
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync();
+
+                if (project is null || PrintVisitorRedaction.HidesProject(project.ViewStatus, project.CreatedById, viewerId))
+                {
+                    printDetailDto.ProjectId = null;
+                }
+            }
         }
 
         return printDetailDto;

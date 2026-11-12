@@ -527,13 +527,25 @@ public sealed class PrintService(
             .Select(p => mapper.Map<PrintSummaryDTO>(p))
             .ToList();
 
-        // The external pair is the creator's business (it embeds a connector's instance id).
-        // Hidden here, before the controller caches the page, because a cached page is shared
-        // and read-only. The cache key includes the caller, so each caller's page is its own.
+        // What a reader who is not the creator may see (PrintVisitorRedaction): no external pair
+        // (it embeds a connector's instance id), none of the owner's spool data, and no project
+        // they could not open. Done here, before the controller caches the page, because a
+        // cached page is shared and read-only. The cache key includes the caller, so each
+        // caller's page is its own: the owner's full page and a visitor's redacted one never
+        // share an entry.
+        var projectById = prints.Where(p => p.Project != null).ToDictionary(p => p.Id, p => p.Project!);
         foreach (var dto in dtos.Where(d => d.CreatedByUserId != currentUserId))
         {
             dto.ExternalSource = null;
             dto.ExternalId = null;
+            PrintVisitorRedaction.RedactFilamentUsage(dto.FilamentUsage);
+
+            if (projectById.TryGetValue(dto.Id, out var project)
+                && PrintVisitorRedaction.HidesProject(project.ViewStatus, project.CreatedById, currentUserId))
+            {
+                dto.ProjectId = null;
+                dto.ProjectName = null;
+            }
         }
 
         // **Restore original sort order**
@@ -1468,7 +1480,16 @@ public sealed class PrintService(
         }
 
         var slotsWithSpool = SlotsWithSpool(existingPrint);
+        var ownRowIds = ChildRows.IdsOf(existingPrint.FilamentUsage, r => r.Id);
         var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
+
+        // A row id this print does not have (another user's row, or one a PATCH has since
+        // replaced) is a new row of this print, never an update of the row it names.
+        ChildRows.AddUnowned(context, updatedPrint.FilamentUsage!, ownRowIds, r => r.Id, (r, id) =>
+        {
+            r.Id = id;
+            r.PrintId = updatedPrint.Id;
+        });
 
         var printer = await context.Printers.FindAsync(dto.PrinterId);
         updatedPrint.Printer = printer!;
