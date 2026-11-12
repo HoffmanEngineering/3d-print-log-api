@@ -665,8 +665,10 @@ public class FilamentService(
             throw McpToolException.InvalidArguments("source and initialAmount must be provided together.");
         }
 
+        // Adjustments too: a density or diameter change re-derives them, as the web PUT does.
         var material = await context.Filaments
             .Include(f => f.MaterialCategory)
+            .Include(f => f.FilamentAdjustments)
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
         {
@@ -700,6 +702,10 @@ public class FilamentService(
     private async Task ApplyMaterialPatch(
         Filament material, MaterialAttributesInput input, ISet<string> clear, long userId, CancellationToken ct)
     {
+        // Taken before any field changes, to tell what the edit did to the conversion inputs.
+        var storedConversionInputs = AdjustmentConversionInputs.Of(material);
+        var storedAdjustments = SnapshotAdjustments(material);
+
         // --- Non-clearable identity/computation fields: set only. ---
         if (input.DisplayName != null)
         {
@@ -844,6 +850,19 @@ public class FilamentService(
         // Recompute weight and the other derived fields from the authoritative field and the
         // current density/diameter. This is the website's behavior, mirrored deliberately.
         UpdateFilamentMeasurements(material);
+
+        // The web PUT's check (#232): an edit that leaves a converted adjustment unconvertible
+        // (a category without a diameter under a length adjustment) would make it stop counting.
+        try
+        {
+            RequireConvertibleAdjustments(material, storedAdjustments);
+        }
+        catch (BadRequestException)
+        {
+            throw McpToolException.InvalidArguments(UnconvertibleAdjustmentMessage);
+        }
+
+        await RederiveFromMaterial(material, storedConversionInputs, ct);
 
         material.UpdatedById = userId;
         await context.SaveChangesAsync(ct);
@@ -1817,6 +1836,55 @@ public class FilamentService(
         }
     }
 
+    /// <summary>
+    /// Snapshots the stored adjustments before an edit, for <see cref="RequireConvertibleAdjustments"/>.
+    /// </summary>
+    private static Dictionary<Guid, StoredAdjustment> SnapshotAdjustments(Filament filament)
+    {
+        var inputs = AdjustmentConversionInputs.Of(filament);
+        return (filament.FilamentAdjustments ?? []).ToDictionary(
+            a => a.Id,
+            a => new StoredAdjustment(a.Source, SourceValue(a), a.AmountMg, inputs.CanConvert(a.Source)));
+    }
+
+    /// <summary>
+    /// Re-derives everything stored against the spool in a measure its density, diameter or
+    /// category converts: every adjustment, and, when one of those inputs changed, every usage
+    /// row that records the spool. Remaining weight sums AmountMg on both, so a row left at the
+    /// old density would keep counting the old weight (#232 for adjustments). The web PUT and
+    /// MCP update_material both call this, so the same edit gives the same remaining figure
+    /// whichever client made it. Call after <see cref="RequireConvertibleAdjustments"/>; the
+    /// caller saves.
+    /// <para>
+    /// Usage rows are loaded and converted in memory, not updated in SQL, so the conversion is
+    /// the one <see cref="IPrintService.UpdateFilamentUsageWeights"/> runs on a print save
+    /// (<see cref="DeriveUsageMeasurements"/>). A side recorded by weight keeps its AmountMg.
+    /// The caller's InvalidateUserCache covers what reads them (summaries, analytics, the
+    /// grouped feed).
+    /// </para>
+    /// </summary>
+    private async Task RederiveFromMaterial(Filament filament, AdjustmentConversionInputs before, CancellationToken ct)
+    {
+        foreach (var adjustment in filament.FilamentAdjustments ?? [])
+        {
+            UpdateFilamentAdjustmentMeasurements(adjustment, filament);
+        }
+
+        if (AdjustmentConversionInputs.Of(filament) == before)
+        {
+            // Nothing a usage row's weight depends on changed, so skip the load.
+            return;
+        }
+
+        var usageRows = await context.PrintFilament
+            .Where(pf => pf.FilamentId == filament.Id)
+            .ToListAsync(ct);
+        foreach (var row in usageRows)
+        {
+            DeriveUsageMeasurements(row, filament);
+        }
+    }
+
     private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
     {
         // > 0, not >= 0: every conversion here divides or multiplies by the density, and 0 turns a
@@ -1995,9 +2063,7 @@ public class FilamentService(
         // Taken before the map, which replaces the adjustment list with the request's when the
         // request sends one (#232); a null list keeps the stored rows (#248).
         var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
-        var storedAdjustments = existingFilament.FilamentAdjustments!.ToDictionary(
-            a => a.Id,
-            a => new StoredAdjustment(a.Source, SourceValue(a), a.AmountMg, storedConversionInputs.CanConvert(a.Source)));
+        var storedAdjustments = SnapshotAdjustments(existingFilament);
 
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
 
@@ -2039,10 +2105,9 @@ public class FilamentService(
         {
             adjustment.CreatedById = userId;
             adjustment.UpdatedById = userId;
-
-            UpdateFilamentAdjustmentMeasurements(adjustment, updatedFilament);
         }
 
+        await RederiveFromMaterial(updatedFilament, storedConversionInputs, CancellationToken.None);
 
         // Set UpdatedByIds
         updatedFilament.UpdatedById = userId;
