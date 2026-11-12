@@ -2445,6 +2445,9 @@ public sealed class PrintService(
     /// <returns></returns>
     public async Task<Comment> AddPrintComment(Print print, string commentBody, long userId)
     {
+        // Before anything is written, so a refused comment leaves no row and notifies no one.
+        await EnsureCommentWithinLimits(print, userId);
+
         var comment = new Comment()
         {
             Body = commentBody.Trim(),
@@ -2493,6 +2496,60 @@ public sealed class PrintService(
 
         return comment;
     }
+
+    /// <summary>
+    /// Throws <see cref="CommentLimitExceededException"/> when <paramref name="userId"/> may not
+    /// comment on <paramref name="print"/> now (<see cref="CommentLimits"/>). Counted from the
+    /// comments' CreatedDate, which SaveChanges stamps with DateTime.UtcNow, so this reads the
+    /// same clock.
+    /// </summary>
+    private async Task EnsureCommentWithinLimits(Print print, long userId)
+    {
+        var total = await context.PrintComments.CountAsync(pc => pc.PrintId == print.Id);
+        if (total >= CommentLimits.MaxCommentsPerPrint)
+        {
+            throw new CommentLimitExceededException(
+                $"This print has reached the limit of {CommentLimits.MaxCommentsPerPrint.ToString("N0", CultureInfo.InvariantCulture)} comments.");
+        }
+
+        // The owner replies to people on their own print; only the total applies to them.
+        if (print.CreatedById == userId)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var since = now - CommentLimits.DayWindow;
+        var recent = await context.PrintComments
+            .Where(pc => pc.PrintId == print.Id && pc.Comment.CreatedById == userId && pc.Comment.CreatedDate >= since)
+            .Select(pc => pc.Comment.CreatedDate)
+            .ToListAsync();
+        recent.Sort();
+
+        var retryAfter = RetryAfter(recent, now, CommentLimits.ShortWindow, CommentLimits.PerCommenterShortWindowMax)
+                         ?? RetryAfter(recent, now, CommentLimits.DayWindow, CommentLimits.PerCommenterDayMax);
+        if (retryAfter is { } wait)
+        {
+            throw new CommentLimitExceededException(
+                "You are commenting on this print too often. Try again later.", wait);
+        }
+
+        // How long until one more comment fits in the window, or null if it fits now. With
+        // `count` comments in the window and room for `max`, the (count - max + 1)th oldest has
+        // to age out first. `created` is sorted, oldest first.
+        static TimeSpan? RetryAfter(List<DateTime> created, DateTime now, TimeSpan window, int max)
+        {
+            var inWindow = created.Where(d => d >= now - window).ToList();
+            if (inWindow.Count < max)
+            {
+                return null;
+            }
+
+            var wait = inWindow[inWindow.Count - max] + window - now;
+            return wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1);
+        }
+    }
+
     private bool PrintExists(long id)
     {
         return context.Prints.Any(e => e.Id == id);
