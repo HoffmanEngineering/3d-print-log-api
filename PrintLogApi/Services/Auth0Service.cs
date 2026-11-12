@@ -266,6 +266,28 @@ public class Auth0Service(
     }
 
     /// <summary>
+    ///   Get the picture URL on a user's Auth0 profile. Null when it has none or the body is empty.
+    /// </summary>
+    public async Task<string?> GetUserPicture(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}" +
+                         "?fields=picture&include_fields=true";
+        var json = await SendManagementAsync(HttpMethod.Get, requestUrl, ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        var user = JsonSerializer.Deserialize<Auth0UserPicture>(json);
+        return string.IsNullOrWhiteSpace(user?.Picture) ? null : user.Picture;
+    }
+
+    private sealed class Auth0UserPicture
+    {
+        [JsonPropertyName("picture")] public string? Picture { get; set; }
+    }
+
+    /// <summary>
     ///   Ask Auth0 to send the user a verification email.
     /// </summary>
     public async Task SendVerificationEmail(string oauthUserId, CancellationToken ct)

@@ -8,11 +8,13 @@ using PrintLogApi.Services;
 namespace PrintLogApi.Controllers;
 
 /// <summary>
-/// Managing API keys for a user.
+/// Managing API keys for a user. Interactive sessions only: a key lives in printer and slicer
+/// config files, and one that leaked must not be able to mint a replacement that survives its
+/// revocation, or revoke the owner's other keys.
 /// </summary>
 [Route("api/UserApiKeys")]
 [ApiController]
-[Authorize]
+[Authorize(Policy = "InteractiveUserOnly")]
 public class UserApiKeysController(IUserApiKeyService userApiKeyService) : ControllerBase
 {
     /// <summary>
@@ -72,13 +74,11 @@ public class UserApiKeysController(IUserApiKeyService userApiKeyService) : Contr
             await userApiKeyService.DeactivateApiKey(apiKey, userId.Value);
             return NoContent();
         }
-        catch (DoesNotExistException)
+        // Another user's key answers exactly like a missing one, as the webhook routes do, so a
+        // key id cannot be confirmed to exist.
+        catch (Exception ex) when (ex is DoesNotExistException or UserCannotAccessApiKeyException)
         {
             return NotFound("Active API Key Not Found");
-        }
-        catch (UserCannotAccessApiKeyException)
-        {
-            return Forbid("User does not have access to specified API Key");
         }
 
 

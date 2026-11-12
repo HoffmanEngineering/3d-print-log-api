@@ -208,6 +208,21 @@ public partial class OpenApiDocumentTests(CustomWebApplicationFactory factory) :
     [InlineData("/api/Users/me/email", "get", new[] { "oauth2" }, false)]
     [InlineData("/api/Users/me/onboarding", "get", new[] { "oauth2" }, false)]
     [InlineData("/api/Users/me/verification-email", "post", new[] { "oauth2" }, false)]
+    // Account-level actions: a leaked key must not mint keys, deactivate or edit the account, or
+    // open billing sessions. The reads integrations use keep the key schemes.
+    [InlineData("/api/UserApiKeys", "get", new[] { "oauth2" }, false)]
+    [InlineData("/api/UserApiKeys", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/UserApiKeys/{apiKey}", "delete", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me", "put", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/deactivate", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/reactivate", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/profile-image", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/cover-image", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me/cover-image", "delete", new[] { "oauth2" }, false)]
+    [InlineData("/api/Subscription/checkout", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Subscription/portal", "post", new[] { "oauth2" }, false)]
+    [InlineData("/api/Users/me", "get", new[] { "oauth2", "apikey", "apikeyQuery", "deviceToken" }, false)]
+    [InlineData("/api/Subscription/me", "get", new[] { "oauth2", "apikey", "apikeyQuery", "deviceToken" }, false)]
     public async Task SecurityRequirements_MatchTheEndpointsAuthorization(
         string path, string method, string[] schemes, bool allowsAnonymous)
     {

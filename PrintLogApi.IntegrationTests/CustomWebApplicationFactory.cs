@@ -413,6 +413,25 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         /// <summary>Runs inside <see cref="SendVerificationEmail"/> before it records the send.</summary>
         public Action? OnSendVerification { get; set; }
 
+        /// <summary>The Auth0 profile picture per oauth user id. A missing id means no picture.</summary>
+        public System.Collections.Concurrent.ConcurrentDictionary<string, string> UserPictures { get; } = new();
+
+        /// <summary>Oauth user ids whose <see cref="GetUserPicture"/> throws Auth0ApiException.</summary>
+        public System.Collections.Concurrent.ConcurrentDictionary<string, bool> FailUserPicture { get; } = new();
+
+        /// <summary>Number of <see cref="GetUserPicture"/> calls so far.</summary>
+        public int UserPictureCalls;
+
+        public Task<string?> GetUserPicture(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            Interlocked.Increment(ref UserPictureCalls);
+            if (FailUserPicture.ContainsKey(oauthUserId))
+            {
+                throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
+            }
+            return Task.FromResult(UserPictures.TryGetValue(oauthUserId, out var picture) ? picture : null);
+        }
+
         public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, System.Threading.CancellationToken ct)
         {
             EmailStatusCalls++;

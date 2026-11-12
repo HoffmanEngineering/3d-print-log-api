@@ -339,7 +339,7 @@ public class ApiRateLimitTests
 
         private static HttpRequestMessage WithKey(string key)
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
             request.Headers.Add("X-Api-Key", key);
             return request;
         }

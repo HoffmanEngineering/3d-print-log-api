@@ -490,6 +490,9 @@ public class UserDeletionServiceTests
             string oauthUserId, System.Threading.CancellationToken ct) =>
             throw new NotImplementedException();
 
+        public Task<string?> GetUserPicture(string oauthUserId, System.Threading.CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task SendVerificationEmail(string oauthUserId, System.Threading.CancellationToken ct) =>
             throw new NotImplementedException();
 
