@@ -370,10 +370,19 @@ public class PrintersController(
 
         newPrinter.UserId = userId.Value;
 
+        // The same rule and answer as PutPrinter: only the caller's own spools can be loaded.
+        var requestedFilamentIds = (printer.LoadedFilaments ?? [])
+            .Select(f => f.FilamentId)
+            .Where(id => id != default)
+            .ToList();
+        if (!await filamentService.CanUserAccessAllFilaments(userId.Value, requestedFilamentIds))
+        {
+            return StatusCode(403, "User does not have access to filament.");
+        }
+
         var loadedAt = DateTimeOffset.Now;
-        newPrinter.LoadedFilaments = (printer.LoadedFilaments ?? [])
-            .Where(f => f.FilamentId != default)
-            .Select(f => new PrinterFilament { FilamentId = f.FilamentId, LoadedDateTime = loadedAt })
+        newPrinter.LoadedFilaments = requestedFilamentIds
+            .Select(id => new PrinterFilament { FilamentId = id, LoadedDateTime = loadedAt })
             .ToList();
 
         context.Printers.Add(newPrinter);
