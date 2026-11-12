@@ -562,6 +562,15 @@ public class UserDeletionService : IUserDeletionService
                 .Where(key => key.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Profile and cover pictures, current and replaced: the user's own Files rows name their
+            // blobs, and nothing else does. The picture columns are never used, as they may hold an
+            // external URL (the Auth0 picture).
+            var profilePicturePaths = await _context.Files
+                .Where(f => f.CreatedById == userId && f.Path != null && f.Path.StartsWith(BlobContainers.UserProfile + "/"))
+                .Select(f => f.Path)
+                .ToListAsync();
+            await DeleteImageBlobsAsync(BlobContainers.UserProfile, profilePicturePaths);
+
             // Delete remaining Files
             await _context.Files
                 .Where(f => f.CreatedById == userId)
@@ -694,7 +703,7 @@ public class UserDeletionService : IUserDeletionService
     }
 
     /// <summary>
-    /// Deletes print or project image blobs from their fixed container. Paths are either
+    /// Deletes print, project or profile image blobs from their fixed container. Paths are either
     /// "container/name" or a bare name; the file name is the blob name either way. Failures are
     /// logged and skipped, as everywhere else in account deletion.
     /// </summary>
