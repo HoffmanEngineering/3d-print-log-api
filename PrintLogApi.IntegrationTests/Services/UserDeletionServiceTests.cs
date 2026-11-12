@@ -611,6 +611,129 @@ public class UserDeletionServiceTests
         Assert.Empty(auth0.DeleteCalls);
     }
 
+    /// <summary>
+    /// Another user's usage row on the deleted user's spool (a legacy row, from before spool
+    /// ownership was checked) used to block the Filaments delete (a Restrict FK) on every run. It
+    /// is detached instead, as deleting a spool detaches it (FilamentService.DeleteFilament): the
+    /// row keeps its amount, with no spool, and its owner's cached summaries are invalidated.
+    /// </summary>
+    [Fact]
+    public async Task DeletePendingDeactivatedUsers_DetachesOtherUsersUsageRowsFromTheUsersSpools()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (connection, context) = await CreateDatabaseAsync();
+        await using var _ = connection;
+        await using var __ = context;
+
+        var deleted = await AddUserAsync(context, "spool-owner", PinnedNow.AddDays(-2));
+        var other = await AddUserAsync(context, "print-owner", deactivatedAt: null, withPrinter: true);
+        var now = DateTime.UtcNow;
+        var spool = new Filament
+        {
+            MaterialCategoryNickname = "filament",
+            DisplayName = "Borrowed spool",
+            CreatedById = deleted.Id,
+            UpdatedById = deleted.Id,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        context.Filaments.Add(spool);
+        var print = new Print
+        {
+            Title = "Other user's print",
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Public,
+            PrinterId = await context.Printers.Where(p => p.UserId == other.Id).Select(p => p.Id).SingleAsync(ct),
+            CreatedById = other.Id,
+            UpdatedById = other.Id,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        context.Prints.Add(print);
+        await context.SaveChangesAsync(ct);
+        var usage = new PrintFilament { Id = Guid.NewGuid(), PrintId = print.Id, FilamentId = spool.Id, AmountMg = 12_345 };
+        context.PrintFilament.Add(usage);
+        await context.SaveChangesAsync(ct);
+        context.ChangeTracker.Clear();
+        var cacheVersions = new CacheVersionService(new MemoryCache(new MemoryCacheOptions()));
+        var otherVersionBefore = cacheVersions.GetUserCacheVersion(other.Id);
+
+        var result = await CreateService(context, cacheVersions, clock: new Analytics.SettableTimeProvider(PinnedNow))
+            .DeletePendingDeactivatedUsers(ct);
+
+        Assert.Equal(new PendingUserDeletionResult(Candidates: 1, Deleted: 1, Failed: 0), result);
+        Assert.Equal([other.Id], await RemainingUserIdsAsync(context));
+        var row = await context.PrintFilament.AsNoTracking().SingleAsync(pf => pf.Id == usage.Id, ct);
+        Assert.Null(row.FilamentId);
+        Assert.Equal(12_345, row.AmountMg);
+        Assert.Equal(print.Id, row.PrintId);
+        Assert.False(await context.Filaments.IgnoreQueryFilters().AnyAsync(f => f.Id == spool.Id, ct));
+        Assert.NotEqual(otherVersionBefore, cacheVersions.GetUserCacheVersion(other.Id));
+    }
+
+    /// <summary>
+    /// Other users' comments on the deleted user's prints went with nothing pointing at them, and
+    /// the user's MCP idempotency records (no FK) stayed forever. Both are deleted now, along with
+    /// a notification about such a comment (its FK to the comment does not cascade). Other users'
+    /// comments elsewhere and their own idempotency records stay.
+    /// </summary>
+    [Fact]
+    public async Task DeletePendingDeactivatedUsers_DeletesOtherUsersCommentsOnTheUsersPrints_AndTheUsersMcpRecords()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (connection, context) = await CreateDatabaseAsync();
+        await using var _ = connection;
+        await using var __ = context;
+
+        var deleted = await AddUserAsync(context, "print-owner", PinnedNow.AddDays(-2), withPrinter: true);
+        var commenter = await AddUserAsync(context, "commenter", deactivatedAt: null, withPrinter: true);
+        var now = DateTime.UtcNow;
+        Print NewPrint(long ownerId, long printerId) => new()
+        {
+            Title = $"print of {ownerId}",
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Public,
+            PrinterId = printerId,
+            CreatedById = ownerId,
+            UpdatedById = ownerId,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        var deletedUsersPrint = NewPrint(deleted.Id, await context.Printers.Where(p => p.UserId == deleted.Id).Select(p => p.Id).SingleAsync(ct));
+        var commentersPrint = NewPrint(commenter.Id, await context.Printers.Where(p => p.UserId == commenter.Id).Select(p => p.Id).SingleAsync(ct));
+        context.Prints.AddRange(deletedUsersPrint, commentersPrint);
+        var onDeletedUsersPrint = new Comment { Body = "nice", CreatedById = commenter.Id, UpdatedById = commenter.Id, CreatedDate = now, UpdatedDate = now };
+        var onOwnPrint = new Comment { Body = "mine", CreatedById = commenter.Id, UpdatedById = commenter.Id, CreatedDate = now, UpdatedDate = now };
+        context.Comments.AddRange(onDeletedUsersPrint, onOwnPrint);
+        await context.SaveChangesAsync(ct);
+        context.PrintComments.AddRange(
+            new PrintComment { PrintId = deletedUsersPrint.Id, CommentId = onDeletedUsersPrint.Id, CreatedById = commenter.Id, UpdatedById = commenter.Id, CreatedDate = now, UpdatedDate = now },
+            new PrintComment { PrintId = commentersPrint.Id, CommentId = onOwnPrint.Id, CreatedById = commenter.Id, UpdatedById = commenter.Id, CreatedDate = now, UpdatedDate = now });
+        context.Notifications.Add(new Notification
+        {
+            Id = Guid.NewGuid(),
+            UserId = commenter.Id,
+            Type = NotificationType.PrintCompleted,
+            Title = "About the comment",
+            Message = "m",
+            CreatedDate = now,
+            CommentId = onDeletedUsersPrint.Id,
+        });
+        context.McpIdempotencyRecords.AddRange(
+            new McpIdempotencyRecord { UserId = deleted.Id, ToolName = "create_print", IdempotencyKey = "k-deleted", CreatedPrintId = deletedUsersPrint.Id, CreatedAt = PinnedNow },
+            new McpIdempotencyRecord { UserId = commenter.Id, ToolName = "create_print", IdempotencyKey = "k-kept", CreatedPrintId = commentersPrint.Id, CreatedAt = PinnedNow });
+        await context.SaveChangesAsync(ct);
+        context.ChangeTracker.Clear();
+
+        var result = await CreateService(context, clock: new Analytics.SettableTimeProvider(PinnedNow)).DeletePendingDeactivatedUsers(ct);
+
+        Assert.Equal(new PendingUserDeletionResult(Candidates: 1, Deleted: 1, Failed: 0), result);
+        Assert.Equal([commenter.Id], await RemainingUserIdsAsync(context));
+        Assert.Equal([onOwnPrint.Id], await context.Comments.Select(c => c.Id).ToListAsync(ct));
+        Assert.Equal(0, await context.Notifications.CountAsync(ct));
+        Assert.Equal(["k-kept"], await context.McpIdempotencyRecords.Select(r => r.IdempotencyKey).ToListAsync(ct));
+    }
+
     /// <summary>Fails the final <c>DELETE FROM "Users"</c> for one user id, as a database error there would.</summary>
     private sealed class FailUserRowDeleteInterceptor : DbCommandInterceptor
     {
