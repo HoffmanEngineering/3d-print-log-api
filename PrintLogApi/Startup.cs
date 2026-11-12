@@ -294,7 +294,8 @@ public class Startup
             options.SenderName = Configuration["ExternalProviders:Smtp:SenderName"];
         });
 
-        services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
+        // Validated on start: Production refuses to start without Stripe:WebhookSecret.
+        services.AddStripeOptions(Configuration, Environment);
         Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
         ConfigureMcpServer(services);

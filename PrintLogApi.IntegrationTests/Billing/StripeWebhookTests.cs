@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.Http.Metadata;
+using PrintLogApi.IntegrationTests.Webhooks;
 using PrintLogApi.Models;
 using Xunit;
 
@@ -158,6 +160,88 @@ public class StripeWebhookTests(CustomWebApplicationFactory factory) : IClassFix
 
         Assert.Equal(SubscriptionStatus.Active, (await StripeTestData.SubscriptionAsync(factory, user.Id))!.Status);
         Assert.Equal(1, await StripeTestData.NotificationCountAsync(factory, user.Id, NotificationType.SubscriptionActivated));
+    }
+
+    #endregion
+
+    #region A blank webhook secret refuses every event (W3a)
+
+    public sealed class BlankSecretFactory : CustomWebApplicationFactory
+    {
+        public CapturingLoggerProvider Logs { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+        }
+    }
+
+    /// <summary>
+    /// Stripe.net accepts a payload signed with an empty key when the configured secret is empty,
+    /// so a missing <c>Stripe:WebhookSecret</c> would let anyone grant themselves Pro or downgrade
+    /// any customer. The endpoint refuses instead, before it reads or checks the body.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ABlankSecret_RefusesEvenAPayloadSignedWithThatBlankKey(string blank)
+    {
+        using var host = new BlankSecretFactory();
+        var client = host.WithWebHostBuilder(b => b.ConfigureAppConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Stripe:WebhookSecret"] = blank,
+        }))).CreateClient();
+        var canceled = await StripeTestData.UserAsync(host, SubscriptionStatus.Canceled);
+        var victim = await StripeTestData.UserAsync(host, SubscriptionStatus.Active);
+        const string marker = "body-marker-that-must-not-be-logged";
+        var regrant = StripeTestData.EventJson("customer.subscription.updated", new
+        {
+            id = StripeTestData.SubscriptionId(canceled),
+            @object = "subscription",
+            customer = StripeTestData.CustomerId(canceled),
+            status = "active",
+            cancel_at_period_end = false,
+            description = marker,
+            items = new { @object = "list", data = Array.Empty<object>() },
+        });
+        var downgrade = StripeTestData.EventJson("invoice.payment_failed", new { id = "in_forged", @object = "invoice", customer = StripeTestData.CustomerId(victim) });
+
+        var first = await client.SendAsync(Webhook(regrant, StripeTestData.Sign(blank, regrant)), Ct);
+        var second = await client.SendAsync(Webhook(downgrade, StripeTestData.Sign(blank, downgrade)), Ct);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, second.StatusCode);
+        Assert.Equal(SubscriptionStatus.Canceled, (await StripeTestData.SubscriptionAsync(host, canceled.Id))!.Status);
+        Assert.Equal(SubscriptionStatus.Active, (await StripeTestData.SubscriptionAsync(host, victim.Id))!.Status);
+
+        // One line per refused request, naming the setting, and never the body.
+        var refusals = host.Logs.Messages.Where(m => m.Contains("Stripe:WebhookSecret", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, refusals.Count);
+        Assert.DoesNotContain(host.Logs.Messages, m => m.Contains(marker, StringComparison.Ordinal));
+    }
+
+    #endregion
+
+    #region Request size (W3c)
+
+    /// <summary>
+    /// The body is read before its signature can be checked, on an anonymous route with no rate
+    /// limit, so its size is capped well below the server default (about 28.6 MiB). TestServer does
+    /// not implement <c>IHttpMaxRequestBodySizeFeature</c>, so an oversized POST cannot be shown to
+    /// fail here; this pins the limit Kestrel and IIS enforce, as the endpoint's metadata carries it.
+    /// </summary>
+    [Fact]
+    public void TheWebhookEndpoint_LimitsItsBodyToOneMebibyte()
+    {
+        var endpoint = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == "api/Subscription/webhook");
+
+        var limit = endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>();
+
+        Assert.NotNull(limit);
+        Assert.Equal(1024 * 1024, limit.MaxRequestBodySize);
     }
 
     #endregion

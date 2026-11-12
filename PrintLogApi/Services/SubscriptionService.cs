@@ -185,6 +185,11 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task HandleStripeWebhook(string json, string signature)
     {
+        // The controller answers 503 before this, but a blank secret must never reach
+        // ConstructEvent from any caller: Stripe.net accepts a payload signed with an empty key.
+        if (string.IsNullOrWhiteSpace(_stripeOptions.WebhookSecret))
+            throw new InvalidOperationException("Stripe:WebhookSecret is not configured.");
+
         var stripeEvent = EventUtility.ConstructEvent(json, signature, _stripeOptions.WebhookSecret);
 
         switch (stripeEvent.Type)

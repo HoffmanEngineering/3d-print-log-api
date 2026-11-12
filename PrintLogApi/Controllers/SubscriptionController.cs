@@ -3,10 +3,12 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Subscription;
+using PrintLogApi.Models.Stripe;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers;
@@ -16,8 +18,18 @@ namespace PrintLogApi.Controllers;
 [Authorize]
 public class SubscriptionController(
     ISubscriptionService subscriptionService,
-    TelemetryClient telemetry) : ControllerBase
+    TelemetryClient telemetry,
+    IOptions<StripeOptions> stripeOptions,
+    ILogger<SubscriptionController> logger) : ControllerBase
 {
+    /// <summary>
+    /// The largest webhook body read. Stripe's event payloads are a few KB to tens of KB (it
+    /// truncates long lists in events), and the body is read before its signature can be checked,
+    /// on an anonymous route with no rate limit, so the server default of about 28.6 MiB is far too
+    /// generous.
+    /// </summary>
+    public const int MaxWebhookBodyBytes = 1024 * 1024;
+
     /// <summary>
     /// Get the current user's subscription status.
     /// </summary>
@@ -103,8 +115,20 @@ public class SubscriptionController(
     // billing burst would otherwise 429 itself. Authenticity is already established by the
     // Stripe-Signature check below, which is the control that matters here.
     [DisableRateLimiting]
+    [RequestSizeLimit(MaxWebhookBodyBytes)]
     public async Task<IActionResult> HandleWebhook()
     {
+        // Checked before the body is read. With a blank secret Stripe.net accepts a payload
+        // signed with an empty key, so anyone could post billing events. Production does not
+        // start without one (StripeOptionsValidator); everywhere else the webhook is off.
+        if (string.IsNullOrWhiteSpace(stripeOptions.Value.WebhookSecret))
+        {
+            logger.LogWarning("Refused a Stripe webhook: Stripe:WebhookSecret is not configured.");
+            return Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Stripe webhooks are not configured.");
+        }
+
         var json = await new StreamReader(HttpContext.Request.Body, Encoding.UTF8).ReadToEndAsync();
         var signature = Request.Headers["Stripe-Signature"].ToString();
 
