@@ -326,7 +326,9 @@ public class UsersController(
     }
 
     /// <summary>
-    /// Updates the current user's details.
+    /// Updates the current user's details. The profile and cover pictures are set by uploading
+    /// an image; values sent here are kept only when unchanged, apart from the picture on the
+    /// user's sign-in profile, which is accepted while the profile has no picture.
     /// </summary>
     /// <param name="updatedUser"></param>
     /// <returns></returns>
@@ -350,7 +352,13 @@ public class UsersController(
         }
 
 
+        // The map leaves both pictures alone (see UserProfile).
         existingUser = mapper.Map(updatedUser, existingUser);
+
+        if (await IsSignInProfilePictureAsync(existingUser, updatedUser.ProfilePicture, HttpContext.RequestAborted))
+        {
+            existingUser.ProfilePicture = updatedUser.ProfilePicture;
+        }
 
         context.Entry(existingUser).State = EntityState.Modified;
 
@@ -371,6 +379,51 @@ public class UsersController(
         }
 
         return mapper.Map<UserDetailDto>(existingUser);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="submitted"/> is the picture on the user's Auth0 profile, which the
+    /// web app sets as the profile picture at first sign-in (Gravatar or the social provider's
+    /// avatar). Any other URL would be loaded by every visitor's browser from a host the user
+    /// picked, so it is never taken on trust.
+    /// <para>
+    /// Asked only while the profile has no picture, at most once a minute per user, so a stream
+    /// of PUTs cannot become a stream of Management API calls. Best-effort: when Auth0 cannot be
+    /// reached the picture is left unset and the rest of the update still saves.
+    /// </para>
+    /// </summary>
+    private async Task<bool> IsSignInProfilePictureAsync(User user, string? submitted, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(submitted)
+            || !string.IsNullOrWhiteSpace(user.ProfilePicture)
+            || string.IsNullOrEmpty(user.OAuthUserId))
+        {
+            return false;
+        }
+
+        var throttleKey = $"signin_picture_lookup:{user.Id}";
+        if (cache.TryGetValue(throttleKey, out _))
+        {
+            return false;
+        }
+
+        // Deliberately IMemoryCache, not HybridCache: a throttle flag, not a computed value.
+        cache.Set(throttleKey, true, new MemoryCacheEntryOptions()
+            .SetSize(CacheBudget.SmallEntryBytes)
+            .SetAbsoluteExpiration(TimeSpan.FromMinutes(1)));
+
+        try
+        {
+            var picture = await auth0Service.GetUserPicture(user.OAuthUserId, ct);
+            return string.Equals(picture, submitted, StringComparison.Ordinal);
+        }
+        // HttpClient's own timeout is a TaskCanceledException while ct is still live.
+        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            logger.LogWarning(ex, "Reading the Auth0 profile picture failed for user {UserId}", user.Id);
+            return false;
+        }
     }
 
     /// <summary>

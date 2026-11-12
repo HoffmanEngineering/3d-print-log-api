@@ -39,6 +39,9 @@ public class ConnectedAgentsControllerTests
         public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct) =>
             throw new NotImplementedException();
 
+        public Task<string?> GetUserPicture(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task SendVerificationEmail(string oauthUserId, CancellationToken ct) =>
             throw new NotImplementedException();
 
