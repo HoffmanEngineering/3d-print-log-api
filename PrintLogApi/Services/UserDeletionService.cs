@@ -552,6 +552,26 @@ public class UserDeletionService : IUserDeletionService
                 .Where(s => s.UserId == userId)
                 .ExecuteDeleteAsync();
 
+            // Detach other users' usage rows from this user's spools, as deleting a spool does
+            // (FilamentService.DeleteFilament): the row keeps its amount, with no spool. Its FK is
+            // Restrict, so a legacy row like this (from before spool ownership was checked) would
+            // otherwise fail this user's deletion on every run. This user's own prints and their
+            // rows are already gone. The rows feed their owners' cached summaries and feed order.
+            var foreignUsage = _context.PrintFilament
+                .Where(pf => pf.Filament!.CreatedById == userId && pf.Print.CreatedById != userId);
+            var foreignUsageOwners = await foreignUsage
+                .Select(pf => pf.Print.CreatedById)
+                .Distinct()
+                .ToListAsync();
+            if (foreignUsageOwners.Count > 0)
+            {
+                await foreignUsage.ExecuteUpdateAsync(setters => setters.SetProperty(pf => pf.FilamentId, (Guid?)null));
+                foreach (var ownerId in foreignUsageOwners)
+                {
+                    _cacheVersionService.InvalidateUserCache(ownerId);
+                }
+            }
+
             // Delete Filaments
             await _context.Filaments
                 .Where(f => f.CreatedById == userId)

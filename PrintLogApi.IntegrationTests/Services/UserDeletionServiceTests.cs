@@ -611,6 +611,66 @@ public class UserDeletionServiceTests
         Assert.Empty(auth0.DeleteCalls);
     }
 
+    /// <summary>
+    /// Another user's usage row on the deleted user's spool (a legacy row, from before spool
+    /// ownership was checked) used to block the Filaments delete (a Restrict FK) on every run. It
+    /// is detached instead, as deleting a spool detaches it (FilamentService.DeleteFilament): the
+    /// row keeps its amount, with no spool, and its owner's cached summaries are invalidated.
+    /// </summary>
+    [Fact]
+    public async Task DeletePendingDeactivatedUsers_DetachesOtherUsersUsageRowsFromTheUsersSpools()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (connection, context) = await CreateDatabaseAsync();
+        await using var _ = connection;
+        await using var __ = context;
+
+        var deleted = await AddUserAsync(context, "spool-owner", PinnedNow.AddDays(-2));
+        var other = await AddUserAsync(context, "print-owner", deactivatedAt: null, withPrinter: true);
+        var now = DateTime.UtcNow;
+        var spool = new Filament
+        {
+            MaterialCategoryNickname = "filament",
+            DisplayName = "Borrowed spool",
+            CreatedById = deleted.Id,
+            UpdatedById = deleted.Id,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        context.Filaments.Add(spool);
+        var print = new Print
+        {
+            Title = "Other user's print",
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Public,
+            PrinterId = await context.Printers.Where(p => p.UserId == other.Id).Select(p => p.Id).SingleAsync(ct),
+            CreatedById = other.Id,
+            UpdatedById = other.Id,
+            CreatedDate = now,
+            UpdatedDate = now,
+        };
+        context.Prints.Add(print);
+        await context.SaveChangesAsync(ct);
+        var usage = new PrintFilament { Id = Guid.NewGuid(), PrintId = print.Id, FilamentId = spool.Id, AmountMg = 12_345 };
+        context.PrintFilament.Add(usage);
+        await context.SaveChangesAsync(ct);
+        context.ChangeTracker.Clear();
+        var cacheVersions = new CacheVersionService(new MemoryCache(new MemoryCacheOptions()));
+        var otherVersionBefore = cacheVersions.GetUserCacheVersion(other.Id);
+
+        var result = await CreateService(context, cacheVersions, clock: new Analytics.SettableTimeProvider(PinnedNow))
+            .DeletePendingDeactivatedUsers(ct);
+
+        Assert.Equal(new PendingUserDeletionResult(Candidates: 1, Deleted: 1, Failed: 0), result);
+        Assert.Equal([other.Id], await RemainingUserIdsAsync(context));
+        var row = await context.PrintFilament.AsNoTracking().SingleAsync(pf => pf.Id == usage.Id, ct);
+        Assert.Null(row.FilamentId);
+        Assert.Equal(12_345, row.AmountMg);
+        Assert.Equal(print.Id, row.PrintId);
+        Assert.False(await context.Filaments.IgnoreQueryFilters().AnyAsync(f => f.Id == spool.Id, ct));
+        Assert.NotEqual(otherVersionBefore, cacheVersions.GetUserCacheVersion(other.Id));
+    }
+
     /// <summary>Fails the final <c>DELETE FROM "Users"</c> for one user id, as a database error there would.</summary>
     private sealed class FailUserRowDeleteInterceptor : DbCommandInterceptor
     {
