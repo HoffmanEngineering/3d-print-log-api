@@ -63,8 +63,6 @@
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" />
     <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" />
     <PackageReference Include="PrintLog.SlicerSettings" />
-    <PackageReference Include="prometheus-net" />
-    <PackageReference Include="prometheus-net.AspNetCore" />
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <PackageReference Include="MailKit" />

@@ -39,9 +39,10 @@ To deploy to the dev resource group instead:
 ## Things that are not obvious
 
 - **Queries filter noise themselves**, duplicating what `NoiseTelemetryProcessor` drops in the
-  app (CORS preflights, the unread-count poll, `/metrics`) plus `GET /` (bots hitting the
-  root) and anything not from the production cloud role. That is deliberate: history from
-  before the processor deploy reads the same as history after it.
+  app (CORS preflights, the unread-count poll) plus `GET /` (bots hitting the root) and
+  anything not from the production cloud role. That is deliberate: history from before the
+  processor deploy reads the same as history after it. `GET /metrics` is still excluded for the
+  same reason, though the API no longer serves it (the Prometheus endpoint was removed).
 - **`availabilityResults.success` is the string `"1"`**, not a bool. `success == true` matches
   nothing and reports 0 % uptime on a healthy site.
 - **`{TimeRange:start}` already expands to a `datetime(...)` literal.** Wrapping it in another

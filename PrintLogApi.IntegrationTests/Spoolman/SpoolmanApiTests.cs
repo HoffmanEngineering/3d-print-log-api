@@ -599,21 +599,6 @@ public class SpoolmanApiTests(CustomWebApplicationFactory factory) : IClassFixtu
     }
 
     [Fact]
-    public async Task Use_ByWeight_IsCountedInMillimetres()
-    {
-        var (user, secret) = await ConnectedUserAsync();
-        var spool = await AddSpoolAsync(user, "Galaxy Black");
-        var before = SpoolmanMetrics.UseMillimetres.Value;
-        var calls = SpoolmanMetrics.UseCalls.WithLabels("weight").Value;
-
-        var response = await SendAsync(secret, HttpMethod.Put, $"/spool/{spool.SpoolNumber}/use", """{"use_weight": 3}""");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(SpoolmanMetrics.UseCalls.WithLabels("weight").Value >= calls + 1);
-        Assert.True(SpoolmanMetrics.UseMillimetres.Value - before >= SpoolmanInventoryService.LengthMm(3, 1.24, 1.75) - 0.001);
-    }
-
-    [Fact]
     public async Task TheSpoolmanRoutes_AreNotInThePublicOpenApiDocument()
     {
         var document = await _client.GetStringAsync("/swagger/v1/swagger.json", Ct);

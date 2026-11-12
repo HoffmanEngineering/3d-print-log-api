@@ -98,6 +98,8 @@ def chart_settings(*series: str, y_label: str | None = None) -> dict:
 # Every API query starts from these. The exclusions duplicate what NoiseTelemetryProcessor
 # drops in the app, on purpose: history from before that deploy then reads the same as
 # history after it. `GET /` is bots and platform probes hitting the root, which 404s.
+# `GET /metrics` was the Prometheus scrape; the API no longer serves it, and the exclusion
+# only keeps older history consistent.
 API_REQUESTS = """let apiRequests = requests
 | where cloud_RoleName == '{ApiRole}'
 | where not(name startswith 'OPTIONS ')
