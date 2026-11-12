@@ -201,6 +201,18 @@ public class UserDeletionService : IUserDeletionService
                 .Select(c => c.Id)
                 .ToListAsync();
 
+            // Other users' comments on this user's prints. Nothing reaches them once the prints
+            // are gone (a comment has no print FK of its own), so they go too, unless one is also
+            // linked to a print that stays.
+            // By print owner rather than printIds, which SQL Server would get as one parameter per id.
+            var foreignCommentIds = await _context.PrintComments
+                .Where(pc => pc.Print.CreatedById == userId && pc.Comment.CreatedById != userId)
+                .Select(pc => pc.CommentId)
+                .Where(id => !_context.PrintComments.Any(other => other.CommentId == id && other.Print.CreatedById != userId))
+                .Distinct()
+                .ToListAsync();
+            commentIds.AddRange(foreignCommentIds);
+
             // Delete in order to respect foreign key constraints
             // Child tables first, then parent tables
 
@@ -231,6 +243,15 @@ public class UserDeletionService : IUserDeletionService
             await _context.Comments
                 .Where(c => c.CreatedById == userId)
                 .ExecuteDeleteAsync();
+
+            // And other users' comments on the user's prints. Their notifications went above with
+            // the user's own (commentIds includes them), as that FK does not cascade.
+            if (foreignCommentIds.Count > 0)
+            {
+                await _context.Comments
+                    .Where(c => foreignCommentIds.Contains(c.Id))
+                    .ExecuteDeleteAsync();
+            }
 
             // Delete PrintImages, their blobs, and their associated Files for user's prints
             if (printIds.Count > 0)
@@ -580,6 +601,11 @@ public class UserDeletionService : IUserDeletionService
             // Delete API Keys
             await _context.UserApiKeys
                 .Where(key => key.UserId == userId)
+                .ExecuteDeleteAsync();
+
+            // Delete MCP idempotency records. Their UserId has no FK, so nothing else would.
+            await _context.McpIdempotencyRecords
+                .Where(r => r.UserId == userId)
                 .ExecuteDeleteAsync();
 
             // Profile and cover pictures, current and replaced: the user's own Files rows name their
