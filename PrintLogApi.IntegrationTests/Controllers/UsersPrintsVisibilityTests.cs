@@ -54,7 +54,9 @@ public class UsersPrintsVisibilityTests(CustomWebApplicationFactory factory) : I
             Assert.Equal(HttpStatusCode.Forbidden, totals.StatusCode);
             // The same answer the profile itself gives that caller.
             Assert.Equal(profile.StatusCode, totals.StatusCode);
-            Assert.DoesNotContain("7777", await totals.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+            // The field that carries the figure, not the figure's digits: a 403 body holds a
+            // random trace id, which can contain any short digit string.
+            Assert.DoesNotContain("\"stat\"", await totals.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
         }
     }
 
