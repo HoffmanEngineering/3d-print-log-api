@@ -43,27 +43,58 @@ public sealed class PrinterSilentCampaign(
 
     public sealed record AutomatedPrint(long UserId, long PrinterId, DateTime CreatedDate, PrintSource Source);
 
+    /// <summary>Automated prints of active printers since <paramref name="sinceUtc"/>.</summary>
+    private static IQueryable<Print> AutomatedPrintRows(PrintLogContext db, DateTime sinceUtc)
+        => db.Prints.AsNoTracking()
+            .Where(p => p.CreatedDate >= sinceUtc && AutomatedPrintSources.All.Contains(p.Source) && p.Printer.IsActive);
+
     /// <summary>
     /// Stage 1: automated prints of active printers since <paramref name="sinceUtc"/>, as plain rows.
     /// The max / count per printer is done in memory (stage 2): an aggregate inside an aggregate
     /// predicate is what SQL Server rejects with error 8124, and SQLite would never tell us.
     /// </summary>
-    internal static IQueryable<AutomatedPrint> AutomatedPrints(PrintLogContext db, DateTime sinceUtc, long? userId = null)
+    internal static IQueryable<AutomatedPrint> AutomatedPrints(PrintLogContext db, DateTime sinceUtc, long? userId = null, IReadOnlyCollection<long>? printerIds = null)
     {
-        var prints = db.Prints.AsNoTracking()
-            .Where(p => p.CreatedDate >= sinceUtc && AutomatedPrintSources.All.Contains(p.Source) && p.Printer.IsActive);
+        var prints = AutomatedPrintRows(db, sinceUtc);
         if (userId is { } id)
         {
             prints = prints.Where(p => p.Printer.UserId == id);
         }
 
+        if (printerIds is not null)
+        {
+            prints = prints.Where(p => printerIds.Contains(p.PrinterId));
+        }
+
         return prints.Select(p => new AutomatedPrint(p.Printer.UserId, p.PrinterId, p.CreatedDate, p.Source));
     }
+
+    /// <summary>
+    /// The printers whose last automated print falls in [<paramref name="quietSinceUtc"/>,
+    /// <paramref name="quietUntilUtc"/>]: one GROUP BY with a HAVING on <c>MAX</c>, over the
+    /// window's own prints only. A printer that has an automated print in the window has its last
+    /// one there too, so this is exactly the set stage 2's window test keeps, before the history
+    /// count. A single aggregate, not an aggregate inside one, so it is clear of error 8124.
+    /// </summary>
+    internal static IQueryable<long> PrintersLastHeardBetween(PrintLogContext db, DateTime quietSinceUtc, DateTime quietUntilUtc)
+        => AutomatedPrintRows(db, quietSinceUtc)
+            .GroupBy(p => p.PrinterId)
+            .Where(g => g.Max(p => p.CreatedDate) <= quietUntilUtc)
+            .Select(g => g.Key);
 
     public async Task<IReadOnlyList<DueEmail>> FindDueAsync(DateTimeOffset now, CancellationToken ct)
     {
         var nowUtc = now.UtcDateTime;
-        var rows = await AutomatedPrints(db, nowUtc - QuietAtMost - History).ToListAsync(ct);
+
+        // Only printers that went quiet inside the window can be due, and on most ticks there are
+        // few or none, so they are found in SQL first and only their history is loaded.
+        var candidates = await PrintersLastHeardBetween(db, nowUtc - QuietAtMost, nowUtc - QuietAtLeast).ToListAsync(ct);
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await AutomatedPrints(db, nowUtc - QuietAtMost - History, printerIds: candidates).ToListAsync(ct);
 
         var silentByUser = Silent(rows, last => last >= nowUtc - QuietAtMost && last <= nowUtc - QuietAtLeast)
             .GroupBy(s => s.UserId)

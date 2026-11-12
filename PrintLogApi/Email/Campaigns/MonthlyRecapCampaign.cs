@@ -34,6 +34,14 @@ public sealed class MonthlyRecapCampaign(
     /// <summary>Wider than any zone's offset from UTC (+14h / -12h), so a UTC window padded by it holds every zone's local month.</summary>
     private static readonly TimeSpan ZonePadding = TimeSpan.FromHours(14);
 
+    /// <summary>The furthest any zone's clock runs ahead of UTC (+14:00, Line Islands).</summary>
+    private static readonly TimeSpan MaxAheadOfUtc = TimeSpan.FromHours(14);
+
+    /// <summary>The furthest any zone's clock runs behind UTC (-12:00, Etc/GMT+12).</summary>
+    private static readonly TimeSpan MaxBehindUtc = TimeSpan.FromHours(12);
+
+    private static readonly TimeSpan LifetimeSpan = TimeSpan.FromDays(5);
+
     public string Name => CampaignName;
 
     public int PreferenceSettingTypeId => EmailSettingTypes.MonthlyRecap;
@@ -42,7 +50,7 @@ public sealed class MonthlyRecapCampaign(
 
     public bool ExemptFromFrequencyCap => false;
 
-    public TimeSpan Lifetime => TimeSpan.FromDays(5);
+    public TimeSpan Lifetime => LifetimeSpan;
 
     public async Task<IReadOnlyList<DueEmail>> FindDueAsync(DateTimeOffset now, CancellationToken ct)
     {
@@ -51,10 +59,13 @@ public sealed class MonthlyRecapCampaign(
 
         // Somewhere in the world it is already tomorrow or still yesterday, so the month that
         // just ended differs by zone. Every candidate is "the month before" one of these dates.
+        // A month whose send window is closed for every zone is dropped before any query, which
+        // is every tick outside the first days of a month (see SendWindow).
         var months = new[] { -1, 0, 1 }
             .Select(d => DateOnly.FromDateTime(nowUtc.AddDays(d)))
             .Select(d => new DateOnly(d.Year, d.Month, 1).AddMonths(-1))
             .Distinct()
+            .Where(month => CanBeDue(month, now, settings.LocalSendHour, settings.EvaluatorInterval))
             .ToList();
 
         var due = new List<DueEmail>();
@@ -86,7 +97,7 @@ public sealed class MonthlyRecapCampaign(
                 var sendAfter = EmailTimeZones.AtLocal(thisMonth, settings.LocalSendHour, zone);
                 if (sendAfter <= now + settings.EvaluatorInterval && sendAfter + Lifetime > now)
                 {
-                    due.Add(new DueEmail(userId, month.ToString(KeyFormat, CultureInfo.InvariantCulture), sendAfter));
+                    due.Add(new DueEmail(userId, PeriodKey(month), sendAfter));
                 }
             }
         }
@@ -95,9 +106,43 @@ public sealed class MonthlyRecapCampaign(
     }
 
     /// <summary>
+    /// The UTC instants at which some zone can be due for <paramref name="month"/>'s recap:
+    /// <c>[Opens, Closes)</c>. The superset of what <see cref="FindDueAsync"/> can return, so a
+    /// tick outside it skips the month without a query.
+    ///
+    /// A user is due when <c>sendAfter - interval &lt;= now &lt; sendAfter + Lifetime</c>, where
+    /// <c>sendAfter</c> is <paramref name="localSendHour"/>:00 on the 1st of the next month in the
+    /// user's zone. That local time is <c>M + hour</c> as a wall clock, with <c>M</c> the 1st at
+    /// 00:00, and every zone's offset lies in [-12h, +14h], so <c>sendAfter</c> lies in
+    /// <c>[M + hour - 14h, M + hour + 12h]</c> as a UTC instant. <see cref="EmailTimeZones.AtLocal"/>
+    /// moves a time in a spring-forward gap one hour later, but only into the offset after the
+    /// gap, so it stays inside that range; <c>MonthlyRecapSendWindowTests</c> checks it for every
+    /// zone this host knows.
+    /// </summary>
+    internal static (DateTimeOffset Opens, DateTimeOffset Closes) SendWindow(DateOnly month, int localSendHour, TimeSpan evaluatorInterval)
+    {
+        var sendDay = new DateTimeOffset(month.AddMonths(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).AddHours(localSendHour);
+        return (sendDay - MaxAheadOfUtc - evaluatorInterval, sendDay + MaxBehindUtc + LifetimeSpan);
+    }
+
+    internal static bool CanBeDue(DateOnly month, DateTimeOffset now, int localSendHour, TimeSpan evaluatorInterval)
+    {
+        var (opens, closes) = SendWindow(month, localSendHour, evaluatorInterval);
+        return now >= opens && now < closes;
+    }
+
+    private static string PeriodKey(DateOnly month) => month.ToString(KeyFormat, CultureInfo.InvariantCulture);
+
+    /// <summary>
     /// Users with a print in <paramref name="month"/> for some zone, each with a test for "a print
-    /// in this exact local window". Prints well inside the month count for every zone, so those
-    /// users come back as a plain distinct list; only the two padded edges need their dates.
+    /// in this exact local window". One pass over the padded month: a print well inside it counts
+    /// for every zone, so it comes back as its user alone (a null date, deduplicated); only a
+    /// print in the two padded edges needs its date.
+    ///
+    /// Users already queued for this month are left out. The evaluator would drop them anyway
+    /// (its unique key is the same user, campaign and period key), and after the first tick of
+    /// their zone that is everyone, so this keeps the zone lookup and the evaluator's existence
+    /// queries to the users not yet queued.
     /// </summary>
     private async Task<Dictionary<long, Func<DateTimeOffset, DateTimeOffset, bool>>> UsersWithPrintsAsync(DateOnly month, CancellationToken ct)
     {
@@ -107,27 +152,28 @@ public sealed class MonthlyRecapCampaign(
         var coreEnd = end - ZonePadding;
         var outerStart = start - ZonePadding;
         var outerEnd = end + ZonePadding;
+        var key = PeriodKey(month);
 
-        var core = await db.Prints.AsNoTracking()
-            .Where(p => p.StartDate >= coreStart && p.StartDate < coreEnd)
-            .Select(p => p.CreatedById)
+        var rows = await db.Prints.AsNoTracking()
+            .Where(p => p.StartDate >= outerStart && p.StartDate < outerEnd)
+            .Where(p => !db.EmailOutbox.Any(o => o.UserId == p.CreatedById && o.Campaign == CampaignName && o.PeriodKey == key))
+            .Select(p => new
+            {
+                p.CreatedById,
+                EdgeDate = p.StartDate >= coreStart && p.StartDate < coreEnd ? null : p.StartDate,
+            })
             .Distinct()
             .ToListAsync(ct);
 
-        var edges = await db.Prints.AsNoTracking()
-            .Where(p => (p.StartDate >= outerStart && p.StartDate < coreStart) || (p.StartDate >= coreEnd && p.StartDate < outerEnd))
-            .Select(p => new { p.CreatedById, p.StartDate })
-            .ToListAsync(ct);
-
         var result = new Dictionary<long, Func<DateTimeOffset, DateTimeOffset, bool>>();
-        foreach (var userId in core)
+        foreach (var row in rows.Where(r => r.EdgeDate is null))
         {
-            result[userId] = static (_, _) => true;
+            result[row.CreatedById] = static (_, _) => true;
         }
 
-        foreach (var group in edges.GroupBy(e => e.CreatedById).Where(g => !result.ContainsKey(g.Key)))
+        foreach (var group in rows.Where(r => r.EdgeDate is not null).GroupBy(r => r.CreatedById).Where(g => !result.ContainsKey(g.Key)))
         {
-            var dates = group.Select(e => e.StartDate!.Value).ToList();
+            var dates = group.Select(r => r.EdgeDate!.Value).ToList();
             result[group.Key] = (from, to) => dates.Exists(d => d >= from && d < to);
         }
 
