@@ -3,8 +3,11 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using PrintLogApi.Achievements.Triggers;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Controllers;
@@ -66,6 +69,90 @@ public class FilamentAdjustmentSqlServerTests(FilamentAdjustmentSqlServerTests.S
         Assert.Null(row.VolumeMl);
         var stored = await db.Filaments.AsNoTracking().SingleAsync(f => f.Id == filament.Id, Ct);
         Assert.Null(stored.InitialNominalVolumeMl);
+    }
+
+    [Fact]
+    public async Task DensityAndDiameterEdits_RederiveLengthUsageRows_OnSqlServer()
+    {
+        // A density or diameter edit now loads the spool's usage rows and re-derives the weight of
+        // those recorded by length (FilamentUsageRederivationTests), through both the web PUT and
+        // MCP update_material.
+        Assert.SkipUnless(Connection is not null, "Set PRINTLOG_SQLSERVER_TEST_CONNECTION to run against SQL Server.");
+        var client = factory.CreateClient();
+
+        var create = new HttpRequestMessage(HttpMethod.Post, "/api/Filaments");
+        create.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        create.Content = JsonContent.Create(new AddFilamentDto
+        {
+            DisplayName = "Usage Rederive SQL Server",
+            MaterialType = "PLA",
+            DiameterMm = 1.75,
+            MaterialDensityGramPerCubicCm = 1.24,
+            Source = Filament.SourceMeasurement.Length,
+            InitialNominalLengthM = 330,
+            IsActive = true,
+            FilamentAdjustments =
+            [
+                new FilamentAdjustmentDto { Source = FilamentAdjustment.SourceMeasurement.Length, LengthInM = -10 },
+            ],
+        });
+        var created = await client.SendAsync(create, Ct);
+        var createBody = await created.Content.ReadAsStringAsync(Ct);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"Create: {(int)created.StatusCode} {createBody}");
+        var filament = (await created.Content.ReadFromJsonAsync<FilamentDetailDto>(cancellationToken: Ct))!;
+
+        var print = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        print.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        print.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = "Usage Rederive SQL Server Print",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = Print.PrintStatus.Pending,
+            ViewStatus = Print.PrintViewStatus.Private,
+            FilamentUsage =
+            [
+                new PrintFilamentSummaryDto
+                {
+                    Id = Guid.NewGuid(),
+                    Filament = new FilamentSummaryDto { Id = filament.Id },
+                    Source = PrintFilament.SourceMeasurement.Length,
+                    LengthInM = 100,
+                },
+            ],
+        });
+        var printed = await client.SendAsync(print, Ct);
+        Assert.True(printed.StatusCode == HttpStatusCode.Created, $"Print: {(int)printed.StatusCode} {await printed.Content.ReadAsStringAsync(Ct)}");
+
+        filament.MaterialDensityGramPerCubicCm = 1.0;
+        filament.FilamentAdjustments = null;
+        var update = new HttpRequestMessage(HttpMethod.Put, $"/api/Filaments/{filament.Id}");
+        update.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        update.Content = JsonContent.Create(filament);
+        var updated = await client.SendAsync(update, Ct);
+        Assert.True(updated.IsSuccessStatusCode, $"Update: {(int)updated.StatusCode} {await updated.Content.ReadAsStringAsync(Ct)}");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var row = await db.PrintFilament.AsNoTracking().SingleAsync(pf => pf.FilamentId == filament.Id, Ct);
+            Assert.Equal((int?)MeasurementUtilities.GetAmountMgFromLength(100, 1.75, 1.0), row.AmountMg);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IFilamentService>().UpdateOwnMaterialForMcp(
+                IntegrationTestSeeder.TestUserId, filament.Id, new MaterialAttributesInput { DiameterMm = 2.85 },
+                new HashSet<string>(), Ct);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var row = await db.PrintFilament.AsNoTracking().SingleAsync(pf => pf.FilamentId == filament.Id, Ct);
+            Assert.Equal((int?)MeasurementUtilities.GetAmountMgFromLength(100, 2.85, 1.0), row.AmountMg);
+            var adjustment = await db.FilamentAdjustments.AsNoTracking().SingleAsync(a => a.FilamentId == filament.Id, Ct);
+            Assert.Equal(-MeasurementUtilities.GetAmountMgFromLength(10, 2.85, 1.0), adjustment.AmountMg);
+        }
     }
 
     /// <summary>The standard test host, schema and seed on a scratch SQL Server database.</summary>
