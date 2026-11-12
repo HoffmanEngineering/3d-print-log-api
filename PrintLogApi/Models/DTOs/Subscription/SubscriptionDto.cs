@@ -8,7 +8,7 @@ public class SubscriptionDto
     public bool CancelAtPeriodEnd { get; set; }
     public bool IsPro { get; set; }
     /// <summary>
-    /// Images allowed per print, per filament and per printer. One cap governs all three.
+    /// Images allowed per print, per filament, per printer and per project. One cap governs all four.
     /// </summary>
     public int MaxImages { get; set; }
 

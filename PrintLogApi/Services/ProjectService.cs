@@ -491,6 +491,14 @@ public class ProjectService(
         var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
         if (project == null) throw new DoesNotExistException();
 
+        // The per-project cap, checked before decoding and before anything reaches storage. A
+        // project already past it (one made before the cap, or by a Pro user who later lapsed)
+        // keeps its images; it only stops taking new ones until it is below the cap again.
+        var maxImages = await GetMaxImagesPerProject(userId);
+        var imageCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+        if (imageCount >= maxImages)
+            throw new BadRequestException($"Maximum of {maxImages} images per project allowed");
+
         // Decode and re-encode BEFORE touching storage: an upload that is not a supported image
         // throws InvalidImageException here and creates no blobs.
         ProcessedImage processed;
@@ -525,6 +533,22 @@ public class ProjectService(
             await imageWriter.DeleteBlobsQuietlyAsync(BlobContainers.ProjectImages, uploadedBlobNames);
             throw;
         }
+    }
+
+    /// <summary>
+    /// The per-tier image cap, shared with prints, printers and filaments. The same direct query
+    /// as <see cref="PrintService.GetMaxImagesPerPrint"/>: there is no IsPro helper to call.
+    /// </summary>
+    public async Task<int> GetMaxImagesPerProject(long userId)
+    {
+        var subscription = await context.Subscriptions
+            .Where(s => s.UserId == userId)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
+
+        return subscription?.Status == SubscriptionStatus.Active
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
