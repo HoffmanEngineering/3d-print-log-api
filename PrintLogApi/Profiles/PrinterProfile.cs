@@ -1,12 +1,26 @@
-﻿using AutoMapper;
+﻿using System.Linq.Expressions;
+using AutoMapper;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Profiles;
 
 public class PrinterProfile : Profile
 {
+    /// <summary>
+    /// The printer's loaded spools in slot order, leaving out any row naming a spool its owner
+    /// does not own (<see cref="SpoolOwnership.LoadedRowCounts"/>). Serves the summary's ProjectTo
+    /// and the detail's in-memory map alike.
+    /// </summary>
+    private static readonly Expression<Func<Printer, IOrderedEnumerable<PrinterFilament>>> OwnedLoadedRows =
+        ExpressionSplice.Inline<Printer, Func<PrinterFilament, bool>, IOrderedEnumerable<PrinterFilament>>(
+            (src, counts) => src.LoadedFilaments!.Where(counts)
+                .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime),
+            SpoolOwnership.LoadedRowCounts);
+
     public PrinterProfile()
     {
         CreateMap<Printer, UserPrinterDTO>()
@@ -17,13 +31,11 @@ public class PrinterProfile : Profile
         CreateMap<Printer, PrinterSummaryWithFilamentDto>();
         CreateMap<Printer, PrinterSummaryWithoutCategory>();
         CreateMap<Printer, PrinterDetailDto>()
-            .ForMember(dest => dest.LoadedFilaments, opt => opt.MapFrom(src => src.LoadedFilaments!
-                .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime)));
+            .ForMember(dest => dest.LoadedFilaments, opt => opt.MapFrom(OwnedLoadedRows));
 
         // New lightweight mapping for improved query performance
         CreateMap<Printer, PrinterSummarySimpleDto>()
-            .ForMember(dest => dest.LoadedFilaments, opt => opt.MapFrom(src => src.LoadedFilaments!
-                .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime)));
+            .ForMember(dest => dest.LoadedFilaments, opt => opt.MapFrom(OwnedLoadedRows));
 
         CreateMap<AddPrinterDTO, Printer>()
             .ForMember(dest => dest.Category, opt => opt.Ignore())

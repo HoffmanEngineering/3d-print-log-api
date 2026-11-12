@@ -177,6 +177,76 @@ public abstract class SpoolFiguresConsistencyTestsBase(CustomWebApplicationFacto
         Assert.Equal(consumedMg / 1000.0, json.GetProperty("used_weight").GetDouble(), 3);
     }
 
+    /// <summary>
+    /// A usage row on another user's print, on that user's printer, does not count toward the
+    /// spool on any surface: the spool's owner can neither see nor remove it. A print another user
+    /// created on the owner's own printer still counts (the printer's owner may link their spools
+    /// to it), as do the owner's own prints.
+    /// </summary>
+    [Fact]
+    public async Task EverySurface_LeavesOutUsageFromAnotherUsersPrint()
+    {
+        Assert.SkipWhen(SkipReason is not null, SkipReason ?? "");
+
+        var user = await _support.CreateUserAsync();
+        var printerId = await _support.CreatePrinterAsync(user);
+        var connection = await _support.ConnectAsync(user, printerId);
+        var spool = await AddSpoolAsync(user);
+        var (printsMg, netAdjustmentMg) = await ArrangeMixedUsageAsync(user, printerId, spool);
+
+        var other = await _support.CreateUserAsync();
+        var otherPrinterId = await _support.CreatePrinterAsync(other);
+        const int onOwnersPrinterMg = 50_000;
+        await WithDbAsync(async db =>
+        {
+            var foreign = NewPrint(other, otherPrinterId, "Another user's print");
+            var onOwnersPrinter = NewPrint(other, printerId, "Another user's print on the owner's printer");
+            db.Prints.AddRange(foreign, onOwnersPrinter);
+            await db.SaveChangesAsync(Ct);
+            db.PrintFilament.AddRange(
+                Usage(foreign.Id, spool.Id, r => r.AmountMg = 300_000),
+                Usage(onOwnersPrinter.Id, spool.Id, r => r.AmountMg = onOwnersPrinterMg));
+            await db.SaveChangesAsync(Ct);
+        });
+        factory.Services.GetRequiredService<ICacheVersionService>().InvalidateUserCache(user.Id);
+
+        var consumedMg = (long)Math.Round(printsMg + onOwnersPrinterMg - netAdjustmentMg);
+        var remainingMg = InitialMg - consumedMg;
+
+        var detail = await RestAsync<FilamentDetailDto>(user, $"/api/Filaments/{spool.Id}");
+        Assert.Equal(remainingMg, detail.FilamentRemaining);
+        Assert.Equal(2, detail.PrintCount);
+
+        var list = await RestJsonAsync(user, "/api/Filaments");
+        var listed = list.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("id").GetGuid() == spool.Id);
+        Assert.Equal(remainingMg, listed.GetProperty("filamentRemaining").GetInt64());
+
+        var printer = await RestJsonAsync(user, $"/api/Printers/{printerId}");
+        Assert.Equal(remainingMg, printer.GetProperty("loadedFilaments").EnumerateArray().Single()
+            .GetProperty("filament").GetProperty("filamentRemaining").GetInt64());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var filaments = scope.ServiceProvider.GetRequiredService<IFilamentService>();
+            var inventory = await filaments.GetMaterialInventoryForMcp(user.Id, 1, 25, null, null, true, Ct);
+            Assert.Equal(remainingMg / 1000.0, inventory.Items.Single().RemainingGrams!.Value, 3);
+
+            var mcpPrinter = await scope.ServiceProvider.GetRequiredService<IPrinterService>().GetPrinterForMcp(user.Id, printerId, Ct);
+            Assert.Equal(remainingMg / 1000.0, mcpPrinter.LoadedFilaments.Single().RemainingGrams!.Value, 3);
+
+            var materials = await scope.ServiceProvider.GetRequiredService<IMaterialAnalyticsService>()
+                .GetMaterials(user.Id, new AnalyticsFilter { TimeZone = "UTC" }, Ct);
+            Assert.Equal(remainingMg, materials.TopSpools.Single().RemainingMg);
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/spoolman/api/v1/spool/{spool.SpoolNumber}");
+        request.Headers.Authorization = SpoolmanTestSupport.Basic(connection.Secret!);
+        var response = await _client.SendAsync(request, Ct);
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
+        Assert.Equal(remainingMg / 1000.0, json.GetProperty("remaining_weight").GetDouble(), 3);
+        Assert.Equal(consumedMg / 1000.0, json.GetProperty("used_weight").GetDouble(), 3);
+    }
+
     private static void AssertNull(JsonElement element, string property) =>
         Assert.True(
             !element.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null,

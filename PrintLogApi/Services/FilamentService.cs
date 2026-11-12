@@ -4,6 +4,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
@@ -1202,7 +1203,10 @@ public class FilamentService(
         // Filter out unloaded-filaments if requested.
         if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
         {
-            filament = filament.Where(f => f.PrinterFilaments!.Any(pf => !pf.UnloadedDateTime.HasValue));
+            // Only a load on a printer the spool's owner owns, as LoadedInPrinter reports it.
+            filament = filament.Where(ExpressionSplice.Inline<Filament, Func<PrinterFilament, bool>, bool>(
+                (f, counts) => f.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Any(counts),
+                SpoolOwnership.LoadedRowCounts));
         }
 
         if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
@@ -1353,7 +1357,11 @@ public class FilamentService(
         return await context.Filaments
                 .Where(f => f.Id == id)
                 .Include(f => f.FilamentAdjustments)
-                .Include(f => f.PrintFilaments)
+                // Print and its Printer: which usage rows count is decided by who owns them
+                // (SpoolOwnership.UsageRowCounts), for the remaining figure and for DeleteFilament.
+                .Include(f => f.PrintFilaments!)
+                    .ThenInclude(pf => pf.Print)
+                        .ThenInclude(p => p.Printer)
                 .Include(f => f.MaterialCategory)
                 .Include(f => f.Tags)
                 .AsSplitQuery()
@@ -2215,10 +2223,18 @@ public class FilamentService(
             return;
         }
 
-        // Check if any filament is being used.
-        if (filament.PrintFilaments!.Any())
+        // Check if any filament is being used. A usage row on another user's print does not count
+        // (SpoolOwnership.UsageRowCounts): its owner could neither see nor remove it, so it would
+        // keep the spool forever. It is detached instead and keeps its amount, with no spool.
+        if (filament.PrintFilaments!.Any(SpoolOwnership.Counts))
         {
             throw new FilamentIsInUseException();
+        }
+
+        foreach (var foreignRow in filament.PrintFilaments!)
+        {
+            foreignRow.FilamentId = null;
+            foreignRow.Filament = null;
         }
 
         // Remove any adjustments
