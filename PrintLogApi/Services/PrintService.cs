@@ -1555,6 +1555,34 @@ public sealed class PrintService(
         return (await GetPrintById(updatedPrint.Id))!;
     }
 
+    /// <summary>
+    /// Unlinks every usage row of <paramref name="print"/> whose spool <paramref name="userId"/>
+    /// does not own, keeping its figures. Such a row predates the ownership checks (a print event
+    /// charged a spool loaded on the printer without one); <c>/complete</c> matches rows by id or
+    /// slot, so it would otherwise write a measurement onto that spool. Run before the merge, so
+    /// the row is an unlinked one the measurement can still land on; the merge itself only links
+    /// spools the request names, which were checked. Refusing instead would leave a connector's
+    /// completion failing on every retry over a row it cannot see.
+    /// </summary>
+    private async Task DetachSpoolsNotOwnedBy(Print print, long userId)
+    {
+        var linked = print.FilamentUsage!.Select(r => r.FilamentId).OfType<Guid>().Distinct().ToList();
+        if (linked.Count == 0)
+        {
+            return;
+        }
+
+        var owned = await context.Filaments
+            .Where(f => linked.Contains(f.Id) && f.CreatedById == userId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var row in print.FilamentUsage!.Where(r => r.FilamentId is { } id && !owned.Contains(id)))
+        {
+            row.FilamentId = null;
+            row.Filament = null;
+        }
+    }
+
     /// <summary>The slots of <paramref name="print"/> whose row has a spool.</summary>
     private static HashSet<int> SlotsWithSpool(Print print) =>
         (print.FilamentUsage ?? [])
@@ -1690,6 +1718,8 @@ public sealed class PrintService(
         {
             throw new UserCannotAccessFilamentException();
         }
+
+        await DetachSpoolsNotOwnedBy(print, userId);
 
         // The end time only fills a gap: a start date or duration already known wins over one
         // derived from it.

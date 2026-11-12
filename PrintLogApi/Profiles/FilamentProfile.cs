@@ -95,9 +95,14 @@ public class FilamentProfile : Profile
         UsageRowActualMl,
         UsageRowEstimatedMl);
 
-    /// <summary>Milligrams the spool's prints took off it, by <see cref="UsageRowMg"/>.</summary>
+    /// <summary>
+    /// Milligrams the spool's prints took off it, by <see cref="UsageRowMg"/>. Only the rows
+    /// <see cref="SpoolOwnership.UsageRowCounts"/> admits: a print of another user's can't move the
+    /// figure. Done in memory (detail page, printer page), the rows need their Print and its Printer.
+    /// </summary>
     private static readonly Expression<Func<Filament, double>> PrintUsageMg =
-        ExpressionSplice.Inline<Filament, Func<PrintFilament, double>, double>((f, row) => f.PrintFilaments!.Sum(row), UsageRowMg);
+        ExpressionSplice.Inline<Filament, Func<PrintFilament, bool>, Func<PrintFilament, double>, double>(
+            (f, counts, row) => f.PrintFilaments!.Where(counts).Sum(row), SpoolOwnership.UsageRowCounts, UsageRowMg);
 
     /// <summary>
     /// One adjustment's signed milligrams, as the spool sees it: negative removes filament, positive
@@ -269,13 +274,9 @@ public class FilamentProfile : Profile
             // that an untracked spool would return remaining null alongside length 0 and
             // volume 0, and the UI would render "Not tracked" beside a contradictory "0.0 m".
             .ForMember(dest => dest.FilamentRemaining, src => src.MapFrom(RemainingMg))
-            // Distinct prints, not usage rows: there is no unique index on (PrintId, FilamentId),
-            // so one print may hold two rows for the same spool.
-            //
-            // Read PrintId, never p.Print. GetFilamentById Includes PrintFilaments but not the
-            // Print behind each one, and there is no lazy-loading proxy, so reaching through that
-            // navigation here would NullReferenceException on every filament that has usage.
-            .ForMember(dest => dest.PrintCount, src => src.MapFrom(src => src.PrintFilaments!.Select(p => p.PrintId).Distinct().Count()))
+            // There is no lazy-loading proxy: every in-memory caller (GetFilamentById) must Include
+            // each usage row's Print and its Printer, which the ownership rule reads.
+            .ForMember(dest => dest.PrintCount, src => src.MapFrom(PrintCount))
             .ForMember(dest => dest.TotalUsedMg, src => src.MapFrom(UsedMg))
             .ForMember(dest => dest.ColorPattern, src => src.MapFrom(src => src.ColorPattern ?? ColorPatternType.Solid))
             .ForMember(dest => dest.FinishType, src => src.MapFrom(src => src.FinishType ?? FilamentFinishType.Standard))

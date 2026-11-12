@@ -212,6 +212,14 @@ public class PrintEventService(
         print.UpdatedById = finished.UserId;
         context.Entry(print).State = EntityState.Modified;
 
+        // A row a start linked to another user's spool, before SpoolInSlot checked the owner. The
+        // finish below writes its length, so it keeps the measurement but loses the spool.
+        foreach (var row in print.FilamentUsage!.Where(r => r.Filament != null && r.Filament.CreatedById != print.CreatedById))
+        {
+            row.FilamentId = null;
+            row.Filament = null;
+        }
+
         // Moonraker's per-spool reports (#171), when the notifier collected any, are the better
         // account of the job than its single total, which cannot say which spool it came from.
         var accumulated = await context.SpoolmanUsages.Where(u => u.PrintId == print.Id).ToListAsync();

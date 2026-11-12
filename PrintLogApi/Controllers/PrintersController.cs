@@ -175,7 +175,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Include(p => p.Category!)
                 .ThenInclude(type => type.MaterialCategory)
             .Where(p => p.Id == id)
@@ -461,7 +463,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Where(p => p.Id == id)
             .SingleOrDefaultAsync();
 
