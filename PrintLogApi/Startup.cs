@@ -33,6 +33,7 @@ using PrintLogApi.Serialization;
 using PrintLogApi.Services;
 using PrintLogApi.Services.Moonraker;
 using PrintLogApi.Services.Push;
+using PrintLogApi.Services.UserDeletion;
 using PrintLogApi.SpoolTags;
 using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
@@ -279,6 +280,9 @@ public class Startup
         services.AddOptions<Services.SlicerSettings.CuraSettingsRetentionOptions>()
             .Bind(Configuration.GetSection(Services.SlicerSettings.CuraSettingsRetentionOptions.SectionName));
         services.AddHostedService<Services.SlicerSettings.CuraSettingsRetentionJob>();
+        // Deletes accounts once their deactivation grace period is over. Replaced the Azure
+        // Function that called the anonymous DELETE /api/Users/pending-deactivation.
+        services.AddPendingUserDeletion(Configuration, Environment);
         services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {

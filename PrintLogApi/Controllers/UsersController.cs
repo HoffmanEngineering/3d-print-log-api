@@ -28,7 +28,6 @@ namespace PrintLogApi.Controllers;
 [Authorize]
 public class UsersController(
     PrintLogContext context,
-    IUserDeletionService userDeletionService,
     IUserService userService,
     IMapper mapper,
     IAuthorizationService authorizationService,
@@ -286,19 +285,6 @@ public class UsersController(
             .SingleAsync();
 
         return user;
-    }
-
-    /// <summary>
-    ///   Delete the data from users pending deactivation after the deactivation period.
-    /// </summary>
-    /// <returns></returns>
-    [HttpDelete("pending-deactivation")]
-    [AllowAnonymous]
-    public async Task<ActionResult> ProcessPendingDeactivations()
-    {
-        await userDeletionService.DeletePendingDeactivatedUsers();
-
-        return Ok();
     }
 
     /// <summary>
