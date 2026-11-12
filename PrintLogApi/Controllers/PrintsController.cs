@@ -1785,7 +1785,12 @@ public class PrintsController(
     /// <param name="id">The ID of the print the file was uploaded for.</param>
     /// <param name="request">The blob path and file metadata returned from the upload-url step.</param>
     /// <response code="200">Returns the created PrintAttachment details.</response>
-    /// <response code="400">If the blob path is invalid.</response>
+    /// <response code="400">
+    /// If the blob path is not one upload-url issued for this print, the file name's type does not
+    /// match it, it is already attached, nothing was uploaded to it, or the uploaded file breaks the
+    /// per-file size, per-print count or storage quota (the blob is then deleted). The size recorded
+    /// is the uploaded blob's own length, not the request's sizeBytes.
+    /// </response>
     /// <response code="401">If the user is not authenticated.</response>
     /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
     /// <response code="404">If the print does not exist.</response>
@@ -1812,7 +1817,8 @@ public class PrintsController(
             {
                 // Lower-cased so ".GCODE" and ".gcode" chart as one series.
                 ["extension"] = Path.GetExtension(request.FileName ?? string.Empty).ToLowerInvariant(),
-                ["sizeBytes"] = request.SizeBytes.ToString(CultureInfo.InvariantCulture),
+                // The stored blob's length, not the client's declared figure.
+                ["sizeBytes"] = result.SizeBytes.ToString(CultureInfo.InvariantCulture),
             });
             return Ok(result);
         }

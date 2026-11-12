@@ -108,6 +108,13 @@ public interface IBlobStorageService
         string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The blob's length in bytes, read from storage, or null if the blob does not exist. For a
+    /// blob a client wrote through a SAS URL, which cannot bound its size, this is the only
+    /// trustworthy figure.
+    /// </summary>
+    Task<long?> GetBlobLengthAsync(string containerName, string blobName, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes a blob from storage. Does nothing if the blob does not exist.
     /// </summary>
     /// <param name="containerName">The blob container name</param>

@@ -193,6 +193,26 @@ public class InMemoryBlobStorageService : IBlobStorageService
     }
 
     /// <summary>
+    /// Lengths to report in place of a blob's real byte count, keyed as <see cref="Blobs"/> is,
+    /// so a test can stand in a 300 MB blob without allocating one.
+    /// </summary>
+    public Dictionary<string, long> ReportedLengths { get; } = new();
+
+    /// <summary>
+    /// The blob's length: <see cref="ReportedLengths"/> when set, else its byte count. Null when
+    /// it does not exist.
+    /// </summary>
+    public Task<long?> GetBlobLengthAsync(
+        string containerName, string blobName, CancellationToken cancellationToken = default)
+    {
+        var blobPath = $"{containerName}/{blobName}";
+        if (!Blobs.TryGetValue(blobPath, out var bytes))
+            return Task.FromResult<long?>(null);
+        return Task.FromResult<long?>(
+            ReportedLengths.TryGetValue(blobPath, out var reported) ? reported : bytes.LongLength);
+    }
+
+    /// <summary>
     /// Removes the blob from in-memory storage. No-op if it does not exist.
     /// </summary>
     public Task DeleteBlobAsync(string containerName, string blobName)
@@ -200,6 +220,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
         DeletedBlobNames.Add($"{containerName}/{blobName}");
         Blobs.Remove($"{containerName}/{blobName}");
         Metadata.Remove($"{containerName}/{blobName}");
+        ReportedLengths.Remove($"{containerName}/{blobName}");
         return Task.CompletedTask;
     }
 
@@ -210,6 +231,7 @@ public class InMemoryBlobStorageService : IBlobStorageService
     {
         Blobs.Clear();
         Metadata.Clear();
+        ReportedLengths.Clear();
         UploadedBlobNames.Clear();
         DeletedBlobNames.Clear();
         SignCallCount = 0;

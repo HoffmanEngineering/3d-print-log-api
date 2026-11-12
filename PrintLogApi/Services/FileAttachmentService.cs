@@ -50,17 +50,41 @@ public class FileAttachmentService(
 
         await AssertProAsync(userId);
 
-        // Parse container and blob name from the blobPath (format: "printattachments/123/guid.ext")
-        var parts = request.BlobPath!.Split('/', 2);
-        if (parts.Length != 2 || parts[0] != AttachmentContainer)
-            throw new BadRequestException("Invalid blob path.");
+        // The client wrote the blob itself through a SAS URL, which can bound neither its size nor
+        // stop it being confirmed twice, so nothing in the request is taken on trust. The path must
+        // be one GetUploadUrlAsync issues for THIS print ("printattachments/{printId}/{guid}{ext}"),
+        // the file name must carry that same allowed extension, and the size recorded is the
+        // blob's own. None of these failures deletes the blob: a path that fails them may be
+        // another print's file, or one already attached.
+        var blobName = ParseIssuedBlobName(printId, request.BlobPath);
+        AssertAllowedExtension(request.FileName);
+        if (!string.Equals(GetExtension(request.FileName), GetExtension(blobName), StringComparison.OrdinalIgnoreCase))
+            throw new BadRequestException("The file name's type does not match the uploaded file.");
+
+        if (await context.Files.AnyAsync(f => f.Path == request.BlobPath))
+            throw new BadRequestException("This file has already been attached.");
+
+        var sizeBytes = await blobStorageService.GetBlobLengthAsync(AttachmentContainer, blobName)
+            ?? throw new BadRequestException("The file was not uploaded.");
+
+        // The blob is this print's, issued by upload-url and attached to nothing, so one that
+        // breaks a limit is deleted rather than left to count against nothing.
+        try
+        {
+            await AssertFileQuotaAsync(printId, userId, sizeBytes);
+        }
+        catch (BadRequestException)
+        {
+            await blobStorageService.DeleteBlobAsync(AttachmentContainer, blobName);
+            throw;
+        }
 
         var fileId = Guid.NewGuid();
         var file = new FileModel
         {
             Id = fileId,
             Path = request.BlobPath,
-            Size = request.SizeBytes,
+            Size = sizeBytes,
             CreatedById = userId,
             UpdatedById = userId,
         };
@@ -200,6 +224,29 @@ public class FileAttachmentService(
         // Per-file size limit (also validated client-side and in the DTO range attribute)
         if (newFileSizeBytes > MaxFileSizeBytes)
             throw new BadRequestException("File size exceeds the 200MB limit.");
+    }
+
+    /// <summary>
+    /// The blob name (within the container) of a path GetUploadUrlAsync issued for this print:
+    /// "printattachments/{printId}/{guid}{ext}", the GUID in its default form and the extension
+    /// an allowed one, in whatever case the uploaded file name used. Anything else is a 400.
+    /// </summary>
+    private static string ParseIssuedBlobName(long printId, string? blobPath)
+    {
+        var prefix = $"{AttachmentContainer}/{printId}/";
+        if (blobPath is null || !blobPath.StartsWith(prefix, StringComparison.Ordinal))
+            throw new BadRequestException("Invalid blob path.");
+
+        var name = blobPath[prefix.Length..];
+        var ext = GetExtension(name);
+        // Length too: Guid parsing forgives surrounding whitespace, which the issued name never has.
+        if (ext.Length == 0
+            || name.Length - ext.Length != 36
+            || !Array.Exists(AllowedExtensions, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase))
+            || !Guid.TryParseExact(name[..^ext.Length], "D", out _))
+            throw new BadRequestException("Invalid blob path.");
+
+        return $"{printId}/{name}";
     }
 
     private static void AssertAllowedExtension(string? fileName)

@@ -701,6 +701,9 @@ public class ImageBackfillTests(CustomWebApplicationFactory factory)
         public Task<BlobContent?> OpenReadAsync(string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
             => inner.OpenReadAsync(containerName, blobName, seekable, cancellationToken);
 
+        public Task<long?> GetBlobLengthAsync(string containerName, string blobName, CancellationToken cancellationToken = default)
+            => inner.GetBlobLengthAsync(containerName, blobName, cancellationToken);
+
         public Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry)
             => inner.GenerateSasUploadUrlAsync(containerName, blobName, expiry);
 
