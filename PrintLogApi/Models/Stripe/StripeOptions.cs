@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Models.Stripe;
 
@@ -19,12 +20,21 @@ public class StripeOptions
 
     public string? ProMonthlyPriceId { get; set; }
     public string? ProAnnualPriceId { get; set; }
+
+    /// <summary>
+    /// Origins (<c>https://localhost:4310</c>), besides <c>Email:WebBaseUrl</c>'s, that Stripe may
+    /// send a customer back to after checkout or the billing portal, when the request comes from
+    /// one of them. For Development, where a UI worktree runs on its own port. Empty by default,
+    /// and production needs nothing here: every other request returns to <c>Email:WebBaseUrl</c>.
+    /// </summary>
+    public string[] AllowedReturnOrigins { get; set; } = [];
 }
 
 /// <summary>
-/// Fails startup in Production without a webhook secret. Development, E2ETesting,
-/// IntegrationTesting and staging run without Stripe, so a blank secret is allowed there and the
-/// webhook answers 503 instead.
+/// Fails startup in Production without a webhook secret, and in every environment on an
+/// <see cref="StripeOptions.AllowedReturnOrigins"/> entry that is not an origin. Development,
+/// E2ETesting, IntegrationTesting and staging run without Stripe, so a blank secret is allowed there
+/// and the webhook answers 503 instead.
 /// </summary>
 public sealed class StripeOptionsValidator(IHostEnvironment environment) : IValidateOptions<StripeOptions>
 {
@@ -35,6 +45,15 @@ public sealed class StripeOptionsValidator(IHostEnvironment environment) : IVali
         if (environment.IsProduction() && string.IsNullOrWhiteSpace(options.WebhookSecret))
         {
             failures.Add($"{StripeOptions.SectionName}:{nameof(StripeOptions.WebhookSecret)} is required in Production. Without it every Stripe webhook is refused.");
+        }
+
+        foreach (var entry in options.AllowedReturnOrigins)
+        {
+            if (!StripeReturnUrls.TryNormalizeOrigin(entry, out _))
+            {
+                failures.Add($"{StripeOptions.SectionName}:{nameof(StripeOptions.AllowedReturnOrigins)} entries must be http or https origins with no path, query or user info, such as https://localhost:4310.");
+                break;
+            }
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);

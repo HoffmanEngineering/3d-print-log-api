@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Authentication.Devices;
+using PrintLogApi.Email;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models.DTOs.Subscription;
@@ -19,6 +20,7 @@ namespace PrintLogApi.Controllers;
 public class SubscriptionController(
     ISubscriptionService subscriptionService,
     TelemetryClient telemetry,
+    IOptions<EmailOptions> emailOptions,
     IOptions<StripeOptions> stripeOptions,
     ILogger<SubscriptionController> logger) : ControllerBase
 {
@@ -57,14 +59,14 @@ public class SubscriptionController(
         if (!userId.HasValue)
             return Unauthorized();
 
+        var returnBase = ReturnBase();
+        if (returnBase is null)
+            return ReturnBaseMissing();
+
         try
         {
-            var origin = Request.Headers["Origin"].ToString();
-            if (string.IsNullOrEmpty(origin))
-                origin = $"{Request.Scheme}://{Request.Host}";
-
-            var successUrl = $"{origin}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}";
-            var cancelUrl = $"{origin}/subscription/canceled";
+            var successUrl = $"{returnBase}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}";
+            var cancelUrl = $"{returnBase}/subscription/canceled";
 
             var url = await subscriptionService.CreateCheckoutSession(
                 userId.Value, dto.PlanId, successUrl, cancelUrl);
@@ -89,13 +91,13 @@ public class SubscriptionController(
         if (!userId.HasValue)
             return Unauthorized();
 
+        var returnBase = ReturnBase();
+        if (returnBase is null)
+            return ReturnBaseMissing();
+
         try
         {
-            var origin = Request.Headers["Origin"].ToString();
-            if (string.IsNullOrEmpty(origin))
-                origin = $"{Request.Scheme}://{Request.Host}";
-
-            var returnUrl = $"{origin}/settings";
+            var returnUrl = $"{returnBase}/settings";
             var url = await subscriptionService.CreateCustomerPortalSession(userId.Value, returnUrl);
             return Ok(new PortalSessionResponseDto { Url = url });
         }
@@ -142,6 +144,24 @@ public class SubscriptionController(
             telemetry.TrackException(ex);
             return BadRequest($"Webhook error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Where Stripe sends the customer back to: <c>Email:WebBaseUrl</c>, or the request's
+    /// <c>Origin</c> when it is on <c>Stripe:AllowedReturnOrigins</c>. Null when the web base is not
+    /// configured. Never the request's Host.
+    /// </summary>
+    private string? ReturnBase() => StripeReturnUrls.ResolveBase(
+        Request.Headers.Origin.ToString(),
+        emailOptions.Value.WebBaseUrl,
+        stripeOptions.Value.AllowedReturnOrigins);
+
+    private ObjectResult ReturnBaseMissing()
+    {
+        logger.LogError("Refused a Stripe session: Email:WebBaseUrl is not an absolute http(s) URL, so there is nowhere safe to return the customer to.");
+        return Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Billing is not configured.");
     }
 }
 

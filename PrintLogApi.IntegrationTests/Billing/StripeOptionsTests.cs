@@ -1,11 +1,12 @@
 ﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.Services;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Billing;
 
-/// <summary>The Stripe settings' startup checks.</summary>
+/// <summary>The Stripe settings' startup checks, and how a Stripe return URL's base is chosen.</summary>
 public class StripeOptionsTests
 {
     #region Startup validation
@@ -45,6 +46,27 @@ public class StripeOptionsTests
         Assert.True(Validate(environment, new StripeOptions { WebhookSecret = "" }).Succeeded);
     }
 
+    [Theory]
+    [InlineData("localhost:4310")]
+    [InlineData("ftp://localhost:4310")]
+    [InlineData("https://localhost:4310/settings")]
+    [InlineData("https://localhost:4310?x=1")]
+    [InlineData("https://user@localhost:4310")]
+    [InlineData("")]
+    public void AnAllowedReturnOriginThatIsNotAnOrigin_FailsInEveryEnvironment(string entry)
+    {
+        var result = Validate("Development", new StripeOptions { AllowedReturnOrigins = [entry] });
+
+        Assert.True(result.Failed);
+        Assert.Contains("AllowedReturnOrigins", result.FailureMessage);
+    }
+
+    [Fact]
+    public void AllowedReturnOrigins_AcceptsOriginsWithOrWithoutATrailingSlash()
+    {
+        Assert.True(Validate("Development", new StripeOptions { AllowedReturnOrigins = ["https://localhost:4310", "http://localhost:4311/"] }).Succeeded);
+    }
+
     [Fact]
     public void Registration_ValidatesOnStart_SoProductionWithoutASecretDoesNotStart()
     {
@@ -66,6 +88,7 @@ public class StripeOptionsTests
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Stripe:WebhookSecret"] = "whsec_x",
+                ["Stripe:AllowedReturnOrigins:0"] = "https://localhost:4310",
             }).Build(),
             new TestHostEnvironment("Production"));
         using var provider = services.BuildServiceProvider();
@@ -73,6 +96,53 @@ public class StripeOptionsTests
         provider.GetRequiredService<IStartupValidator>().Validate();
         var options = provider.GetRequiredService<IOptions<StripeOptions>>().Value;
         Assert.Equal("whsec_x", options.WebhookSecret);
+        Assert.Equal(["https://localhost:4310"], options.AllowedReturnOrigins);
+    }
+
+    #endregion
+
+    #region Return URL base
+
+    private const string Web = "https://www.3dprintlog.com";
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("https://evil.example")]
+    [InlineData("https://www.3dprintlog.com.evil.example")]
+    [InlineData("http://www.3dprintlog.com")]
+    [InlineData("https://www.3dprintlog.com:444")]
+    [InlineData("https://www.3dprintlog.com/elsewhere")]
+    [InlineData("null")]
+    [InlineData("not a url")]
+    public void AnyOriginOtherThanAnAllowedOne_GetsTheConfiguredBase(string? origin)
+    {
+        Assert.Equal(Web, StripeReturnUrls.ResolveBase(origin, Web, ["https://localhost:4310"]));
+    }
+
+    [Theory]
+    [InlineData("https://www.3dprintlog.com")]
+    [InlineData("https://WWW.3dprintlog.com")]
+    [InlineData("https://www.3dprintlog.com/")]
+    public void TheConfiguredOrigin_GetsTheConfiguredBase(string origin)
+    {
+        Assert.Equal(Web, StripeReturnUrls.ResolveBase(origin, Web + "/", []));
+    }
+
+    [Fact]
+    public void AnAllowListedOrigin_IsUsedAsTheBase()
+    {
+        Assert.Equal("https://localhost:4310", StripeReturnUrls.ResolveBase("https://localhost:4310", Web, ["https://localhost:4310/"]));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("www.3dprintlog.com")]
+    public void WithoutAUsableConfiguredBase_ThereIsNoBase(string? webBase)
+    {
+        Assert.Null(StripeReturnUrls.ResolveBase("https://localhost:4310", webBase, ["https://localhost:4310"]));
     }
 
     #endregion
