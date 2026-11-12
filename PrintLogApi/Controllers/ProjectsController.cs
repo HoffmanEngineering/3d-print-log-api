@@ -293,6 +293,11 @@ public class ProjectsController(
         {
             return BadRequest(ex.Message);
         }
+        catch (BadRequestException ex)
+        {
+            // The per-project image cap.
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>Remove an image from a project.</summary>

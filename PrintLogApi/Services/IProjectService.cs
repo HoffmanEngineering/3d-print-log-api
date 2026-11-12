@@ -47,7 +47,13 @@ public interface IProjectService
     Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId);
     Task DeleteProjectAsync(Guid id, bool deletePrints, long userId);
     /// <exception cref="Exceptions.InvalidImageException">The file is not a supported image.</exception>
+    /// <exception cref="Exceptions.BadRequestException">
+    /// The project already has <see cref="GetMaxImagesPerProject"/> images or more.
+    /// </exception>
     Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId);
+
+    /// <summary>Images allowed per project: the same cap as prints, printers and filaments.</summary>
+    Task<int> GetMaxImagesPerProject(long userId);
     Task DeleteImageAsync(Guid projectId, int imageId, long userId);
     Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
     Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);

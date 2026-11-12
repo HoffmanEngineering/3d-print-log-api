@@ -6,8 +6,10 @@
 public static class SubscriptionLimits
 {
     /// <summary>
-    /// Images per print, per filament and per printer share one pair of limits. They diverged
-    /// historically (filament shipped at 3/10); unified upward so no user's images are stranded.
+    /// Images per print, per filament, per printer and per project share one pair of limits. They
+    /// diverged historically (filament shipped at 3/10); unified upward so no user's images are
+    /// stranded. Projects had no cap until it joined this pair: a project already past it keeps
+    /// its images and only stops accepting new ones.
     /// </summary>
     public const int FreeMaxImages = 5;
     public const int ProMaxImages = 20;
