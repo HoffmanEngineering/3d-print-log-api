@@ -2064,8 +2064,17 @@ public class FilamentService(
         // request sends one (#232); a null list keeps the stored rows (#248).
         var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
         var storedAdjustments = SnapshotAdjustments(existingFilament);
+        var ownAdjustmentIds = ChildRows.IdsOf(existingFilament.FilamentAdjustments, a => a.Id);
 
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
+
+        // An adjustment id this spool does not have (another user's, or a stale one) is a new
+        // adjustment of this spool, never an update of the row it names.
+        ChildRows.AddUnowned(context, updatedFilament.FilamentAdjustments!, ownAdjustmentIds, a => a.Id, (a, id) =>
+        {
+            a.Id = id;
+            a.FilamentId = updatedFilament.Id;
+        });
 
         if (tagUids is not null)
         {

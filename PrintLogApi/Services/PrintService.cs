@@ -1480,7 +1480,16 @@ public sealed class PrintService(
         }
 
         var slotsWithSpool = SlotsWithSpool(existingPrint);
+        var ownRowIds = ChildRows.IdsOf(existingPrint.FilamentUsage, r => r.Id);
         var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
+
+        // A row id this print does not have (another user's row, or one a PATCH has since
+        // replaced) is a new row of this print, never an update of the row it names.
+        ChildRows.AddUnowned(context, updatedPrint.FilamentUsage!, ownRowIds, r => r.Id, (r, id) =>
+        {
+            r.Id = id;
+            r.PrintId = updatedPrint.Id;
+        });
 
         var printer = await context.Printers.FindAsync(dto.PrinterId);
         updatedPrint.Printer = printer!;
