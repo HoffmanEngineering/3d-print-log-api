@@ -72,9 +72,10 @@ public sealed class PrinterSilentCampaign(
     /// <summary>
     /// The printers whose last automated print falls in [<paramref name="quietSinceUtc"/>,
     /// <paramref name="quietUntilUtc"/>]: one GROUP BY with a HAVING on <c>MAX</c>, over the
-    /// window's own prints only. A printer that has an automated print in the window has its last
-    /// one there too, so this is exactly the set stage 2's window test keeps, before the history
-    /// count. A single aggregate, not an aggregate inside one, so it is clear of error 8124.
+    /// window's own prints only. A printer whose last automated print is at or after the window's
+    /// start has that print among these rows, so the MAX here is its true last print and this is
+    /// exactly the set stage 2's window test keeps, before the history count. A single aggregate,
+    /// not one inside another, so it is clear of error 8124.
     /// </summary>
     internal static IQueryable<long> PrintersLastHeardBetween(PrintLogContext db, DateTime quietSinceUtc, DateTime quietUntilUtc)
         => AutomatedPrintRows(db, quietSinceUtc)
