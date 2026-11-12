@@ -126,6 +126,96 @@ public class EmailPipelineSqlServerTests : IClassFixture<EmailPipelineSqlServerT
         Assert.Contains(transport.Sent, m => m.ToAddress == newcomer.Email);
     }
 
+    /// <summary>
+    /// The narrowed monthly recap and printer-silent due queries (the recap's single padded-month
+    /// pass with its outbox anti-join, printer silent's GROUP BY / HAVING MAX candidate query and
+    /// its IN-list history load) translate and run on SQL Server, and agree with the queries they
+    /// replaced at ticks inside, at the ends of and outside the recap's send window.
+    /// </summary>
+    [Fact]
+    public async Task NarrowedCampaignQueries_MatchTheOldOnes_OnSqlServer()
+    {
+        Assert.SkipUnless(Connection is not null, "Set PRINTLOG_SQLSERVER_TEST_CONNECTION to run against SQL Server.");
+
+        using var scope = _factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var db = sp.GetRequiredService<PrintLogContext>();
+        var settings = CampaignQueryTestKit.Options();
+        var ids = new HashSet<long>();
+        var november = new DateOnly(2026, 11, 1);
+
+        async Task<(long UserId, long PrinterId)> UserAsync(string? zone)
+        {
+            var user = await EmailTestData.CreateUserAsync(db, createdDate: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            ids.Add(user.Id);
+            if (zone is not null)
+            {
+                await CampaignTestData.SetZoneAsync(db, user.Id, zone);
+            }
+
+            return (user.Id, (await CampaignTestData.PrinterAsync(db, user.Id)).Id);
+        }
+
+        // Recap: prints on and beside the local month edges of the extreme zones, one well inside.
+        foreach (var zoneId in new string?[] { null, "Pacific/Kiritimati", "Etc/GMT+12", "Pacific/Auckland" })
+        {
+            var zone = EmailTimeZones.For(zoneId, settings.DefaultTimeZone);
+            var localStart = EmailTimeZones.AtLocal(november, 0, zone);
+            var localEnd = EmailTimeZones.AtLocal(november.AddMonths(1), 0, zone);
+            foreach (var at in new[] { localStart, localStart.AddTicks(-10), localEnd, localEnd.AddTicks(-10), new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero) })
+            {
+                var (userId, printerId) = await UserAsync(zoneId);
+                await CampaignTestData.PrintAsync(db, userId, printerId, at);
+            }
+        }
+
+        // Already queued for November: the narrowed query leaves it out, the old one did not.
+        var (queued, queuedPrinter) = await UserAsync(null);
+        await CampaignTestData.PrintAsync(db, queued, queuedPrinter, new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
+        db.EmailOutbox.Add(EmailTestData.OutboxRow(queued, MonthlyRecapCampaign.CampaignName, "2026-11", new DateTimeOffset(2026, 11, 30, 19, 0, 0, TimeSpan.Zero)));
+        await db.SaveChangesAsync(Ct);
+
+        // Printer silent: quiet 15 days with history, quiet 15 days without enough, still reporting.
+        var silentNow = new DateTimeOffset(2026, 12, 1, 15, 0, 0, TimeSpan.Zero);
+        foreach (var daysAgo in new[] { new[] { 15, 25, 35 }, [15, 25], [2, 12, 22] })
+        {
+            var (userId, printerId) = await UserAsync("Europe/Berlin");
+            foreach (var d in daysAgo)
+            {
+                await CampaignTestData.PrintAsync(db, userId, printerId, silentNow.AddDays(-d), PrintSource.Moonraker);
+            }
+        }
+
+        var recap = CampaignQueryTestKit.MonthlyRecap(sp, db, settings);
+        var silent = CampaignQueryTestKit.PrinterSilent(sp, db, settings);
+        var recapDue = 0;
+        var silentDue = 0;
+        foreach (var now in new[]
+                 {
+                     new DateTimeOffset(2026, 11, 30, 18, 30, 0, TimeSpan.Zero),
+                     new DateTimeOffset(2026, 11, 30, 18, 45, 0, TimeSpan.Zero),
+                     silentNow,
+                     new DateTimeOffset(2026, 12, 6, 20, 45, 0, TimeSpan.Zero),
+                     new DateTimeOffset(2026, 12, 6, 21, 0, 0, TimeSpan.Zero),
+                     new DateTimeOffset(2026, 12, 15, 12, 0, 0, TimeSpan.Zero),
+                 })
+        {
+            var expectedRecap = (await LegacyCampaignQueries.MonthlyRecapDueAsync(db, settings, now, Ct))
+                .Where(d => ids.Contains(d.UserId) && d.UserId != queued).OrderBy(d => d.UserId).ToList();
+            var actualRecap = (await recap.FindDueAsync(now, Ct)).Where(d => ids.Contains(d.UserId)).OrderBy(d => d.UserId).ToList();
+            Assert.Equal(expectedRecap, actualRecap);
+            recapDue += actualRecap.Count;
+
+            var expectedSilent = (await LegacyCampaignQueries.PrinterSilentDueAsync(db, settings, now, Ct))
+                .Where(d => ids.Contains(d.UserId)).OrderBy(d => d.UserId).ToList();
+            var actualSilent = (await silent.FindDueAsync(now, Ct)).Where(d => ids.Contains(d.UserId)).OrderBy(d => d.UserId).ToList();
+            Assert.Equal(expectedSilent, actualSilent);
+            silentDue += actualSilent.Count;
+        }
+
+        Assert.True(recapDue > 0 && silentDue > 0, $"Nothing was due (recap {recapDue}, silent {silentDue}).");
+    }
+
     /// <summary>The standard test host on a scratch SQL Server database, migrated rather than created.</summary>
     public sealed class SqlServerFactory : CustomWebApplicationFactory
     {
