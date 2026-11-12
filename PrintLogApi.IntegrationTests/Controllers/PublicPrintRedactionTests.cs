@@ -173,7 +173,9 @@ public class PublicPrintRedactionTests(CustomWebApplicationFactory factory) : IC
     {
         var owner = await OwnerAsync(factory);
         await PrintAsync(factory, owner, PrintViewStatus.Public);
-        var url = $"/api/Prints/summary?userId={owner.User.Id}";
+        // The public profile's request: a visitor is cached only for the public pages' shapes
+        // (PrintSummaryCachePolicy), so any other shape would never reach the cache.
+        var url = $"/api/Prints/summary?userId={owner.User.Id}&PageNumber=1&PageSize=10&SortColumn=2&SortDirection=2";
 
         for (var pass = 0; pass < 2; pass++)
         {
