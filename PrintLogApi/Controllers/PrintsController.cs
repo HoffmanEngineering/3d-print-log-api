@@ -137,6 +137,20 @@ public class PrintsController(
             projectIds.Add(filterByProjectId.Value);
         }
 
+        // A reader who is not the owner is cached only for the shapes the public pages send;
+        // anything else would let one visitor fill the shared cache by varying a query value.
+        // Same condition as SearchPrintSummary's "someone else's public prints".
+        var viewerIsOwner = !userId.HasValue || userId == currentUserId;
+        if (!PrintSummaryCachePolicy.ShouldCache(viewerIsOwner, pagingRequest, searchText, filterByPrinterIds,
+                                                 filterByFilamentIds, sortRequest, statuses, projectIds,
+                                                 fromDate, toDate))
+        {
+            // The injected service is safe here: nothing else shares this computation.
+            return await printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
+                                                         filterByFilamentIds, statuses, userId, currentUserId, projectIds,
+                                                         fromDate, toDate);
+        }
+
         var version = cacheVersionService.GetUserCacheVersion(targetUserId);
         var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                         filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
@@ -1640,10 +1654,12 @@ public class PrintsController(
     /// <param name="printId">The ID of the print to comment on.</param>
     /// <param name="newComment">The details of the new comment.</param>
     /// <response code="200">An OK response with the new comment details if the comment was added successfully.</response>
-    /// <response code="400">Returned if the request contains bad details, or if the print specified does not allow comments.</response>
+    /// <response code="400">Returned if the request contains bad details, if the print specified does not allow comments, or if it has reached its comment limit.</response>
     /// <response code="403">Returned if the user cannot access the print specified.</response>
+    /// <response code="429">Returned, with Retry-After, when the caller has commented on this print too often (CommentLimits).</response>
     [HttpPost("{printId}/comment")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
@@ -1674,7 +1690,34 @@ public class PrintsController(
             return Forbid();
         }
 
-        var comment = await printService.AddPrintComment(print, newComment.Body!, userId.Value);
+        Comment comment;
+        try
+        {
+            comment = await printService.AddPrintComment(print, newComment.Body!, userId.Value);
+        }
+        catch (CommentLimitExceededException ex)
+        {
+            // CommentLimits: 429 with Retry-After for a per-commenter rate, 400 for the print's
+            // total, which waiting does not lift.
+            var status = ex.RetryAfter.HasValue ? StatusCodes.Status429TooManyRequests : StatusCodes.Status400BadRequest;
+            if (ex.RetryAfter is { } wait)
+            {
+                // Rounded up: a client that honors the header must not come back early.
+                Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+            }
+
+            var problem = ProblemDetailsFactory.CreateProblemDetails(
+                HttpContext,
+                statusCode: status,
+                title: ex.RetryAfter.HasValue ? "Too many comments" : "Comment limit reached",
+                detail: ex.Message);
+            problem.Extensions["code"] = ex.RetryAfter.HasValue ? CommentLimits.RateLimitedCode : CommentLimits.TotalReachedCode;
+            return new ObjectResult(problem)
+            {
+                StatusCode = status,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
 
         // Null-forgiven: the comment was just persisted, so the re-read always finds it.
         var mappedComment = await commentService.GetCommentDetailById(comment.Id);
