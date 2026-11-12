@@ -79,14 +79,12 @@ public sealed class SesEventProcessor(
         foreach (var address in Addresses(bounce?["bouncedRecipients"]))
         {
             await suppressions.SuppressAsync(address, isHash: false, EmailSuppressionReason.Bounce, detail, ct);
-            EmailMetrics.Bounced.Inc();
         }
     }
 
     private async Task ComplaintAsync(JsonObject? complaint, JsonObject? mail, string? messageId, CancellationToken ct)
     {
         telemetry.TrackEvent("Email_Complained");
-        EmailMetrics.Complained.Inc();
         var detail = (string?)complaint?["feedbackId"];
 
         // The message id is only on the row once the dispatcher has saved it after the send; the

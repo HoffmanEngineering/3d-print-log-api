@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Nodes;
 using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -67,7 +68,8 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         public FakeEmailTransport Transport { get; } = new();
         public FakeVerificationRefresher Verification { get; } = new();
         public RecordingTelemetryChannel Channel { get; } = new();
-        public TelemetryClient Telemetry => new(new TelemetryConfiguration
+        // One client per harness, so a test can flush the metrics a dispatcher pre-aggregated.
+        public TelemetryClient Telemetry => field ??= new(new TelemetryConfiguration
         {
             ConnectionString = "InstrumentationKey=00000000-0000-0000-0000-000000000000",
             TelemetryChannel = Channel,
@@ -626,6 +628,23 @@ public class EmailDispatcherTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(h.Campaign.Name, message.Campaign);
         Assert.StartsWith("<https://api.3dprintlog.test/api/email/unsubscribe?t=", message.Headers["List-Unsubscribe"]);
         Assert.Equal("List-Unsubscribe=One-Click", message.Headers["List-Unsubscribe-Post"]);
+    }
+
+    [Fact]
+    public async Task Tick_TracksTheOutboxBacklog()
+    {
+        using var h = new Harness(_factory);
+        var user = await h.UserAsync();
+        await h.QueueAsync(user.Id, period: "now");
+        await h.QueueAsync(user.Id, period: "later", due: Now.AddDays(1));
+
+        await h.TickAsync();
+        h.Telemetry.Flush();
+
+        // The due row was sent; the one not yet due is the backlog.
+        var metric = Assert.Single(h.Channel.Items.OfType<MetricTelemetry>(), m => m.Name == EmailDispatcher.OutboxPendingMetric);
+        Assert.Equal(1, metric.Count);
+        Assert.Equal(1, metric.Sum);
     }
 
     [Theory]

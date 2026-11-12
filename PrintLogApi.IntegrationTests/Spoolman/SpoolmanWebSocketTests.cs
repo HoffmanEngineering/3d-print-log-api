@@ -113,39 +113,22 @@ public class SpoolmanWebSocketTests(SpoolmanWebSocketTests.Factory factory) : IC
     }
 
     [Fact]
-    public async Task TheGauge_CountsOpenSocketsByTier()
+    public async Task TheCounts_TrackOpenSocketsByTier()
     {
+        var host = factory.Services.GetRequiredService<SpoolmanSocketHost>();
         var free = await _support.CreateUserAsync();
         var freeConnection = await _support.ConnectAsync(free);
         var pro = await _support.CreateUserAsync(pro: true);
         var proConnection = await _support.ConnectAsync(pro);
-        var freeBefore = SpoolmanSocketMetrics.OpenSockets.WithLabels("free").Value;
-        var proBefore = SpoolmanSocketMetrics.OpenSockets.WithLabels("pro").Value;
+        var before = host.Counts();
 
         using var freeSocket = await ConnectAsync(freeConnection.Secret!, "/spoolman/api/v1/spool");
         using var proSocket = await ConnectAsync(proConnection.Secret!, "/spoolman/api/v1/spool");
-        await WaitForAsync(() => SpoolmanSocketMetrics.OpenSockets.WithLabels("free").Value >= freeBefore + 1
-            && SpoolmanSocketMetrics.OpenSockets.WithLabels("pro").Value >= proBefore + 1);
+        await WaitForAsync(() => host.Counts().Free >= before.Free + 1 && host.Counts().Pro >= before.Pro + 1);
 
         await freeSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", Ct);
         await proSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", Ct);
-        await WaitForAsync(() => SpoolmanSocketMetrics.OpenSockets.WithLabels("free").Value <= freeBefore
-            && SpoolmanSocketMetrics.OpenSockets.WithLabels("pro").Value <= proBefore);
-    }
-
-    [Fact]
-    public async Task TheMetrics_ExposeTheGaugeWithATierLabelAndNoUser()
-    {
-        var user = await _support.CreateUserAsync();
-        var connection = await _support.ConnectAsync(user);
-        using var socket = await ConnectAsync(connection.Secret!, "/spoolman/api/v1/spool");
-
-        var metrics = await factory.CreateClient().GetStringAsync("/metrics", Ct);
-
-        var lines = metrics.Split('\n').Where(l => l.StartsWith("printlog_spoolman_open_sockets{", StringComparison.Ordinal)).ToList();
-        Assert.Contains(lines, l => l.Contains("tier=\"free\"", StringComparison.Ordinal));
-        Assert.All(lines, l => Assert.DoesNotContain("user", l, StringComparison.OrdinalIgnoreCase));
-        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", Ct);
+        await WaitForAsync(() => host.Counts().Free <= before.Free && host.Counts().Pro <= before.Pro);
     }
 
     [Fact]

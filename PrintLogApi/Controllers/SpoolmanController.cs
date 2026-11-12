@@ -170,8 +170,8 @@ public class SpoolmanController(
     /// connection's printer's open notifier print (#171), which the notifier's finish turns into the
     /// print's usage; with no such print, or with a live printlog-bridge logging the printer, it is
     /// not stored (<see cref="ISpoolmanUsageRecorder"/>). Answered the same either way, because
-    /// Moonraker cannot act on the difference. Counted, per user in Application Insights and by
-    /// outcome in Prometheus.
+    /// Moonraker cannot act on the difference. Counted per user in Application Insights
+    /// (<c>Spoolman_UseMm</c>).
     /// </summary>
     [HttpPut("spool/{id:int}/use")]
     public async Task<IActionResult> Use(int id)
@@ -208,7 +208,6 @@ public class SpoolmanController(
 
         var millimetres = body.UseLength
             ?? SpoolmanInventoryService.LengthMm(body.UseWeight!.Value, spool.Filament.Density, spool.Filament.Diameter);
-        var unit = body.UseLength is not null ? "length" : "weight";
 
         // Checked after the weight conversion and before any metric or write: a finite use_weight
         // near double.MaxValue converts to an infinite length. Negated so NaN fails too.
@@ -217,11 +216,6 @@ public class SpoolmanController(
             return Message(StatusCodes.Status400BadRequest, "use_weight or use_length is too large.");
         }
 
-        SpoolmanMetrics.UseCalls.WithLabels(unit).Inc();
-        if (millimetres > 0)
-        {
-            SpoolmanMetrics.UseMillimetres.Inc(millimetres);
-        }
         // Pre-aggregated per minute by the SDK: one metric per user, count = calls, sum = mm.
         var userId = UserId();
         telemetry.GetMetric("Spoolman_UseMm", "userId").TrackValue(millimetres, userId.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -235,8 +229,7 @@ public class SpoolmanController(
         if (filamentId is { } filament)
         {
             var printerId = long.TryParse(User.FindFirst(SpoolmanAuthentication.PrinterIdClaim)?.Value, out var claimed) ? claimed : (long?)null;
-            var outcome = await usage.RecordAsync(userId, printerId, filament, millimetres, HttpContext.RequestAborted);
-            SpoolmanMetrics.UseRecorded.WithLabels(SpoolmanMetrics.OutcomeLabel(outcome)).Inc();
+            await usage.RecordAsync(userId, printerId, filament, millimetres, HttpContext.RequestAborted);
         }
 
         return Json(spool, SpoolmanJsonContext.Wire.SpoolmanSpool);

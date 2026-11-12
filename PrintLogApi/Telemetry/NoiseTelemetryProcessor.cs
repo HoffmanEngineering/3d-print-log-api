@@ -11,9 +11,8 @@ namespace PrintLogApi.Telemetry;
 /// <para>
 /// Measured on 2026-09-19: CORS preflights and the notification unread-count poll were
 /// ~1 GB of the API's 2.2 GB monthly ingestion — nearly half, for rows that only ever say
-/// "the browser is still open". The Prometheus scrape is small but equally content-free, and so
-/// is App Service's Always On ping of <c>GET /</c> (about 300 a day, 404s until the root was
-/// mapped).
+/// "the browser is still open". App Service's Always On ping of <c>GET /</c> is small but equally
+/// content-free (about 300 a day, 404s until the root was mapped).
 /// Dropping them keeps the resource inside the free allowance and, just as importantly,
 /// keeps request-rate charts from being a picture of polling cadence.
 /// </para>
@@ -36,7 +35,6 @@ namespace PrintLogApi.Telemetry;
 public sealed class NoiseTelemetryProcessor(ITelemetryProcessor next) : ITelemetryProcessor
 {
     public const string UnreadCountRequestName = "GET Notifications/GetUnreadCount";
-    public const string MetricsRequestName = "GET /metrics";
     public const string RootRequestName = "GET /";
 
     public void Process(ITelemetry item)
@@ -78,7 +76,6 @@ public sealed class NoiseTelemetryProcessor(ITelemetryProcessor next) : ITelemet
 
         return name.StartsWith("OPTIONS ", StringComparison.Ordinal)
             || name == UnreadCountRequestName
-            || name == MetricsRequestName
             || name == RootRequestName;
     }
 }

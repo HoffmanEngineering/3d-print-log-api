@@ -167,21 +167,28 @@ requests
 
 ## Operational counters
 
-Prometheus, next to the existing `printlog_*` metrics:
+All in Application Insights. Count the custom events:
 
-| Metric | Labels |
+| Event | Properties |
 |---|---|
-| `printlog_email_sent_total` | `campaign` |
-| `printlog_email_skipped_total` | `campaign`, `reason` |
-| `printlog_email_failed_total` | `campaign`, `kind` |
-| `printlog_email_bounced_total` | |
-| `printlog_email_complained_total` | |
-| `printlog_email_outbox_pending` (gauge) | |
+| `Email_Sent` | `campaign` |
+| `Email_Skipped` | `campaign`, `reason` |
+| `Email_Failed` | `campaign`, `kind` |
+| `Email_Deferred` | `campaign`, `why` |
+| `Email_Bounced` | `type` (`Permanent` bounces suppress the address) |
+| `Email_Complained` | |
 
-Application Insights events carry the same dimensions: `Email_Queued`, `Email_Sent`,
-`Email_Skipped`, `Email_Failed`, `Email_Deferred`, `Email_Bounced`, `Email_Complained`,
-`Email_DryRun`, `Email_SendingPaused`, `Email_WebhookFailed`, `EmailSync_Failed` and
-`EmailPreference_Unrecognized`.
+Also emitted: `Email_Queued`, `Email_DryRun`, `Email_SendingPaused`, `Email_WebhookFailed`,
+`EmailSync_Failed` and `EmailPreference_Unrecognized`.
+
+The outbox backlog is the custom metric `Email_OutboxPending`, sampled once per dispatcher tick
+(every 2 minutes). A value that only climbs means the dispatcher is stuck or sending is paused:
+
+```kusto
+customMetrics
+| where name == 'Email_OutboxPending'
+| summarize Pending = max(valueMax) by bin(timestamp, 10m)
+```
 
 The reputation numbers SES enforces are its own `Reputation.ComplaintRate` and
 `Reputation.BounceRate` CloudWatch metrics, which the infra repo alarms on. The per-campaign

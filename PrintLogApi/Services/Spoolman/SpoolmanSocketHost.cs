@@ -33,7 +33,7 @@ namespace PrintLogApi.Services.Spoolman;
 /// peer that does not acknowledge within a few seconds is aborted so shutdown is not held. Moonraker
 /// reconnects every 2 seconds and holds its usage in memory meanwhile, so a deploy loses nothing.</para>
 ///
-/// <para><b>In-process, single instance.</b> The registry and gauge live in this process, which is
+/// <para><b>In-process, single instance.</b> The registry and its counts live in this process, which is
 /// right for one App Service instance. Scaling out needs a backplane before #172's events can reach
 /// a socket held by another instance.</para>
 /// </summary>
@@ -74,7 +74,6 @@ public sealed class SpoolmanSocketHost(
 
         var tier = await TierAsync(userId, CancellationToken.None);
         _open[socketId] = tier;
-        SpoolmanSocketMetrics.OpenSockets.WithLabels(tier).Inc();
         telemetry.TrackEvent("Spoolman_SocketOpened", new Dictionary<string, string>
         {
             ["tier"] = tier,
@@ -123,10 +122,7 @@ public sealed class SpoolmanSocketHost(
             {
             }
 
-            if (_open.TryRemove(socketId, out var finalTier))
-            {
-                SpoolmanSocketMetrics.OpenSockets.WithLabels(finalTier).Dec();
-            }
+            _open.TryRemove(socketId, out _);
         }
     }
 
@@ -186,10 +182,9 @@ public sealed class SpoolmanSocketHost(
                     .ExecuteUpdateAsync(s => s.SetProperty(c => c.LastSeenAt, now), ct);
 
                 var tier = await TierAsync(userId, ct, services);
-                if (_open.TryGetValue(socketId, out var previous) && previous != tier && _open.TryUpdate(socketId, tier, previous))
+                if (_open.TryGetValue(socketId, out var previous) && previous != tier)
                 {
-                    SpoolmanSocketMetrics.OpenSockets.WithLabels(previous).Dec();
-                    SpoolmanSocketMetrics.OpenSockets.WithLabels(tier).Inc();
+                    _open.TryUpdate(socketId, tier, previous);
                 }
             }
             catch (OperationCanceledException)
@@ -236,8 +231,8 @@ public sealed class SpoolmanSocketHost(
 
 /// <summary>
 /// Samples open Spoolman sockets by tier into Application Insights once a minute, for the
-/// workbook's "open sockets over time" chart. The Prometheus gauge has the live value; App Insights
-/// is where the workbook reads history from.
+/// workbook's "open sockets over time" chart. <see cref="SpoolmanSocketHost.Counts"/> has the
+/// live value; this sample is the only record of it outside the process.
 /// </summary>
 public sealed class SpoolmanSocketSampler(SpoolmanSocketHost host, TelemetryClient telemetry) : BackgroundService
 {

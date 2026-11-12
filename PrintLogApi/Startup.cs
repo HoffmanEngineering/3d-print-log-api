@@ -39,7 +39,6 @@ using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
 using PrintLogApi.Webhooks;
-using Prometheus;
 
 namespace PrintLogApi;
 
@@ -1023,8 +1022,8 @@ public class Startup
 
         // Outside every middleware that writes a response body, which is the actual constraint:
         // this swaps IHttpResponseBodyFeature for a wrapper, so anything that has already
-        // started writing would bypass it. That puts it above routing, endpoints, Swagger and
-        // /metrics, and below the HTTPS redirect (no point compressing a 307 with no body).
+        // started writing would bypass it. That puts it above routing, endpoints and Swagger,
+        // and below the HTTPS redirect (no point compressing a 307 with no body).
         //
         // It also sits inside UseClientAbortHandling so that anything thrown while finalizing
         // the compressed frame passes back through that handler. Do not read more into that
@@ -1036,15 +1035,6 @@ public class Startup
         // ClientAbortMiddleware matches only OperationCanceledException and
         // InvalidOperationException, so an IOException surfacing from a dead-socket write would
         // still escape. Widening that is a change to that middleware, not to this line.
-        //
-        // Ordering against UseHttpMetrics was checked (issue #66 raised it): prometheus-net 8's
-        // UseHttpMetrics records request counts, in-flight gauge and duration — it has no
-        // response-size metric, so no recorded byte count can be distorted by compression.
-        // Duration is a different story and worth stating accurately: the codec runs during the
-        // WriteAsync calls the endpoint makes, which happen while UseHttpMetrics is still
-        // awaiting, so request duration INCLUDES compression. Only the trailing finalization
-        // falls outside it. At the measured 0.15 ms that is under the noise floor of these
-        // handlers, but a dashboard reading duration is not reading pure handler latency.
         app.UseResponseCompression();
 
         app.UseCors(builder =>
@@ -1094,9 +1084,6 @@ public class Startup
         JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
         app.UsePrintLogOpenApi(Configuration);
-
-        app.UseMetricServer();
-        app.UseHttpMetrics();
 
         app.UseEndpoints(endpoints =>
         {
