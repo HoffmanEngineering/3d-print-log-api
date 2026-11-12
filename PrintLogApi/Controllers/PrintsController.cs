@@ -466,6 +466,11 @@ public class PrintsController(
         {
             return BadRequest();
         }
+        catch (UserCannotAccessFilamentException)
+        {
+            // As PATCH and complete answer it (EditPrint).
+            return BadRequest("A filament does not belong to the current user.");
+        }
         catch (DoesNotExistException)
         {
             return NotFound();

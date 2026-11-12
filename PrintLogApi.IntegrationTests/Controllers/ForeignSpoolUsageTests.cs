@@ -161,4 +161,28 @@ public class ForeignSpoolUsageTests(CustomWebApplicationFactory factory)
         var (status, _) = await SendAsync(As(new HttpRequestMessage(HttpMethod.Delete, $"/api/Filaments/{owner.Filament.Id}"), owner.User));
         Assert.Equal(HttpStatusCode.BadRequest, status);
     }
+
+    [Fact]
+    public async Task PutPrint_KeepingAnotherUsersSpool_Is400()
+    {
+        var (victim, other) = await SeedPairAsync();
+        var print = await SeedPrintAsync(other.User, other.Printer, victim.Filament.Id, 5_000);
+        var row = print.FilamentUsage!.Single();
+
+        var (status, _) = await SendAsync(As(new HttpRequestMessage(HttpMethod.Put, $"/api/Prints/{print.Id}")
+        {
+            Content = JsonContent.Create(new PutPrintDetailDto
+            {
+                Id = print.Id,
+                Title = "x",
+                PrinterId = other.Printer.Id,
+                Status = PrintStatus.Success,
+                ViewStatus = PrintViewStatus.Private,
+                FilamentUsage = [new PutPrintFilamentSummaryDto { Id = row.Id, FilamentId = victim.Filament.Id, Slot = 0, AmountMg = 900_000, Source = PrintFilament.SourceMeasurement.Weight, EstimatedSource = PrintFilament.SourceMeasurement.Weight }],
+            }),
+        }, other.User));
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Equal(5_000, Assert.Single((await PrintAsync(print.Id)).FilamentUsage!).AmountMg);
+    }
 }
