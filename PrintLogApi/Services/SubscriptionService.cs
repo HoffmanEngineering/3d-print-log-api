@@ -323,15 +323,31 @@ public class SubscriptionService : ISubscriptionService
 
         subscription.StripeSubscriptionId = stripeSubscriptionId;
         subscription.StripePriceId = priceId;
-        subscription.Status = SubscriptionStatus.Active;
+        // The subscription's live status, not "Active": Stripe does not order or deduplicate
+        // deliveries, so this event can arrive (late, retried or resent) after the subscription
+        // was canceled, and a canceled subscription sends nothing afterwards to correct it.
+        subscription.Status = MapStripeStatus(stripeSubscription.Status);
         subscription.Plan = MapPriceIdToPlan(priceId);
         subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
         subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
         subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
 
+        if (stripeSubscription.CanceledAt.HasValue)
+            subscription.CanceledAt = stripeSubscription.CanceledAt;
+
         await _context.SaveChangesAsync();
 
         await ApplySpoolmanTierBestEffort(subscription.UserId);
+
+        if (subscription.Status != SubscriptionStatus.Active)
+        {
+            _telemetry.TrackEvent("Subscription_CheckoutCompletedNotActive", new Dictionary<string, string>
+            {
+                { "userId", subscription.UserId.ToString() },
+                { "status", stripeSubscription.Status ?? "" }
+            });
+            return;
+        }
 
         _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
         {
@@ -482,7 +498,12 @@ public class SubscriptionService : ISubscriptionService
         return SubscriptionPlan.Free;
     }
 
-    private static SubscriptionStatus MapStripeStatus(string stripeStatus)
+    /// <summary>
+    /// Only <c>active</c> and <c>trialing</c> grant Pro. Anything else, including <c>incomplete</c>,
+    /// <c>incomplete_expired</c>, <c>paused</c> and any status Stripe adds later, maps to a status
+    /// that does not.
+    /// </summary>
+    private static SubscriptionStatus MapStripeStatus(string? stripeStatus)
     {
         return stripeStatus switch
         {
