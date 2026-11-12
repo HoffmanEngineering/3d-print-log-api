@@ -1,6 +1,5 @@
 ﻿using System.Net;
 using Microsoft.EntityFrameworkCore;
-using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
 using PrintLogApi.Models.DTOs.User;
 using Xunit;
@@ -382,84 +381,33 @@ public class UsersControllerTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// The anonymous <c>DELETE /api/Users/pending-deactivation</c> let anyone run the multi-table
+    /// account deletion job on demand. The job now runs in-process on a timer
+    /// (PendingUserDeletionJob, covered by PendingUserDeletionJobTests), and the route is gone for
+    /// every caller. 405 rather than 404 is expected: the path still matches <c>GET {id}</c>.
+    /// </summary>
     [Fact]
-    public async Task ProcessPendingDeactivations_DeletesNotificationsReferencingDeletedPrints()
+    public async Task PendingDeactivationRoute_IsGone_ForAnonymousCallers()
     {
-        Guid notificationId;
-        long userId;
-        long printId;
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            var now = DateTime.UtcNow;
-            var deactivatedUser = new User
-            {
-                OAuthUserId = $"auth0|pending-delete-{Guid.NewGuid()}",
-                DeactivationDateTime = DateTimeOffset.UtcNow.AddDays(-2),
-                ViewStatus = ProfileViewStatus.Public
-            };
-            var recipientUser = new User
-            {
-                OAuthUserId = $"auth0|notification-recipient-{Guid.NewGuid()}",
-                ViewStatus = ProfileViewStatus.Public
-            };
-            db.Users.AddRange(deactivatedUser, recipientUser);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            var printer = new Printer
-            {
-                Name = "Pending Delete Printer",
-                UserId = deactivatedUser.Id,
-                IsActive = true
-            };
-            db.Printers.Add(printer);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            var print = new Print
-            {
-                Title = "Pending Delete Print",
-                Status = Print.PrintStatus.Success,
-                ViewStatus = Print.PrintViewStatus.Public,
-                PrinterId = printer.Id,
-                CreatedById = deactivatedUser.Id,
-                UpdatedById = deactivatedUser.Id,
-                CreatedDate = now,
-                UpdatedDate = now
-            };
-            db.Prints.Add(print);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            var notification = new Notification
-            {
-                Id = Guid.NewGuid(),
-                UserId = recipientUser.Id,
-                Type = NotificationType.PrintCompleted,
-                Title = "Print Completed",
-                Message = "A followed print completed.",
-                IsRead = false,
-                CreatedDate = now,
-                PrintId = print.Id
-            };
-            db.Notifications.Add(notification);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            userId = deactivatedUser.Id;
-            printId = print.Id;
-            notificationId = notification.Id;
-        }
-
         var response = await _httpClient.DeleteAsync("/api/Users/pending-deactivation", TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(
+            response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed,
+            $"Expected 404 or 405, got {(int)response.StatusCode}.");
+    }
 
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-            Assert.False(await db.Users.AnyAsync(u => u.Id == userId, cancellationToken: TestContext.Current.CancellationToken));
-            Assert.False(await db.Prints.AnyAsync(p => p.Id == printId, cancellationToken: TestContext.Current.CancellationToken));
-            Assert.False(await db.Notifications.AnyAsync(n => n.Id == notificationId, cancellationToken: TestContext.Current.CancellationToken));
-        }
+    [Fact]
+    public async Task PendingDeactivationRoute_IsGone_ForAuthenticatedCallers()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Delete, "/api/Users/pending-deactivation");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.True(
+            response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed,
+            $"Expected 404 or 405, got {(int)response.StatusCode}.");
     }
 
     #endregion
