@@ -137,6 +137,20 @@ public class PrintsController(
             projectIds.Add(filterByProjectId.Value);
         }
 
+        // A reader who is not the owner is cached only for the shapes the public pages send;
+        // anything else would let one visitor fill the shared cache by varying a query value.
+        // Same condition as SearchPrintSummary's "someone else's public prints".
+        var viewerIsOwner = !userId.HasValue || userId == currentUserId;
+        if (!PrintSummaryCachePolicy.ShouldCache(viewerIsOwner, pagingRequest, searchText, filterByPrinterIds,
+                                                 filterByFilamentIds, sortRequest, statuses, projectIds,
+                                                 fromDate, toDate))
+        {
+            // The injected service is safe here: nothing else shares this computation.
+            return await printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
+                                                         filterByFilamentIds, statuses, userId, currentUserId, projectIds,
+                                                         fromDate, toDate);
+        }
+
         var version = cacheVersionService.GetUserCacheVersion(targetUserId);
         var cacheKey = GenerateCacheKey(targetUserId, currentUserId, version, pagingRequest, searchText,
                                         filterByPrinterIds, filterByFilamentIds, sortRequest, statuses, projectIds,
