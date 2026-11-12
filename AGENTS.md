@@ -1000,6 +1000,33 @@ index's filter (`CuraSettingsRetentionSqlServerTranslationTests`). A form opened
 upload gets a 404 from `GET /api/Cura/settings`, and a print created with an expired id still
 saves, just without slicer-plugin provenance (`ApplyProvenance`).
 
+### Deactivated accounts are deleted by an in-process job
+
+`POST /api/Users/me/deactivate` only stamps `DeactivationDateTime`. `PendingUserDeletionJob`
+(`Services/UserDeletion/`) deletes each account once that is `PendingUserDeactivationTimeInMinutes`
+(1440) old, through `IUserDeletionService.DeletePendingDeactivatedUsers`. Configuration:
+`PendingUserDeletion:Enabled` (true) and `PendingUserDeletion:RunInterval` (`02:00:00`, validated
+at startup to between one minute and one day); App Service names are `PendingUserDeletion__Enabled`
+and `PendingUserDeletion__RunInterval`. The first run waits five minutes after start. It is forced
+off in E2ETesting (the E2E users are fixtures) and the integration-test host removes it, so tests
+drive `RunOnceAsync` instead. Like every hosted service here it runs only while the process is
+alive, so the App Service needs **Always On**.
+
+- **It replaced an Azure Function** (`DeleteUsersPendingDeactivation`, every 2 hours) that called
+  an anonymous `DELETE /api/Users/pending-deactivation`, which let anyone start the job. That route
+  is gone (it now answers 405), so once a release with the job is deployed the function only logs
+  a warning every two hours and can be disabled.
+- **One user's failure never stops the others.** It is logged with the user id and tracked as
+  `DeletePendingDeactivatedUserFailed` (`UserId`, `Stage`, `ExceptionType`); the run's
+  `DeletePendingDeactivatedUsers` event carries `Count`, `Deleted` and `Failed`.
+- **Auth0 is deleted before the database, on purpose.** The user row is the last thing
+  `DeleteAllDataForUser` removes, so any partial failure leaves it and the next run repeats the
+  whole user. `Auth0Service.DeleteUser` treats a 404 as done for that repeat. The opposite order
+  orphaned the Auth0 account whenever Auth0 failed after the rows were gone. A user whose database
+  delete keeps failing has no Auth0 account, so cannot sign in, until a run succeeds.
+- `DeleteAllDataForUser` has no enclosing transaction (each `ExecuteDelete` commits on its own),
+  which is what makes the retry finish the job. Keep every step safe to run twice.
+
 ### Migrations are never executed by the test suite
 
 Integration tests build their schema with `EnsureCreated()` on SQLite, so a migration can be
