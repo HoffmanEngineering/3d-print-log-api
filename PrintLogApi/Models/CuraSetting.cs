@@ -11,10 +11,16 @@ public class CuraSetting
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public Guid Id { get; set; }
 
-    [StringLength(100)]
+    /// <summary>Column length of <see cref="CuraVersion"/> and <see cref="PluginVersion"/>.</summary>
+    public const int MaxVersionLength = 100;
+
+    /// <summary>Column length of <see cref="Slicer"/>.</summary>
+    public const int MaxSlicerLength = 50;
+
+    [StringLength(MaxVersionLength)]
     public string? CuraVersion { get; set; }
 
-    [StringLength(100)]
+    [StringLength(MaxVersionLength)]
     public string? PluginVersion { get; set; }
 
     //// https://docs.microsoft.com/en-us/ef/core/modeling/backing-field
@@ -44,7 +50,7 @@ public class CuraSetting
     /// The slicer name the Slic3r uploader posts (its parser's <c>SlicerName</c>). Null means the
     /// Cura plugin, which does not send the field. Copied onto the print when one is created.
     /// </summary>
-    [StringLength(50)]
+    [StringLength(MaxSlicerLength)]
     public string? Slicer { get; set; }
 
     /// <summary>

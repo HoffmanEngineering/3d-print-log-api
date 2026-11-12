@@ -20,9 +20,12 @@ public class ProjectService(
         var query = context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
         if (!string.IsNullOrWhiteSpace(search))
         {
+            // Contains, as the REST search below uses: it escapes %, _ and [ so the search is
+            // matched as text. EF.Functions.Like would treat them as wildcards.
+            var trimmed = search.Trim();
             query = query.Where(p =>
-                EF.Functions.Like(p.Name, $"%{search}%") ||
-                (p.Reference != null && EF.Functions.Like(p.Reference, $"%{search}%")));
+                p.Name.Contains(trimmed) ||
+                (p.Reference != null && p.Reference.Contains(trimmed)));
         }
         if (status.HasValue)
         {
