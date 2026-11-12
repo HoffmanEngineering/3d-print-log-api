@@ -180,10 +180,6 @@ response. One test there is load-bearing in a way that is easy to miss: `Compres
 drives an `https://` base address, because every other test runs over plain HTTP where compression
 happens whatever `EnableForHttps` says — revert that option and it is the _only_ test that fails.
 
-One thing `UseHttpMetrics` readers should know: the codec runs during the endpoint's `WriteAsync`
-calls, so `http_request_duration_seconds` **includes** compression. prometheus-net 8.2.1 has no
-response-size metric, so no byte count is distorted.
-
 ## Connector write budget (#151)
 
 Writes (`POST`/`PUT`/`PATCH`/`DELETE` under `/api`, except the heartbeat below) made with a
@@ -312,8 +308,8 @@ printlog-bridge (and later Home Assistant) pairs instead of pasting an API key. 
   `DevicePairingForwardedAddressTests` pins both cases. The address is in the email body and the
   in-app message ("from IP address ..."), never the subject, telemetry or logs. Only the in-app
   notification (`DevicePairingNotifier`, when `PairedDevice.Noticed`) runs after the commit, best
-  effort: a failure is logged, counted (`DevicePairingNoticeFailed`,
-  `printlog_device_pairing_notice_failures_total`) and never fails the pairing. `device-paired` is the first **security notice**
+  effort: a failure is logged, counted (the `DevicePairingNoticeFailed` event) and never fails the
+  pairing. `device-paired` is the first **security notice**
   (`IEmailCampaign.IsSecurityNotice`): on unless `Email:Campaigns:device_paired:Enabled=false`, it
   ignores preferences (the master switch too), the in-app notice gate and the holdout, has no
   unsubscribe header or link, and is outside the frequency cap; `Email:Enabled`, dry run, the
@@ -1560,7 +1556,7 @@ switch telemetry off sends there. Code: `Telemetry/`, wired in `Startup.Configur
   SQL text from user values (interpolated `SqlQuery`/`ExecuteSql` is parameterized, `*Raw` with
   concatenation is not).
 - **`NoiseTelemetryProcessor` drops successful rows that carry no information**: CORS preflights,
-  the unread-count poll and its SQL, `/metrics`, `GET /`. The only exception it drops is the MCP
+  the unread-count poll and its SQL, `GET /`. The only exception it drops is the MCP
   SDK's `UnsupportedProtocolVersionException` (a client offering 2026-07-28 through `initialize`;
   the SDK answers -32022 in a 200 and logs it at Warning). Match by exact type, not category, so
   real MCP errors stay visible.
@@ -1569,6 +1565,11 @@ switch telemetry off sends there. Code: `Telemetry/`, wired in `Startup.Configur
   `api_key` query parameter on every request (`ApiKeyRedactionInitializer`, which decodes each
   parameter name the way ASP.NET Core does, so `API_KEY` and `api%5Fkey` are caught too). A new
   query-string credential needs the same treatment.
+- **Application Insights is the only telemetry sink.** The anonymous Prometheus `/metrics`
+  endpoint and prometheus-net were removed; `/metrics` now answers 404 like any unknown route
+  (`MetricsTests`). Count things with `TelemetryClient.TrackEvent`, and record a sampled or summed
+  value with `TelemetryClient.GetMetric` (pre-aggregated per minute, e.g. `Email_OutboxPending`,
+  `Spoolman_OpenSockets`, `Spoolman_UseMm`).
 
 ## UTF-8 and BOM file formatting
 

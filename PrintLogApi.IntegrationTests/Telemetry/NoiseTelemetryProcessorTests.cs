@@ -27,7 +27,6 @@ public class NoiseTelemetryProcessorTests
     [InlineData("OPTIONS /api/notifications/unread-count")]
     [InlineData("OPTIONS /api/Prints/summary")]
     [InlineData("GET Notifications/GetUnreadCount")]
-    [InlineData("GET /metrics")]
     [InlineData("GET /")]
     public void Drops_successful_noise_requests(string name)
     {
@@ -41,7 +40,6 @@ public class NoiseTelemetryProcessorTests
     [Theory]
     [InlineData("OPTIONS /api/Prints/summary")]
     [InlineData("GET Notifications/GetUnreadCount")]
-    [InlineData("GET /metrics")]
     [InlineData("GET /")]
     public void Keeps_failed_noise_requests(string name)
     {
@@ -57,6 +55,7 @@ public class NoiseTelemetryProcessorTests
     [InlineData("POST Prints/PostPrint")]
     [InlineData("GET /health")]
     [InlineData("GET /api/Prints")]
+    [InlineData("GET /metrics")] // No longer served; anything still scraping it should show up.
     public void Keeps_ordinary_requests(string name)
     {
         var (processor, sink) = Build();

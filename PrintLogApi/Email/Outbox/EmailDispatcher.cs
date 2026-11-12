@@ -35,6 +35,9 @@ public sealed class EmailDispatcher(
     private static readonly TimeSpan[] Backoff =
         [TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(30), TimeSpan.FromHours(2)];
 
+    /// <summary>The Application Insights metric for outbox rows waiting to be sent.</summary>
+    public const string OutboxPendingMetric = "Email_OutboxPending";
+
     private const int MaxAttempts = 5;
     private const int MaxErrorLength = 512;
     private static readonly TimeSpan AbandonedAfter = TimeSpan.FromMinutes(10);
@@ -129,7 +132,10 @@ public sealed class EmailDispatcher(
             }
         }
 
-        EmailMetrics.OutboxPending.Set(await db.EmailOutbox.CountAsync(o => o.Status == EmailOutboxStatus.Pending, ct));
+        // The outbox backlog, sampled once per tick: a count that only climbs means the
+        // dispatcher is stuck or paused. Pre-aggregated per minute by the SDK.
+        var pending = await db.EmailOutbox.CountAsync(o => o.Status == EmailOutboxStatus.Pending, ct);
+        telemetry.GetMetric(OutboxPendingMetric).TrackValue(pending);
         return new DispatchTickResult(claimed, sent, skipped, deferred, failed, paused);
     }
 
@@ -356,7 +362,6 @@ public sealed class EmailDispatcher(
             row.Attempts++;
             row.LastError = null;
             telemetry.TrackEvent("Email_Sent", new Dictionary<string, string> { ["campaign"] = row.Campaign });
-            EmailMetrics.Sent.WithLabels(row.Campaign).Inc();
             outcome = Outcome.Sent;
         }
         catch (Exception ex)
@@ -383,7 +388,6 @@ public sealed class EmailDispatcher(
         row.SkipReason = reason;
         row.ClaimedAt = null;
         telemetry.TrackEvent("Email_Skipped", new Dictionary<string, string> { ["campaign"] = row.Campaign, ["reason"] = reason });
-        EmailMetrics.Skipped.WithLabels(row.Campaign, reason).Inc();
         return new Prepared(Outcome.Skipped, null);
     }
 
@@ -417,7 +421,6 @@ public sealed class EmailDispatcher(
         row.Status = EmailOutboxStatus.Failed;
         row.LastError = Truncate(error);
         telemetry.TrackEvent("Email_Failed", new Dictionary<string, string> { ["campaign"] = row.Campaign, ["kind"] = kind.ToString() });
-        EmailMetrics.Failed.WithLabels(row.Campaign, kind.ToString()).Inc();
         return Outcome.Failed;
     }
 

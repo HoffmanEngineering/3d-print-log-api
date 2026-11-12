@@ -56,6 +56,19 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         Assert.Equal(70, Assert.Single(await UsagesAsync(print)).LengthMm, 6);
     }
 
+    [Fact]
+    public async Task Use_ByWeight_IsRecordedInMillimetres()
+    {
+        var (user, secret, printer) = await ConnectedAsync();
+        var spool = await AddSpoolAsync(user, "PLA");
+        var print = await AddPrintAsync(user, printer, MoonrakerController.NotifierSource);
+
+        var response = await PutUseAsync(secret, spool, """{"use_weight": 3}""");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(SpoolmanInventoryService.LengthMm(3, 1.24, 1.75), Assert.Single(await UsagesAsync(print)).LengthMm, 6);
+    }
+
     // #196: bounded after the weight conversion and before any metric or write. 1e306 g is finite
     // but converts to an infinite length; 1e10 mm is finite either way and still refused.
     [Theory]
@@ -69,7 +82,6 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         var (user, secret, printer) = await ConnectedAsync();
         var spool = await AddSpoolAsync(user, "PLA");
         var print = await AddPrintAsync(user, printer, MoonrakerController.NotifierSource);
-        var before = SpoolmanMetrics.UseMillimetres.Value;
 
         var response = await PutUseAsync(secret, spool, $$"""{"{{field}}": {{value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}}}""");
 
@@ -77,11 +89,6 @@ public class SpoolmanUsageRecordingTests(CustomWebApplicationFactory factory) : 
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct));
         Assert.Equal("use_weight or use_length is too large.", body.RootElement.GetProperty("message").GetString());
         Assert.Empty(await UsagesAsync(print));
-        // The counter is process-wide and other classes run in parallel, so assert only that this
-        // report did not reach it: every legitimate report is far below the bound.
-        var after = SpoolmanMetrics.UseMillimetres.Value;
-        Assert.True(double.IsFinite(after));
-        Assert.True(after - before < SpoolmanController.MaxUseMillimetres);
     }
 
     [Fact]

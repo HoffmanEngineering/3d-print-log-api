@@ -487,7 +487,7 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
     #region Credentials never logged
 
     [Fact]
-    public async Task Credentials_NeverReachLogsTelemetryOrMetrics()
+    public async Task Credentials_NeverReachLogsOrTelemetry()
     {
         var user = await _support.CreateUserAsync();
         var connection = await _support.ConnectAsync(user);
@@ -501,7 +501,6 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
         await SendAsync(HttpMethod.Get, ProbePath, SpoolmanTestSupport.Basic(wrong));
         await SendAsync(HttpMethod.Get, "/spoolman/api/v1/no-such-thing", SpoolmanTestSupport.Basic(secret));
         await SendHandshakeAsync(secret);
-        var metrics = await (await _client.GetAsync("/metrics", Ct)).Content.ReadAsStringAsync(Ct);
 
         var telemetry = string.Join("\n", factory.Telemetry.Items.Select(Describe));
         var logs = string.Join("\n", factory.Logs.Messages);
@@ -509,7 +508,6 @@ public class SpoolmanAuthenticationTests(SpoolmanAuthenticationTests.Factory fac
         {
             Assert.DoesNotContain(leaked, telemetry);
             Assert.DoesNotContain(leaked, logs);
-            Assert.DoesNotContain(leaked, metrics);
         }
         // The log capture is live. Request telemetry is not asserted present: the SDK's request
         // tracking hooks a process-wide listener, so which host's channel receives an item
