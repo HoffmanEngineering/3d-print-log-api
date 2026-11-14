@@ -58,17 +58,7 @@ public class TagReadService(
         {
             Status = "unknown",
             Reading = reading,
-            CatalogMatch = match is null ? null : new CatalogMatchDto
-            {
-                Id = match.Id,
-                Confidence = match.Confidence,
-                SpoolWeightG = match.SpoolWeightG,
-                ColorName = match.ColorName,
-                Name = match.Name,
-                Manufacturer = match.Manufacturer,
-                DensityGramPerCubicCm = match.Density,
-                Source = "SpoolmanDB",
-            },
+            CatalogMatch = CatalogMatchDto.From(match),
             Suggestions = suggestions
                 .Select(s => new TagSuggestionDto { FilamentId = s.FilamentId, Score = s.Score, Reasons = s.Reasons.ToList() })
                 .ToList(),

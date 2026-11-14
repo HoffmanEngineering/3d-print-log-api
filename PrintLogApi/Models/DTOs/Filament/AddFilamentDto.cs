@@ -160,4 +160,11 @@ public class AddFilamentDto
     /// </summary>
     public string? CatalogEntryId { get; set; }
 
+    /// <summary>
+    /// Barcodes read from the spool's label or box, at most four (more is a 400). Invalid values
+    /// are dropped and duplicates stored once. With <see cref="CatalogEntryId"/> set, each counts
+    /// as the user's vote that the barcode is that catalog entry.
+    /// </summary>
+    public List<BarcodeInputDto>? Barcodes { get; set; }
+
 }

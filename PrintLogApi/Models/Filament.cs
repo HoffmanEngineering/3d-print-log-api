@@ -179,4 +179,7 @@ public class Filament : TimestampEntity
 
     /// <summary>RFID/NFC tags on this spool (#147).</summary>
     public ICollection<FilamentTag> Tags { get; set; } = new List<FilamentTag>();
+
+    /// <summary>Barcodes from the spool's label or box, for finding it by a scan.</summary>
+    public ICollection<FilamentBarcode>? Barcodes { get; set; }
 }

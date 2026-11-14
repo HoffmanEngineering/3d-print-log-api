@@ -1022,6 +1022,40 @@ namespace PrintLogApi.Migrations
                     b.ToTable("FilamentAdjustments");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.FilamentBarcode", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FilamentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Value");
+
+                    b.HasIndex("FilamentId", "Value")
+                        .IsUnique();
+
+                    b.ToTable("FilamentBarcodes");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.FilamentCatalogEntry", b =>
                 {
                     b.Property<string>("Id")
@@ -3631,6 +3665,17 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.FilamentBarcode", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Filament", "Filament")
+                        .WithMany("Barcodes")
+                        .HasForeignKey("FilamentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Filament");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.FilamentCatalogSku", b =>
                 {
                     b.HasOne("PrintLogApi.Models.FilamentCatalogEntry", "CatalogEntry")
@@ -4305,6 +4350,8 @@ namespace PrintLogApi.Migrations
 
             modelBuilder.Entity("PrintLogApi.Models.Filament", b =>
                 {
+                    b.Navigation("Barcodes");
+
                     b.Navigation("FilamentAdjustments");
 
                     b.Navigation("PrintFilaments");
