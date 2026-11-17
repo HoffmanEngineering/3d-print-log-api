@@ -33,7 +33,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
     {
         var key = await GenerateApiKey("Auth Test Key");
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         request.Headers.Add("X-Api-Key", key.PublicKey);
 
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
@@ -44,7 +44,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
     [Fact]
     public async Task ApiKey_InvalidKey_ReturnsUnauthorized()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         request.Headers.Add("X-Api-Key", "INVALIDKEY00000000000000000000000");
 
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
@@ -60,7 +60,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         // A freshly generated key has never been used.
         Assert.Null(GetLastUsed(key.Id));
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         request.Headers.Add("X-Api-Key", key.PublicKey);
         var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -78,7 +78,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
     {
         var key = await GenerateApiKey("Last Used Throttle Test");
 
-        var first = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var first = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         first.Headers.Add("X-Api-Key", key.PublicKey);
         Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(first, TestContext.Current.CancellationToken)).StatusCode);
 
@@ -88,7 +88,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         // The write is throttled to once an hour per key by a memory-cache guard, so a second
         // use must not issue another UPDATE. This is what keeps a chatty integration from
         // writing to the same row on every single request.
-        var second = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var second = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         second.Headers.Add("X-Api-Key", key.PublicKey);
         Assert.Equal(HttpStatusCode.OK, (await _httpClient.SendAsync(second, TestContext.Current.CancellationToken)).StatusCode);
 
@@ -117,7 +117,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         // Generate a key and use it once to warm the cache
         var key = await GenerateApiKey("Deactivation Cache Test");
 
-        var warmupRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var warmupRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         warmupRequest.Headers.Add("X-Api-Key", key.PublicKey);
         var warmupResponse = await _httpClient.SendAsync(warmupRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, warmupResponse.StatusCode);
@@ -129,7 +129,7 @@ public class ApiKeyAuthenticationTests : IClassFixture<CustomWebApplicationFacto
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // The deactivated key must not authenticate even though it was recently cached
-        var secondRequest = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+        var secondRequest = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
         secondRequest.Headers.Add("X-Api-Key", key.PublicKey);
         var secondResponse = await _httpClient.SendAsync(secondRequest, TestContext.Current.CancellationToken);
 

@@ -7,7 +7,19 @@ namespace PrintLogApi.Services;
 
 public interface IPrintService
 {
-    Task<Print> AddPrint(AddPrintDTO print, long userId);
+    /// <summary>
+    /// Adds a print. <paramref name="sourceCandidate"/> is how the caller reached the API (web or
+    /// API key); a valid <see cref="AddPrintDTO.CuraSettingId"/> owned by the user overrides it
+    /// with <see cref="PrintSource.SlicerPlugin"/>.
+    /// </summary>
+    Task<Print> AddPrint(AddPrintDTO print, long userId, PrintSource sourceCandidate = PrintSource.Web);
+
+    /// <summary>
+    /// The REST create. Without an external pair it is <see cref="AddPrint"/>. With one that
+    /// <paramref name="userId"/> already used, it returns that print with WasReplayed = true
+    /// instead of creating a duplicate.
+    /// </summary>
+    Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate);
 
     /// <summary>
     /// Creates a print and its PrintFilament usage rows for the MCP write surface, in one
@@ -66,8 +78,13 @@ public interface IPrintService
     /// </summary>
     Task WritePrintReportAsCsvForUser(long userId, Stream destination, CancellationToken cancellationToken = default);
     Task<Print?> GetPrintById(long id);
+
+    /// <summary>
+    /// The two users who may edit a print, read untracked without loading the print graph, or
+    /// null when the print does not exist.
+    /// </summary>
+    Task<PrintEditors?> GetPrintEditors(long id);
     Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate);
-    Task<List<long>> GetPublicPrintIds();
     /// <summary>
     /// The statuses and projectIds collections replace the former scalar filters; the caller
     /// folds any legacy scalar parameters into them so there is a single code path here.
@@ -85,9 +102,51 @@ public interface IPrintService
         Print.PrintStatus? filterByStatus = null,
         SortRequest<PrintSummarySortColumn>? sortRequest = null);
 
+    /// <summary>
+    /// One page of a grouped feed order the caller already has (from the cache, in
+    /// <c>PrintsController.GetGrouped</c>). Loads only that page's rows.
+    /// </summary>
+    Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedPageAsync(GroupedFeedOrder order, int pageNumber, int pageSize);
+
     Task<int> GetMaxImagesPerPrint(long userId);
     Task SetDefaultImage(long printId, int newDefaultImageId);
     Task<Print> UpdatePrint(long id, PutPrintDetailDto dto, long userId);
+
+    /// <summary>
+    /// Changes only the fields <paramref name="dto"/> sends, and nulls the ones it names in
+    /// Clear. Sent usage rows replace the print's rows. Throws DoesNotExistException for a missing
+    /// print or project, and UserCannotAccessPrinterException or UserCannotAccessFilamentException
+    /// for a printer or filament the user does not own; nothing is written when it throws.
+    /// </summary>
+    Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId);
+
+    /// <summary>
+    /// Records how a job ended: status, duration, and actual usage merged by filament (see
+    /// CompletePrintDto). Leaves every other field alone, and is safe to repeat: remaining filament
+    /// follows the rows, so a second identical call changes nothing. Notifies the print's creator
+    /// only when this moves it from a not-finished status to a finished one (IPrintFinishNotifier),
+    /// so a repeat does not notify again. Throws BadRequestException when endedAt is before the
+    /// start date.
+    /// </summary>
+    Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId);
+
+    /// <summary>
+    /// Links a connector's job to a print something else created (#165): sets the external pair,
+    /// the connection when <see cref="ClaimPrintDto.ConnectionInstanceId"/> is one of the user's,
+    /// and the start date when the print has none. <see cref="Print.Source"/> is kept. Only the
+    /// print's creator may claim it, only while it is Printing and has no pair yet. Claiming again
+    /// with the pair it already has returns it with WasReplayed = true. Throws
+    /// DoesNotExistException, ForbiddenException, or PrintClaimConflictException when the print
+    /// has another pair, is not Printing, or the pair is already on another of the user's prints.
+    /// </summary>
+    Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId);
+
+    /// <summary>
+    /// The user's prints on <paramref name="printerId"/> a connector could claim: Printing, with
+    /// no external pair, created after <paramref name="createdAfter"/> when given. Newest first,
+    /// at most <paramref name="limit"/>.
+    /// </summary>
+    Task<List<ClaimablePrintDto>> GetClaimablePrints(long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct);
     Task<Print> UpdatePrintStatus(long id, Print.PrintStatus newStatus, long userId);
     Task UpdateFilamentUsageWeights(Print print);
 
@@ -105,3 +164,9 @@ public interface IPrintService
     /// </summary>
     Task<BulkPrintOperationResult> BulkDeletePrints(long userId, IReadOnlyList<long> printIds, CancellationToken ct);
 }
+
+/// <summary>A created print, or the existing one an external pair resolved to.</summary>
+public sealed record AddPrintResult(Print Print, bool WasReplayed);
+
+/// <summary>A print's creator and its printer's owner: the users who may edit it.</summary>
+public sealed record PrintEditors(long CreatedById, long PrinterOwnerId);

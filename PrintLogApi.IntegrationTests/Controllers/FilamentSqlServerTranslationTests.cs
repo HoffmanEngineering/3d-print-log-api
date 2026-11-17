@@ -67,4 +67,28 @@ public class FilamentSqlServerTranslationTests(CustomWebApplicationFactory facto
         Assert.Contains("MaterialDensityGramPerCubicCm", aggregate);
         Assert.Contains("DiameterMm", aggregate);
     }
+
+    /// <summary>
+    /// Only usage rows whose print belongs to the spool's owner count (SpoolOwnership). The rule
+    /// compares owner ids through the usage row's own joins, so the subquery's only reference to
+    /// the outer spool stays the correlation on its id.
+    /// </summary>
+    [Fact]
+    public void FilamentSummary_UsageAggregate_FiltersOnOwnersWithoutAnOuterReference()
+    {
+        var sql = SummarySql();
+
+        var start = sql.IndexOf("SELECT COALESCE(SUM(CASE", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"No usage aggregate found in the projection:\n{sql}");
+        var end = sql.IndexOf("[FilamentAdjustments]", start, StringComparison.Ordinal);
+        Assert.True(end > start, $"Usage subquery is not followed by the adjustments as expected:\n{sql}");
+        var subquery = sql[start..end];
+        var where = subquery[subquery.IndexOf("WHERE", StringComparison.Ordinal)..];
+
+        Assert.Contains("INNER JOIN [Prints]", subquery);
+        Assert.Contains("[CreatedById]", where);
+        Assert.Contains("[UserId]", where);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(where, @"\[f\]\."));
+        Assert.Contains("[f].[Id] = ", where);
+    }
 }

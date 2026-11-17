@@ -26,7 +26,7 @@ public class PushConfigurationTests : IClassFixture<CustomWebApplicationFactory>
         var client = new NoOpFcmClient(NullLogger<NoOpFcmClient>.Instance);
 
         var result = await client.SendAsync(
-            [new FcmMessage("tok", "Title", "Body", new Dictionary<string, string>())],
+            [new FcmMessage("tok", "Title", "Body", new Dictionary<string, string>(), DateTimeOffset.UtcNow)],
             TestContext.Current.CancellationToken);
 
         Assert.Equal(0, result.SuccessCount);

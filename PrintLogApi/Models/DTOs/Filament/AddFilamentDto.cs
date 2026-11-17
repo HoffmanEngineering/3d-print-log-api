@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Enums;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament;
@@ -138,4 +139,25 @@ public class AddFilamentDto
     public FilamentFinishType? FinishType { get; set; }
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// RFID or NFC tag UIDs on this spool, in any case and with any separators
+    /// (<c>04:A2:3f:11</c>). Stored as uppercase hex without separators (<c>04A23F11</c>), and
+    /// unique across the user's spools: a UID already on another spool is a 409.
+    /// </summary>
+    public List<string>? TagUids { get; set; }
+
+    /// <summary>
+    /// Decoded tag readings to keep with the spool's tags, matched to <c>TagUids</c> by UID. A
+    /// reading for a UID that is not in <c>TagUids</c> is ignored. When a spool is updated, a
+    /// tag's stored reading is replaced only when a new one is sent for it.
+    /// </summary>
+    public List<TagReadingInputDto>? TagReadings { get; set; }
+
+    /// <summary>
+    /// The SpoolmanDB catalog entry the spool was created from. Settable on create only: it is
+    /// validated there (an unknown or removed entry is a 400) and a PUT never changes it.
+    /// </summary>
+    public string? CatalogEntryId { get; set; }
+
 }

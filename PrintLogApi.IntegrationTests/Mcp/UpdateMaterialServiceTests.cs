@@ -1,5 +1,7 @@
-﻿using PrintLogApi.Enums;
+﻿using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Enums;
 using PrintLogApi.Mcp;
+using PrintLogApi.Models;
 using PrintLogApi.Services;
 using Xunit;
 
@@ -370,6 +372,71 @@ public class UpdateMaterialServiceTests : IClassFixture<McpDataWebApplicationFac
         Assert.Empty(m.Effects);
         // Capacity survives: it is not clearable.
         Assert.Equal(500d, m.InitialAmountInSourceUnit);
+    }
+
+    private async Task<FilamentAdjustment> StoredAdjustment(Guid materialId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        return await db.FilamentAdjustments.AsNoTracking()
+            .SingleAsync(a => a.FilamentId == materialId, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Update_DensityChange_RederivesLengthAdjustments()
+    {
+        // The MCP twin of FilamentAdjustmentConversionTests.UpdateFilament_DensityChange_*: the
+        // same edit must leave the same remaining weight whichever client made it.
+        using var scope = _factory.Services.CreateScope();
+        var id = await Seed(scope, "Mcp Density Adjustment");
+        await Svc(scope).AdjustMaterialRemainingForMcp(
+            IntegrationTestSeeder.TestUserId, id, McpMeasurementSource.Length, -10_000, null, CancellationToken.None); // -10 m
+        var stored = await StoredAdjustment(id);
+
+        using var updateScope = _factory.Services.CreateScope();
+        await Update(updateScope, id, new MaterialAttributesInput { DensityGramPerCubicCm = 2.48 });
+
+        var rederived = await StoredAdjustment(id);
+        Assert.Equal(stored.Id, rederived.Id);
+        // Twice the density, twice the weight, give or take the rounding to whole milligrams.
+        Assert.InRange(rederived.AmountMg!.Value, stored.AmountMg!.Value * 2 - 1, stored.AmountMg.Value * 2 + 1);
+    }
+
+    [Fact]
+    public async Task Update_DiameterChange_RederivesLengthAdjustments()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var id = await Seed(scope, "Mcp Diameter Adjustment");
+        await Svc(scope).AdjustMaterialRemainingForMcp(
+            IntegrationTestSeeder.TestUserId, id, McpMeasurementSource.Length, -10_000, null, CancellationToken.None);
+
+        using var updateScope = _factory.Services.CreateScope();
+        await Update(updateScope, id, new MaterialAttributesInput { DiameterMm = 2.85 });
+
+        Assert.Equal(-MeasurementUtilities.GetAmountMgFromLength(10, 2.85, 1.24), (await StoredAdjustment(id)).AmountMg);
+    }
+
+    [Fact]
+    public async Task Update_CategoryWithoutDiameterUnderALengthAdjustment_IsInvalid_AndLeavesItCounting()
+    {
+        // The web PUT rejects this (RequireConvertibleAdjustments): the length adjustment could no
+        // longer be converted and would silently stop counting.
+        using var scope = _factory.Services.CreateScope();
+        var id = await Seed(scope, "Mcp Category Under Adjustment");
+        await Svc(scope).AdjustMaterialRemainingForMcp(
+            IntegrationTestSeeder.TestUserId, id, McpMeasurementSource.Length, -10_000, null, CancellationToken.None);
+        var stored = await StoredAdjustment(id);
+
+        using var updateScope = _factory.Services.CreateScope();
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => Update(updateScope, id, new MaterialAttributesInput { MaterialCategoryNickname = "resin" }));
+        Assert.Equal("invalid_arguments", ex.Code);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var still = await Svc(verifyScope).GetOwnMaterialDetailForMcp(
+            IntegrationTestSeeder.TestUserId, id, CancellationToken.None);
+        Assert.Equal("filament", still.CategoryNickname);
+        Assert.Equal(stored.AmountMg, (await StoredAdjustment(id)).AmountMg);
     }
 
     [Fact]

@@ -12,7 +12,7 @@ public class NotificationService(
     IMapper mapper,
     IPushDispatchService pushDispatchService) : INotificationService
 {
-    public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null)
+    public async Task<PagedList<NotificationSummaryDto>> GetNotificationsForUser(long userId, PagedRequest pagingRequest, bool? unreadOnly = null, NotificationType? type = null)
     {
         var query = context.Notifications
             .Where(n => n.UserId == userId);
@@ -20,6 +20,11 @@ public class NotificationService(
         if (unreadOnly == true)
         {
             query = query.Where(n => !n.IsRead);
+        }
+
+        if (type is { } onlyType)
+        {
+            query = query.Where(n => n.Type == onlyType);
         }
 
         var orderedQuery = query
@@ -48,11 +53,33 @@ public class NotificationService(
         return mapper.Map<NotificationDetailDto>(notification);
     }
 
+    /// <summary>
+    /// The filter of <c>IX_Notifications_UserId_Type_Unread</c>, which serves both unread counts
+    /// without touching the table. SQL Server uses a filtered index only for a query whose
+    /// predicate is this literal, which is what <see cref="Unread"/> compiles to (pinned by
+    /// <c>DatabaseLoadIndexTests</c>).
+    /// </summary>
+    internal const string UnreadFilter = "[IsRead] = CAST(0 AS bit)";
+
+    /// <summary>A user's unread notifications, in the shape the filtered unread index matches.</summary>
+    internal static IQueryable<Notification> Unread(IQueryable<Notification> notifications, long userId) =>
+        notifications.Where(n => n.UserId == userId && !n.IsRead);
+
     public async Task<int> GetUnreadCountForUser(long userId)
     {
-        return await context.Notifications
-            .Where(n => n.UserId == userId && !n.IsRead)
-            .CountAsync();
+        return await Unread(context.Notifications, userId).CountAsync();
+    }
+
+    public async Task<(int Total, int Achievements)> GetUnreadCountsForUser(long userId)
+    {
+        // A conditional count in one GROUP BY: no subquery inside the aggregate, so this is as
+        // valid on SQL Server as on the SQLite test database. The web app polls this every 30 s.
+        var counts = await Unread(context.Notifications, userId)
+            .GroupBy(n => n.UserId)
+            .Select(g => new { Total = g.Count(), Achievements = g.Count(n => n.Type == NotificationType.Achievement) })
+            .FirstOrDefaultAsync();
+
+        return counts is null ? (0, 0) : (counts.Total, counts.Achievements);
     }
 
     public async Task<bool> MarkAsRead(Guid notificationId, long userId)
@@ -118,7 +145,7 @@ public class NotificationService(
     /// funnels here so cross-cutting concerns — currently push dispatch — attach in exactly one
     /// place. A create method that saves directly will silently skip them.
     /// </summary>
-    private async Task PersistNotifications(IReadOnlyList<Notification> notifications)
+    private async Task PersistNotifications(IReadOnlyList<Notification> notifications, CancellationToken ct = default)
     {
         if (notifications.Count == 0)
         {
@@ -126,7 +153,7 @@ public class NotificationService(
         }
 
         context.Notifications.AddRange(notifications);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(ct);
 
         foreach (var notification in notifications)
         {
@@ -141,6 +168,10 @@ public class NotificationService(
             }
         }
     }
+
+    /// <inheritdoc/>
+    public Task PersistAchievementNotifications(IReadOnlyList<Notification> notifications, CancellationToken ct = default) =>
+        PersistNotifications(notifications, ct);
 
     public async Task<Notification> CreateNotification(
         long userId,
@@ -288,6 +319,20 @@ public class NotificationService(
             message,
             actionUrl);
     }
+
+    public Task<Notification> CreateBridgeKeyPendingNotification(long userId, string bridgeName) => CreateNotification(
+        userId,
+        NotificationType.SystemAnnouncement,
+        "Bridge encryption key changed",
+        $"{bridgeName} reported a new encryption key; confirm it on the Bridges screen",
+        "/printers/bridges");
+
+    public Task<Notification> CreateDevicePairedNotification(long userId, string deviceName, bool repaired, string? ipAddress) => CreateNotification(
+        userId,
+        NotificationType.SystemAnnouncement,
+        repaired ? "Device paired again" : "Device paired",
+        $"{deviceName} was paired with your account{(repaired ? " again" : "")}{(ipAddress is null ? "" : $" from IP address {ipAddress}")}. Don't recognize it? Revoke it in Settings.",
+        "/settings");
 
     public async Task<Notification> CreateApiKeyDeletedNotification(long userId, string? keyDescription)
     {

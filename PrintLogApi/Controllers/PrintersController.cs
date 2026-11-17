@@ -5,10 +5,13 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Services;
 
 namespace PrintLogApi.Controllers;
@@ -25,22 +28,29 @@ public class PrintersController(
     TelemetryClient telemetry,
     IFilamentService filamentService,
     IPrinterService printerService,
+    IPrinterImageService printerImageService,
     IPrinterCategoryService printerCategoryService,
     HybridCache cache,
     CachedComputation computation,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    ICacheVersionService cacheVersionService,
+    TimeProvider timeProvider) : ControllerBase
 {
     private const string DEFAULT_PRINTER_CATEGORY_NICKNAME = PrinterService.DefaultPrinterCategoryNickname;
     private const string PRINTER_SUMMARY_CACHE_PREFIX = "printer_summary_";
 
     /// <summary>
-    /// Get an array of paged Printer Summaries for current user.
+    /// List the current user's printers.
     /// </summary>
+    /// <remarks>
+    /// Inactive printers are left out unless `includeInactive=true`. Use a printer's `id` as the
+    /// `printerId` when creating a print.
+    /// </remarks>
     /// <param name="pagingRequest">Paging information</param>
     /// <param name="searchText">Filter printers by name, make, and model.</param>
     /// <param name="includeInactive">By default, only returns active printers. Set this to true to return both active and inactive printers.</param>
     /// <response code="200">Returned with a paged list of printer summaries.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("summary")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -66,9 +76,45 @@ public class PrintersController(
             SummaryCacheOptions,
             cancellationToken: HttpContext.RequestAborted);
 
-        return Ok(response);
+        // The cached instance is shared with every concurrent caller and is marked
+        // [ImmutableObject(true)] for HybridCache, so it must be treated as read-only. Sign
+        // into a fresh copy: bucketed expiry makes repeated signing cheap and byte-identical
+        // within a window, and expiry stays bounded by the request rather than by the cache
+        // entry's lifetime.
+        var items = new List<PrinterSummarySimpleDto>(response.Page.Items.Count);
+        foreach (var item in response.Page.Items)
+        {
+            response.DefaultImages.TryGetValue(item.Id, out var defaultImage);
 
-        Task<PagedList<PrinterSummarySimpleDto>> LoadPrinterSummary(PrintLogContext db)
+            items.Add(new PrinterSummarySimpleDto
+            {
+                Id = item.Id,
+                Name = item.Name,
+                Make = item.Make,
+                Model = item.Model,
+                IsActive = item.IsActive,
+                CatalogModelId = item.CatalogModelId,
+                WattageW = item.WattageW,
+                SlotCount = item.SlotCount,
+                Category = item.Category,
+                LoadedFilaments = item.LoadedFilaments,
+                DefaultImageThumbnailUrl = defaultImage?.BlobPath is null
+                    ? null
+                    : await printerService.SignImageOrNullAsync(
+                        defaultImage.BlobPath,
+                        defaultImage.ContentType ?? "image/webp",
+                        item.Id,
+                        HttpContext.RequestAborted)
+            });
+        }
+
+        return Ok(new PagedList<PrinterSummarySimpleDto>(
+            items,
+            response.Page.Paging.TotalCount,
+            response.Page.Paging.CurrentPage,
+            response.Page.Paging.PageSize));
+
+        async Task<CachedPrinterSummaryPage> LoadPrinterSummary(PrintLogContext db)
         {
             var printers = db.Printers
                 .AsNoTracking()
@@ -93,7 +139,11 @@ public class PrintersController(
                 .ThenByDescending(p => p.Model)
                 .ProjectTo<PrinterSummarySimpleDto>(mapper.ConfigurationProvider);
 
-            return PagedList<PrinterSummarySimpleDto>.CreateAsync(result, pagingRequest.PageNumber, pagingRequest.PageSize);
+            var page = await PagedList<PrinterSummarySimpleDto>.CreateAsync(
+                result, pagingRequest.PageNumber, pagingRequest.PageSize);
+
+            return new CachedPrinterSummaryPage(
+                page, await LoadDefaultImagePathsAsync(db, page.Items));
         }
     }
 
@@ -111,6 +161,7 @@ public class PrintersController(
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -124,7 +175,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Include(p => p.Category!)
                 .ThenInclude(type => type.MaterialCategory)
             .Where(p => p.Id == id)
@@ -147,22 +200,37 @@ public class PrintersController(
             return Forbid();
         }
 
-        return mapper.Map<PrinterDetailDto>(printer);
+        var dto = mapper.Map<PrinterDetailDto>(printer);
+
+        // Hydration is explicit rather than a member mapping: SAS signing is async and
+        // cannot run inside ProjectTo. Without this call Images is always null and the edit
+        // panel shows nothing.
+        await printerService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+
+        return dto;
     }
 
     /// <summary>
-    /// Update a printer. Overwrites all properties of the printer.
+    /// Replace a printer's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole printer rather than patching it: send every field, not only the changed ones.
+    /// The one exception is `loadedFilaments`: omit it (or send `null`) to leave the loaded spools as
+    /// they are. A list replaces them, unloading any spool not in it and moving each listed spool off
+    /// any other printer it is loaded on; an empty list unloads everything.
+    /// </remarks>
     /// <param name="id">The ID of the printer to update.</param>
     /// <param name="printer">The updated printer details.</param>
     /// <returns></returns>
     /// <response code="201">Returned with the updated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -192,6 +260,12 @@ public class PrintersController(
             return Forbid();
         }
 
+        var (catalogProblem, _) = await ValidateCatalogModelAsync(printer, existingPrinter.CatalogModelId);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
+        }
+
         existingPrinter = mapper.Map<AddPrinterDTO, Printer>(printer, existingPrinter);
 
         var printerCategory = await printerCategoryService.get(printer.Category ?? existingPrinter.Category!.Nickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
@@ -203,20 +277,27 @@ public class PrintersController(
 
         existingPrinter.Category = printerCategory;
 
-        foreach (var filament in existingPrinter.LoadedFilaments!)
+        // A missing (or null) list means "leave what is loaded alone". A client that saves other
+        // fields must not revert spools a print, the bridge or another tab loaded meanwhile; an
+        // explicit empty list still unloads everything.
+        var requestedFilaments = printer.LoadedFilaments;
+        if (requestedFilaments is not null)
         {
-            if (filament.FilamentId != default)
+            foreach (var filament in requestedFilaments)
             {
-                var canAccessFilament = await filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
-                if (!canAccessFilament)
+                if (filament.FilamentId != default)
                 {
-                    //throw new UserCannotAccessFilamentException();
-                    return StatusCode(403, "User does not have access to filament.");
+                    var canAccessFilament = await filamentService.CanUserAccessFilament(userId.Value, filament.FilamentId);
+                    if (!canAccessFilament)
+                    {
+                        //throw new UserCannotAccessFilamentException();
+                        return StatusCode(403, "User does not have access to filament.");
+                    }
                 }
             }
-        }
 
-        await printerService.setLoadedFilament(existingPrinter.Id, existingPrinter.LoadedFilaments.Select(f => f.FilamentId).AsEnumerable());
+            await printerService.setLoadedFilament(existingPrinter.Id, requestedFilaments.Select(f => f.FilamentId).ToList(), fillPrintingRows: true);
+        }
 
         context.Entry(existingPrinter).State = EntityState.Modified;
 
@@ -248,12 +329,14 @@ public class PrintersController(
     /// </summary>
     /// <param name="printer">The printer details to create</param>
     /// <response code="201">Returned with the newly creeated printer details.</response>
-    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route.</response>
+    /// <response code="400">Returned if the printer details do not contain all required fields, or if the ID in the printer details does not match the id in the route. A `catalogModelId` that is unknown, hidden, or retired (and not already the printer's) returns a problem with `code` `printer_model_not_found`.</response>
     /// <response code="401">Returned if the user is not authenticated.</response>
     /// <response code="403">Returned if the current user cannot access the requested printer.</response>
     /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersCreate)]
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -265,9 +348,28 @@ public class PrintersController(
             return Unauthorized();
         }
 
-        var newPrinter = mapper.Map<Printer>(printer);
+        var (catalogProblem, catalogModel) = await ValidateCatalogModelAsync(printer, currentCatalogModelId: null);
+        if (catalogProblem is not null)
+        {
+            return catalogProblem;
+        }
 
-        var printerType = await printerCategoryService.get(printer.Category ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        var newPrinter = mapper.Map<Printer>(printer);
+        newPrinter.CreatedAt = timeProvider.GetUtcNow();
+
+        // Specs the caller left null come from the catalog model (create only; PUT never fills).
+        if (catalogModel is not null)
+        {
+            PrinterCatalogDefaults.ApplyOnCreate(newPrinter, catalogModel, printer.SlotCount);
+        }
+
+        // The category the caller named wins; otherwise the model's technology, then the default.
+        // A category taken from the model is a default, so a missing one falls back instead of failing.
+        var printerType = await printerCategoryService.get(printer.Category ?? newPrinter.CategoryNickname ?? DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        if (printerType is null && printer.Category is null)
+        {
+            printerType = await printerCategoryService.get(DEFAULT_PRINTER_CATEGORY_NICKNAME);
+        }
 
         if (printerType is null)
         {
@@ -275,8 +377,24 @@ public class PrintersController(
         }
 
         newPrinter.Category = printerType;
+        newPrinter.CategoryNickname = printerType.Nickname;
 
         newPrinter.UserId = userId.Value;
+
+        // The same rule and answer as PutPrinter: only the caller's own spools can be loaded.
+        var requestedFilamentIds = (printer.LoadedFilaments ?? [])
+            .Select(f => f.FilamentId)
+            .Where(id => id != default)
+            .ToList();
+        if (!await filamentService.CanUserAccessAllFilaments(userId.Value, requestedFilamentIds))
+        {
+            return StatusCode(403, "User does not have access to filament.");
+        }
+
+        var loadedAt = DateTimeOffset.Now;
+        newPrinter.LoadedFilaments = requestedFilamentIds
+            .Select(id => new PrinterFilament { FilamentId = id, LoadedDateTime = loadedAt })
+            .ToList();
 
         context.Printers.Add(newPrinter);
         await context.SaveChangesAsync();
@@ -289,10 +407,62 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Checks a catalog model id on a printer write. Null is always fine. Otherwise the model must
+    /// exist and not be hidden, and a retired model is accepted only when the printer already has it.
+    /// Keeping the id a printer already has (any case) is always accepted, so editing a printer whose model
+    /// was hidden or retired later never fails on a field the user did not touch.
+    /// </summary>
+    private async Task<(ObjectResult? Problem, PrinterModel? Model)> ValidateCatalogModelAsync(AddPrinterDTO printer, string? currentCatalogModelId)
+    {
+        var catalogModelId = printer.CatalogModelId;
+        if (catalogModelId is null)
+        {
+            return (null, null);
+        }
+
+        if (string.Equals(catalogModelId, currentCatalogModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Unchanged. The FK guarantees a stored id exists; save it in its stored case.
+            printer.CatalogModelId = currentCatalogModelId;
+            return (null, null);
+        }
+
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels
+            .AsNoTracking()
+            .Where(m => m.Id.ToLower() == lowered)
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
+
+        if (model is not null && !model.Hidden && !model.Retired)
+        {
+            printer.CatalogModelId = model.Id;
+            return (null, model);
+        }
+
+        return (CodedProblem(
+            StatusCodes.Status400BadRequest,
+            "The printer model was not found in the catalog.",
+            "printer_model_not_found"), null);
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
+
+    /// <summary>
     /// Retrieve the list of currently loaded filament for this printer
     /// </summary>
     /// <param name="id"></param>
     /// <returns></returns>
+    [DeviceAccess(DeviceScopes.PrintersRead)]
     [HttpGet("{id}/filament")]
     public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> GetLoadedFilament(long id)
     {
@@ -302,7 +472,9 @@ public class PrintersController(
                     .ThenInclude(f => f.FilamentAdjustments)
             .Include(p => p.LoadedFilaments!)
                 .ThenInclude(pf => pf.Filament)
-                    .ThenInclude(f => f.PrintFilaments)
+                    .ThenInclude(f => f.PrintFilaments!)
+                        .ThenInclude(u => u.Print)
+                            .ThenInclude(pr => pr.Printer)
             .Where(p => p.Id == id)
             .SingleOrDefaultAsync();
 
@@ -322,7 +494,122 @@ public class PrintersController(
             return Forbid();
         }
 
-        return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments);
+        return mapper.Map<List<PrinterFilamentSummaryDto>>(printer.LoadedFilaments!
+            .Where(SpoolOwnership.Counts)
+            .OrderBy(pf => pf.Slot == null).ThenBy(pf => pf.Slot).ThenBy(pf => pf.LoadedDateTime));
+    }
+
+    /// <summary>
+    /// Load a spool into one of a printer's slots.
+    /// </summary>
+    /// <remarks>
+    /// Slots are 0-based and must be below the printer's `slotCount`. Whatever is in the slot is
+    /// unloaded, and so is the spool from any other slot or printer it was loaded on: a spool is
+    /// loaded in one place at a time. Loading the spool that is already there only updates the
+    /// label. Returns the printer's loaded filament, in slot order.
+    /// </remarks>
+    /// <param name="id">The ID of the printer.</param>
+    /// <param name="slot">The 0-based slot, such as 2 for T2.</param>
+    /// <param name="body">The spool to load, and what the printer calls the slot.</param>
+    /// <response code="200">Returned with the printer's loaded filament.</response>
+    /// <response code="400">Returned if the slot is outside the printer's slot count.</response>
+    /// <response code="401">Returned if the user is not authenticated.</response>
+    /// <response code="403">Returned if the current user cannot access the printer or the spool.</response>
+    /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
+    [HttpPut("{id}/slots/{slot}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<PrinterFilamentSummaryDto>>> LoadSlot(long id, int slot, LoadPrinterSlotDto body)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var printer = await printerService.getPrinterById(id);
+        if (printer == null)
+        {
+            return NotFound();
+        }
+
+        if (printer.UserId != userId)
+        {
+            return Forbid();
+        }
+
+        if (slot < 0 || slot >= printer.SlotCount)
+        {
+            return BadRequest($"slot must be between 0 and {printer.SlotCount - 1}; this printer has {printer.SlotCount}.");
+        }
+
+        // [Required] guarantees a value.
+        var filamentId = body.FilamentId!.Value;
+        if (!await filamentService.CanUserAccessFilament(userId.Value, filamentId))
+        {
+            return StatusCode(403, "User does not have access to filament.");
+        }
+
+        var label = string.IsNullOrWhiteSpace(body.SlotLabel) ? null : body.SlotLabel.Trim();
+        await printerService.LoadSlot(printer, slot, filamentId, label);
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrinterSlotLoaded");
+        cacheVersionService.InvalidateUserCache(userId.Value);
+
+        // The tracked printer still holds the rows just unloaded; read the result fresh.
+        context.ChangeTracker.Clear();
+        return await GetLoadedFilament(id);
+    }
+
+    /// <summary>
+    /// Unload whatever spool is in one of a printer's slots.
+    /// </summary>
+    /// <remarks>
+    /// Unloading an empty slot succeeds. To unload every slot, use `PUT /api/Printers/{id}/filament/unload`.
+    /// </remarks>
+    /// <param name="id">The ID of the printer.</param>
+    /// <param name="slot">The 0-based slot.</param>
+    /// <response code="204">Returned when the slot is empty.</response>
+    /// <response code="401">Returned if the user is not authenticated.</response>
+    /// <response code="403">Returned if the current user cannot access the printer.</response>
+    /// <response code="404">Returned if the printer does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintersSlots)]
+    [HttpDelete("{id}/slots/{slot}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UnloadSlot(long id, int slot)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var printer = await printerService.getPrinterById(id);
+        if (printer == null)
+        {
+            return NotFound();
+        }
+
+        if (printer.UserId != userId)
+        {
+            return Forbid();
+        }
+
+        await printerService.UnloadSlot(printer, slot);
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrinterSlotUnloaded");
+        cacheVersionService.InvalidateUserCache(userId.Value);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -444,4 +731,276 @@ public class PrintersController(
 
     // EstimatePrinterCacheSize is gone for the same reason as PrintsController's counterpart:
     // HybridCache charges the entry's real serialized byte length. See CacheBudget.
+
+    // ------------------------------------------------------------------------------------
+    // Printer images
+    // ------------------------------------------------------------------------------------
+
+    /// <summary>Largest accepted image upload.</summary>
+    private const int MaxImageSizeBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// The unsigned default-image blob path for each printer on a page, keyed by printer id.
+    /// Runs INSIDE the cached computation: a path never expires, so caching it is safe, while
+    /// the signed URL built from it must not be cached at all.
+    /// </summary>
+    private static async Task<Dictionary<long, CachedDefaultImage>> LoadDefaultImagePathsAsync(
+        PrintLogContext db, IList<PrinterSummarySimpleDto> items)
+    {
+        if (items.Count == 0) return [];
+
+        var ids = items.Select(i => i.Id).ToList();
+
+        var candidates = await db.PrinterImages
+            .AsNoTracking()
+            .Where(pi => ids.Contains(pi.PrinterId))
+            .Select(pi => new
+            {
+                pi.PrinterId,
+                pi.IsDefault,
+                pi.DisplayOrder,
+                pi.Id,
+                pi.ContentType,
+                HasThumbnail = pi.ThumbnailFile != null,
+                Path = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : pi.File.Path
+            })
+            .ToListAsync();
+
+        // The filtered unique index enforces AT MOST one default, never at least one, so a
+        // printer can legitimately have images and no flagged default. Fall back to the
+        // lowest DisplayOrder, matching detail hydration.
+        return candidates
+            .GroupBy(c => c.PrinterId)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    var chosen = g.OrderByDescending(c => c.IsDefault)
+                                  .ThenBy(c => c.DisplayOrder)
+                                  .ThenBy(c => c.Id)
+                                  .First();
+
+                    return new CachedDefaultImage
+                    {
+                        BlobPath = chosen.Path,
+                        ContentType = chosen.HasThumbnail ? "image/webp" : chosen.ContentType
+                    };
+                });
+    }
+
+    /// <summary>
+    /// Signed default-image thumbnails for every printer the caller owns.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately has no anonymous variant. Surfaces that merely mention a printer read
+    /// this map instead of carrying a signed URL on their own DTO, which is what keeps
+    /// printer photos off public print pages without a guard on each of those surfaces.
+    /// </remarks>
+    [HttpGet("thumbnails")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IList<PrinterThumbnailDto>>> GetPrinterThumbnails()
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        // Ownership is Printer.UserId. A predicate on PrinterImage.CreatedById compiles and
+        // reads plausibly; because this endpoint returns a whole-user map rather than taking
+        // a printer id, that mistake would leak every default printer image in the database
+        // while still passing every happy-path test.
+        var candidates = await context.PrinterImages
+            .AsNoTracking()
+            .Where(pi => pi.Printer.UserId == userId.Value)
+            .Select(pi => new
+            {
+                pi.PrinterId,
+                pi.IsDefault,
+                pi.DisplayOrder,
+                pi.Id,
+                pi.ContentType,
+                HasThumbnail = pi.ThumbnailFile != null,
+                Path = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : pi.File.Path
+            })
+            .ToListAsync(HttpContext.RequestAborted);
+
+        // Same at-most-versus-at-least-one-default fallback as detail hydration.
+        var chosen = candidates
+            .GroupBy(c => c.PrinterId)
+            .Select(g => g.OrderByDescending(c => c.IsDefault)
+                          .ThenBy(c => c.DisplayOrder)
+                          .ThenBy(c => c.Id)
+                          .First());
+
+        var result = new List<PrinterThumbnailDto>();
+        foreach (var c in chosen)
+        {
+            result.Add(new PrinterThumbnailDto
+            {
+                PrinterId = c.PrinterId,
+                ThumbnailUrl = await printerService.SignImageOrNullAsync(
+                    c.Path,
+                    c.HasThumbnail ? "image/webp" : c.ContentType,
+                    c.PrinterId,
+                    HttpContext.RequestAborted)
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Upload a photo of a printer.
+    /// </summary>
+    /// <remarks>
+    /// The uploaded bytes are decoded server-side; the declared content type from the client
+    /// is not trusted. An undecodable or disallowed file is rejected before anything is
+    /// stored.
+    /// </remarks>
+    /// <response code="201">The stored image, with signed URLs.</response>
+    /// <response code="400">The file is missing, too large, or not a supported image.</response>
+    /// <response code="404">No such printer belonging to the current user.</response>
+    [HttpPost("{id}/images")]
+    // Enforced BEFORE model binding, unlike the file.Length check in the body: by the time
+    // IFormFile has materialized, a much larger multipart body has already been buffered.
+    //
+    // Not covered by an integration test on purpose: the limit is a Kestrel feature and
+    // TestServer does not implement IHttpMaxRequestBodySizeFeature, so an oversized body
+    // there falls through to the file.Length check and reports 400 instead of 413.
+    [RequestSizeLimit(MaxImageSizeBytes + (1024 * 1024))]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrinterImageDto>> PostPrinterImage(long id, IFormFile file)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        if (file is null || file.Length == 0) return BadRequest("Image file is required.");
+
+        if (file.Length > MaxImageSizeBytes) return BadRequest("Image must be under 10MB.");
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var image = await printerImageService.AddImageAsync(
+                id, stream, userId.Value, HttpContext.RequestAborted);
+
+            var dto = await printerService.HydrateImageDtoAsync(image, HttpContext.RequestAborted);
+
+            telemetry.TrackEvent("PrinterPictureAdded");
+
+            // The printer summary is cached and now carries a default-image path, so the
+            // list would keep showing the old photo until the entry expired.
+            cacheVersionService.InvalidateUserCache(userId.Value);
+
+            return CreatedAtAction(nameof(GetPrinterImage), new { id, imageId = image.Id }, dto);
+        }
+        catch (InvalidImageException ex) { return BadRequest(ex.Message); }
+        // The account storage quota throws this. There is no global exception-to-status
+        // mapping in this app, so without the catch it surfaces as a 500.
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Redirects to a signed URL for a printer image.
+    /// </summary>
+    /// <remarks>
+    /// For non-browser API consumers holding a bearer token. The UI does not use this - it
+    /// reads pre-signed URLs from the printer DTO and the thumbnail map.
+    /// NOT usable from &lt;img src&gt;: the redirect itself requires the bearer token.
+    /// </remarks>
+    [HttpGet("{id}/images/{imageId}")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPrinterImage(long id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        // Ownership is part of the predicate, so a foreign image is indistinguishable from a
+        // missing one. This endpoint must not be an existence oracle. Note the deliberate
+        // difference from GetPrinter above, which answers 403: the image routes are new and
+        // start out non-disclosing rather than inheriting that older behavior.
+        var image = await context.PrinterImages
+            .AsNoTracking()
+            .Include(pi => pi.File)
+            .FirstOrDefaultAsync(pi => pi.PrinterId == id
+                                    && pi.Id == imageId
+                                    && pi.Printer.UserId == userId.Value,
+                                 HttpContext.RequestAborted);
+        if (image?.File?.Path is null) return NotFound();
+
+        var uri = await printerService.SignImageOrNullAsync(
+            image.File.Path, image.ContentType, id, HttpContext.RequestAborted);
+        if (uri is null) return NotFound();
+
+        return Redirect(uri);
+    }
+
+    /// <summary>
+    /// Deletes a printer image, its file rows, and its blobs.
+    /// </summary>
+    [HttpDelete("{id}/images/{imageId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePrinterImage(long id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await printerImageService.DeleteImageAsync(
+                id, imageId, userId.Value, HttpContext.RequestAborted);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            return NoContent();
+        }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Reorders the images on a printer. The supplied IDs must be its exact image set.
+    /// </summary>
+    [HttpPut("{id}/images/reorder")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReorderPrinterImages(long id, [FromBody] List<int> orderedImageIds)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await printerImageService.ReorderImagesAsync(
+                id, orderedImageIds, userId.Value, HttpContext.RequestAborted);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            return NoContent();
+        }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// Makes one of the images on a printer its default.
+    /// </summary>
+    [HttpPost("{id}/images/{imageId}/set-as-default")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetDefaultPrinterImage(long id, int imageId)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        try
+        {
+            await printerImageService.SetDefaultImageAsync(
+                id, imageId, userId.Value, HttpContext.RequestAborted);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            return NoContent();
+        }
+        catch (DoesNotExistException) { return NotFound(); }
+    }
 }

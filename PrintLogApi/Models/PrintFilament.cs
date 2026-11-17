@@ -25,6 +25,11 @@ public class PrintFilament
 
     public Guid? FilamentId { get; set; }
 
+    /// <summary>
+    /// The printer slot (tool) the material was fed from, recorded even when no spool is linked.
+    /// </summary>
+    public int? Slot { get; set; }
+
     // Can be null
     public Filament? Filament { get; set; }
 
@@ -42,7 +47,7 @@ public class PrintFilament
     public double? LengthInM { get; set; }
 
     /// <summary>
-    /// The estimated length of filament used in meters.
+    /// The estimated volume of filament used in milliliters.
     /// </summary>
     public double? EstimatedVolumeMl { get; set; }
 
@@ -60,6 +65,13 @@ public class PrintFilament
     /// The source of truth for the actual sections
     /// </summary>
     public SourceMeasurement Source { get; set; }
+
+    /// <summary>
+    /// True when the actual figures are the slicer's estimate rather than a measurement: most
+    /// firmwares other than Klipper report only that (printlog-bridge#82). The spool is still
+    /// charged them, but accuracy analytics leave the row out, as they do a row with no estimate.
+    /// </summary>
+    public bool ActualIsEstimate { get; set; }
 
     [StringLength(1000)]
     public string? Notes { get; set; }

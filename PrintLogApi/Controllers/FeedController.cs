@@ -29,6 +29,13 @@ public class FeedController : ControllerBase
         _allowedUserIds = config.GetSection("Feed").GetSection("AllowedUserIds").Get<long[]>();
     }
 
+    /// <summary>
+    /// Get the ten most recent prints before a point in time, for a feed view. Not in general use.
+    /// </summary>
+    /// <remarks>
+    /// Restricted to an allowlist of users; everyone else receives 404.
+    /// </remarks>
+    /// <param name="fromDateTime">Return prints before this time. Defaults to now.</param>
     [HttpGet]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]

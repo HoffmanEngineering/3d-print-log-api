@@ -1,17 +1,21 @@
 ﻿using System.Globalization;
+using System.Linq.Expressions;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using CsvHelper;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Achievements;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.SortEnums;
+using PrintLogApi.Profiles;
 using static PrintLogApi.Models.Print;
 using static PrintLogApi.Services.MeasurementUtilities;
 
@@ -24,7 +28,9 @@ public sealed class PrintService(
     IFilamentService filamentService,
     IPrinterService printerService,
     INotificationService notificationService,
-    ICacheVersionService cacheVersionService) : IPrintService
+    ICacheVersionService cacheVersionService,
+    IPrintFinishNotifier printFinishNotifier,
+    IPrintStartNotifier printStartNotifier) : IPrintService
 {
     /// <summary>Maximum length of the free-text search term.</summary>
     public const int MaxSearchQueryLength = 200;
@@ -216,7 +222,7 @@ public sealed class PrintService(
             .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(p => new
+            .Select(ExpressionSplice.With((Print p, long materialMg, bool materialIsEstimated) => new
             {
                 p.Id,
                 p.Title,
@@ -227,22 +233,18 @@ public sealed class PrintService(
                 PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
                 PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                 p.StartDate,
-                // Canonical material usage: sum of per-filament actual weight, falling back to
-                // the estimated weight. The scalar Print.FilamentUsageMg is legacy and not
-                // maintained, so it must not be used. Mirrors PrintProfile / remaining-weight.
-                MaterialMg = p.FilamentUsage!.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
+                // Canonical material usage: the per-filament rows, each resolved by
+                // FilamentProfile.UsageRowMg (PrintMetrics.RowsMgExpr). The scalar
+                // Print.FilamentUsageMg is legacy and not maintained, so it must not be used.
+                // Mirrors PrintProfile / remaining-weight.
+                MaterialMg = materialMg,
                 p.PrintTimeInSeconds,
                 p.EstimatedPrintTimeInSeconds,
                 // Material provenance: true when ANY contributing usage row fell back to its estimate.
-                MaterialIsEstimated = p.FilamentUsage!.Any(pf =>
-                    !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                    && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0),
+                MaterialIsEstimated = materialIsEstimated,
                 ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                 ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
-            })
+            }, PrintMetrics.RowsMgExpr, PrintMetrics.RowsAreEstimatedExpr))
             .ToListAsync(ct);
 
         var items = rows.Select(r =>
@@ -279,7 +281,7 @@ public sealed class PrintService(
     {
         var row = await context.Prints.AsNoTracking()
             .Where(p => p.Id == printId && p.CreatedById == userId)
-            .Select(p => new
+            .SelectWith((p, usageRow) => new
             {
                 p.Id,
                 p.Title,
@@ -289,10 +291,6 @@ public sealed class PrintService(
                 PrinterId = p.Printer != null && p.Printer.UserId == userId ? (long?)p.PrinterId : null,
                 PrinterName = p.Printer != null && p.Printer.UserId == userId ? p.Printer.Name : null,
                 p.StartDate,
-                MaterialMg = p.FilamentUsage!.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
                 p.PrintTimeInSeconds,
                 p.EstimatedPrintTimeInSeconds,
                 p.FileName,
@@ -306,7 +304,7 @@ public sealed class PrintService(
 
                 // Optional navigation => EF emits a LEFT JOIN, so rows with a NULL FilamentId
                 // are preserved. An inner join would silently drop them and the per-material
-                // rows would no longer add up to MaterialMg above.
+                // rows would no longer add up to the material total below.
                 // Not capped in SQL: EF cannot translate Take() inside a nested collection
                 // projection. That is acceptable here because this collection is bounded by one
                 // print's filament rows (a printer's tool/AMS slots — single digits), not by how
@@ -314,39 +312,9 @@ public sealed class PrintService(
                 // data, not a paging mechanism.
                 Usage = p.FilamentUsage!
                     .OrderBy(pf => pf.Id)
-                    .Select(pf => new
-                    {
-                        // Guard on ownership, not merely on non-null: a corrupt row can point at
-                        // ANOTHER user's spool, and returning its brand/material/colour would
-                        // leak their data. The quantity lives on the caller's own PrintFilament
-                        // row, so it is safe to keep.
-                        Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
-                        pf.FilamentId,
-                        // Null-forgiven because this is an EF projection: the null nav is
-                        // handled server-side in SQL and never dereferenced in process. The
-                        // Readable flag above is what gates the values on the read side.
-                        Name = pf.Filament!.DisplayName,
-                        Brand = pf.Filament.Brand,
-                        Material = pf.Filament.MaterialType,
-                        Color = pf.Filament.ColorName,
-
-                        // Identical to MaterialMg above and to McpStatisticsService: a zero or
-                        // NEGATIVE actual falls through to the estimate. `AmountMg ?? Estimated`
-                        // would not, and the sum invariant would break.
-                        Mg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                            : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                            : 0,
-                        IsEstimated = !(pf.AmountMg.HasValue && pf.AmountMg > 0)
-                            && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0,
-
-                        // The unresolved figures, so a caller can see what was actually recorded
-                        // vs. estimated. Same non-positive-means-unset rule as Mg above.
-                        ActualMg = pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg : (int?)null,
-                        EstimatedMg = pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg : (int?)null,
-                        pf.Notes,
-                    })
+                    .Select(usageRow)
                     .ToList(),
-            })
+            }, McpUsageRow.For(userId))
             .FirstOrDefaultAsync(ct);
 
         if (row is null)
@@ -364,18 +332,25 @@ public sealed class PrintService(
                 u.Readable ? u.Brand : null,
                 u.Readable ? u.Material : null,
                 u.Readable ? u.Color : null,
-                McpUnits.MgToGrams(u.Mg),
+                McpUnits.MgToGrams(PrintMetrics.Round(u.Mg)),
                 u.IsEstimated,
-                u.ActualMg.HasValue ? McpUnits.MgToGrams(u.ActualMg.Value) : (double?)null,
-                u.EstimatedMg.HasValue ? McpUnits.MgToGrams(u.EstimatedMg.Value) : (double?)null,
-                u.Notes))
+                // Unset (null) rather than 0 when that side recorded nothing usable, as before.
+                u.ActualMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.ActualMg)) : (double?)null,
+                u.EstimatedMg > 0 ? McpUnits.MgToGrams(PrintMetrics.Round(u.EstimatedMg)) : (double?)null,
+                u.Notes,
+                u.Milliliters))
             .ToList();
 
         var seconds = PrintMetrics.Resolve(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds);
 
+        // Over ALL rows, which are not capped in SQL, each rounded once the way
+        // PrintMetrics.RowsMgExpr rounds in SQL, so the parts below sum to it and it matches
+        // search_prints and the print list.
+        var materialMg = row.Usage.Sum(u => PrintMetrics.Round(u.Mg));
+
         return new PrintDetailResult(
             row.Id, row.Title!, row.Status.ToString(), row.PrinterId, row.PrinterName,
-            row.StartDate, McpUnits.MgToGrams(row.MaterialMg),
+            row.StartDate, McpUnits.MgToGrams(materialMg),
             // Null, not 0, when nothing was recorded: a 0 would claim a measured zero seconds.
             seconds > 0 ? seconds : (int?)null,
             PrintMetrics.IsEstimated(row.PrintTimeInSeconds, row.EstimatedPrintTimeInSeconds),
@@ -446,18 +421,9 @@ public sealed class PrintService(
                 .Where(p => p.CreatedById == currentUserId);
         }
 
-        if (!string.IsNullOrWhiteSpace(searchText))
+        foreach (var text in PrintSearchPredicate.SplitCriteria(searchText))
         {
-            // Split on any spaces and search separately, preserving quotes.
-            var criterias = searchText.Split('"')
-                 .Select((element, index) => index % 2 == 0  // If even index
-                                       ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)  // Split the item
-                                       : new string[] { element })  // Keep the entire item
-                 .SelectMany(element => element).ToList();
-            foreach (var text in criterias)
-            {
-                printQuery = printQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text));
-            }
+            printQuery = printQuery.Where(PrintSearchPredicate.TitleOrNotes(text));
         }
 
         // Half-open [fromDate, toDate) so adjacent windows never double-count a boundary
@@ -515,24 +481,15 @@ public sealed class PrintService(
             }
             else if (sortRequest.SortColumn == PrintSummarySortColumn.FilamentUsage)
             {
-                // NOTE: This is still problematic - consider computing and storing this value
+                // NOTE: This is still problematic - consider computing and storing this value.
+                // The same per-print figure the list shows as TotalFilamentWeightMg.
                 if (sortRequest.SortDirection == SortDirection.Asc)
                 {
-                    printQuery = printQuery.OrderBy(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                p.AmountMg > 0 ?
-                                                                                                p.AmountMg :
-                                                                                                p.EstimatedAmountMg.HasValue &&
-                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                    printQuery = printQuery.OrderBy(PrintMetrics.RowsMgExpr).ThenByDescending(p => p.CreatedDate);
                 }
                 else
                 {
-                    printQuery = printQuery.OrderByDescending(src => src.FilamentUsage!.Sum(p => p.AmountMg.HasValue &&
-                                                                                                p.AmountMg > 0 ?
-                                                                                                p.AmountMg :
-                                                                                                p.EstimatedAmountMg.HasValue &&
-                                                                                                p.EstimatedAmountMg > 0 ?
-                                                                                                p.EstimatedAmountMg : 0)).ThenByDescending(p => p.CreatedDate);
+                    printQuery = printQuery.OrderByDescending(PrintMetrics.RowsMgExpr).ThenByDescending(p => p.CreatedDate);
                 }
             }
         }
@@ -570,6 +527,27 @@ public sealed class PrintService(
             .Select(p => mapper.Map<PrintSummaryDTO>(p))
             .ToList();
 
+        // What a reader who is not the creator may see (PrintVisitorRedaction): no external pair
+        // (it embeds a connector's instance id), none of the owner's spool data, and no project
+        // they could not open. Done here, before the controller caches the page, because a
+        // cached page is shared and read-only. The cache key includes the caller, so each
+        // caller's page is its own: the owner's full page and a visitor's redacted one never
+        // share an entry.
+        var projectById = prints.Where(p => p.Project != null).ToDictionary(p => p.Id, p => p.Project!);
+        foreach (var dto in dtos.Where(d => d.CreatedByUserId != currentUserId))
+        {
+            dto.ExternalSource = null;
+            dto.ExternalId = null;
+            PrintVisitorRedaction.RedactFilamentUsage(dto.FilamentUsage);
+
+            if (projectById.TryGetValue(dto.Id, out var project)
+                && PrintVisitorRedaction.HidesProject(project.ViewStatus, project.CreatedById, currentUserId))
+            {
+                dto.ProjectId = null;
+                dto.ProjectName = null;
+            }
+        }
+
         // **Restore original sort order**
         var dtoById = dtos.ToDictionary(d => d.Id);
         var orderedDtos = printIds
@@ -581,11 +559,6 @@ public sealed class PrintService(
             totalCount,
             pagingRequest.PageNumber,
             pagingRequest.PageSize);
-    }
-
-    public async Task<List<long>> GetPublicPrintIds()
-    {
-        return await context.Prints.Where(p => p.ViewStatus == PrintViewStatus.Public).Select(p => p.Id).ToListAsync();
     }
 
     public async Task<List<PrintStatistic>> GetPrintStatisticsForUser(long userId, DateTimeOffset fromDate, DateTimeOffset toDate)
@@ -664,6 +637,7 @@ public sealed class PrintService(
     {
         var print = await context.Prints
             .Include(p => p.Printer)
+            .Include(p => p.Connection)
             .Include(p => p.Images!)
                 .ThenInclude(p => p.File)
             .Include(p => p.Comments!)
@@ -682,13 +656,199 @@ public sealed class PrintService(
         return print;
     }
 
+    public Task<PrintEditors?> GetPrintEditors(long id) =>
+        context.Prints
+            .AsNoTracking()
+            .Where(p => p.Id == id)
+            .Select(p => new PrintEditors(p.CreatedById, p.Printer.UserId))
+            .FirstOrDefaultAsync();
+
+    public async Task<AddPrintResult> CreatePrint(AddPrintDTO print, long userId, PrintSource sourceCandidate)
+    {
+        // AddPrintDTO.Validate has already rejected half a pair, so either both are set or neither.
+        if (print.ExternalSource is not { } rawSource || print.ExternalId is not { } rawExternalId)
+        {
+            return new AddPrintResult(await AddPrint(print, userId, sourceCandidate), WasReplayed: false);
+        }
+
+        print.ExternalSource = ExternalPrintIds.NormalizeSource(rawSource);
+        print.ExternalId = ExternalPrintIds.NormalizeId(rawExternalId);
+
+        if (await ReplayExternalPrint(print, userId) is { } replayed)
+        {
+            return replayed;
+        }
+
+        try
+        {
+            return new AddPrintResult(await AddPrint(print, userId, sourceCandidate), WasReplayed: false);
+        }
+        catch (DbUpdateException)
+        {
+            // A racing create with the same pair won IX_Prints_User_ExternalSource_ExternalId.
+            // Drop the failed insert's tracked entities so the lookup reads committed state, then
+            // replay the winner. No such print means the failure was something else.
+            context.ChangeTracker.Clear();
+            if (await ReplayExternalPrint(print, userId) is { } winner)
+            {
+                return winner;
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The replay half of <see cref="CreatePrint"/>: finds the caller's print for the pair and
+    /// applies only the fields a connector owns. Null when the pair is new.
+    /// </summary>
+    private async Task<AddPrintResult?> ReplayExternalPrint(AddPrintDTO print, long userId)
+    {
+        var existing = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .Where(p => p.CreatedById == userId && p.ExternalSource == print.ExternalSource && p.ExternalId == print.ExternalId)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync();
+        if (existing is null)
+        {
+            return null;
+        }
+
+        var previousStatus = existing.Status;
+        if (await ApplyConnectorOwnedFields(existing, print, userId))
+        {
+            existing.UpdatedById = userId;
+            if (!CompletePrintDto.IsFinished(previousStatus) && CompletePrintDto.IsFinished(existing.Status))
+            {
+                // A replay that finishes the print is a finish like /complete's, so it is claimed
+                // the same way (#199) and notifies exactly once: an overlapping finish that won
+                // the claim has already notified, and this one writes nothing.
+                var claimed = await PrintFinishTransition.SaveIfStillUnfinished(context, existing, userId);
+                cacheVersionService.InvalidateUserCache(userId);
+                if (claimed)
+                {
+                    await printFinishNotifier.NotifyIfJustFinished(existing, previousStatus);
+                }
+                else
+                {
+                    context.ChangeTracker.Clear();
+                }
+            }
+            else
+            {
+                await context.SaveChangesAsync();
+                cacheVersionService.InvalidateUserCache(userId);
+                // A connector that created the print Pending and now reports it running (#235).
+                printStartNotifier.NotifyIfJustStarted(existing, previousStatus);
+            }
+        }
+
+        // Null-forgiven: the row was read a moment ago and replay never deletes it.
+        return new AddPrintResult((await GetPrintById(existing.Id))!, WasReplayed: true);
+    }
+
+    /// <summary>
+    /// Copies status, durations and usage from a replayed create onto the stored print. Everything
+    /// else (title, notes, visibility, project…) belongs to the user, who may have edited it
+    /// while the print ran, so a replay never touches it. A field the replay omits keeps its value.
+    /// Returns whether anything changed.
+    /// </summary>
+    private async Task<bool> ApplyConnectorOwnedFields(Print existing, AddPrintDTO replay, long userId)
+    {
+        // A finished print is never reopened: a start call that timed out client-side but landed
+        // can be retried after the finish, and must not put the print back to Printing. Nor may it
+        // touch anything else: its durations and usage are the start's estimates, and replacing
+        // the finished rows would drop the actual amounts, slots and spool links the finish (or
+        // /complete) recorded, moving the spool's remaining weight back to the estimate (#191).
+        // A finish replayed onto a finished print is not a reopen, and still applies. A replay that
+        // omits status arrives undefined and is not a finish either, so it is treated as a start.
+        var reopens = existing.Status is not (PrintStatus.Pending or PrintStatus.Printing)
+            && (!Enum.IsDefined(replay.Status) || replay.Status is PrintStatus.Pending or PrintStatus.Printing);
+        if (reopens)
+        {
+            return false;
+        }
+
+        var changed = false;
+        if (Enum.IsDefined(replay.Status) && replay.Status != existing.Status)
+        {
+            existing.Status = replay.Status;
+            changed = true;
+        }
+
+        changed |= SetIfSupplied(replay.PrintTimeInSeconds, v => existing.PrintTimeInSeconds = v, existing.PrintTimeInSeconds);
+        changed |= SetIfSupplied(replay.EstimatedPrintTimeInSeconds, v => existing.EstimatedPrintTimeInSeconds = v, existing.EstimatedPrintTimeInSeconds);
+        changed |= SetIfSupplied(replay.FilamentUsageMg, v => existing.FilamentUsageMg = v, existing.FilamentUsageMg);
+        changed |= SetIfSupplied(replay.EstimatedFilamentUsageMg, v => existing.EstimatedFilamentUsageMg = v, existing.EstimatedFilamentUsageMg);
+
+        if (replay.FilamentUsage is { Count: > 0 } rows)
+        {
+            var replayed = mapper.Map<List<PrintFilament>>(rows);
+            // A spool the user linked to a row since the first create stays: the replay is the
+            // connector's same start, and its rows still have no spool for that slot (#128).
+            foreach (var row in replayed.Where(r => (r.FilamentId is null || r.FilamentId == Guid.Empty) && r.Slot is not null))
+            {
+                row.FilamentId = existing.FilamentUsage!
+                    .FirstOrDefault(r => r.Slot == row.Slot && r.FilamentId is not null)?.FilamentId
+                    ?? row.FilamentId;
+            }
+            await ReplaceUsageRows(existing, replayed, userId);
+            changed = true;
+        }
+
+        return changed;
+
+        static bool SetIfSupplied(int? value, Action<int?> set, int? current)
+        {
+            if (value is null || value == current)
+            {
+                return false;
+            }
+            set(value);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Swaps every usage row on <paramref name="existing"/> for <paramref name="newRows"/>. Remaining
+    /// filament is derived from the rows, so a replacement moves inventory by the net difference.
+    /// Throws <see cref="UserCannotAccessFilamentException"/> before changing anything when a row
+    /// names a filament the user does not own.
+    /// </summary>
+    private async Task ReplaceUsageRows(Print existing, List<PrintFilament> newRows, long userId)
+    {
+        foreach (var row in newRows)
+        {
+            // Fresh keys: the rows being replaced are still tracked under theirs, and a
+            // caller resending the same row ids would otherwise collide with them.
+            row.Id = Guid.NewGuid();
+            row.PrintId = existing.Id;
+            if (row.FilamentId == default(Guid))
+            {
+                row.FilamentId = null;
+            }
+        }
+
+        if (!await filamentService.CanUserAccessAllFilaments(userId, newRows.Select(r => r.FilamentId).OfType<Guid>()))
+        {
+            throw new UserCannotAccessFilamentException();
+        }
+
+        context.PrintFilament.RemoveRange(existing.FilamentUsage!);
+        // Added explicitly: discovered through the navigation, a row with a key already set
+        // is taken for an existing one and saved as an UPDATE that matches nothing.
+        context.PrintFilament.AddRange(newRows);
+        existing.FilamentUsage = newRows;
+        await UpdateFilamentUsageWeights(existing);
+    }
+
     /// <summary>
     /// Add Print
     /// </summary>
     /// <param name="print">The Print to add</param>
     /// <param name="userId">The user adding the print</param>
+    /// <param name="sourceCandidate">How the caller reached the API; see <see cref="IPrintService.AddPrint"/>.</param>
     /// <returns></returns>
-    public async Task<Print> AddPrint(AddPrintDTO print, long userId)
+    public async Task<Print> AddPrint(AddPrintDTO print, long userId, PrintSource sourceCandidate = PrintSource.Web)
     {
         var newPrint = mapper.Map<Print>(print);
 
@@ -716,6 +876,24 @@ public sealed class PrintService(
                 filament.FilamentId = null;
         }
 
+        // Only the caller's own connection links; any other id is ignored rather than rejected,
+        // so a print is never lost because its agent has not registered yet.
+        if (!string.IsNullOrWhiteSpace(print.ConnectionInstanceId))
+        {
+            var instanceId = print.ConnectionInstanceId.Trim();
+            var connection = await context.Connections
+                .Where(c => c.UserId == userId && c.InstanceId == instanceId)
+                .Select(c => new { c.Id, c.Kind })
+                .FirstOrDefaultAsync();
+            newPrint.ConnectionId = connection?.Id;
+
+            // A connector's own credential records which adapter it is (printlog-bridge#82).
+            if (sourceCandidate == PrintSource.ApiKey && Connection.PrintSourceForKind(connection?.Kind) is { } kindSource)
+            {
+                sourceCandidate = kindSource;
+            }
+        }
+
         var filamentIdsToCheck = newPrint.FilamentUsage!
             .Select(f => f.FilamentId)
             .OfType<Guid>();
@@ -733,14 +911,22 @@ public sealed class PrintService(
             .OfType<Guid>()
             .Where(id => id != default);
 
-        // PrinterService setLoadedFilament
-        await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+        // A print's spools become the printer's loaded list. Not on a multi-slot printer: there
+        // the slots say what is loaded, and replacing them with one print's spools would unload
+        // every tool the print did not use. Nor when the print links no spool (a connector that
+        // doesn't know what's loaded, printlog-bridge#128): an empty list would unload them all.
+        if (newPrint.Printer.SlotCount <= 1 && newLoadedFilamentIds.Any())
+        {
+            await printerService.setLoadedFilament(newPrint.Printer.Id, newLoadedFilamentIds);
+        }
 
 
         await UpdateFilamentUsageWeights(newPrint);
 
         newPrint.CreatedById = userId;
         newPrint.UpdatedById = userId;
+
+        await ApplyProvenance(newPrint, print.CuraSettingId, userId, sourceCandidate);
 
         // Resolve project assignment
         if (print.ProjectId.HasValue)
@@ -766,8 +952,39 @@ public sealed class PrintService(
 
         context.Prints.Add(newPrint);
         await context.SaveChangesAsync();
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(newPrint.Id))!;
+    }
+
+    /// <summary>
+    /// Sets <see cref="Print.Source"/>, <see cref="Print.Slicer"/> and <see cref="Print.SlicerVersion"/>.
+    /// A Cura setting the user owns marks the print as a slicer-plugin upload and wins over the
+    /// caller's candidate. Any other id (purged by retention, or another account's) is ignored
+    /// so the print still saves.
+    /// </summary>
+    private async Task ApplyProvenance(Print newPrint, Guid? curaSettingId, long userId, PrintSource sourceCandidate)
+    {
+        newPrint.Source = sourceCandidate;
+
+        if (curaSettingId is not { } settingId)
+        {
+            return;
+        }
+
+        var setting = await context.CuraSettings
+            .Where(s => s.Id == settingId && s.UserId == userId)
+            .Select(s => new { s.Slicer, s.CuraVersion })
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
+        if (setting is null)
+        {
+            return;
+        }
+
+        newPrint.Source = PrintSource.SlicerPlugin;
+        newPrint.Slicer = SlicerNames.Normalize(setting.Slicer);
+        newPrint.SlicerVersion = setting.CuraVersion is { Length: > 50 } v ? v[..50] : setting.CuraVersion;
     }
 
     public async Task<CreatePrintResult> CreatePrintForMcp(
@@ -838,6 +1055,12 @@ public sealed class PrintService(
             CreatedById = userId,
             UpdatedById = userId,
             FilamentUsage = materials.Select(ToPrintFilament).ToList(),
+            Source = PrintSource.Mcp,
+            // The same pair a connector's print carries (#144), so the prints unique index backs
+            // this key as well as IX_McpIdempotencyRecords_User_Tool_Key. The record still holds
+            // the fingerprint that tells a retry from a key reused with different arguments.
+            ExternalSource = ExternalPrintIds.McpSource,
+            ExternalId = idempotencyKey,
         };
 
         await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);
@@ -877,6 +1100,7 @@ public sealed class PrintService(
         }
 
         cacheVersionService.InvalidateUserCache(userId);
+        printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
         return await BuildCreatePrintResult(newPrint.Id, wasReplayed: false, userId, ct);
     }
 
@@ -1255,7 +1479,17 @@ public sealed class PrintService(
             throw new ArgumentNullException(nameof(id));
         }
 
+        var slotsWithSpool = SlotsWithSpool(existingPrint);
+        var ownRowIds = ChildRows.IdsOf(existingPrint.FilamentUsage, r => r.Id);
         var updatedPrint = mapper.Map<PutPrintDetailDto, Print>(dto, existingPrint);
+
+        // A row id this print does not have (another user's row, or one a PATCH has since
+        // replaced) is a new row of this print, never an update of the row it names.
+        ChildRows.AddUnowned(context, updatedPrint.FilamentUsage!, ownRowIds, r => r.Id, (r, id) =>
+        {
+            r.Id = id;
+            r.PrintId = updatedPrint.Id;
+        });
 
         var printer = await context.Printers.FindAsync(dto.PrinterId);
         updatedPrint.Printer = printer!;
@@ -1316,6 +1550,8 @@ public sealed class PrintService(
             updatedPrint.ProjectId = dto.ProjectId; // null
         }
 
+        await LoadPickedSpools(updatedPrint, slotsWithSpool);
+
         context.Entry(updatedPrint).State = EntityState.Modified;
 
         try
@@ -1338,6 +1574,606 @@ public sealed class PrintService(
 
         // Null-forgiven: the print was just persisted, so the re-read always finds it.
         return (await GetPrintById(updatedPrint.Id))!;
+    }
+
+    /// <summary>
+    /// Unlinks every usage row of <paramref name="print"/> whose spool <paramref name="userId"/>
+    /// does not own, keeping its figures. Such a row predates the ownership checks (a print event
+    /// charged a spool loaded on the printer without one); <c>/complete</c> matches rows by id or
+    /// slot, so it would otherwise write a measurement onto that spool. Run before the merge, so
+    /// the row is an unlinked one the measurement can still land on; the merge itself only links
+    /// spools the request names, which were checked. Refusing instead would leave a connector's
+    /// completion failing on every retry over a row it cannot see.
+    /// </summary>
+    private async Task DetachSpoolsNotOwnedBy(Print print, long userId)
+    {
+        var linked = print.FilamentUsage!.Select(r => r.FilamentId).OfType<Guid>().Distinct().ToList();
+        if (linked.Count == 0)
+        {
+            return;
+        }
+
+        var owned = await context.Filaments
+            .Where(f => linked.Contains(f.Id) && f.CreatedById == userId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var row in print.FilamentUsage!.Where(r => r.FilamentId is { } id && !owned.Contains(id)))
+        {
+            row.FilamentId = null;
+            row.Filament = null;
+        }
+    }
+
+    /// <summary>The slots of <paramref name="print"/> whose row has a spool.</summary>
+    private static HashSet<int> SlotsWithSpool(Print print) =>
+        (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is not null)
+            .Select(r => r.Slot!.Value)
+            .ToHashSet();
+
+    /// <summary>
+    /// Loads the spool the user picked for a row on its slot (printlog-bridge#128): a row with a
+    /// slot whose slot had no spool before the edit (an "Other" row a connector created). Only on
+    /// a printer with more than one slot, where the slots say what is loaded (one with fewer keeps
+    /// the create's rule), and only for a print still printing or the printer's latest, so editing
+    /// an old print never changes what is loaded now.
+    /// </summary>
+    private async Task LoadPickedSpools(Print print, IReadOnlySet<int> slotsWithSpool)
+    {
+        var picked = (print.FilamentUsage ?? [])
+            .Where(r => r.FilamentId is not null && r.Slot is { } slot && !slotsWithSpool.Contains(slot))
+            .ToList();
+        if (picked.Count == 0)
+        {
+            return;
+        }
+
+        var printer = await context.Printers.FirstOrDefaultAsync(p => p.Id == print.PrinterId);
+        if (printer == null || printer.SlotCount <= 1)
+        {
+            return;
+        }
+
+        // The latest by start date; a print with none (logged by hand without one) is the latest
+        // when it was logged last.
+        var current = print.Status == PrintStatus.Printing
+            || (print.StartDate is { } started
+                ? !await context.Prints.AnyAsync(p =>
+                    p.PrinterId == print.PrinterId && p.Id != print.Id && p.StartDate > started)
+                : !await context.Prints.AnyAsync(p => p.PrinterId == print.PrinterId && p.Id > print.Id));
+        if (!current)
+        {
+            return;
+        }
+
+        foreach (var row in picked.Where(r => r.Slot < printer.SlotCount).DistinctBy(r => r.Slot))
+        {
+            var slot = row.Slot!.Value;
+            var label = await context.PrinterFilament
+                .Where(pf => pf.PrinterId == printer.Id && pf.Slot == slot)
+                .Select(pf => pf.SlotLabel)
+                .FirstOrDefaultAsync();
+            await printerService.LoadSlot(printer, slot, row.FilamentId!.Value, label);
+        }
+    }
+
+    public async Task<Print> PatchPrint(long id, PatchPrintDto dto, long userId)
+    {
+        var print = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .FirstOrDefaultAsync(p => p.Id == id)
+            ?? throw new DoesNotExistException();
+
+        // ---- Validate everything first: a rejected patch must leave the print untouched. ----
+        if (dto.PrinterId.HasValue &&
+            !await context.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value && p.UserId == userId))
+        {
+            throw new UserCannotAccessPrinterException();
+        }
+        if (dto.ProjectId.HasValue &&
+            !await context.Projects.AnyAsync(p => p.Id == dto.ProjectId.Value && p.CreatedById == userId))
+        {
+            throw new DoesNotExistException();
+        }
+
+        // ---- Mutate. ----
+        var slotsWithSpool = SlotsWithSpool(print);
+        if (dto.FilamentUsage != null)
+        {
+            // First, because it is the one step that can still refuse (a foreign filament), and
+            // it throws before touching the print.
+            await ReplaceUsageRows(print, mapper.Map<List<PrintFilament>>(dto.FilamentUsage), userId);
+
+            // The rows supersede the legacy scalar fields. The edit form shows a print's legacy
+            // usage as one row and sends it back as a row, so keeping the scalars would count
+            // that usage twice (totals add the scalar to the rows), and a row the user deleted
+            // would reappear from them on reopen. This is what the full PUT always did, since the
+            // form sends the scalars as null. Inventory is untouched: it is derived from rows
+            // only, and a legacy scalar names no spool.
+            print.FilamentType = null;
+            print.FilamentUsageMg = null;
+            print.EstimatedFilamentUsageMg = null;
+        }
+
+        if (dto.Title != null) { print.Title = dto.Title.Trim(); }
+        if (dto.Status.HasValue) { print.Status = dto.Status.Value; }
+        if (dto.PrinterId.HasValue) { print.PrinterId = dto.PrinterId.Value; }
+        if (dto.ViewStatus.HasValue) { print.ViewStatus = dto.ViewStatus.Value; }
+        if (dto.AllowComments.HasValue) { print.AllowComments = dto.AllowComments.Value; }
+        if (dto.AllowFileDownloads.HasValue) { print.AllowFileDownloads = dto.AllowFileDownloads.Value; }
+
+        if (dto.StartDate.HasValue) { print.StartDate = dto.StartDate; } else if (dto.Clears("startDate")) { print.StartDate = null; }
+        if (dto.EstimatedPrintTimeInSeconds.HasValue) { print.EstimatedPrintTimeInSeconds = dto.EstimatedPrintTimeInSeconds; } else if (dto.Clears("estimatedPrintTimeInSeconds")) { print.EstimatedPrintTimeInSeconds = null; }
+        if (dto.PrintTimeInSeconds.HasValue) { print.PrintTimeInSeconds = dto.PrintTimeInSeconds; } else if (dto.Clears("printTimeInSeconds")) { print.PrintTimeInSeconds = null; }
+        if (dto.Notes != null) { print.Notes = dto.Notes; } else if (dto.Clears("notes")) { print.Notes = null; }
+        if (dto.Url != null) { print.Url = dto.Url; } else if (dto.Clears("url")) { print.Url = null; }
+        if (dto.FileName != null) { print.FileName = dto.FileName; } else if (dto.Clears("fileName")) { print.FileName = null; }
+        if (dto.ProjectId.HasValue) { print.ProjectId = dto.ProjectId; } else if (dto.Clears("projectId")) { print.ProjectId = null; }
+
+        if (dto.FilamentUsage != null)
+        {
+            await LoadPickedSpools(print, slotsWithSpool);
+        }
+
+        print.UpdatedById = userId;
+        await context.SaveChangesAsync();
+
+        telemetry.TrackEvent("PrintPatch");
+
+        // Null-forgiven: the print was just saved, so the re-read always finds it.
+        return (await GetPrintById(id))!;
+    }
+
+    public Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId) =>
+        CompletePrint(id, dto, userId, retryIfRaced: true);
+
+    private async Task<Print> CompletePrint(long id, CompletePrintDto dto, long userId, bool retryIfRaced)
+    {
+        var print = await context.Prints
+            .Include(p => p.FilamentUsage)
+            .FirstOrDefaultAsync(p => p.Id == id)
+            ?? throw new DoesNotExistException();
+
+        var usage = dto.FilamentUsage ?? [];
+        if (!await filamentService.CanUserAccessAllFilaments(userId, usage.Select(u => u.FilamentId).OfType<Guid>()))
+        {
+            throw new UserCannotAccessFilamentException();
+        }
+
+        await DetachSpoolsNotOwnedBy(print, userId);
+
+        // The end time only fills a gap: a start date or duration already known wins over one
+        // derived from it.
+        var printTime = dto.PrintTimeInSeconds;
+        if (dto.EndedAt is { } endedAt)
+        {
+            if (print.StartDate is { } start)
+            {
+                if (endedAt < start)
+                {
+                    throw new BadRequestException("endedAt is before the print's start date.");
+                }
+                var elapsed = (endedAt - start).TotalSeconds;
+                if (printTime is null && elapsed > int.MaxValue)
+                {
+                    // The cast below would saturate rather than throw, storing a nonsense duration.
+                    throw new BadRequestException("endedAt is too far after the print's start date.");
+                }
+                printTime ??= (int)elapsed;
+            }
+            else if (printTime.HasValue)
+            {
+                // Caught rather than pre-checked: AddSeconds range-checks the local clock time as
+                // well as the UTC instant, so a negative offset near DateTimeOffset.MinValue
+                // throws even when the UTC arithmetic fits (#198).
+                try
+                {
+                    print.StartDate = endedAt.AddSeconds(-printTime.Value);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    throw new BadRequestException("endedAt is earlier than printTimeInSeconds allows.");
+                }
+            }
+        }
+
+        // Read before it is overwritten: only the move to a finished status notifies, so a retry
+        // or an edit of a print that had already finished stays quiet (#166).
+        var previousStatus = print.Status;
+        print.Status = dto.Status;
+        if (printTime.HasValue)
+        {
+            print.PrintTimeInSeconds = printTime;
+        }
+
+        // On a single-tool printer an unslotted row can only be slot 0's (#165).
+        var singleTool = await context.Printers
+            .Where(p => p.Id == print.PrinterId)
+            .Select(p => p.SlotCount)
+            .FirstOrDefaultAsync() == 1;
+        MergeActualUsage(print, usage, singleTool, await UsageSpoolMeasures(usage, print));
+        await UpdateFilamentUsageWeights(print);
+
+        print.UpdatedById = userId;
+        if (CompletePrintDto.IsFinished(previousStatus))
+        {
+            await context.SaveChangesAsync();
+        }
+        else if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, userId))
+        {
+            // An overlapping completion finished the print first (#199), and these tracked rows
+            // predate its usage. Run again against what it stored, as a later retry would: a
+            // replay of an already-finished print, which merges without adding a second row and
+            // does not notify.
+            context.ChangeTracker.Clear();
+            if (retryIfRaced)
+            {
+                return await CompletePrint(id, dto, userId, retryIfRaced: false);
+            }
+            throw new DbUpdateConcurrencyException("The print changed while it was being completed.");
+        }
+
+        telemetry.TrackEvent("PrintComplete");
+
+        await printFinishNotifier.NotifyIfJustFinished(print, previousStatus);
+
+        // Null-forgiven: the print was just saved, so the re-read always finds it.
+        return (await GetPrintById(id))!;
+    }
+
+    public Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId) =>
+        ClaimPrint(id, dto, userId, retryIfRaced: true);
+
+    private async Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId, bool retryIfRaced)
+    {
+        // ClaimPrintDto.Validate has already rejected a missing half; restated where flow analysis
+        // can see it.
+        if (dto.ExternalSource is not { } rawSource || dto.ExternalId is not { } rawExternalId)
+        {
+            throw new BadRequestException("externalSource and externalId are both required.");
+        }
+
+        var source = ExternalPrintIds.NormalizeSource(rawSource);
+        var externalId = ExternalPrintIds.NormalizeId(rawExternalId);
+
+        var print = await context.Prints
+            .Where(p => p.Id == id)
+            .Select(p => new { p.CreatedById, p.Status, p.ExternalSource, p.ExternalId })
+            .FirstOrDefaultAsync()
+            ?? throw new DoesNotExistException();
+
+        if (print.CreatedById != userId)
+        {
+            throw new ForbiddenException();
+        }
+
+        // Checked before the status: a retried claim must still succeed after the print finished.
+        // Case-insensitive, to agree with FindPrintIdByExternalPair's SQL (#204). See NormalizeId.
+        if (string.Equals(print.ExternalSource, source, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(print.ExternalId, externalId, StringComparison.OrdinalIgnoreCase))
+        {
+            return await ClaimedResult(id, wasReplayed: true);
+        }
+
+        if (print.ExternalSource is not null || print.ExternalId is not null)
+        {
+            throw new PrintClaimConflictException("The print is already linked to another job.");
+        }
+
+        if (print.Status != PrintStatus.Printing)
+        {
+            throw new PrintClaimConflictException("Only a print that is Printing can be claimed.");
+        }
+
+        if (await FindPrintIdByExternalPair(userId, source, externalId) is { } holder)
+        {
+            throw new PrintClaimConflictException("The job is already logged as another print.", holder);
+        }
+
+        Guid? connectionId = null;
+        if (!string.IsNullOrWhiteSpace(dto.ConnectionInstanceId))
+        {
+            var instanceId = dto.ConnectionInstanceId.Trim();
+            connectionId = await context.Connections
+                .Where(c => c.UserId == userId && c.InstanceId == instanceId)
+                .Select(c => (Guid?)c.Id)
+                .FirstOrDefaultAsync();
+        }
+
+        // One conditional UPDATE, so two claims of the same print cannot both pass the checks
+        // above and the later one silently overwrite the earlier one's pair: whichever runs
+        // second matches no row. IX_Prints_User_ExternalSource_ExternalId rejects it instead when a
+        // create for the same job committed in between.
+        var startDate = dto.StartDate;
+        var fileHash = PrintFileHashes.Parse(dto.FileHash);
+        var now = DateTime.UtcNow;
+        int updated;
+        try
+        {
+            updated = await context.Prints
+                .Where(p => p.Id == id
+                    && p.Status == PrintStatus.Printing
+                    && p.ExternalSource == null
+                    && p.ExternalId == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(p => p.ExternalSource, source)
+                    .SetProperty(p => p.ExternalId, externalId)
+                    .SetProperty(p => p.ConnectionId, p => connectionId ?? p.ConnectionId)
+                    .SetProperty(p => p.StartDate, p => p.StartDate ?? startDate)
+                    .SetProperty(p => p.FileHash, p => p.FileHash ?? fileHash)
+                    .SetProperty(p => p.UpdatedById, userId)
+                    // ExecuteUpdate bypasses the context's SaveChanges timestamping.
+                    .SetProperty(p => p.UpdatedDate, now));
+        }
+        catch (System.Data.Common.DbException ex)
+        {
+            if (await FindPrintIdByExternalPair(userId, source, externalId) is { } winner && winner != id)
+            {
+                throw new PrintClaimConflictException("The job is already logged as another print.", winner, ex);
+            }
+            throw;
+        }
+
+        if (updated == 0)
+        {
+            // Lost to a concurrent claim or status change. Retry once against what is there now:
+            // the same pair replays, anything else is the conflict it would have been.
+            if (retryIfRaced)
+            {
+                return await ClaimPrint(id, dto, userId, retryIfRaced: false);
+            }
+            throw new PrintClaimConflictException("The print changed while it was being claimed.");
+        }
+
+        cacheVersionService.InvalidateUserCache(userId);
+        telemetry.TrackEvent("PrintClaimed");
+
+        return await ClaimedResult(id, wasReplayed: false);
+    }
+
+    private async Task<long?> FindPrintIdByExternalPair(long userId, string source, string externalId) =>
+        await context.Prints
+            .Where(p => p.CreatedById == userId && p.ExternalSource == source && p.ExternalId == externalId)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+
+    private async Task<AddPrintResult> ClaimedResult(long id, bool wasReplayed) =>
+        // Null-forgiven: the print was read a moment ago and a claim never deletes it.
+        new((await GetPrintById(id))!, wasReplayed);
+
+    public async Task<List<ClaimablePrintDto>> GetClaimablePrints(
+        long userId, long printerId, DateTimeOffset? createdAfter, int limit, CancellationToken ct)
+    {
+        var query = context.Prints
+            .Where(p => p.CreatedById == userId
+                && p.PrinterId == printerId
+                && p.Status == PrintStatus.Printing
+                // A print MCP create_print made carries its idempotency key as the pair, so it is
+                // excluded too: claiming it would break that key's replay.
+                && p.ExternalSource == null
+                && p.ExternalId == null);
+
+        if (createdAfter is { } after)
+        {
+            var afterUtc = after.UtcDateTime;
+            query = query.Where(p => p.CreatedDate > afterUtc);
+        }
+
+        var prints = await query
+            .OrderByDescending(p => p.CreatedDate)
+            .ThenByDescending(p => p.Id)
+            .Take(limit)
+            .Include(p => p.FilamentUsage!)
+                .ThenInclude(pf => pf.Filament)
+            .AsSplitQuery()
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return prints.Select(p => new ClaimablePrintDto
+        {
+            Id = p.Id,
+            Title = p.Title,
+            PrinterId = p.PrinterId,
+            Status = p.Status,
+            Source = p.Source,
+            FileName = p.FileName,
+            FileHash = p.FileHash is { } hash ? Convert.ToHexStringLower(hash) : null,
+            CreatedDate = DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc),
+            StartDate = p.StartDate,
+            // Slicer is set exactly when settings were recorded with the print: today through a
+            // CuraSetting (ApplyProvenance), and by #164 for connector-sent settings.
+            HasSlicerSettings = p.Slicer != null,
+            FilamentUsage = mapper.Map<List<PrintFilamentSummaryDto>>(p.FilamentUsage!.OrderBy(f => f.Slot ?? int.MaxValue)),
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Writes actual usage onto the print's rows. A measurement that names a row of the print
+    /// (<see cref="CompletePrintFilamentUsageDto.RowId"/>) fills that row, which keeps a spool
+    /// already linked to it; the others are matched by filament first. A row with a
+    /// filament that no row has yet takes the print's unlinked row for its slot when it names one,
+    /// and links that row to the filament (#162): a spool loaded after the print started then
+    /// completes the row its estimate is on instead of adding a second row for the same tool. A
+    /// row with no filament is matched to the print's unlinked row for its slot when it names one,
+    /// otherwise in order against the remaining unlinked rows, so a retried completion updates the
+    /// row the first one added instead of adding another. Each unlinked row is claimed at most
+    /// once, with slot-only rows claiming theirs before rows with a filament. A match keeps its
+    /// estimate and notes; an incoming row with no match is added. Rows the completion does not
+    /// mention are untouched.
+    /// <para>
+    /// On a <paramref name="singleTool"/> printer an unlinked row with no slot counts as slot 0's
+    /// in both slot passes, and is stamped slot 0 when one takes it (#165): the Slic3r uploader
+    /// writes its estimate with no slot, and a connector completes the same tool as slot 0. On a
+    /// multi-tool printer an unslotted row is ambiguous, so it is left to the in-order match.
+    /// </para>
+    /// </summary>
+    private void MergeActualUsage(
+        Print print,
+        IEnumerable<CompletePrintFilamentUsageDto> usage,
+        bool singleTool,
+        IReadOnlyDictionary<Guid, SpoolMeasure> spools)
+    {
+        var rows = print.FilamentUsage!;
+        var unlinked = rows.Where(r => r.FilamentId is null).OrderBy(r => r.Id).ToList();
+
+        PrintFilament? TakeUnlinkedRowOnSlot(int? slot)
+        {
+            // A row stamped with the slot wins over an unslotted one.
+            var row = unlinked.FirstOrDefault(r => r.Slot == slot)
+                ?? (singleTool && slot == 0 ? unlinked.FirstOrDefault(r => r.Slot is null) : null);
+            if (row != null)
+            {
+                unlinked.Remove(row);
+                if (singleTool)
+                {
+                    row.Slot ??= 0;
+                }
+            }
+            return row;
+        }
+
+        // A row named by id first (printlog-bridge#128), so no other pass can take it. It keeps a
+        // spool the user linked; an id that isn't on the print leaves the measurement to the
+        // passes below.
+        var incomingRows = usage.ToList();
+        var named = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament>();
+        foreach (var incoming in incomingRows.Where(u => u.RowId is not null))
+        {
+            var row = rows.FirstOrDefault(r => r.Id == incoming.RowId);
+            if (row == null || named.ContainsValue(row))
+            {
+                continue;
+            }
+            named[incoming] = row;
+            unlinked.Remove(row);
+            row.FilamentId ??= incoming.FilamentId;
+            row.Slot ??= incoming.Slot;
+        }
+        var unnamed = incomingRows.Where(u => !named.ContainsKey(u)).ToList();
+
+        // Slots next, so an in-order match below cannot take a row a later slot names.
+        var matches = new Dictionary<CompletePrintFilamentUsageDto, PrintFilament?>();
+        // A slot's measurement with no spool takes that slot's row with no spool, else its row
+        // whose spool no other measurement names: one linked since the print started (loading
+        // the spool fills it, printlog-bridge#128), which a retry also finds again.
+        var namedSpools = incomingRows.Select(u => u.FilamentId).OfType<Guid>().ToHashSet();
+        var claimed = new HashSet<PrintFilament>(named.Values);
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is null && u.Slot is not null))
+        {
+            var row = TakeUnlinkedRowOnSlot(incoming.Slot)
+                ?? rows.FirstOrDefault(r => r.Slot == incoming.Slot
+                    && r.FilamentId is { } linked && !namedSpools.Contains(linked)
+                    && !claimed.Contains(r));
+            if (row != null)
+            {
+                claimed.Add(row);
+            }
+            matches[incoming] = row;
+        }
+
+        // Then a filament no row has yet, on a slot: it takes what the slot-only rows left of that
+        // slot's unlinked row. Claimed here rather than in the loop below for the same reason.
+        foreach (var incoming in unnamed.Where(u => u.FilamentId is not null && u.Slot is not null))
+        {
+            if (rows.Any(r => r.FilamentId == incoming.FilamentId))
+            {
+                continue;
+            }
+            matches[incoming] = TakeUnlinkedRowOnSlot(incoming.Slot);
+        }
+
+        foreach (var incoming in incomingRows)
+        {
+            PrintFilament? row;
+            if (named.TryGetValue(incoming, out var namedRow))
+            {
+                row = namedRow;
+            }
+            else if (incoming.FilamentId is { } filamentId)
+            {
+                row = rows.FirstOrDefault(r => r.FilamentId == filamentId && !named.ContainsValue(r))
+                    ?? matches.GetValueOrDefault(incoming);
+                // Linked before UpdateFilamentUsageWeights runs, so the row's weight is derived
+                // from this filament and counts against its remaining amount.
+                if (row != null)
+                {
+                    row.FilamentId = filamentId;
+                }
+            }
+            else if (incoming.Slot is not null)
+            {
+                row = matches[incoming];
+            }
+            else
+            {
+                row = unlinked.FirstOrDefault();
+                if (row != null)
+                {
+                    unlinked.Remove(row);
+                }
+            }
+
+            if (row == null)
+            {
+                row = new PrintFilament
+                {
+                    Id = Guid.NewGuid(),
+                    PrintId = print.Id,
+                    FilamentId = incoming.FilamentId,
+                    Slot = incoming.Slot,
+                    EstimatedSource = PrintFilament.SourceMeasurement.Weight,
+                };
+                // Added explicitly, for the same reason as in ReplaceUsageRows.
+                context.PrintFilament.Add(row);
+                rows.Add(row);
+            }
+
+            // Validation guarantees a source. All three values are replaced so a figure from an
+            // earlier completion cannot outlive the measurement that produced it. The spool's own
+            // measurement decides between several the row carries (printlog-bridge#97).
+            var spool = row.FilamentId is { } linkedId ? spools.GetValueOrDefault(linkedId) : null;
+            row.Source = incoming.ResolveSourceFor(spool?.Source, spool?.HasDiameter ?? false)!.Value;
+            row.AmountMg = incoming.AmountMg;
+            row.LengthInM = incoming.LengthInM;
+            row.VolumeMl = incoming.VolumeMl;
+            // Replaced with the values, and measured unless the connector says otherwise, so an
+            // older bridge's completion stays a measurement (printlog-bridge#82).
+            row.ActualIsEstimate = incoming.ActualIsEstimate ?? false;
+        }
+    }
+
+    /// <summary>How a spool is measured, and whether it has a diameter to convert a length with.</summary>
+    private sealed record SpoolMeasure(PrintFilament.SourceMeasurement Source, bool HasDiameter);
+
+    /// <summary>
+    /// How each spool a completion names is measured, for
+    /// <see cref="CompletePrintFilamentUsageDto.ResolveSourceFor"/>. A spool missing here falls
+    /// back to the row's own source.
+    /// </summary>
+    private async Task<Dictionary<Guid, SpoolMeasure>> UsageSpoolMeasures(
+        IEnumerable<CompletePrintFilamentUsageDto> usage, Print print)
+    {
+        // The print's own spools too: a row named by rowId, or found by its slot, keeps the
+        // spool linked to it when the completion sends none.
+        var ids = usage.Select(u => u.FilamentId)
+            .Concat((print.FilamentUsage ?? []).Select(r => r.FilamentId))
+            .OfType<Guid>().Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var spools = await context.Filaments
+            .Where(f => ids.Contains(f.Id))
+            .Select(f => new
+            {
+                f.Id,
+                f.Source,
+                HasDiameter = f.MaterialCategory.HasDiameter && f.DiameterMm > 0,
+            })
+            .ToListAsync();
+        // The two enums share their values: Weight 1, Length 2, Volume 3.
+        return spools.ToDictionary(f => f.Id, f => new SpoolMeasure((PrintFilament.SourceMeasurement)(int)f.Source, f.HasDiameter));
     }
 
     /// <summary>
@@ -1376,83 +2212,7 @@ public sealed class PrintService(
                 continue;
             }
 
-            bool hasDiameter = filament.MaterialCategory?.HasDiameter == true;
-
-            if (filament.MaterialDensityGramPerCubicCm <= 0
-                || (hasDiameter && (!filament.DiameterMm.HasValue || filament.DiameterMm <= 0)))
-            {
-                continue;
-            }
-
-            if (pf.Source == PrintFilament.SourceMeasurement.Length)
-            {
-                // The diameter test is what the Volume and Weight branches below already do.
-                // Without it a material whose category tracks no diameter (resin, powder)
-                // reaches DiameterMm.Value and throws.
-                if (pf.LengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
-                {
-                    pf.AmountMg = (int)GetAmountMgFromLength(pf.LengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
-                    pf.VolumeMl = GetVolumeInMlFromLengthM(pf.LengthInM.Value, diameterMm);
-                }
-            }
-            else if (pf.Source == PrintFilament.SourceMeasurement.Volume)
-            {
-                if (pf.VolumeMl.HasValue)
-                {
-                    pf.AmountMg = (int)GetAmountMgFromVolume(pf.VolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
-
-                    if (hasDiameter && filament.DiameterMm is { } diameterMm)
-                    {
-                        pf.LengthInM = GetLengthInMetersFromVolume(pf.VolumeMl.Value, diameterMm);
-                    }
-                }
-            }
-            else
-            {
-                if (pf.AmountMg.HasValue)
-                {
-                    pf.VolumeMl = GetVolumeInMlFromAmount(pf.AmountMg.Value, filament.MaterialDensityGramPerCubicCm);
-
-                    if (hasDiameter && filament.DiameterMm is { } diameterMm)
-                    {
-                        pf.LengthInM = GetLengthInMetersFromAmount(pf.AmountMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
-                    }
-                }
-            }
-
-            if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Length)
-            {
-                // Same missing diameter test as the actual-measurement Length branch above.
-                if (pf.EstimatedLengthInM.HasValue && hasDiameter && filament.DiameterMm is { } diameterMm)
-                {
-                    pf.EstimatedAmountMg = (int)GetAmountMgFromLength(pf.EstimatedLengthInM.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
-                    pf.EstimatedVolumeMl = GetVolumeInMlFromLengthM(pf.EstimatedLengthInM.Value, diameterMm);
-                }
-            }
-            else if (pf.EstimatedSource == PrintFilament.SourceMeasurement.Volume)
-            {
-                if (pf.EstimatedVolumeMl.HasValue)
-                {
-                    pf.EstimatedAmountMg = (int)GetAmountMgFromVolume(pf.EstimatedVolumeMl.Value, filament.MaterialDensityGramPerCubicCm);
-
-                    if (hasDiameter && filament.DiameterMm is { } diameterMm)
-                    {
-                        pf.EstimatedLengthInM = GetLengthInMetersFromVolume(pf.EstimatedVolumeMl.Value, diameterMm);
-                    }
-                }
-            }
-            else
-            {
-                if (pf.EstimatedAmountMg.HasValue)
-                {
-                    pf.EstimatedVolumeMl = GetVolumeInMlFromAmount(pf.EstimatedAmountMg.Value, filament.MaterialDensityGramPerCubicCm);
-
-                    if (hasDiameter && filament.DiameterMm is { } diameterMm)
-                    {
-                        pf.EstimatedLengthInM = GetLengthInMetersFromAmount(pf.EstimatedAmountMg.Value, diameterMm, filament.MaterialDensityGramPerCubicCm);
-                    }
-                }
-            }
+            DeriveUsageMeasurements(pf, filament);
         }
     }
 
@@ -1502,8 +2262,8 @@ public sealed class PrintService(
             .SingleOrDefaultAsync();
 
         return subscription?.Status == SubscriptionStatus.Active
-            ? SubscriptionLimits.ProMaxImagesPerPrint
-            : SubscriptionLimits.FreeMaxImagesPerPrint;
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task SetDefaultImage(long printId, int newDefaultImageId)
@@ -1625,6 +2385,21 @@ public sealed class PrintService(
             context.PrintFilament.RemoveRange(print.FilamentUsage!.ToArray());
         }
 
+        // The derivative File rows (thumbnail, social) are not loaded with the images, and their
+        // FKs are Restrict, so read them by id. Like the originals above, their blobs stay.
+        var derivativeFileIds = prints
+            .SelectMany(p => p.Images!)
+            .SelectMany(i => new[] { i.ThumbnailFileId, i.SocialFileId })
+            .OfType<Guid>()
+            .ToList();
+        if (derivativeFileIds.Count > 0)
+        {
+            var derivativeFiles = await context.Files
+                .Where(f => derivativeFileIds.Contains(f.Id))
+                .ToListAsync(ct);
+            context.Files.RemoveRange(derivativeFiles);
+        }
+
         // Remove Print Attachments.
         var attachments = await context.PrintAttachments
             .Include(a => a.File)
@@ -1670,6 +2445,9 @@ public sealed class PrintService(
     /// <returns></returns>
     public async Task<Comment> AddPrintComment(Print print, string commentBody, long userId)
     {
+        // Before anything is written, so a refused comment leaves no row and notifies no one.
+        await EnsureCommentWithinLimits(print, userId);
+
         var comment = new Comment()
         {
             Body = commentBody.Trim(),
@@ -1718,6 +2496,60 @@ public sealed class PrintService(
 
         return comment;
     }
+
+    /// <summary>
+    /// Throws <see cref="CommentLimitExceededException"/> when <paramref name="userId"/> may not
+    /// comment on <paramref name="print"/> now (<see cref="CommentLimits"/>). Counted from the
+    /// comments' CreatedDate, which SaveChanges stamps with DateTime.UtcNow, so this reads the
+    /// same clock.
+    /// </summary>
+    private async Task EnsureCommentWithinLimits(Print print, long userId)
+    {
+        var total = await context.PrintComments.CountAsync(pc => pc.PrintId == print.Id);
+        if (total >= CommentLimits.MaxCommentsPerPrint)
+        {
+            throw new CommentLimitExceededException(
+                $"This print has reached the limit of {CommentLimits.MaxCommentsPerPrint.ToString("N0", CultureInfo.InvariantCulture)} comments.");
+        }
+
+        // The owner replies to people on their own print; only the total applies to them.
+        if (print.CreatedById == userId)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var since = now - CommentLimits.DayWindow;
+        var recent = await context.PrintComments
+            .Where(pc => pc.PrintId == print.Id && pc.Comment.CreatedById == userId && pc.Comment.CreatedDate >= since)
+            .Select(pc => pc.Comment.CreatedDate)
+            .ToListAsync();
+        recent.Sort();
+
+        var retryAfter = RetryAfter(recent, now, CommentLimits.ShortWindow, CommentLimits.PerCommenterShortWindowMax)
+                         ?? RetryAfter(recent, now, CommentLimits.DayWindow, CommentLimits.PerCommenterDayMax);
+        if (retryAfter is { } wait)
+        {
+            throw new CommentLimitExceededException(
+                "You are commenting on this print too often. Try again later.", wait);
+        }
+
+        // How long until one more comment fits in the window, or null if it fits now. With
+        // `count` comments in the window and room for `max`, the (count - max + 1)th oldest has
+        // to age out first. `created` is sorted, oldest first.
+        static TimeSpan? RetryAfter(List<DateTime> created, DateTime now, TimeSpan window, int max)
+        {
+            var inWindow = created.Where(d => d >= now - window).ToList();
+            if (inWindow.Count < max)
+            {
+                return null;
+            }
+
+            var wait = inWindow[inWindow.Count - max] + window - now;
+            return wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1);
+        }
+    }
+
     private bool PrintExists(long id)
     {
         return context.Prints.Any(e => e.Id == id);
@@ -1761,40 +2593,72 @@ public sealed class PrintService(
         Print.PrintStatus? filterByStatus = null,
         SortRequest<PrintSummarySortColumn>? sortRequest = null)
     {
-        var printerIdList = filterByPrinterIds?.ToList();
-        var filamentIdList = filterByFilamentIds?.ToList();
+        var query = new GroupedFeedQuery(
+            userId, searchText, filterByPrinterIds?.ToList(), filterByFilamentIds?.ToList(), filterByStatus,
+            sortRequest?.SortColumn, sortRequest?.SortDirection);
+        var order = await LoadGroupedFeedOrderAsync(context, query, CancellationToken.None);
+        return await GetGroupedFeedPageAsync(order, pageNumber, pageSize);
+    }
+
+    /// <summary>
+    /// Phases 1 to 4 of the grouped feed: which rows match, and in what order. This is the part
+    /// whose cost grows with the user's prints (every standalone print's sort key, every project's
+    /// start dates, the usage rows of all of them), so the controller caches its result on the
+    /// user's cache version and every page of one query is served from that one entry (#309).
+    ///
+    /// <para>Static, and handed its context, because it runs inside a
+    /// <see cref="Caching.CachedComputation"/> scope: see that type for why a shared computation
+    /// must not use the request's <see cref="PrintLogContext"/>. Everything it reads is changed
+    /// only by writes that already bump the version (prints, their usage rows, projects, and the
+    /// spools whose density and diameter resolve a usage row), as the summaries require.</para>
+    /// </summary>
+    internal static async Task<GroupedFeedOrder> LoadGroupedFeedOrderAsync(
+        PrintLogContext context, GroupedFeedQuery query, CancellationToken ct)
+    {
+        var userId = query.UserId;
+        var searchText = query.SearchText;
+        var filterByStatus = query.Status;
+        var printerIdList = query.PrinterIds;
+        var filamentIdList = query.FilamentIds;
 
         bool hasFilters = !string.IsNullOrWhiteSpace(searchText)
             || filterByStatus.HasValue
             || (printerIdList != null && printerIdList.Any())
             || (filamentIdList != null && filamentIdList.Any());
 
-        // ── Phase 1: Build the filtered print query ───────────────────────────────
-        IQueryable<Print> filteredPrintQuery = context.Prints
+        // ── Phase 1: Build the filtered print queries ─────────────────────────────
+        // The non-text filters are shared by both branches; the text search is not, because a
+        // print with no project cannot match on a project's name. Build the shared part first.
+        IQueryable<Print> baseQuery = context.Prints
             .Where(p => p.CreatedById == userId);
 
-        if (!string.IsNullOrWhiteSpace(searchText))
-        {
-            var criterias = searchText.Split('"')
-                .Select((element, index) => index % 2 == 0
-                    ? element.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                    : new string[] { element })
-                .SelectMany(element => element).ToList();
-            foreach (var text in criterias)
-                filteredPrintQuery = filteredPrintQuery.Where(p => p.Title!.Contains(text) || p.Notes!.Contains(text) || p.Project!.Name!.Contains(text));
-        }
-
         if (filterByStatus.HasValue)
-            filteredPrintQuery = filteredPrintQuery.Where(p => p.Status == filterByStatus.Value);
+            baseQuery = baseQuery.Where(p => p.Status == filterByStatus.Value);
 
         if (printerIdList != null && printerIdList.Any())
-            filteredPrintQuery = filteredPrintQuery.Where(p => printerIdList.Contains(p.PrinterId));
+            baseQuery = baseQuery.Where(p => printerIdList.Contains(p.PrinterId));
 
         if (filamentIdList != null && filamentIdList.Any())
         {
-            filteredPrintQuery = filteredPrintQuery.Where(p =>
+            baseQuery = baseQuery.Where(p =>
                 p.FilamentUsage!.Any(pf => pf.FilamentId.HasValue && filamentIdList.Contains((Guid)pf.FilamentId)));
         }
+
+        var criterias = PrintSearchPredicate.SplitCriteria(searchText);
+
+        // Project-assigned prints: the project's name is on the row the user sees, so it is
+        // searchable and the join to Projects earns its place.
+        IQueryable<Print> filteredPrintQuery = baseQuery;
+        foreach (var text in criterias)
+            filteredPrintQuery = filteredPrintQuery.Where(PrintSearchPredicate.TitleNotesOrProjectName(text));
+
+        // Standalone prints: ProjectId IS NULL, so the LEFT JOIN the project-name term generates
+        // can only ever produce NULL and `Project.Name LIKE …` is never true. Carrying that term
+        // here made every standalone-branch query join Projects and evaluate a third LIKE — over
+        // a nvarchar(max) column — to reach a result it could not change.
+        IQueryable<Print> standalonePrintQuery = baseQuery.Where(p => p.ProjectId == null);
+        foreach (var text in criterias)
+            standalonePrintQuery = standalonePrintQuery.Where(PrintSearchPredicate.TitleOrNotes(text));
 
         // ── Phase 2: Determine filtered print counts per project (only needed when filters are active) ──
         Dictionary<Guid, int> filteredGroupLookup;
@@ -1804,7 +2668,7 @@ public sealed class PrintService(
                 .Where(p => p.ProjectId != null)
                 .GroupBy(p => p.ProjectId)
                 .Select(g => new { ProjectId = g.Key, FilteredPrintCount = g.Count() })
-                .ToListAsync();
+                .ToListAsync(ct);
             filteredGroupLookup = groups
                 // Non-null by the Where; the group is still needed for the value selector, so
                 // a Select+OfType unwrap here would discard FilteredPrintCount.
@@ -1821,66 +2685,94 @@ public sealed class PrintService(
         // Intentionally sums ALL project prints (not just filtered) so sort order reflects overall project weight.
         var projectList = await context.Projects
             .Where(p => p.CreatedById == userId)
-            .Select(p => new { p.Id, p.CreatedDate, p.Name })
+            .Select(p => new { p.Id, p.CreatedDate, p.Name, p.StartDateOverride })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
+        // Each row resolved by FilamentProfile.UsageRowMg and rounded once in SQL, then summed
+        // per project, exactly as the project pages total them.
+        // The resin in mL (#294) rides along: each row by FilamentProfile.UsageRowMl, as the
+        // project pages total it.
         var projectFilamentTotals = await context.PrintFilament
-            .Join(
-                context.Prints.Where(pr => pr.CreatedById == userId && pr.ProjectId != null),
-                pf => pf.PrintId, pr => pr.Id,
-                (pf, pr) => new { pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
+            .Where(pf => pf.Print.CreatedById == userId && pf.Print.ProjectId != null)
+            .Select(ExpressionSplice.With((PrintFilament pf, double mg, double ml) => new { pf.Print.ProjectId, Mg = (long)Math.Round(mg), Ml = ml },
+                FilamentProfile.UsageRowMg, FilamentProfile.UsageRowMl))
             .GroupBy(x => x.ProjectId)
-            .Select(g => new
-            {
-                ProjectId = g.Key,
-                TotalFilamentWeightMg = (long?)g.Sum(x =>
-                    x.AmountMg > 0 ? (long?)x.AmountMg
-                    : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                    : (long?)0) ?? 0L
-            })
+            .Select(g => new { ProjectId = g.Key, Mg = g.Sum(x => x.Mg), Ml = g.Sum(x => x.Ml) })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var projectFilamentLookup = projectFilamentTotals
+            // Non-null by the Where; the row is still needed for the value selector.
             .Where(x => x.ProjectId.HasValue)
-            .ToDictionary(x => x.ProjectId!.Value, x => x.TotalFilamentWeightMg);
+            .ToDictionary(x => x.ProjectId!.Value, x => x.Mg);
+
+        var projectVolumeLookup = projectFilamentTotals
+            .Where(x => x.ProjectId.HasValue)
+            .ToDictionary(x => x.ProjectId!.Value, x => PrintMetrics.RoundMl(x.Ml));
+
+        // Start only: the feed carries no finish date, so there is no reason to load the
+        // duration columns or compute a finish here.
+        //
+        // The MIN is folded in memory rather than pushed into SQL. Print.StartDate is a
+        // DateTimeOffset?, and the SQLite provider the test suite runs on stores that as text
+        // INCLUDING the offset suffix and compares it lexicographically — so across rows with
+        // mixed offsets a SQL MIN can pick a different row on SQLite than on SQL Server.
+        // Two small columns per project-assigned print is the price of not having CI and
+        // production disagree about a sort key.
+        var projectStartRows = await context.Prints
+            .Where(p => p.CreatedById == userId && p.ProjectId != null && p.StartDate != null)
+            .Select(p => new { p.ProjectId, p.StartDate })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var projectStartLookup = projectStartRows
+            .Where(x => x.ProjectId.HasValue)
+            .GroupBy(x => x.ProjectId!.Value)
+            .ToDictionary(g => g.Key, g => g.Min(x => x.StartDate));
 
         var projectSortKeys = projectList.Select(p => new FeedSortItem
         {
             Type = FeedItemType.Project,
             ProjectId = p.Id,
-            SortDate = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc)),
+            // Was the project's CreatedDate, which is why a project whose prints all ran in
+            // March sorted as though it happened the day the row was created.
+            SortDate = ProjectDateResolver.ResolveStartInstant(
+                p.StartDateOverride,
+                projectStartLookup.TryGetValue(p.Id, out var earliest) ? earliest : null,
+                p.CreatedDate),
             SortTitle = p.Name,
             TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var pw) ? pw : 0L
         }).ToList();
 
         // Standalone prints: same split to avoid correlated subquery per row.
-        var standalonePrintList = await filteredPrintQuery
-            .Where(p => p.ProjectId == null)
+        var standalonePrintList = await standalonePrintQuery
             .Select(p => new { p.Id, p.StartDate, p.CreatedDate, p.Title })
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
-        var standaloneFilamentTotals = await context.PrintFilament
-            .Join(
-                filteredPrintQuery.Where(p => p.ProjectId == null),
-                pf => pf.PrintId, pr => pr.Id,
-                (pf, pr) => new { pr.Id, pf.AmountMg, pf.EstimatedAmountMg })
-            .GroupBy(x => x.Id)
-            .Select(g => new
-            {
-                PrintId = g.Key,
-                TotalFilamentWeightMg = (long?)g.Sum(x =>
-                    x.AmountMg > 0 ? (long?)x.AmountMg
-                    : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                    : (long?)0) ?? 0L
-            })
-            .AsNoTracking()
-            .ToListAsync();
+        // Joining PrintFilament back to the filtered query would re-run the text search — the
+        // most expensive predicate in the request, a scan of the user's prints with a LOB read
+        // per row for Notes — a second time to reach the same set of ids. The ids are already
+        // materialized above, and IX_PrintFilament_PrintId includes every measure, so seeking
+        // on them covers the usage rows. Since #229 each row also joins its spool for density
+        // and diameter, so a row recorded only as a length or volume counts.
+        var standalonePrintIds = standalonePrintList.Select(p => p.Id).ToList();
 
-        var standaloneFilamentLookup = standaloneFilamentTotals
-            .ToDictionary(x => x.PrintId, x => x.TotalFilamentWeightMg);
+        var standaloneFilamentLookup = new Dictionary<long, long>();
+        if (standalonePrintIds.Count > 0)
+        {
+            var standaloneFilamentTotals = await context.PrintFilament
+                .Where(pf => standalonePrintIds.Contains(pf.PrintId))
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.PrintId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
+                .GroupBy(x => x.PrintId)
+                .Select(g => new { PrintId = g.Key, Mg = g.Sum(x => x.Mg) })
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            standaloneFilamentLookup = standaloneFilamentTotals
+                .ToDictionary(x => x.PrintId, x => x.Mg);
+        }
 
         var standaloneSortKeys = standalonePrintList.Select(p => new FeedSortItem
         {
@@ -1895,42 +2787,95 @@ public sealed class PrintService(
         // ── Phase 4: Merge, sort, paginate the lightweight keys ───────────────────
         IEnumerable<FeedSortItem> merged = projectSortKeys.Concat(standaloneSortKeys);
 
-        if (sortRequest?.SortColumn == PrintSummarySortColumn.Title)
+        if (query.SortColumn == PrintSummarySortColumn.Title)
         {
-            merged = sortRequest.SortDirection == SortDirection.Asc
+            merged = query.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.SortTitle)
-                : merged.OrderByDescending(x => x.SortTitle);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.SortTitle)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
-        else if (sortRequest?.SortColumn == PrintSummarySortColumn.FilamentUsage)
+        else if (query.SortColumn == PrintSummarySortColumn.FilamentUsage)
         {
-            merged = sortRequest.SortDirection == SortDirection.Asc
+            merged = query.SortDirection == SortDirection.Asc
                 ? merged.OrderBy(x => x.TotalFilamentWeightMg)
-                : merged.OrderByDescending(x => x.TotalFilamentWeightMg);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.TotalFilamentWeightMg)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
         else
         {
-            bool asc = sortRequest?.SortDirection == SortDirection.Asc;
+            bool asc = query.SortDirection == SortDirection.Asc;
+            // Ties are now the COMMON case: a date-only override sorts every pinned project to
+            // the same UTC midnight. Without a deterministic tie-breaker equal keys can reorder
+            // between page requests, duplicating a row on one page and dropping it from the next.
             merged = asc
                 ? merged.OrderBy(x => x.SortDate)
-                : merged.OrderByDescending(x => x.SortDate);
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0)
+                : merged.OrderByDescending(x => x.SortDate)
+                        .ThenBy(x => x.Type)
+                        .ThenBy(x => x.ProjectId ?? Guid.Empty)
+                        .ThenBy(x => x.PrintId ?? 0);
         }
 
-        var mergedList = merged.ToList();
-        var total = mergedList.Count;
-        var pagedKeys = mergedList
+        // Only what a page needs from the sort is kept: the cached entry is charged its serialized
+        // size against the shared budget, so a print row is its id and nothing else. A project row
+        // carries the figures computed over all of the project's prints above, which a page would
+        // otherwise have to recompute.
+        var entries = merged
+            .Select(x => x.Type == FeedItemType.Project
+                ? new GroupedFeedEntry
+                {
+                    ProjectId = x.ProjectId,
+                    ProjectSortDate = x.SortDate,
+                    FilteredPrintCount = hasFilters
+                        ? filteredGroupLookup.GetValueOrDefault(x.ProjectId!.Value)
+                        : null,
+                    ProjectWeightMg = projectFilamentLookup.TryGetValue(x.ProjectId!.Value, out var fw) ? fw : 0L,
+                    ProjectVolumeMl = projectVolumeLookup.TryGetValue(x.ProjectId!.Value, out var fv) ? fv : 0.0,
+                }
+                : new GroupedFeedEntry { PrintId = x.PrintId })
+            .ToList();
+
+        return new GroupedFeedOrder { Entries = entries, HasFilters = hasFilters };
+    }
+
+    /// <summary>
+    /// Phases 5 and 6 of the grouped feed: one page of a <see cref="GroupedFeedOrder"/>, with the
+    /// detail of only that page's rows loaded. The order may come from the cache, so it is only
+    /// read, never changed.
+    /// </summary>
+    public async Task<PagedList<GroupedFeedItemDto>> GetGroupedFeedPageAsync(GroupedFeedOrder order, int pageNumber, int pageSize)
+    {
+        var hasFilters = order.HasFilters;
+        var total = order.Entries.Count;
+        var pagedKeys = order.Entries
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToList();
 
         // ── Phase 5: Load full detail only for the current page's items ───────────
+        // An entry is a project row exactly when it has a project id: the projection and the id
+        // are proved together, so nothing below needs .Value.
         var pageProjectGuids = pagedKeys
-            .Where(x => x.Type == FeedItemType.Project)
-            .Select(x => x.ProjectId!.Value)
+            .Select(x => x.ProjectId)
+            .OfType<Guid>()
             .ToList();
 
         var pagePrintIds = pagedKeys
-            .Where(x => x.Type == FeedItemType.Print)
-            .Select(x => x.PrintId!.Value)
+            .Where(x => x.ProjectId is null)
+            .Select(x => x.PrintId)
+            .OfType<long>()
             .ToList();
 
         // — Project detail via targeted projections (avoids loading all prints per project) —
@@ -1988,24 +2933,16 @@ public sealed class PrintService(
                 .ToListAsync();
             projectDefaultImageLookup = defaultImageRows.ToDictionary(i => i.ProjectId, i => i.Id);
 
-            var filamentUsageRows = await context.PrintFilament
-                .Join(
-                    context.Prints.Where(pr => pr.ProjectId != null && pageProjectGuids.Contains(pr.ProjectId.Value)),
-                    pf => pf.PrintId, pr => pr.Id,
-                    (pf, pr) => new { pf.FilamentId, pr.ProjectId, pf.AmountMg, pf.EstimatedAmountMg })
-                .Where(x => x.FilamentId != null)
+            var filamentUsageSums = await context.PrintFilament
+                .Where(pf => pf.FilamentId != null && pf.Print.ProjectId != null && pageProjectGuids.Contains(pf.Print.ProjectId.Value))
+                .Select(ExpressionSplice.With((PrintFilament pf, double mg) => new { pf.FilamentId, pf.Print.ProjectId, Mg = (long)Math.Round(mg) }, FilamentProfile.UsageRowMg))
                 .GroupBy(x => new { x.ProjectId, x.FilamentId })
-                .Select(g => new
-                {
-                    ProjectId = g.Key.ProjectId,
-                    FilamentId = g.Key.FilamentId,
-                    TotalAmountMg = (long?)g.Sum(x =>
-                        x.AmountMg > 0 ? (long?)x.AmountMg
-                        : x.EstimatedAmountMg > 0 ? (long?)x.EstimatedAmountMg
-                        : (long?)0) ?? 0L
-                })
+                .Select(g => new { g.Key.ProjectId, g.Key.FilamentId, Mg = g.Sum(x => x.Mg) })
                 .AsNoTracking()
                 .ToListAsync();
+            var filamentUsageRows = filamentUsageSums
+                .Select(r => new { r.ProjectId, r.FilamentId, TotalAmountMg = r.Mg })
+                .ToList();
 
             var uniqueFilamentIds = filamentUsageRows
                 .Select(r => r.FilamentId)
@@ -2133,27 +3070,34 @@ public sealed class PrintService(
 
         var pagedItems = pagedKeys.Select(key =>
         {
-            if (key.Type == FeedItemType.Project)
+            if (key.ProjectId is { } projectId)
             {
-                if (!projectEntityLookup.TryGetValue(key.ProjectId!.Value, out var p))
+                if (!projectEntityLookup.TryGetValue(projectId, out var p))
                     return null;
 
                 projectPrintStats.TryGetValue(p.Id, out var stats);
-                filteredGroupLookup.TryGetValue(p.Id, out var filteredCount);
+
+                // Set on every project entry by LoadGroupedFeedOrderAsync.
+                var sortDate = key.ProjectSortDate.GetValueOrDefault();
 
                 return new GroupedFeedItemDto
                 {
                     Type = "project",
-                    SortDate = key.SortDate,
+                    SortDate = sortDate,
+                    // The UTC civil date of the sort instant is exactly the resolved start
+                    // date: an override sorts at UTC midnight of that day, and the derived
+                    // cases already reduce to their UTC civil date in ProjectDateResolver.
+                    ProjectStartDate = DateOnly.FromDateTime(sortDate.UtcDateTime),
                     ProjectId = p.Id,
                     ProjectName = p.Name,
                     ProjectReference = p.Reference,
                     ProjectStatus = p.Status,
                     PrintCount = stats.PrintCount,
-                    FilteredPrintCount = hasFilters ? (int?)filteredCount : null,
+                    FilteredPrintCount = hasFilters ? key.FilteredPrintCount ?? 0 : null,
                     TotalPrintTimeInSeconds = stats.TotalPrintTime,
                     TotalEstimatedPrintTimeInSeconds = stats.TotalEstPrintTime,
-                    TotalFilamentWeightMg = projectFilamentLookup.TryGetValue(p.Id, out var fw) ? fw : 0L,
+                    TotalFilamentWeightMg = key.ProjectWeightMg ?? 0L,
+                    TotalFilamentVolumeMl = key.ProjectVolumeMl ?? 0.0,
                     DefaultProjectImageId = projectDefaultImageLookup.TryGetValue(p.Id, out var imgId) ? imgId : 0,
                     FilamentUsage = projectFilamentUsageLookup.TryGetValue(p.Id, out var fu) ? fu : new List<PrintFilamentSummaryDto>(),
                     Printers = projectPrinterLookup.TryGetValue(p.Id, out var printers) ? printers : new List<PrinterSummary>(),
@@ -2161,7 +3105,7 @@ public sealed class PrintService(
             }
             else
             {
-                if (!printLookup.TryGetValue(key.PrintId!.Value, out var p))
+                if (key.PrintId is not { } printId || !printLookup.TryGetValue(printId, out var p))
                     return null;
                 var sortDate = p.StartDate ?? new DateTimeOffset(DateTime.SpecifyKind(p.CreatedDate, DateTimeKind.Utc));
                 return new GroupedFeedItemDto
@@ -2174,6 +3118,66 @@ public sealed class PrintService(
         }).Where(item => item != null).Select(item => item!).ToList();
 
         return new PagedList<GroupedFeedItemDto>(pagedItems, total, pageNumber, pageSize);
+    }
+    /// <summary>
+    /// One usage row as get_print reports it, projected in SQL. A named type rather than an
+    /// anonymous one so the projection can be built once, from the shared row rule, and spliced
+    /// into the print query.
+    /// </summary>
+    private sealed class McpUsageRow
+    {
+        public bool Readable { get; init; }
+        public Guid? FilamentId { get; init; }
+        public string? Name { get; init; }
+        public string? Brand { get; init; }
+        public string? Material { get; init; }
+        public string? Color { get; init; }
+        public double Mg { get; init; }
+        public bool IsEstimated { get; init; }
+        public double ActualMg { get; init; }
+        public double EstimatedMg { get; init; }
+        public string? Notes { get; init; }
+        public double? Milliliters { get; init; }
+
+        public static Expression<Func<PrintFilament, McpUsageRow>> For(long userId) =>
+            ExpressionSplice.With<PrintFilament, double, bool, double, double, McpUsageRow>(
+                (pf, mg, isEstimated, actualMg, estimatedMg) => new McpUsageRow
+                {
+                    // Guard on ownership, not merely on non-null: a corrupt row can point at
+                    // ANOTHER user's spool, and returning its brand/material/colour would leak
+                    // their data. The quantity lives on the caller's own PrintFilament row, so it
+                    // is safe to keep.
+                    Readable = pf.Filament != null && pf.Filament.CreatedById == userId,
+                    FilamentId = pf.FilamentId,
+                    // Null-forgiven because this is an EF projection: the null nav is handled
+                    // server-side in SQL and never dereferenced in process. The Readable flag
+                    // above is what gates the values on the read side.
+                    Name = pf.Filament!.DisplayName,
+                    Brand = pf.Filament.Brand,
+                    Material = pf.Filament.MaterialType,
+                    Color = pf.Filament.ColorName,
+                    // FilamentProfile's row rule, the same one search_prints and every spool
+                    // figure use: a zero or NEGATIVE actual falls through to the estimate, in
+                    // whichever measure each side was recorded.
+                    Mg = mg,
+                    IsEstimated = isEstimated,
+                    // Each side on its own, so a caller can see what was actually recorded vs.
+                    // estimated. Zero means that side recorded nothing usable.
+                    ActualMg = actualMg,
+                    EstimatedMg = estimatedMg,
+                    Notes = pf.Notes,
+                    // The same side Mg resolved to, in milliliters, when that side was recorded
+                    // as a volume (resin, printlog-bridge#97). The actual volume counts even with
+                    // no spool to give it a weight.
+                    Milliliters = pf.Source == PrintFilament.SourceMeasurement.Volume && pf.VolumeMl > 0 ? pf.VolumeMl
+                        : actualMg > 0 ? null
+                        : pf.EstimatedSource == PrintFilament.SourceMeasurement.Volume && pf.EstimatedVolumeMl > 0 ? pf.EstimatedVolumeMl
+                        : null,
+                },
+                FilamentProfile.UsageRowMg,
+                FilamentProfile.UsageRowIsEstimated,
+                FilamentProfile.UsageRowActualMg,
+                FilamentProfile.UsageRowEstimatedMg);
     }
 }
 

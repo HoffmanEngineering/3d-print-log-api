@@ -103,6 +103,77 @@ public class PushDispatchServiceTests : IClassFixture<CustomWebApplicationFactor
         Assert.Empty(fcm.Sent);
     }
 
+    /// <summary>An isolated user with one registered device, so device counts are exact.</summary>
+    private static async Task<long> UserWithDeviceAsync(PrintLogContext db, IDeviceTokenService tokens)
+    {
+        var user = await Achievements.AchievementTestData.CreateUserAsync(db);
+        await tokens.RegisterDevice(user.Id, $"tok-{Guid.NewGuid():N}", DevicePlatform.Android, null);
+        return user.Id;
+    }
+
+    private static Notification AchievementFor(long userId, bool isRead = false)
+    {
+        var n = NotificationOfType(NotificationType.Achievement);
+        n.UserId = userId;
+        n.PrintId = null;
+        n.Title = "Achievement unlocked: First Layer";
+        n.IsRead = isRead;
+        return n;
+    }
+
+    [Fact]
+    public async Task DispatchesForAchievement_WhenPushAchievementEnabled()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+
+        await service.DispatchForNotification(AchievementFor(userId), TestContext.Current.CancellationToken);
+
+        Assert.Single(fcm.Sent);
+        Assert.Equal("Achievement unlocked: First Layer", fcm.Sent[0].Title);
+    }
+
+    [Fact]
+    public async Task SkipsAchievement_WhenDisabled()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            UserSettingTypeId = 21, // Push_Achievement
+            Value = "false",
+            CreatedById = userId,
+            UpdatedById = userId
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await service.DispatchForNotification(AchievementFor(userId), TestContext.Current.CancellationToken);
+
+        Assert.Empty(fcm.Sent);
+    }
+
+    [Theory]
+    [InlineData(NotificationType.Achievement)]
+    [InlineData(NotificationType.PrintFailed)]
+    public async Task SkipsAlreadyReadNotifications(NotificationType type)
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, db, scope) = Build(fcm);
+        using var _s = scope;
+        var userId = await UserWithDeviceAsync(db, tokens);
+        var notification = AchievementFor(userId, isRead: true);
+        notification.Type = type;
+
+        await service.DispatchForNotification(notification, TestContext.Current.CancellationToken);
+
+        Assert.Empty(fcm.Sent);
+    }
+
     [Fact]
     public async Task RespectsDisabledPreference()
     {
@@ -157,5 +228,55 @@ public class PushDispatchServiceTests : IClassFixture<CustomWebApplicationFactor
             service.DispatchForNotification(NotificationOfType(NotificationType.PrintFailed), TestContext.Current.CancellationToken));
 
         Assert.Null(ex);
+    }
+
+    /// <summary>
+    /// AndroidNotification.EventTimestamp is non-nullable, so leaving it unset ships
+    /// event_time as 0001-01-01 and Android renders the card's age from it — "2023y" on the
+    /// notification shade instead of "now". The dispatch layer therefore has to carry the
+    /// notification's own timestamp down to the client.
+    /// </summary>
+    [Fact]
+    public async Task DispatchCarriesTheNotificationTimestamp()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, _, scope) = Build(fcm);
+        using var _s = scope;
+
+        await tokens.PruneTokens(await tokens.GetTokensForUser(IntegrationTestSeeder.TestUserId));
+        await tokens.RegisterDevice(IntegrationTestSeeder.TestUserId, $"tok-{Guid.NewGuid():N}", DevicePlatform.Android, null);
+
+        var created = new DateTime(2026, 8, 29, 21, 23, 41, DateTimeKind.Utc);
+        var notification = NotificationOfType(NotificationType.PrintCompleted);
+        notification.CreatedDate = created;
+
+        await service.DispatchForNotification(notification, TestContext.Current.CancellationToken);
+
+        var sent = Assert.Single(fcm.Sent);
+        Assert.Equal(new DateTimeOffset(created), sent.EventTime);
+    }
+
+    /// <summary>
+    /// The column round-trips out of SQL Server as Unspecified even though the value stored
+    /// is UTC, so the kind has to be reasserted or the instant shifts by the server's zone.
+    /// </summary>
+    [Fact]
+    public async Task DispatchTreatsAnUnspecifiedTimestampAsUtc()
+    {
+        var fcm = new RecordingFcmClient();
+        var (service, tokens, _, scope) = Build(fcm);
+        using var _s = scope;
+
+        await tokens.PruneTokens(await tokens.GetTokensForUser(IntegrationTestSeeder.TestUserId));
+        await tokens.RegisterDevice(IntegrationTestSeeder.TestUserId, $"tok-{Guid.NewGuid():N}", DevicePlatform.Android, null);
+
+        var notification = NotificationOfType(NotificationType.PrintCompleted);
+        notification.CreatedDate = new DateTime(2026, 8, 29, 21, 23, 41, DateTimeKind.Unspecified);
+
+        await service.DispatchForNotification(notification, TestContext.Current.CancellationToken);
+
+        var sent = Assert.Single(fcm.Sent);
+        Assert.Equal(TimeSpan.Zero, sent.EventTime.Offset);
+        Assert.Equal(21, sent.EventTime.Hour);
     }
 }

@@ -187,6 +187,32 @@ public class ApiRateLimitTests
         }
     }
 
+    /// <summary>
+    /// The /seo endpoints are anonymous and called once per crawled page, so they spend the
+    /// general anonymous budget, not the larger media one.
+    /// </summary>
+    public class SeoBudget : IClassFixture<LowAnonymousLimitFactory>
+    {
+        private readonly LowAnonymousLimitFactory _factory;
+
+        public SeoBudget(LowAnonymousLimitFactory factory) => _factory = factory;
+
+        [Fact]
+        public async Task SeoRequests_SpendTheAnonymousBudget()
+        {
+            var client = _factory.CreateClient();
+
+            var responses = new List<HttpResponseMessage>();
+            for (var i = 0; i < Limit + 1; i++)
+            {
+                responses.Add(await client.GetAsync($"/api/Prints/{IntegrationTestSeeder.TestPrintId}/seo", TestContext.Current.CancellationToken));
+            }
+
+            Assert.All(responses.Take(Limit), r => Assert.NotEqual(HttpStatusCode.TooManyRequests, r.StatusCode));
+            Assert.Equal(HttpStatusCode.TooManyRequests, responses[Limit].StatusCode);
+        }
+    }
+
     public class AnonymousBudgetIsolation : IClassFixture<LowAnonymousLimitFactory>
     {
         private readonly LowAnonymousLimitFactory _factory;
@@ -313,7 +339,7 @@ public class ApiRateLimitTests
 
         private static HttpRequestMessage WithKey(string key)
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/UserApiKeys");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/Users/me");
             request.Headers.Add("X-Api-Key", key);
             return request;
         }

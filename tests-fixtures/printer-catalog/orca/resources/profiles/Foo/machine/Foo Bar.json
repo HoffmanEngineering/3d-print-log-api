@@ -1,0 +1,11 @@
+{
+    "type": "machine_model",
+    "name": "Foo Bar",
+    "nozzle_diameter": "0.6;0.4",
+    "bed_model": "foo_bar_bed.stl",
+    "bed_texture": "foo_bar_texture.svg",
+    "family": "Foo",
+    "machine_tech": "FFF",
+    "model_id": "foo-bar",
+    "default_materials": "Generic PLA"
+}

@@ -9,7 +9,13 @@ public record FcmMessage(
     string Token,
     string Title,
     string Body,
-    IReadOnlyDictionary<string, string> Data);
+    IReadOnlyDictionary<string, string> Data,
+    /// <summary>
+    /// When the event being announced happened. Carried explicitly rather than defaulted at
+    /// send time because AndroidNotification.EventTimestamp is non-nullable: an unset value
+    /// ships as 0001-01-01, and Android renders the notification card's age from it.
+    /// </summary>
+    DateTimeOffset EventTime);
 
 /// <summary>
 /// The seam between dispatch and Google. Everything above this interface is testable

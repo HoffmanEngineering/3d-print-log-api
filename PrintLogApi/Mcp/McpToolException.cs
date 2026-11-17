@@ -9,13 +9,20 @@ public sealed class McpToolException : Exception
 {
     public string Code { get; }
 
-    private McpToolException(string code, string message) : base(message)
+    /// <summary>A finer machine-readable reason within <see cref="Code"/>, for callers (REST) that map it; never sent over MCP.</summary>
+    public string? SubCode { get; }
+
+    private McpToolException(string code, string message, string? subCode = null) : base(message)
     {
         Code = code;
+        SubCode = subCode;
     }
 
     public static McpToolException InvalidArguments(string message) =>
         new("invalid_arguments", message);
+
+    public static McpToolException InvalidArguments(string message, string subCode) =>
+        new("invalid_arguments", message, subCode);
 
     public static McpToolException NotFound(string message = "The requested item was not found.") =>
         new("not_found", message);
@@ -25,4 +32,11 @@ public sealed class McpToolException : Exception
 
     public static McpToolException Conflict(string message) =>
         new("conflict", message);
+
+    /// <summary>
+    /// A dependency outside this API (the docs site) could not be read. Retrying later can
+    /// succeed, unlike every other code here.
+    /// </summary>
+    public static McpToolException Unavailable(string message) =>
+        new("unavailable", message);
 }

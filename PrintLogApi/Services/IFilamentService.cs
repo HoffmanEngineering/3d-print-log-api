@@ -54,10 +54,10 @@ public interface IFilamentService
 
     /// <summary>
     /// Remaining weight (grams) for one of the caller's materials, using the same remaining
-    /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns 0 when the material has no
-    /// nominal weight or does not belong to <paramref name="userId"/>.
+    /// expression as <see cref="GetMaterialInventoryForMcp"/>. Returns null when the material has no
+    /// nominal weight (not tracked, #230) or does not belong to <paramref name="userId"/>.
     /// </summary>
-    Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
+    Task<double?> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct);
 
     /// <summary>
     /// Full detail for ONE of the caller's own materials, via the combined ownership predicate.
@@ -112,6 +112,27 @@ public interface IFilamentService
     bool FilamentExists(Guid id);
     Task<string[]> GetFilamentBrands(long userId);
     Task<Filament?> GetFilamentById(Guid id);
+    /// <summary>
+    /// The user's filament carrying this tag UID, in any case and with any separators (#147), or
+    /// null when none does. Throws <see cref="Exceptions.BadRequestException"/> when the UID is
+    /// not hex bytes. Another user's tag is never returned.
+    /// </summary>
+    Task<Filament?> GetFilamentByTag(long userId, string uid);
+
+    /// <summary>
+    /// The user's spool with this <see cref="Filament.SpoolNumber"/> (#174), or null when they
+    /// have none. Numbers any of the user's unnumbered spools first.
+    /// </summary>
+    Task<Filament?> GetFilamentBySpoolNumber(long userId, int spoolNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gives a number to each of the user's spools that has none, oldest first. Only a spool the
+    /// previous app version created while the #174 migration ran can be unnumbered, so this
+    /// normally finds nothing, but the query scans the user's filaments (no index serves
+    /// <c>SpoolNumber IS NULL</c>). Call it before resolving or listing by number, off any hot
+    /// path: the Spoolman inventory runs it on a cache miss only (#195).
+    /// </summary>
+    Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default);
     Task<string[]> GetFilamentPurchaseLocations(long userId);
     Task<string[]> GetFilamentStorageLocations(long userId);
     Task<PagedList<FilamentSummaryDto>> GetFilamentSummaryForUser(long userId, SortDirection sortDirection, FilamentSummarySortColumn sortColumn, int pageNumber, int pageSize, string? searchText, string? filterByMaterialCategoryNickname, string? filterByStorageLocation, bool? includeInactive, bool? showFavoritesOnly, bool? showLoadedFilamentOnly, List<ColorPatternType>? colorPatterns = null, List<FilamentFinishType>? finishTypes = null, List<FilamentEffect>? effects = null);

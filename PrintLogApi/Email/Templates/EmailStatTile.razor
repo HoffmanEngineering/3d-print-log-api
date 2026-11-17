@@ -1,0 +1,45 @@
+@* One number in a tile: a table cell, so the caller lays tiles out in its own row. A hero tile is
+   solid indigo with white text; a light tile is pale indigo with the number in indigo 800. A
+   change line shows gains in green and declines or no change in a neutral tone: a slower month
+   isn't a failure. *@
+<td class="@(Hero ? "em-hero" : "em-tile")" bgcolor="@(Hero ? "#3f51b5" : "#eef0fa")" width="@Width" valign="top" style="padding:@(Hero ? "16px" : "12px");background-color:@(Hero ? "#3f51b5" : "#eef0fa");border-radius:8px;font-family:Arial,Helvetica,sans-serif;text-align:@(Center ? "center" : "left");">
+    <div class="@(Hero ? null : "em-tile-value")" style="font-size:@(Hero ? "34px" : "22px");line-height:@(Hero ? "38px" : "26px");font-weight:bold;color:@(Hero ? "#ffffff" : "#283593");">@Value</div>
+    <div class="@(Hero ? null : "em-muted")" style="font-size:13px;line-height:18px;color:@(Hero ? "#e8eaf6" : "#424242");">@Label</div>
+    @if (Change is not null)
+    {
+        <div style="margin:6px 0 0 0;font-size:13px;line-height:18px;font-weight:bold;color:@ChangeColor;">@Arrow@Change</div>
+    }
+</td>
+
+@code {
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    /// <summary>e.g. "50% vs October"; the arrow comes from <see cref="Trend"/>.</summary>
+    [Parameter] public string? Change { get; set; }
+
+    [Parameter] public Trend? Trend { get; set; }
+
+    [Parameter] public bool Hero { get; set; }
+
+    [Parameter] public bool Center { get; set; }
+
+    /// <summary>The cell width attribute, e.g. "50%".</summary>
+    [Parameter] public string? Width { get; set; }
+
+    private string Arrow => Trend switch
+    {
+        Templates.Trend.Up => "▲ ",
+        Templates.Trend.Down => "▼ ",
+        _ => "",
+    };
+
+    private string ChangeColor => (Hero, Trend) switch
+    {
+        (true, Templates.Trend.Up) => "#c5e1a5",
+        (true, _) => "#c5cae9",
+        (false, Templates.Trend.Up) => "#2e7d32",
+        _ => "#616161",
+    };
+}

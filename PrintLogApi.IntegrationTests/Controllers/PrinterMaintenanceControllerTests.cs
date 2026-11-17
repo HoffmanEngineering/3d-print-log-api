@@ -375,6 +375,66 @@ public class PrinterMaintenanceControllerTests : IClassFixture<CustomWebApplicat
         Assert.True(persisted.Done);
     }
 
+    [Fact]
+    public async Task PostPrinterMaintenanceEntry_ForNonexistentPrinter_ReturnsNotFound()
+    {
+        // Arrange - a deleted printer looks the same as an unknown id
+        var dto = new AddPrinterMaintenanceDto
+        {
+            PrinterId = 9_999_999,
+            Date = DateTimeOffset.UtcNow,
+            Category = "Ghost printer"
+        };
+
+        var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/PrinterMaintenance");
+        request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
+
+        // Act
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostPrinterMaintenanceEntry_ForAnotherUsersPrinter_ReturnsNotFound()
+    {
+        // Arrange
+        long otherPrinterId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var otherUser = new User
+            {
+                OAuthUserId = "auth0|other-maintenance-post-" + Guid.NewGuid().ToString("N"),
+                ViewStatus = User.ProfileViewStatus.Public
+            };
+            db.Users.Add(otherUser);
+            db.SaveChanges();
+
+            var otherPrinter = new Printer { Name = "Foreign Printer", UserId = otherUser.Id, IsActive = true };
+            db.Printers.Add(otherPrinter);
+            db.SaveChanges();
+            otherPrinterId = otherPrinter.Id;
+        }
+
+        var dto = new AddPrinterMaintenanceDto
+        {
+            PrinterId = otherPrinterId,
+            Date = DateTimeOffset.UtcNow,
+            Category = "Foreign printer"
+        };
+
+        var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/PrinterMaintenance");
+        request.Content = new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json");
+
+        // Act
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     #endregion
 
     #region PUT /api/PrinterMaintenance/{id} Tests

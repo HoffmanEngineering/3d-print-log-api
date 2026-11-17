@@ -1,6 +1,8 @@
 ---
 name: adding-an-mcp-tool
 description: Use when adding a read or write tool to the MCP server (PrintLogApi/Mcp/PrintLogReadTools or PrintLogWriteTools, exposed at /mcp), when choosing whether a write tool's idempotency key is required, or when an MCP tool leaks another user's data, reports wrong filament usage, advertises the wrong required fields, duplicates an entity on retry, or its integration test hangs.
+metadata:
+  internal: true
 ---
 
 # Adding an MCP Tool
@@ -28,11 +30,17 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
    everywhere: Print/Filament/Project use `CreatedById`, **Printer uses `UserId`**. A foreign or
    missing id must surface a uniform `not_found` — never an existence oracle.
 3. **Register** any NEW service in `Startup.ConfigureServices` and inject it into the tool class.
-4. **Tool method** — `[McpServerTool, Description("…")]`. Get the user with
-   `McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User)` — **never** a tool argument.
+4. **Tool method** — `[McpServerTool(Title = "…", ReadOnly = …, Destructive = …, Idempotent = …, OpenWorld = false), Description("…")]`.
+   All four hints are explicit booleans on every tool, reads included (`ReadOnly = true,
+   Destructive = false, Idempotent = true`): OpenAI's directory review rejects an omitted hint
+   even where the MCP spec allows it. `ToolSchemaTests` fails on a missing or contradictory one.
+   Get the user with `McpUserContext.RequireUserId(httpContextAccessor.HttpContext!.User)` — **never** a tool argument.
    Throw `McpToolException.NotFound/InvalidArguments/Forbidden/Conflict`.
 5. **Tests** — `IClassFixture<McpDataWebApplicationFactory>`. Cover creator-only isolation, each
    filter/validation rule, and invalid input → error.
+6. **Public skill** — if the tool changes how an agent should work (a new workflow, a renamed
+   parameter, a new guardrail), update `skills/3d-print-log/SKILL.md`. `AgentSkillTests` fails on
+   any tool or argument the skill names that no longer exists. See AGENTS.md for the UI mirror.
 
 ## Extra steps for a WRITE tool
 
@@ -117,7 +125,11 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
 the user entered and weight is derived from it. Editing density/diameter on a Length/Volume material
 therefore recomputes its weight and remaining-by-weight — expected, not a bug. Say so in the tool
 description. `adjust_material_remaining` is the only tool for changing quantity, and it refuses a
-result below zero or above original capacity.
+result below zero or above original capacity, and any material with no capacity at all.
+
+- **An untracked material's remaining is null, never 0** (#230). Report `FilamentProfile.RemainingMg`
+  through `McpUnits.MgToGramsOrNull`; `MgToGrams` turns null into 0, which reads as "empty". A tool
+  that sums or ranks availability leaves untracked spools out, as `find_material` does.
 
 - Route **every** capacity conversion through `McpMaterialConversion.RequireMgInRange` before the
   `long` cast — `MeasurementUtilities` casts **unchecked**, so an unguarded huge density or amount
@@ -144,7 +156,7 @@ result below zero or above original capacity.
   `Include(p => p.LoadedFilaments)`; what is never loaded cannot be marked modified, so the
   invariant doesn't depend on the patch code being careful. Avoid both website paths:
   `PostPrinter`/`PutPrinter` run an AutoMapper map that clobbers `LoadedFilaments`/`UserId`, and
-  `PutPrinter` also calls `setLoadedFilament`.
+  `PutPrinter` also calls `setLoadedFilament` whenever the body carries a `loadedFilaments` list.
 - Non-blank `make`/`model`/`name` and "has a category" are MCP **new-write** invariants, not schema
   facts — the columns are only length-limited and the category FK is nullable, so legacy rows may
   hold nulls. Normalize a legacy null rather than throwing; leave an omitted category alone on

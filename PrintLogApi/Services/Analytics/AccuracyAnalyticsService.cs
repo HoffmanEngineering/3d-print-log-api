@@ -102,12 +102,17 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context, TimeProvid
                 // genuine actual/estimate pair on the print itself (PrintProfile keeps them
                 // parallel for exactly this reason), so omitting them would silently shrink
                 // the material sample and bias it toward spool-tracked prints.
+                //
+                // A row whose actual is the slicer's estimate (printlog-bridge#82) is left out
+                // of BOTH sides, so a print's measured rows still compare like with like and a
+                // print with only estimated rows has no sample at all, exactly as a print with
+                // no estimate has none.
                 EstimatedMg = (long)p.FilamentUsage!.Sum(pf =>
-                    pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value : 0)
+                    !pf.ActualIsEstimate && pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value : 0)
                     + (p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0
                         ? p.EstimatedFilamentUsageMg.Value : 0),
                 ActualMg = (long)p.FilamentUsage!.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value : 0)
+                    !pf.ActualIsEstimate && pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value : 0)
                     + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0
                         ? p.FilamentUsageMg.Value : 0),
             })
@@ -234,6 +239,8 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context, TimeProvid
         var rows = await scoped
             .SelectMany(p => p.FilamentUsage!, (p, pf) => new { p, pf })
             .Where(x => x.pf.Filament != null && x.pf.Filament.CreatedById == userId)
+            // An estimate compared with itself is not a sample (printlog-bridge#82).
+            .Where(x => !x.pf.ActualIsEstimate)
             .Select(x => new
             {
                 PrintId = x.p.Id,

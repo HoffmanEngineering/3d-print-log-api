@@ -31,7 +31,9 @@ public class AddPrinterDTO
     public double? BeamDiameter { get; set; }
 
     /// <summary>
-    /// The collection of currently loaded filament for this printer.
+    /// The spools loaded on this printer. On an update, omit it or send `null` to leave the loaded
+    /// spools unchanged; a list (empty included) replaces them, unloading any spool not in it.
+    /// On create, omitting it loads nothing. Every listed spool must be the caller's own.
     /// </summary>
     public ICollection<AddPrinterFilamentDto>? LoadedFilaments { get; set; }
 
@@ -54,4 +56,19 @@ public class AddPrinterDTO
 
     [Range(0, double.MaxValue, ErrorMessage = "Only positive number allowed")]
     public double? WattageW { get; set; }
+
+    /// <summary>
+    /// How many filament positions the printer has (tools, AMS slots). Omit to keep the current
+    /// value; a new printer defaults to 1.
+    /// </summary>
+    [Range(1, Models.Printer.MaxSlotCount)]
+    public int? SlotCount { get; set; }
+
+    /// <summary>
+    /// Id of the printer catalog model this printer is, such as `bambu-lab-p1s`. Must exist and not
+    /// be hidden; a retired model is accepted only if the printer already has it. Omit to keep the
+    /// current model. Ids match case-insensitively and are saved in their canonical case.
+    /// </summary>
+    [MaxLength(100)]
+    public string? CatalogModelId { get; set; }
 }

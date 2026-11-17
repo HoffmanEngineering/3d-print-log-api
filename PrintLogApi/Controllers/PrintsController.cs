@@ -6,18 +6,23 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Net.Http.Headers;
+using PrintLogApi.Authentication;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Caching;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Print;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Bridges;
+using PrintLogApi.Services.PublicPrints;
+using PrintLogApi.Services.SlicerSettings;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Controllers;
@@ -34,22 +39,32 @@ public class PrintsController(
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IPrintService printService,
-    IPrintImageService printImageService,
     ICommentService commentService,
     HybridCache cache,
     CachedComputation computation,
     ICacheVersionService cacheVersionService,
     IBlobStorageService blobStorageService,
-    IFileAttachmentService fileAttachmentService) : ControllerBase
+    IFileAttachmentService fileAttachmentService,
+    IImageProcessingService imageProcessing,
+    IProcessedImageWriter imageWriter,
+    SocialImageLookup socialImages,
+    IBridgePrintGuard bridgePrintGuard,
+    PublicPrintIndexCache publicPrints) : ControllerBase
 {
     private const string printImageContainerName = BlobContainers.PrintImages;
     private const string PRINT_SUMMARY_CACHE_PREFIX = "print_summary_";
 
     /// <summary>
-    ///     Get a paged list of Print Summary information for a user. 
-    ///     If no userId is provided, then all prints for the currently authenticated user will be queried.
-    ///     Otherwise, if a userId is provided, then only the user's public prints will be returned.
+    /// List prints, paged, with optional search, filters and sorting.
     /// </summary>
+    /// <remarks>
+    /// Without `userId`, lists the authenticated user's own prints. With `userId`, lists that user's
+    /// public prints, and needs no credentials. Results are paged with `pageNumber` (from 1) and
+    /// `pageSize` (default 10, at most 250: a larger value is treated as 250).
+    ///
+    /// Statuses are integers: `1` Pending, `2` Printing, `3` Success, `4` Cancelled, `5` Failed,
+    /// `6` PartialSuccess. `fromDate` and `toDate` must be supplied together.
+    /// </remarks>
     /// <param name="pagingRequest">The paging request.</param>
     /// <param name="searchText">Optionally search for text in a print's title or notes.</param>
     /// <param name="filterByPrinterIds">Optionally filter by specific printer ids.</param>
@@ -120,6 +135,20 @@ public class PrintsController(
         if (filterByProjectId.HasValue && !projectIds.Contains(filterByProjectId.Value))
         {
             projectIds.Add(filterByProjectId.Value);
+        }
+
+        // A reader who is not the owner is cached only for the shapes the public pages send;
+        // anything else would let one visitor fill the shared cache by varying a query value.
+        // Same condition as SearchPrintSummary's "someone else's public prints".
+        var viewerIsOwner = !userId.HasValue || userId == currentUserId;
+        if (!PrintSummaryCachePolicy.ShouldCache(viewerIsOwner, pagingRequest, searchText, filterByPrinterIds,
+                                                 filterByFilamentIds, sortRequest, statuses, projectIds,
+                                                 fromDate, toDate))
+        {
+            // The injected service is safe here: nothing else shares this computation.
+            return await printService.SearchPrintSummary(pagingRequest, searchText, sortRequest, filterByPrinterIds,
+                                                         filterByFilamentIds, statuses, userId, currentUserId, projectIds,
+                                                         fromDate, toDate);
         }
 
         var version = cacheVersionService.GetUserCacheVersion(targetUserId);
@@ -203,17 +232,59 @@ public class PrintsController(
         if (!userId.HasValue)
             return Unauthorized();
 
-        var result = await printService.GetGroupedFeedAsync(
-            pageNumber, pageSize, userId.Value,
-            searchText, filterByPrinterIds, filterByFilamentIds,
-            filterByStatus, sortRequest);
+        var query = new GroupedFeedQuery(
+            userId.Value, searchText, filterByPrinterIds?.ToList(), filterByFilamentIds?.ToList(), filterByStatus,
+            sortRequest?.SortColumn, sortRequest?.SortDirection);
 
-        return Ok(result);
+        // The order, not the page, is what is cached (#309). Building it reads every print the
+        // user has, and was 5 to 25 s at the database's busiest; one entry per query now serves
+        // every page of it, and a page loads only its own rows. The key carries the user's cache
+        // version, so any write that changes the feed starts a new entry, exactly as for the
+        // summaries. The factory runs on CachedComputation's scope with HybridCache's token: see
+        // CachedComputation.
+        var order = await cache.GetOrCreateAsync(
+            GroupedFeedCacheKey(query, cacheVersionService.GetUserCacheVersion(userId.Value)),
+            (computation, query),
+            static (state, token) => state.computation.RunAsync(
+                (services, innerToken) => PrintService.LoadGroupedFeedOrderAsync(
+                    services.GetRequiredService<PrintLogContext>(), state.query, innerToken),
+                token),
+            SummaryCacheOptions,
+            cancellationToken: HttpContext.RequestAborted);
+
+        // The same cap as PagedRequest (#314); this action binds its page size on its own.
+        return Ok(await printService.GetGroupedFeedPageAsync(order, pageNumber, Math.Min(pageSize, PagedRequest.MaxPageSize)));
     }
 
     /// <summary>
-    ///     Get a print's detailed information by print id.
+    /// The grouped feed order's cache key. The id lists are sorted and deduplicated, since neither
+    /// order nor repeats change the rows. The search text goes last: nothing before it can contain
+    /// a colon, so no two queries share a key.
     /// </summary>
+    internal static string GroupedFeedCacheKey(GroupedFeedQuery query, string version)
+    {
+        static string Ids<T>(IEnumerable<T>? ids) =>
+            ids is null ? "" : string.Join(",", ids.Distinct().Order());
+
+        return string.Join(":",
+            "grouped_feed_order",
+            query.UserId.ToString(CultureInfo.InvariantCulture),
+            version,
+            query.Status is { } status ? ((int)status).ToString(CultureInfo.InvariantCulture) : "",
+            query.SortColumn is { } column ? ((int)column).ToString(CultureInfo.InvariantCulture) : "",
+            query.SortDirection is { } direction ? ((int)direction).ToString(CultureInfo.InvariantCulture) : "",
+            Ids(query.PrinterIds),
+            Ids(query.FilamentIds),
+            query.SearchText ?? "");
+    }
+
+    /// <summary>
+    /// Get a print's full detail by id.
+    /// </summary>
+    /// <remarks>
+    /// Public and unlisted prints can be read without credentials; a private print only by its creator.
+    /// Durations are in seconds and filament amounts in milligrams.
+    /// </remarks>
     /// <param name="id">The id of a print to query</param>
     /// <returns></returns>
     /// <response code="200">Returns the Print's Detailed information.</response>
@@ -222,6 +293,7 @@ public class PrintsController(
     ///     Normally when the print is marked as private, and the current user cannot access it.
     /// </response>
     /// <response code="404">Returned when a print with that ID does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
     [HttpGet("{id}")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -259,7 +331,76 @@ public class PrintsController(
         // properly is a behaviour change, tracked in #57.
         printDetailDto!.Comments = printDetailDto.Comments!.OrderBy(c => c.CreatedDate).ToList();
 
+        // This endpoint serves public and unlisted prints to anyone, so a reader who is not the
+        // creator gets what the public print page shows (PrintVisitorRedaction): no external pair
+        // (it embeds a connector's instance id), none of the owner's spool data, and no id of a
+        // project they could not open, which GET /api/Projects/{id} would confirm with its 403.
+        // The creator keeps everything, through any credential: the bridge reads its own prints'
+        // filamentUsage and filament ids here with a device token.
+        var viewerId = User.GetUserId();
+        if (viewerId != print.CreatedById)
+        {
+            printDetailDto.ExternalSource = null;
+            printDetailDto.ExternalId = null;
+            printDetailDto.ConnectionDisplayName = null;
+            PrintVisitorRedaction.RedactFilamentUsage(printDetailDto.FilamentUsage);
+
+            if (printDetailDto.ProjectId is { } projectId)
+            {
+                var project = await context.Projects
+                    .Where(p => p.Id == projectId)
+                    .Select(p => new { p.ViewStatus, p.CreatedById })
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync();
+
+                if (project is null || PrintVisitorRedaction.HidesProject(project.ViewStatus, project.CreatedById, viewerId))
+                {
+                    printDetailDto.ProjectId = null;
+                }
+            }
+        }
+
         return printDetailDto;
+    }
+
+    /// <summary>
+    /// Find one of your prints by the id a connector logged it under.
+    /// </summary>
+    /// <remarks>
+    /// `source` is the connector (`moonraker`, `octoprint`…) and `id` its job id, the same pair
+    /// sent as `externalSource` and `externalId` when the print was created. Neither is
+    /// case-sensitive: `ABc1` finds a print logged as `abC1`.
+    /// </remarks>
+    /// <param name="source">The connector the print was logged from.</param>
+    /// <param name="id">The job's id in that connector.</param>
+    /// <response code="200">The print's detail.</response>
+    /// <response code="400">Returned when `source` or `id` is missing.</response>
+    /// <response code="404">Returned when you have no print with that pair.</response>
+    [HttpGet("external")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrintDetailDTO>> GetPrintByExternalId([FromQuery] string? source, [FromQuery] string? id)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(id))
+        {
+            return BadRequest("source and id are both required.");
+        }
+
+        var normalizedSource = ExternalPrintIds.NormalizeSource(source);
+        var normalizedId = ExternalPrintIds.NormalizeId(id);
+        var printId = await context.Prints
+            .Where(p => p.CreatedById == userId && p.ExternalSource == normalizedSource && p.ExternalId == normalizedId)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+
+        // Scoped to the caller, so another user's pair is indistinguishable from an unknown one.
+        return printId is { } found ? await GetPrintById(found) : NotFound();
     }
 
     /// <summary>
@@ -304,9 +445,12 @@ public class PrintsController(
 
 
     /// <summary>
-    ///     Update a print with new detailed information. All data is overridden with the details provided, no partial-patching is done. Last-request wins.
-    ///     Normally GetPrintById is used to retrieve the current version, then fields are modified before PUT to this endpoint.
+    /// Replace a print's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole print rather than patching it: read the print with `GET /api/Prints/{id}`,
+    /// change the fields you need, and send the whole object back. The last request wins.
+    /// </remarks>
     /// <param name="id">The ID of the print to update.</param>
     /// <param name="printDTO">The new print detail information.</param>
     /// <response code="200">The newly-updated Print Detail information.</response>
@@ -356,6 +500,11 @@ public class PrintsController(
         {
             return BadRequest();
         }
+        catch (UserCannotAccessFilamentException)
+        {
+            // As PATCH and complete answer it (EditPrint).
+            return BadRequest("A filament does not belong to the current user.");
+        }
         catch (DoesNotExistException)
         {
             return NotFound();
@@ -366,8 +515,358 @@ public class PrintsController(
     }
 
     /// <summary>
+    /// Change some of a print's details.
+    /// </summary>
+    /// <remarks>
+    /// Send only the fields to change; a field left out, or sent as null, keeps its value. To null
+    /// out `startDate`, `estimatedPrintTimeInSeconds`, `printTimeInSeconds`, `notes`, `url`,
+    /// `fileName` or `projectId`, name it in `clear`. Setting and clearing the same field is a 400.
+    /// `filamentUsage`, when sent, replaces every usage row, and remaining filament moves by the
+    /// net difference. Unlike `PUT`, a patch cannot undo an edit somebody else made to another field.
+    /// </remarks>
+    /// <param name="id">The ID of the print to update.</param>
+    /// <param name="patch">The fields to change.</param>
+    /// <response code="200">The updated print.</response>
+    /// <response code="400">The patch is invalid, or names a printer or filament the caller does not own.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the caller may not edit this print.</response>
+    /// <response code="404">Returned when the print, or the project named, does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
+    [HttpPatch("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrintDetailDTO>> PatchPrint(long id, PatchPrintDto patch)
+    {
+        return await EditPrint(id, userId => printService.PatchPrint(id, patch, userId));
+    }
+
+    /// <summary>
+    /// Record how a print ended.
+    /// </summary>
+    /// <remarks>
+    /// For connectors reporting a finished job. Sets `status` (Success `3`, Cancelled `4`, Failed
+    /// `5` or PartialSuccess `6`) and `printTimeInSeconds`, and merges `filamentUsage` into the
+    /// print's rows by `filamentId`: actual values are set, estimates and notes are kept, and a
+    /// filament not yet on the print is added. Rows with no `filamentId` are matched in order
+    /// against the print's unlinked rows. `endedAt` fills in the duration from the start date, or
+    /// the start date from the duration, when one is missing. Every other field is left alone,
+    /// and repeating the call is safe: remaining filament changes by the net difference only.
+    ///
+    /// Each usage row carries `amountMg`, `lengthInM` or `volumeMl`, and `source` (Weight `1`,
+    /// Length `2`, Volume `3`) names the measurement; without it, weight wins, then length. A
+    /// weight is stored as sent, never converted through length. Set `actualIsEstimate` when the
+    /// figures are the slicer's estimate rather than a measurement (a printer that reports only
+    /// that): the spool is still charged, but accuracy analytics leave the row out. Left out, a
+    /// row is measured.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="completion">How the print ended.</param>
+    /// <response code="200">The updated print.</response>
+    /// <response code="400">The body is invalid, `endedAt` is before the start date or out of range, or a filament is not the caller's.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the caller may not edit this print.</response>
+    /// <response code="404">Returned when the print does not exist.</response>
+    /// <response code="409">Overlapping requests kept finishing the print first. Retrying replays against the finished print.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
+    [HttpPost("{id}/complete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<PrintDetailDTO>> CompletePrint(long id, CompletePrintDto completion)
+    {
+        return await EditPrint(id, userId => printService.CompletePrint(id, completion, userId));
+    }
+
+    /// <summary>
+    /// Link a connector's job to a print that is already Printing.
+    /// </summary>
+    /// <remarks>
+    /// For connectors that report a job the slicer uploader, the Cura plugin or a hand entry has
+    /// already logged. Find the print with `GET /api/Prints/claimable`, then claim it instead of
+    /// creating a second one. Sets `externalSource` and `externalId` (same rules as on create),
+    /// the connection named by `connectionInstanceId` when it is yours, and `startDate` when the
+    /// print has none, and `fileHash` (as on create) when the print has none: a hash it already
+    /// has, such as OctoPrint's SHA-1, is kept. The print keeps its title, notes, usage rows and
+    /// how it was created. Finish it with `POST /api/Prints/{id}/complete`.
+    ///
+    /// Only your own print can be claimed, only while it is Printing (`2`) and not yet linked to a
+    /// job. Claiming again with the same pair returns the print unchanged, so retries are safe. A
+    /// different pair, a print that is no longer Printing, or a pair already on another of your
+    /// prints is a `409`; in the last case `printId` in the body names that print. After a claim,
+    /// `POST /api/Prints` with the same pair returns this print rather than creating one.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="claim">The job claiming it.</param>
+    /// <response code="200">The claimed print. When a paired bridge claims for a printer another of your bridges watches, and that bridge already logged the same job, it is that print instead, unchanged.</response>
+    /// <response code="400">The pair is missing, blank, or uses the reserved `mcp` source, or `fileHash` is malformed.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="403">Returned when the print is not yours.</response>
+    /// <response code="404">Returned when the print does not exist.</response>
+    /// <response code="409">The print is linked to another job or not Printing, or the job is already another print.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
+    [HttpPost("{id}/claim")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<PrintDetailDTO>> ClaimPrint(long id, ClaimPrintDto claim)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        if (DeviceGrantClaim.Get(User) is { } grantId)
+        {
+            var decision = await bridgePrintGuard.CheckClaimAsync(userId, grantId, id, claim, HttpContext.RequestAborted);
+            TrackSharedJob(grantId, decision, "claim");
+            if (decision is { Verdict: BridgePrintVerdict.UsePrint, PrintId: { } sameJob }
+                && await printService.GetPrintById(sameJob) is { } logged)
+            {
+                return Ok(mapper.Map<PrintDetailDTO>(logged));
+            }
+        }
+
+        try
+        {
+            var result = await printService.ClaimPrint(id, claim, userId);
+            return Ok(mapper.Map<PrintDetailDTO>(result.Print));
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+        catch (ForbiddenException)
+        {
+            return Forbid();
+        }
+        catch (BadRequestException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (PrintClaimConflictException ex)
+        {
+            var problem = ProblemDetailsFactory.CreateProblemDetails(
+                HttpContext,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Print cannot be claimed",
+                detail: ex.Message);
+            if (ex.ConflictingPrintId is { } printId)
+            {
+                problem.Extensions["printId"] = printId;
+            }
+
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status409Conflict,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
+    }
+
+    /// <summary>
+    /// List your prints on a printer that a connector could claim.
+    /// </summary>
+    /// <remarks>
+    /// Prints that are Printing and not yet linked to a connector's job, newest first. Match one to
+    /// the job by `fileHash` (lowercase hex: the file's SHA-1 or a connector's file identity, so
+    /// compare it only with hashes from the same source) or `fileName`, then claim it with
+    /// `POST /api/Prints/{id}/claim`. `hasSlicerSettings` says whether the print already has its
+    /// slicer settings recorded, so a connector can skip sending its own. Usage rows carry the
+    /// `slot` each material was fed from, where known.
+    /// </remarks>
+    /// <param name="printerId">The printer the job is running on.</param>
+    /// <param name="createdAfter">Only prints created after this instant, e.g. a little before the job started.</param>
+    /// <param name="limit">The most prints to return, 1 to 100. Defaults to 20.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">The claimable prints. Empty when there are none, or the printer is not yours.</response>
+    /// <response code="400">Returned when `printerId` is missing or `limit` is out of range.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
+    [HttpGet("claimable")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<List<ClaimablePrintDto>>> GetClaimablePrints(
+        [FromQuery, BindRequired] long printerId,
+        [FromQuery] DateTimeOffset? createdAfter,
+        [FromQuery, Range(1, 100)] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        return await printService.GetClaimablePrints(userId, printerId, createdAfter, limit, cancellationToken);
+    }
+
+    /// <summary>
+    /// Largest body the slicer-settings action reads. The fields are capped separately, in bytes of
+    /// text; this leaves room for JSON escaping, which can grow ASCII text up to sixfold
+    /// (<c>\u0001</c>), so a block under its own cap is never refused by the server first.
+    /// </summary>
+    private const int MaxSlicerSettingsRequestBytes = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// Record a print's slicer settings from a connector.
+    /// </summary>
+    /// <remarks>
+    /// For connectors that read the G-code a print came from. Send `configBlock`, the
+    /// `; key = value` settings the slicer wrote (at most 512 KiB), with `header`, the start of
+    /// the file through `; HEADER_BLOCK_END` (at most 64 KiB), which names the slicer and its
+    /// version. OrcaSlicer, PrusaSlicer, Bambu Studio, FLSun Slicer and Anycubic Slicer Next are
+    /// read; Anycubic Slicer Next only with its header. When there is no block, send `metadata`,
+    /// the summary Moonraker extracts; its `slicer` is then required. With a block, `metadata`
+    /// only fills in what the block lacks: the version, and the slicer when there is no header.
+    ///
+    /// The print gets its slicer and version, and the settings note the Slic3r uploader would
+    /// write, added to the print's notes under a `--- Slicer settings (…) ---` heading. The user's
+    /// own notes are kept. How the print was logged (`source`, `externalSource`) does not change.
+    /// Host and credential settings (`print_host`, `printhost_*`, anything with `apikey`,
+    /// `password`, `token`, `secret` or `user` in its name, `post_process`) are removed before
+    /// anything is parsed or stored; the block itself is never stored.
+    ///
+    /// Sending again is safe: it replaces the settings and the note an earlier call recorded. A
+    /// print whose settings came from the Cura plugin or the Slic3r uploader keeps them, and the
+    /// call is a `409`; `hasSlicerSettings` on `GET /api/Prints/claimable` says so up front.
+    /// Errors never change the print. Only your own print's settings can be sent.
+    /// </remarks>
+    /// <param name="id">The ID of the print.</param>
+    /// <param name="settings">The settings block, the metadata summary, or both.</param>
+    /// <param name="slicerSettingsService">Records the settings.</param>
+    /// <param name="cancellationToken">Cancelled when the caller disconnects.</param>
+    /// <response code="200">What was recorded.</response>
+    /// <response code="400">Neither field was sent, the block holds no settings and there is no metadata, or the metadata has no slicer.</response>
+    /// <response code="401">Returned when no user is authenticated.</response>
+    /// <response code="404">Returned when the print does not exist or is not yours.</response>
+    /// <response code="409">The print's settings came from a slicer plugin.</response>
+    /// <response code="413">`configBlock` is over 512 KiB or `header` over 64 KiB.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
+    [HttpPost("{id}/slicer-settings")]
+    [RequestSizeLimit(MaxSlicerSettingsRequestBytes)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<PrintSlicerSettingsResultDto>> PostSlicerSettings(
+        long id,
+        PrintSlicerSettingsDto settings,
+        [FromServices] IPrintSlicerSettingsService slicerSettingsService,
+        CancellationToken cancellationToken)
+    {
+        if (User.GetUserId() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        // Checked here, not with [StringLength], so an oversized field is a 413 like an oversized
+        // body, not a 400 a connector would read as malformed.
+        if (TooLarge(settings.ConfigBlock, PrintSlicerSettingsDto.MaxConfigBlockBytes))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Slicer settings are too large",
+                detail: $"configBlock is over {PrintSlicerSettingsDto.MaxConfigBlockBytes / 1024} KiB. Send only the settings block, not the toolpaths.");
+        }
+        if (TooLarge(settings.Header, PrintSlicerSettingsDto.MaxHeaderBytes))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Slicer settings are too large",
+                detail: $"header is over {PrintSlicerSettingsDto.MaxHeaderBytes / 1024} KiB. Send the file only through `; HEADER_BLOCK_END`.");
+        }
+
+        try
+        {
+            return await slicerSettingsService.Record(id, settings, userId, cancellationToken);
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "No usable slicer settings", detail: ex.Message);
+        }
+        catch (SlicerSettingsConflictException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status409Conflict, title: "Print already has slicer settings", detail: ex.Message);
+        }
+
+        static bool TooLarge(string? text, int maxBytes) =>
+            // One UTF-16 code unit is at most three UTF-8 bytes, so only a long text needs counting.
+            text is { } t && t.Length * 3 > maxBytes && System.Text.Encoding.UTF8.GetByteCount(t) > maxBytes;
+    }
+
+    /// <summary>
+    /// The access check and error mapping PATCH and complete share with PUT: the print's creator
+    /// or its printer's owner may edit it.
+    /// </summary>
+    private async Task<ActionResult<PrintDetailDTO>> EditPrint(long id, Func<long, Task<Print>> edit)
+    {
+        // Two fields, untracked: the edit loads what it changes itself (#202).
+        var editors = await printService.GetPrintEditors(id);
+        if (editors == null)
+        {
+            return NotFound();
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (userId != editors.CreatedById && userId != editors.PrinterOwnerId)
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var updatedPrint = await edit(userId.Value);
+
+            // Same reason as PutPrint: the printer's owner can edit a print another user created.
+            InvalidateAffectedUserCaches(userId.Value, editors.CreatedById, editors.PrinterOwnerId);
+
+            return Ok(mapper.Map<PrintDetailDTO>(updatedPrint));
+        }
+        catch (UserCannotAccessPrinterException)
+        {
+            return BadRequest("The printer does not belong to the current user.");
+        }
+        catch (UserCannotAccessFilamentException)
+        {
+            return BadRequest("A filament does not belong to the current user.");
+        }
+        catch (BadRequestException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DoesNotExistException)
+        {
+            return NotFound();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // CompletePrint lost the race to finish the print on its retry as well (#199).
+            return Conflict();
+        }
+    }
+
+    /// <summary>
     ///   Update a print with a new PrintStatus.
     /// </summary>
+    /// <remarks>
+    /// Changes only the status, leaving every other field as it is. Statuses: `1` Pending,
+    /// `2` Printing, `3` Success, `4` Cancelled, `5` Failed, `6` PartialSuccess.
+    /// </remarks>
     /// <param name="id">The ID of the print to update.</param>
     /// <param name="newStatus">The new Print Status.</param>
     /// <response code="200">The updated Print Detail information.</response>
@@ -517,10 +1016,31 @@ public class PrintsController(
     /// <summary>
     ///    Create a new Print.
     /// </summary>
+    /// <remarks>
+    /// `title` is required, and `printerId` is the id of one of the caller's printers. Durations are
+    /// in seconds and filament amounts in milligrams. `status` is an integer (`1` Pending,
+    /// `2` Printing, `3` Success, `4` Cancelled, `5` Failed, `6` PartialSuccess), and `viewStatus`
+    /// is `1` Public, `2` Unlisted or `3` Private.
+    ///
+    /// Connectors should send `externalSource` (e.g. `moonraker`) and `externalId` (their job id)
+    /// together. Re-sending a pair you already used returns that print with `200` instead of
+    /// creating a duplicate, so retries and backfills are safe. On such a replay only the fields a
+    /// connector owns are applied (`status`, the durations, the filament totals and the usage
+    /// rows), and only when sent; the title, notes and every other field keep any edits the user
+    /// made. A replay with `status` Pending or Printing, or with no `status`, onto a finished print
+    /// changes nothing and returns the print as it is, so a start retried after the finish cannot
+    /// undo it. `mcp` is reserved.
+    ///
+    /// `fileHash` is optional: 40 hex digits (20 bytes) identifying the G-code file, either its
+    /// SHA-1 or a connector's own identity for it. A replay never changes it.
+    /// </remarks>
     /// <param name="print">The print details to create.</param>
+    /// <response code="200">Returned when `externalSource`/`externalId` matched one of your prints, containing that print. Also, for a paired bridge, when the job is evidently one another of your bridges already logged (same file, nearly the same start): a printer two bridges watch, or a job running when the printer moved. That print is returned, and the bridge finishes it with its own `complete`.</response>
     /// <response code="201">Returned if the create was successful, containing the new Print Detail information.</response>
-    /// <response code="400">Returned if the new Print is not valid. Inspect Problem Details object for message as to what failed validation.</response>
+    /// <response code="400">Returned if the new Print is not valid, including a malformed `fileHash`. Inspect Problem Details object for message as to what failed validation.</response>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PrintDetailDTO>> PostPrint(AddPrintDTO print)
@@ -532,14 +1052,42 @@ public class PrintsController(
             return Unauthorized();
         }
 
+        if (DeviceGrantClaim.Get(User) is { } grantId)
+        {
+            var decision = await bridgePrintGuard.CheckCreateAsync(userId.Value, grantId, print, HttpContext.RequestAborted);
+            TrackSharedJob(grantId, decision, "create");
+            if (decision is { Verdict: BridgePrintVerdict.UsePrint, PrintId: { } sameJob }
+                && await printService.GetPrintById(sameJob) is { } logged)
+            {
+                telemetry.TrackEvent("BridgePrintSameJob", new Dictionary<string, string>
+                {
+                    ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+                    ["HandedOver"] = decision.HandedOver.ToString(),
+                });
+                Response.Headers.Location = Url.Action("GetPrintById", null, new { id = logged.Id }, Request.Scheme);
+                return Ok(mapper.Map<PrintDetailDTO>(logged));
+            }
+        }
+
         try
         {
-            var newPrint = await printService.AddPrint(print, userId.Value);
+            // A device token (#148) records what the bridge recorded with an API key before it.
+            var sourceCandidate = AuthMethodClaim.IsApiKey(User) || AuthMethodClaim.IsDevice(User) ? PrintSource.ApiKey : PrintSource.Web;
+            var (newPrint, wasReplayed) = await printService.CreatePrint(print, userId.Value, sourceCandidate);
+            var body = mapper.Map<PrintDetailDTO>(newPrint);
+
+            if (wasReplayed)
+            {
+                // Absolute, the same URL CreatedAtAction gave the original create.
+                Response.Headers.Location = Url.Action("GetPrintById", null, new { id = newPrint.Id }, Request.Scheme);
+                return Ok(body);
+            }
+
             telemetry.TrackEvent("PrintAdded");
 
             cacheVersionService.InvalidateUserCache(userId.Value);
 
-            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, mapper.Map<PrintDetailDTO>(newPrint));
+            return CreatedAtAction("GetPrintById", new { id = newPrint.Id }, body);
         }
         catch (UserCannotAccessPrinterException)
         {
@@ -664,52 +1212,122 @@ public class PrintsController(
     /// <summary>
     /// Gets an image attached to a print.
     /// </summary>
+    /// <remarks>
+    /// Anyone can read an image of a public or unlisted print; an image of a private print only its
+    /// creator. Responses carry a strong `ETag` (answering `If-None-Match` with 304) and support
+    /// `Range`. An image anyone can read is `Cache-Control: public, max-age=3600`, so shared
+    /// caches drop it within an hour of the print being made private; a private print's image is
+    /// `private`.
+    /// </remarks>
     /// <param name="printId">The Id of the print.</param>
     /// <param name="imageId">The id of the image to retrieve.</param>
-    /// <returns></returns>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range of the image.</response>
+    /// <response code="304">The image has not changed since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="403">The print is private and the caller is not its creator.</response>
+    /// <response code="404">No such print image.</response>
     [AllowAnonymous]
     [HttpGet("{printId}/image/{imageId}")]
-    [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [MediaEndpoint]
-    public async Task<IActionResult> GetImage(long printId, int imageId)
+    public Task<IActionResult> GetImage(long printId, int imageId)
+        => ServePrintImageAsync(printId, imageId, thumbnail: false);
+
+    /// <summary>
+    /// Gets the 320px thumbnail of an image attached to a print, for list views.
+    /// </summary>
+    /// <remarks>
+    /// Same access, caching and headers as the image itself. An image stored before thumbnails
+    /// existed returns the original instead, so this URL always shows something.
+    /// </remarks>
+    /// <param name="printId">The Id of the print.</param>
+    /// <param name="imageId">The id of the image.</param>
+    /// <response code="200">The thumbnail, or the original when the image has none.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="403">The print is private and the caller is not its creator.</response>
+    /// <response code="404">No such print image.</response>
+    [AllowAnonymous]
+    [HttpGet("{printId}/image/{imageId}/thumbnail")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public Task<IActionResult> GetImageThumbnail(long printId, int imageId)
+        => ServePrintImageAsync(printId, imageId, thumbnail: true);
+
+    /// <summary>
+    /// Gets the link-preview image of a public print: its default image, about 1200px on the long edge.
+    /// </summary>
+    /// <remarks>
+    /// This is the `og:image` the print's `/seo` metadata points at, with a `?v=` that changes
+    /// when the image does; the parameter is otherwise ignored. Returns the original when the
+    /// image has no social derivative yet. 404, never 403, for a print that is not public (even
+    /// to its creator) or has no image, so the endpoint does not reveal which private prints exist.
+    /// </remarks>
+    /// <param name="id">The Id of the print.</param>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">The print does not exist, is not public, or has no image.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/social-image")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public async Task<IActionResult> GetSocialImage(long id)
     {
-        // Optimized query: only load the specific image and minimal print data needed for authorization
+        var image = await socialImages.ForPrintAsync(id, HttpContext.RequestAborted);
+        if (image is null)
+            return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorageService, printImageContainerName, image.Served, HttpContext.RequestAborted);
+    }
+
+    private async Task<IActionResult> ServePrintImageAsync(long printId, int imageId, bool thumbnail)
+    {
+        // Only the one image row and the print's visibility, not the print entity.
         var imageData = await context.PrintImages
             .Where(pi => pi.PrintId == printId && pi.Id == imageId)
             .Select(pi => new
             {
-                pi.File,
+                OriginalPath = pi.File.Path,
+                pi.ContentType,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
                 PrintViewStatus = pi.Print.ViewStatus,
                 PrintCreatedById = pi.Print.CreatedById
             })
             .AsNoTracking()
-            .SingleOrDefaultAsync();
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
 
         if (imageData == null)
         {
             return NotFound();
         }
 
-        // Simplified authorization check without loading full print entity
+        var isPrivate = imageData.PrintViewStatus == Print.PrintViewStatus.Private;
         var userId = User.GetUserId();
-        if (imageData.PrintViewStatus == Print.PrintViewStatus.Private &&
-            (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
+        if (isPrivate && (!userId.HasValue || userId.Value != imageData.PrintCreatedById))
         {
             return Forbid();
         }
 
-        try
-        {
-            var printImageDto = await printImageService.DownloadPrintFile(imageData.File);
+        var image = thumbnail
+            ? StoredImageRef.ThumbnailOrOriginal(
+                imageData.ThumbnailPath, imageData.OriginalPath, imageData.ContentType, sharedCacheable: !isPrivate)
+            : new StoredImageRef(imageData.OriginalPath, imageData.ContentType, SharedCacheable: !isPrivate);
 
-            new FileExtensionContentTypeProvider().TryGetContentType(printImageDto.FileName!, out var contentType);
-            return File(printImageDto.File!, contentType ?? "application/octet-stream");
-
-        }
-        catch (DoesNotExistException)
-        {
-            return NotFound();
-        }
+        return await ImageFileResult.ServeAsync(
+            this, blobStorageService, printImageContainerName, image, HttpContext.RequestAborted);
     }
 
     /// <summary>
@@ -830,6 +1448,7 @@ public class PrintsController(
     /// <param name="image">The image file to save.</param>
     /// <param name="isDefault">If true, then mark the new image as the print's default image.</param>
     /// <returns>The created PrintImage with its ID.</returns>
+    [DeviceAccess(DeviceScopes.PrintsWrite)]
     [HttpPost("{id}/image")]
     public async Task<ActionResult<PrintImageDto>> PostImage(long id, IFormFile image, [FromForm] bool isDefault = false)
     {
@@ -857,10 +1476,11 @@ public class PrintsController(
             return BadRequest("Image file is required.");
         }
 
-        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+        // A cheap early answer for an obviously wrong file. The decode below is what decides.
+        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/webp" };
         if (!allowedImageTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         const long maxImageSizeBytes = 10 * 1024 * 1024;
@@ -877,48 +1497,59 @@ public class PrintsController(
             return BadRequest($"Maximum of {maxImages} images per print allowed");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-
-
-        using var uploadFileStream = image.OpenReadStream();
-        var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-        var file = new Models.File()
+        // Decode and re-encode BEFORE touching storage, as printer and material images do: an
+        // upload that is not a supported image must not create blobs.
+        ProcessedImage processed;
+        try
         {
-            Size = image.Length,
-            Path = uploadResult.BlobPath,
-            Id = fileId,
-            CreatedById = userId.Value,
-            UpdatedById = userId.Value,
-        };
-        context.Files.Add(file);
-
-        // Calculate next display order
-        var maxDisplayOrder = await context.PrintImages
-            .Where(pi => pi.PrintId == id)
-            .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
-
-        var printImage = new PrintImage()
+            await using var uploadFileStream = image.OpenReadStream();
+            processed = await imageProcessing.ProcessAsync(
+                uploadFileStream, ImageProcessingOptions.PrintUploads, HttpContext.RequestAborted);
+        }
+        catch (InvalidImageException ex)
         {
-            File = file,
-            CreatedById = userId.Value,
-            UpdatedById = userId.Value,
-            Print = print,
-            IsDefault = isDefault,
-            DisplayOrder = maxDisplayOrder + 1,
-        };
-        context.PrintImages.Add(printImage);
-
-        if (isDefault)
-        {
-            // Set other defaults to false;
-            var otherEntities = await context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-            otherEntities.ForEach(p => p.IsDefault = false);
+            return BadRequest(ex.Message);
         }
 
-        await context.SaveChangesAsync();
+        var uploadedBlobNames = new List<string>();
+        PrintImage printImage;
+        try
+        {
+            var files = await imageWriter.WriteAsync(
+                printImageContainerName, processed, userId.Value, uploadedBlobNames, HttpContext.RequestAborted);
+            var fileId = files.Original.Id;
+
+            // Calculate next display order
+            var maxDisplayOrder = await context.PrintImages
+                .Where(pi => pi.PrintId == id)
+                .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
+
+            printImage = new PrintImage()
+            {
+                CreatedById = userId.Value,
+                UpdatedById = userId.Value,
+                Print = print,
+                IsDefault = isDefault,
+                DisplayOrder = maxDisplayOrder + 1,
+            };
+            files.ApplyTo(printImage, processed);
+            context.PrintImages.Add(printImage);
+
+            if (isDefault)
+            {
+                // Set other defaults to false;
+                var otherEntities = await context.PrintImages.Where(p => p.PrintId == id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
+                otherEntities.ForEach(p => p.IsDefault = false);
+            }
+
+            await context.SaveChangesAsync();
+        }
+        catch
+        {
+            // The blobs are not covered by the save, so a failed save would orphan them.
+            await imageWriter.DeleteBlobsQuietlyAsync(printImageContainerName, uploadedBlobNames);
+            throw;
+        }
 
         telemetry.TrackEvent("PrintPictureAdded");
 
@@ -926,6 +1557,7 @@ public class PrintsController(
         var printImageDto = new PrintImageDto
         {
             Id = printImage.Id,
+            PrintId = id,
             IsDefault = printImage.IsDefault,
             DisplayOrder = printImage.DisplayOrder
         };
@@ -949,7 +1581,13 @@ public class PrintsController(
         }
 
         var print = await context.Prints
-            .Include(p => p.Images)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.File)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.ThumbnailFile)
+            .Include(p => p.Images!)
+                .ThenInclude(i => i.SocialFile)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == printId);
 
         if (print == null)
@@ -970,7 +1608,17 @@ public class PrintsController(
 
         var wasDefault = imageToDelete.IsDefault;
 
+        var files = new[] { imageToDelete.File, imageToDelete.ThumbnailFile, imageToDelete.SocialFile }
+            .OfType<Models.File>()
+            .ToList();
+        var blobNames = files
+            .Select(f => Path.GetFileName(f.Path))
+            .OfType<string>()
+            .Where(name => name.Length > 0)
+            .ToList();
+
         context.PrintImages.Remove(imageToDelete);
+        context.Files.RemoveRange(files);
 
         // If deleted image was default, promote next image by DisplayOrder
         if (wasDefault)
@@ -988,6 +1636,13 @@ public class PrintsController(
 
         await context.SaveChangesAsync();
 
+        // Blobs last: a failed save then leaves an orphaned blob rather than a row pointing at
+        // deleted bytes.
+        foreach (var blobName in blobNames)
+        {
+            await blobStorageService.DeleteBlobAsync(printImageContainerName, blobName);
+        }
+
         cacheVersionService.InvalidateUserCache(userId.Value);
 
         return Ok();
@@ -999,10 +1654,12 @@ public class PrintsController(
     /// <param name="printId">The ID of the print to comment on.</param>
     /// <param name="newComment">The details of the new comment.</param>
     /// <response code="200">An OK response with the new comment details if the comment was added successfully.</response>
-    /// <response code="400">Returned if the request contains bad details, or if the print specified does not allow comments.</response>
+    /// <response code="400">Returned if the request contains bad details, if the print specified does not allow comments, or if it has reached its comment limit.</response>
     /// <response code="403">Returned if the user cannot access the print specified.</response>
+    /// <response code="429">Returned, with Retry-After, when the caller has commented on this print too often (CommentLimits).</response>
     [HttpPost("{printId}/comment")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "BindRequired used.")]
@@ -1033,7 +1690,34 @@ public class PrintsController(
             return Forbid();
         }
 
-        var comment = await printService.AddPrintComment(print, newComment.Body!, userId.Value);
+        Comment comment;
+        try
+        {
+            comment = await printService.AddPrintComment(print, newComment.Body!, userId.Value);
+        }
+        catch (CommentLimitExceededException ex)
+        {
+            // CommentLimits: 429 with Retry-After for a per-commenter rate, 400 for the print's
+            // total, which waiting does not lift.
+            var status = ex.RetryAfter.HasValue ? StatusCodes.Status429TooManyRequests : StatusCodes.Status400BadRequest;
+            if (ex.RetryAfter is { } wait)
+            {
+                // Rounded up: a client that honors the header must not come back early.
+                Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+            }
+
+            var problem = ProblemDetailsFactory.CreateProblemDetails(
+                HttpContext,
+                statusCode: status,
+                title: ex.RetryAfter.HasValue ? "Too many comments" : "Comment limit reached",
+                detail: ex.Message);
+            problem.Extensions["code"] = ex.RetryAfter.HasValue ? CommentLimits.RateLimitedCode : CommentLimits.TotalReachedCode;
+            return new ObjectResult(problem)
+            {
+                StatusCode = status,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
 
         // Null-forgiven: the comment was just persisted, so the re-read always finds it.
         var mappedComment = await commentService.GetCommentDetailById(comment.Id);
@@ -1093,14 +1777,37 @@ public class PrintsController(
     /// <summary>
     /// Returns an array of all the IDs for public prints, for use with creating and updating sitemaps.
     /// </summary>
-    /// <returns></returns>
+    /// <remarks>
+    /// Ordered by id. Read from a list refreshed every ten minutes, so a print made public or
+    /// private can take that long to appear or drop out.
+    /// </remarks>
     [AllowAnonymous]
     [HttpGet("public")]
     [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
-    public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds()
+    public async Task<ActionResult<IEnumerable<long>>> GetPublicPrintIds(CancellationToken cancellationToken)
     {
         telemetry.TrackEvent("PublicPrintsQueried");
-        return await printService.GetPublicPrintIds();
+        return Ok((await publicPrints.GetAsync(cancellationToken)).Ids);
+    }
+
+    /// <summary>
+    /// Returns every public print's id with its last-modified time, for the sitemap's lastmod.
+    /// </summary>
+    /// <remarks>
+    /// A sibling of <c>GET public</c> rather than a change to it, so a sitemap generator that still
+    /// expects a bare id array keeps working. <c>lastModified</c> is the print's own last save
+    /// (UTC) and is null when no trustworthy timestamp exists. Read from the same list as
+    /// <c>GET public</c>, refreshed every ten minutes.
+    /// </remarks>
+    /// <response code="200">The public prints, ordered by id.</response>
+    [AllowAnonymous]
+    [HttpGet("public/sitemap")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+    public async Task<ActionResult<IEnumerable<SitemapEntryDto>>> GetPublicPrintSitemapEntries(CancellationToken cancellationToken)
+    {
+        telemetry.TrackEvent("PublicPrintSitemapQueried");
+        return (await publicPrints.GetAsync(cancellationToken)).ToSitemapEntries();
     }
 
     /// <summary>
@@ -1113,6 +1820,7 @@ public class PrintsController(
     /// <response code="401">If the user is not authenticated.</response>
     /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.FilesWrite)]
     [HttpPost("{id}/files/upload-url")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1145,10 +1853,16 @@ public class PrintsController(
     /// <param name="id">The ID of the print the file was uploaded for.</param>
     /// <param name="request">The blob path and file metadata returned from the upload-url step.</param>
     /// <response code="200">Returns the created PrintAttachment details.</response>
-    /// <response code="400">If the blob path is invalid.</response>
+    /// <response code="400">
+    /// If the blob path is not one upload-url issued for this print, the file name's type does not
+    /// match it, it is already attached, nothing was uploaded to it, or the uploaded file breaks the
+    /// per-file size, per-print count or storage quota (the blob is then deleted). The size recorded
+    /// is the uploaded blob's own length, not the request's sizeBytes.
+    /// </response>
     /// <response code="401">If the user is not authenticated.</response>
     /// <response code="403">If the user does not own the print or does not have a Pro subscription.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.FilesWrite)]
     [HttpPost("{id}/files/confirm")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1167,6 +1881,13 @@ public class PrintsController(
         try
         {
             var result = await fileAttachmentService.ConfirmUploadAsync(id, userId.Value, request);
+            telemetry.TrackEvent("PrintFileUploaded", new Dictionary<string, string>
+            {
+                // Lower-cased so ".GCODE" and ".gcode" chart as one series.
+                ["extension"] = Path.GetExtension(request.FileName ?? string.Empty).ToLowerInvariant(),
+                // The stored blob's length, not the client's declared figure.
+                ["sizeBytes"] = result.SizeBytes.ToString(CultureInfo.InvariantCulture),
+            });
             return Ok(result);
         }
         catch (NotFoundException) { return NotFound(); }
@@ -1182,6 +1903,7 @@ public class PrintsController(
     /// <response code="200">Returns the list of file attachments (may be empty).</response>
     /// <response code="403">If the print is private and the requesting user is not the owner.</response>
     /// <response code="404">If the print does not exist.</response>
+    [DeviceAccess(DeviceScopes.PrintsRead)]
     [HttpGet("{id}/files")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -1343,4 +2065,18 @@ public class PrintsController(
     // EstimateCacheSize is gone: HybridCache charges the entry's real serialized byte length
     // against the shared budget, so the "~2KB per item" guess is both unnecessary and less
     // accurate than what replaces it. See PrintLogApi.Caching.CacheBudget.
+
+    /// <summary>A bridge's job for a printer another bridge watches (printlog-bridge#103): logged, and counted on the bridge.</summary>
+    private void TrackSharedJob(long grantId, BridgePrintDecision decision, string what)
+    {
+        if (decision.Shared)
+        {
+            telemetry.TrackEvent("BridgeSharedJob", new Dictionary<string, string>
+            {
+                ["GrantId"] = grantId.ToString(CultureInfo.InvariantCulture),
+                ["Event"] = what,
+                ["SamePrint"] = (decision.Verdict == BridgePrintVerdict.UsePrint).ToString(),
+            });
+        }
+    }
 }

@@ -7,6 +7,7 @@ using PrintLogApi.Models.DTOs.Comments;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Models.DTOs.Sitemap;
 using PrintLogApi.Services;
 using Xunit;
 using static PrintLogApi.Models.Print;
@@ -942,7 +943,7 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(
             "Start Date,Title,Printer Name,Printer Make,Printer Model,Estimated Print Time (s),"
             + "Estimated Filament Usage (g),Print Time (s),Filament Usage (g),Filament Type,Notes,"
-            + "Url,Status,View Status",
+            + "Url,Status,View Status,Estimated Filament Usage (mL),Filament Usage (mL)",
             lines[0]);
 
         var newerIndex = lines.FindIndex(l => l.Contains(newer.Title!, StringComparison.Ordinal));
@@ -968,10 +969,17 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/Prints/csv");
         request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
 
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
         Assert.Null(response.Content.Headers.ContentLength);
+
+        // Read to the end before returning. The headers arrive with the first row, while the export
+        // is still reading the rest from the class's shared SQLite connection; a test that returned
+        // here left that query running into the next test, whose first DbContext then failed with
+        // SQLite error 5 ("database is locked") because EF cannot register its functions on a
+        // connection with a statement in progress.
+        await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>
@@ -1211,6 +1219,10 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
 
     #region GET Public Print Ids
 
+    /// <summary>The public lists are cached for ten minutes; a test that just changed a print reads past that.</summary>
+    private Task EvictPublicPrintIndexAsync() => _factory.Services.GetRequiredService<Microsoft.Extensions.Caching.Hybrid.HybridCache>()
+        .RemoveAsync(PrintLogApi.Services.PublicPrints.PublicPrintIndexCache.CacheKey, TestContext.Current.CancellationToken).AsTask();
+
     [Fact]
     public async Task GetPublicPrintIds_ReturnsSuccess()
     {
@@ -1226,6 +1238,65 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.NotNull(ids);
         Assert.True(ids.Count > 0, "Should have at least one public print");
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_ListsPublicPrintsWithTheirLastSave_OrderedById()
+    {
+        var before = DateTimeOffset.UtcNow.AddSeconds(-5);
+        var created = await CreatePrintAsync("Sitemap Lastmod Print");
+        await EvictPublicPrintIndexAsync();
+
+        var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
+
+        var entry = Assert.Single(entries, e => e.Id == created.Id);
+        Assert.NotNull(entry.LastModified);
+        Assert.Equal(TimeSpan.Zero, entry.LastModified.Value.Offset);
+        Assert.InRange(entry.LastModified.Value, before, DateTimeOffset.UtcNow.AddSeconds(5));
+        Assert.Equal(entries.Select(e => e.Id).Order(), entries.Select(e => e.Id));
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_ListsExactlyThePublicPrintIds()
+    {
+        var privatePrint = await CreatePrintAsync("Sitemap Private Print");
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.Prints
+                .Where(p => p.Id == privatePrint.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.ViewStatus, PrintViewStatus.Private), TestContext.Current.CancellationToken);
+        }
+
+        await EvictPublicPrintIndexAsync();
+
+        var entries = (await _httpClient.GetFromJsonAsync<List<SitemapEntryDto>>("/api/Prints/public/sitemap", cancellationToken: TestContext.Current.CancellationToken))!;
+        var ids = (await _httpClient.GetFromJsonAsync<List<long>>("/api/Prints/public", cancellationToken: TestContext.Current.CancellationToken))!;
+
+        Assert.DoesNotContain(entries, e => e.Id == privatePrint.Id);
+        Assert.Equal(ids.Order(), entries.Select(e => e.Id).Order());
+    }
+
+    [Fact]
+    public async Task GetPublicPrintSitemapEntries_IsAnonymousAndSerializesCamelCase()
+    {
+        var response = await _httpClient.GetAsync("/api/Prints/public/sitemap", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("\"lastModified\":", body);
+        Assert.Contains("\"id\":", body);
+    }
+
+    [Fact]
+    public void SitemapEntry_FromUpdatedDate_DropsAnUnsetTimestamp_AndMarksARealOneUtc()
+    {
+        Assert.Null(SitemapEntryDto.FromUpdatedDate(1, DateTime.MinValue).LastModified);
+
+        var saved = new DateTime(2026, 9, 14, 8, 30, 0, DateTimeKind.Unspecified);
+        var entry = SitemapEntryDto.FromUpdatedDate(2, saved);
+
+        Assert.Equal(new DateTimeOffset(2026, 9, 14, 8, 30, 0, TimeSpan.Zero), entry.LastModified);
     }
 
     #endregion
@@ -2370,6 +2441,147 @@ public class PrintsControllerTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(1, projectItem.FilteredPrintCount);
         // PrintCount reflects all prints in the project regardless of filter.
         Assert.Equal(2, projectItem.PrintCount);
+    }
+
+    #endregion
+
+    #region GetGrouped Search
+
+    // The grouped feed searches project-assigned prints and standalone prints with two different
+    // predicates: a standalone print has no project, so it cannot match on a project's name. These
+    // pin that asymmetry, which is otherwise only visible in the generated SQL.
+
+    /// <summary>
+    /// Helper: posts a standalone print (no project) and returns its id.
+    /// </summary>
+    private async Task<long> CreateStandalonePrintAsync(string title, string? notes = null, int? filamentAmountMg = null)
+    {
+        var dto = new AddPrintDTO
+        {
+            Title = title,
+            Notes = notes,
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Private,
+            AllowComments = false
+        };
+
+        if (filamentAmountMg.HasValue)
+        {
+            dto.FilamentUsage = new List<PrintFilamentSummaryDto>
+            {
+                new PrintFilamentSummaryDto
+                {
+                    Id = Guid.NewGuid(),
+                    Filament = new FilamentSummaryDto { Id = IntegrationTestSeeder.TestFilamentId1 },
+                    Source = PrintFilament.SourceMeasurement.Weight,
+                    AmountMg = filamentAmountMg.Value
+                }
+            };
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        request.Content = JsonContent.Create(dto);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var created = (await response.Content.ReadFromJsonAsync<PrintDetailDTO>(cancellationToken: TestContext.Current.CancellationToken))!;
+        return created.Id;
+    }
+
+    private async Task<PagedList<GroupedFeedItemDto>> GetGroupedAsync(string query)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/Prints/grouped?{query}");
+        request.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        var response = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<PagedList<GroupedFeedItemDto>>(cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    [Fact]
+    public async Task GetGrouped_SearchMatchesStandalonePrintTitle()
+    {
+        var token = $"needle{Guid.NewGuid():N}";
+        var matchId = await CreateStandalonePrintAsync($"Bracket {token}");
+        var otherId = await CreateStandalonePrintAsync("Bracket unrelated");
+
+        var result = await GetGroupedAsync($"pageNumber=1&pageSize=50&searchText={token}");
+
+        Assert.Contains(result.Items, i => i.Type == "print" && i.Print!.Id == matchId);
+        Assert.DoesNotContain(result.Items, i => i.Type == "print" && i.Print!.Id == otherId);
+    }
+
+    [Fact]
+    public async Task GetGrouped_SearchMatchesStandalonePrintNotes()
+    {
+        var token = $"needle{Guid.NewGuid():N}";
+        var matchId = await CreateStandalonePrintAsync("Notes Search Print", notes: $"wall speed {token} tuned");
+
+        var result = await GetGroupedAsync($"pageNumber=1&pageSize=50&searchText={token}");
+
+        Assert.Contains(result.Items, i => i.Type == "print" && i.Print!.Id == matchId);
+    }
+
+    [Fact]
+    public async Task GetGrouped_SearchMatchesProjectAssignedPrintOnProjectName()
+    {
+        var token = $"needle{Guid.NewGuid():N}";
+        var project = await CreateProjectAsync($"Chassis {token}");
+
+        var printRequest = new HttpRequestMessage(HttpMethod.Post, "/api/Prints");
+        printRequest.Headers.Add(TestAuthHandler.TestUserIdHeader, IntegrationTestSeeder.TestUserOAuthId);
+        printRequest.Content = JsonContent.Create(new AddPrintDTO
+        {
+            Title = "Print With No Matching Text",
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            Status = Print.PrintStatus.Success,
+            ViewStatus = Print.PrintViewStatus.Private,
+            AllowComments = false,
+            ProjectId = project.Id
+        });
+        (await _httpClient.SendAsync(printRequest, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var result = await GetGroupedAsync($"pageNumber=1&pageSize=50&searchText={token}");
+
+        var projectItem = result.Items.FirstOrDefault(i => i.Type == "project" && i.ProjectId == project.Id);
+        Assert.NotNull(projectItem);
+        Assert.Equal(1, projectItem.FilteredPrintCount);
+    }
+
+    [Fact]
+    public async Task GetGrouped_SearchOnProjectName_DoesNotReturnStandalonePrints()
+    {
+        // A standalone print has no project, so the project-name half of the search can never
+        // match it. The standalone branch drops that term entirely; this is what proves the drop
+        // is behavior-preserving rather than merely faster.
+        var token = $"needle{Guid.NewGuid():N}";
+        await CreateProjectAsync($"Chassis {token}");
+        var standaloneId = await CreateStandalonePrintAsync("Standalone With No Matching Text");
+
+        var result = await GetGroupedAsync($"pageNumber=1&pageSize=50&searchText={token}");
+
+        Assert.DoesNotContain(result.Items, i => i.Type == "print" && i.Print!.Id == standaloneId);
+    }
+
+    [Fact]
+    public async Task GetGrouped_SearchSortedByFilamentUsage_OrdersStandalonePrintsByWeight()
+    {
+        // Filament totals for standalone prints are resolved from the ids the list query already
+        // materialized rather than by re-running the search. This covers that path with a search
+        // filter active, which is the only way the two can disagree.
+        var token = $"needle{Guid.NewGuid():N}";
+        var lightId = await CreateStandalonePrintAsync($"Light {token}", filamentAmountMg: 1000);
+        var heavyId = await CreateStandalonePrintAsync($"Heavy {token}", filamentAmountMg: 90000);
+
+        var result = await GetGroupedAsync(
+            $"pageNumber=1&pageSize=50&searchText={token}&sortColumn=FilamentUsage&sortDirection=Desc");
+
+        var printIds = result.Items
+            .Where(i => i.Type == "print")
+            .Select(i => i.Print!.Id)
+            .ToList();
+
+        Assert.Equal(new[] { heavyId, lightId }, printIds);
     }
 
     #endregion

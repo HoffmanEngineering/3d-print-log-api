@@ -1,4 +1,5 @@
 ﻿using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.Services;
 using static PrintLogApi.Models.Project;
 
 namespace PrintLogApi.Models.DTOs.Print;
@@ -17,6 +18,17 @@ public class GroupedFeedItemDto
 
     // --- Project fields (populated when Type == "project") ---
     public Guid? ProjectId { get; set; }
+
+    /// <summary>
+    /// The project's RESOLVED start date as a civil date. Populated for project rows only.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="SortDate"/> on purpose. SortDate is an instant used for
+    /// ordering; a manual override sorts at UTC midnight, so rendering SortDate in the
+    /// viewer's timezone shows a pinned 2026-01-01 as December 31 anywhere west of UTC — and
+    /// disagrees with the same project's detail page. Clients display THIS field.
+    /// </remarks>
+    public DateOnly? ProjectStartDate { get; set; }
     public string? ProjectName { get; set; }
     public string? ProjectReference { get; set; }
     public ProjectStatus? ProjectStatus { get; set; }
@@ -33,7 +45,19 @@ public class GroupedFeedItemDto
     public int? TotalPrintTimeInSeconds { get; set; }
     public int? TotalEstimatedPrintTimeInSeconds { get; set; }
     public long? TotalFilamentWeightMg { get; set; }
+
+    /// <summary>
+    /// The project's resin in milliliters (#294), beside TotalFilamentWeightMg and never added to
+    /// it. Project rows only; a print row carries its own on Print.
+    /// </summary>
+    public double? TotalFilamentVolumeMl { get; set; }
     public int? DefaultProjectImageId { get; set; }
+
+    /// <summary>
+    /// Path of the project's default image thumbnail, relative to the API base URL. Null on print
+    /// rows and for a project without a default image.
+    /// </summary>
+    public string? DefaultProjectImageThumbnailUrl => ImageUrls.ProjectThumbnailOrNull(ProjectId, DefaultProjectImageId);
 
     /// <summary>
     /// Aggregated filament usage across all prints in this project,

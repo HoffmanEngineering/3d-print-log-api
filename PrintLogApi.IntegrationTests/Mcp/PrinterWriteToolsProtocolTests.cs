@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.Models;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp;
@@ -99,6 +100,76 @@ public class PrinterWriteToolsProtocolTests : IClassFixture<McpDataWebApplicatio
         Assert.Equal(350.0, printer.GetProperty("wattageW").GetDouble());
         Assert.True(printer.GetProperty("isActive").GetBoolean());
         Assert.False(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CreatePrinter_WithCatalogModelId_FillsSpecsOverTheWire()
+    {
+        var id = $"mcp-proto-{Guid.NewGuid():N}";
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.PrinterModels.Add(new PrinterModel
+            {
+                Id = id,
+                Make = "Catalog Make",
+                Model = "Catalog Model",
+                Technology = "FFF",
+                BedWidthMm = 256,
+                DefaultNozzleMm = 0.4,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, WriteOnly);
+
+        var args = BasicArgs("proto-catalog-printer");
+        args["catalogModelId"] = id;
+        var result = await client.CallToolAsync("create_printer", args, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsError != true);
+        using var doc = JsonDocument.Parse(RawText(result));
+        var printer = doc.RootElement.GetProperty("printer");
+        Assert.Equal(id, printer.GetProperty("catalogModelId").GetString());
+        Assert.Equal(256.0, printer.GetProperty("bedWidthMm").GetDouble());
+        Assert.Equal(0.4, printer.GetProperty("nozzleDiameterMm").GetDouble());
+
+        var unknown = BasicArgs("proto-catalog-unknown");
+        unknown["catalogModelId"] = "no-such-model";
+        Assert.True(await McpDataWebApplicationFactory.IsToolError(client, "create_printer", unknown));
+    }
+
+    [Fact]
+    public async Task CreatePrinter_ReusedKeyWithADifferentCatalogModelId_SurfacesConflict()
+    {
+        var id = $"mcp-proto-{Guid.NewGuid():N}";
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.PrinterModels.Add(new PrinterModel
+            {
+                Id = id,
+                Make = "Catalog Make",
+                Model = "Catalog Model",
+                Technology = "FFF",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var key = $"prn-cat-{Guid.NewGuid():N}";
+
+        var plain = BasicArgs("proto-catalog-key");
+        plain["idempotencyKey"] = key;
+        Assert.True((await client.CallToolAsync("create_printer", plain, cancellationToken: TestContext.Current.CancellationToken)).IsError != true);
+
+        var withModel = BasicArgs("proto-catalog-key");
+        withModel["idempotencyKey"] = key;
+        withModel["catalogModelId"] = id;
+        var conflict = await client.CallToolAsync("create_printer", withModel, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(conflict.IsError == true);
+        Assert.StartsWith("conflict:", RawText(conflict));
     }
 
     [Fact]

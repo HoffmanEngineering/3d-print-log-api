@@ -47,4 +47,19 @@ public class Printer
 
     public double? WattageW { get; set; }
 
+    /// <summary>
+    /// How many filament positions the printer has (tools, AMS slots). 1 for a single-tool
+    /// printer.
+    /// </summary>
+    public int SlotCount { get; set; } = 1;
+
+    public const int MaxSlotCount = 64;
+
+    /// <summary>The catalog model this printer was picked from, if any.</summary>
+    [MaxLength(100)]
+    public string? CatalogModelId { get; set; }
+    public PrinterModel? CatalogModel { get; set; }
+
+    /// <summary>When the printer was added. Null for rows that predate the column.</summary>
+    public DateTimeOffset? CreatedAt { get; set; }
 }

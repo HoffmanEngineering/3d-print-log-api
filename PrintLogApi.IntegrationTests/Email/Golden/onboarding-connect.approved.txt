@@ -1,0 +1,21 @@
+Let your prints log themselves
+
+Hi Ada,
+
+Typing in every print gets old fast. Connect the tool you already use and new prints show up on their own:
+
+- OctoPrint: install the webhook plugin. https://www.3dprintlog.test/docs/octoprint-webhook
+- Klipper (Moonraker): add one block to your config. https://www.3dprintlog.test/docs/klipper
+- Your slicer: upload straight from PrusaSlicer, OrcaSlicer or SuperSlicer. https://www.3dprintlog.test/docs/slic3r-uploader
+
+Each one takes about five minutes.
+
+--
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
+You're receiving this because of a test.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB
+PO Box 0, Testville, USA

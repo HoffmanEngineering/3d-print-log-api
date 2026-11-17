@@ -5,6 +5,12 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
+using PrintLogApi.Authentication.Devices;
+using PrintLogApi.Caching;
+using PrintLogApi.Email;
+using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs;
@@ -22,17 +28,25 @@ namespace PrintLogApi.Controllers;
 [Authorize]
 public class UsersController(
     PrintLogContext context,
-    IUserDeletionService userDeletionService,
     IUserService userService,
     IMapper mapper,
     IAuthorizationService authorizationService,
     TelemetryClient telemetry,
     IBlobStorageService blobStorageService,
-    ISubscriptionService subscriptionService) : ControllerBase
+    IImageProcessingService imageProcessing,
+    ISubscriptionService subscriptionService,
+    IOptions<UserOnboardingOptions> onboardingOptions,
+    IEmailVerificationRefresher emailVerificationRefresher,
+    IAuth0Service auth0Service,
+    IMemoryCache cache,
+    TimeProvider clock,
+    ILogger<UsersController> logger) : ControllerBase
 {
-    private readonly string profileImageContainerName = "userprofile";
+    private readonly string profileImageContainerName = BlobContainers.UserProfile;
 
-    private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+    // A cheap early answer for an obviously wrong file, matching what the image processor
+    // accepts for uploads. The decode in StoreProcessedImageAsync is what decides.
+    private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/webp" };
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
@@ -42,7 +56,7 @@ public class UsersController(
     /// <returns></returns>
     [HttpGet("{id}/summary")]
     [AllowAnonymous]
-    public async Task<ActionResult<UserSummaryDto>> GetCurrentUserDetails(long id)
+    public async Task<ActionResult<UserSummaryDto>> GetUserSummary(long id)
     {
         var user = await context.Users
             .Where(u => u.Id == id)
@@ -62,6 +76,7 @@ public class UsersController(
     /// Gets the user details for the currently authenticated user.
     /// </summary>
     /// <returns></returns>
+    [DeviceAccess]
     [HttpGet("me")]
     public async Task<ActionResult<UserDetailDto>> GetCurrentUserDetails()
     {
@@ -81,10 +96,146 @@ public class UsersController(
     }
 
     /// <summary>
-    /// Marks the current user as deactivated
+    /// The address email is sent to, as last synced from the sign-in provider. Interactive
+    /// sessions only: an API key must not be a way to read the account address.
+    /// </summary>
+    [HttpGet("me/email")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<ActionResult<AccountEmailDto>> GetAccountEmail(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new AccountEmailDto(u.Email, u.EmailVerified))
+            .AsNoTracking()
+            .SingleAsync(ct);
+    }
+
+    /// <summary>
+    /// Whether the current user goes through onboarding. Interactive sessions only. Deliberately
+    /// not part of the public user detail, which is anonymous.
+    /// </summary>
+    [HttpGet("me/onboarding")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<ActionResult<OnboardingStatusDto>> GetOnboardingStatus(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var user = await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.CreatedDate, u.EmailVerified })
+            .AsNoTracking()
+            .SingleAsync(ct);
+
+        // The token claim lags until the next sign-in, so ask Auth0 (throttled) while unverified.
+        // Only for an onboarding user: nobody else is shown anything that reads this flag.
+        var eligible = onboardingOptions.Value.IsEligible(user.CreatedDate);
+        var emailVerified = user.EmailVerified
+            || (eligible && await emailVerificationRefresher.RefreshAsync(userId.Value, ct));
+
+        return new OnboardingStatusDto(
+            eligible,
+            user.CreatedDate,
+            emailVerified);
+    }
+
+    /// <summary>
+    /// Asks Auth0 to send the current user's verification email again. Interactive sessions only.
+    /// Limited to one send per user every five minutes.
+    /// </summary>
+    [HttpPost("me/verification-email")]
+    [Authorize(Policy = "InteractiveUserOnly")]
+    public async Task<IActionResult> ResendVerificationEmail(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var throttleKey = $"verification_email_sent:{userId.Value}";
+        if (cache.TryGetValue(throttleKey, out DateTimeOffset expiresAt))
+        {
+            // Rounded up, never down: Retry-After is whole seconds, and truncating sends a
+            // client that honors the header back before the window has closed.
+            var seconds = Math.Max(1, (int)Math.Ceiling((expiresAt - clock.GetUtcNow()).TotalSeconds));
+            Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+            return CodedProblem(StatusCodes.Status429TooManyRequests, "A verification email was sent recently. Try again later.", "rate_limited");
+        }
+
+        // Forced, so a GET me/onboarding a moment ago (which set the refresher's throttle) cannot
+        // hide a verification that just happened. The rate limit above bounds the Auth0 calls.
+        if (await emailVerificationRefresher.RefreshAsync(userId.Value, ct, force: true))
+        {
+            return CodedProblem(StatusCodes.Status409Conflict, "The email address is already verified.", "already_verified");
+        }
+
+        var oauthUserId = await context.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.OAuthUserId)
+            .SingleOrDefaultAsync(ct);
+
+        // Without an Auth0 id there is nothing to resend to. Leave the throttle unset.
+        if (string.IsNullOrEmpty(oauthUserId))
+        {
+            return CodedProblem(StatusCodes.Status502BadGateway, "The verification email could not be sent right now.", "auth0_unavailable");
+        }
+
+        try
+        {
+            await auth0Service.SendVerificationEmail(oauthUserId, ct);
+        }
+        // HttpClient's own timeout is a TaskCanceledException while ct is still live.
+        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            // Logged so a missing update:users grant on the Management API client shows up.
+            logger.LogWarning(ex, "Resending the verification email failed for user {UserId}", userId.Value);
+            return CodedProblem(StatusCodes.Status502BadGateway, "The verification email could not be sent right now.", "auth0_unavailable");
+        }
+
+        // Deliberately IMemoryCache, not HybridCache: a throttle flag, not a computed value.
+        // The value is the expiry instant so a later call can report the time remaining.
+        var window = TimeSpan.FromMinutes(5);
+        cache.Set(throttleKey, clock.GetUtcNow().Add(window), new MemoryCacheEntryOptions()
+            .SetSize(CacheBudget.SmallEntryBytes)
+            .SetAbsoluteExpiration(window));
+
+        telemetry.TrackEvent("VerificationEmail_Sent", new Dictionary<string, string>
+        {
+            { "UserId", userId.Value.ToString(CultureInfo.InvariantCulture) },
+        });
+
+        return NoContent();
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
+
+    /// <summary>
+    /// Marks the current user as deactivated. Interactive sessions only, like every account-level
+    /// write below: an API key or device token must not be a way to delete or edit the account.
     /// </summary>
     /// <returns></returns>
     [HttpPost("me/deactivate")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> DeactivateCurrentUser()
     {
         var userId = User.GetUserId();
@@ -112,6 +263,7 @@ public class UsersController(
     /// </summary>
     /// <returns></returns>
     [HttpPost("me/reactivate")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> ReactivateCurrentUser()
     {
         var userId = User.GetUserId();
@@ -133,19 +285,6 @@ public class UsersController(
             .SingleAsync();
 
         return user;
-    }
-
-    /// <summary>
-    ///   Delete the data from users pending deactivation after the deactivation period.
-    /// </summary>
-    /// <returns></returns>
-    [HttpDelete("pending-deactivation")]
-    [AllowAnonymous]
-    public async Task<ActionResult> ProcessPendingDeactivations()
-    {
-        await userDeletionService.DeletePendingDeactivatedUsers();
-
-        return Ok();
     }
 
     /// <summary>
@@ -176,11 +315,14 @@ public class UsersController(
     }
 
     /// <summary>
-    /// Updates the current user's details.
+    /// Updates the current user's details. The profile and cover pictures are set by uploading
+    /// an image; values sent here are kept only when unchanged, apart from the picture on the
+    /// user's sign-in profile, which is accepted while the profile has no picture.
     /// </summary>
     /// <param name="updatedUser"></param>
     /// <returns></returns>
     [HttpPut("me")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserDetailDto>> UpdateCurrentUserDetails(UpdateUserDetailDto updatedUser)
     {
         var userId = User.GetUserId();
@@ -199,7 +341,13 @@ public class UsersController(
         }
 
 
+        // The map leaves both pictures alone (see UserProfile).
         existingUser = mapper.Map(updatedUser, existingUser);
+
+        if (await IsSignInProfilePictureAsync(existingUser, updatedUser.ProfilePicture, HttpContext.RequestAborted))
+        {
+            existingUser.ProfilePicture = updatedUser.ProfilePicture;
+        }
 
         context.Entry(existingUser).State = EntityState.Modified;
 
@@ -223,11 +371,57 @@ public class UsersController(
     }
 
     /// <summary>
+    /// Whether <paramref name="submitted"/> is the picture on the user's Auth0 profile, which the
+    /// web app sets as the profile picture at first sign-in (Gravatar or the social provider's
+    /// avatar). Any other URL would be loaded by every visitor's browser from a host the user
+    /// picked, so it is never taken on trust.
+    /// <para>
+    /// Asked only while the profile has no picture, at most once a minute per user, so a stream
+    /// of PUTs cannot become a stream of Management API calls. Best-effort: when Auth0 cannot be
+    /// reached the picture is left unset and the rest of the update still saves.
+    /// </para>
+    /// </summary>
+    private async Task<bool> IsSignInProfilePictureAsync(User user, string? submitted, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(submitted)
+            || !string.IsNullOrWhiteSpace(user.ProfilePicture)
+            || string.IsNullOrEmpty(user.OAuthUserId))
+        {
+            return false;
+        }
+
+        var throttleKey = $"signin_picture_lookup:{user.Id}";
+        if (cache.TryGetValue(throttleKey, out _))
+        {
+            return false;
+        }
+
+        // Deliberately IMemoryCache, not HybridCache: a throttle flag, not a computed value.
+        cache.Set(throttleKey, true, new MemoryCacheEntryOptions()
+            .SetSize(CacheBudget.SmallEntryBytes)
+            .SetAbsoluteExpiration(TimeSpan.FromMinutes(1)));
+
+        try
+        {
+            var picture = await auth0Service.GetUserPicture(user.OAuthUserId, ct);
+            return string.Equals(picture, submitted, StringComparison.Ordinal);
+        }
+        // HttpClient's own timeout is a TaskCanceledException while ct is still live.
+        catch (Exception ex) when (ex is Auth0ApiException or HttpRequestException
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            logger.LogWarning(ex, "Reading the Auth0 profile picture failed for user {UserId}", user.Id);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Replace the user profile image of the currently authenticated user.
     /// </summary>
     /// <param name="image">The image file to save.</param>
     /// <returns></returns>
     [HttpPost("me/profile-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> PostProfileImage(IFormFile image)
     {
         var userId = User.GetUserId();
@@ -250,7 +444,7 @@ public class UsersController(
 
         if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         if (image.Length > MaxImageSizeBytes)
@@ -258,27 +452,18 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-        using (var uploadFileStream = image.OpenReadStream())
+        var replaced = user.ProfilePicture;
+        try
         {
-            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
-
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = uploadResult.BlobPath,
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            context.Files.Add(file);
-
-            user.ProfilePicture = uploadResult.BlobUri.AbsoluteUri;
+            user.ProfilePicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, replaced);
         telemetry.TrackEvent("UserProfilePictureUploaded");
 
         return new UserUrlDto() { Url = user.ProfilePicture };
@@ -290,6 +475,7 @@ public class UsersController(
     /// <param name="image">The image file to save.</param>
     /// <returns></returns>
     [HttpPost("me/cover-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> PostCoverImage(IFormFile image)
     {
         var userId = User.GetUserId();
@@ -312,7 +498,7 @@ public class UsersController(
 
         if (!AllowedImageContentTypes.Contains(image.ContentType.ToLowerInvariant()))
         {
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
         }
 
         if (image.Length > MaxImageSizeBytes)
@@ -320,30 +506,55 @@ public class UsersController(
             return BadRequest("Image must be under 10MB.");
         }
 
-        var fileId = Guid.NewGuid();
-        var fileName = fileId + Path.GetExtension(image.FileName);
-
-        using (var uploadFileStream = image.OpenReadStream())
+        var replaced = user.CoverPicture;
+        try
         {
-            var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, fileName, uploadFileStream);
-
-            var file = new Models.File()
-            {
-                Size = image.Length,
-                Path = uploadResult.BlobPath,
-                Id = fileId,
-                CreatedById = userId.Value,
-                UpdatedById = userId.Value,
-            };
-            context.Files.Add(file);
-
-            user.CoverPicture = uploadResult.BlobUri.AbsoluteUri;
+            user.CoverPicture = (await StoreProcessedImageAsync(image, userId.Value)).AbsoluteUri;
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, replaced);
         telemetry.TrackEvent("UserCoverPictureUploaded");
 
         return new UserUrlDto() { Url = user.CoverPicture };
+    }
+
+    /// <summary>
+    /// Decodes and re-encodes a profile or cover image as every other image upload does, then
+    /// stores the result and adds (does not save) its File row. The re-encode drops all metadata
+    /// (EXIF, GPS included), the blob is named with the extension of the decoded type rather than
+    /// the client's file name, and bytes that do not decode as JPEG, PNG or WebP throw
+    /// <see cref="InvalidImageException"/> before anything is stored.
+    /// </summary>
+    /// <returns>The blob's URI, which is what the user row stores.</returns>
+    private async Task<Uri> StoreProcessedImageAsync(IFormFile image, long userId)
+    {
+        ProcessedImage processed;
+        await using (var uploadFileStream = image.OpenReadStream())
+        {
+            processed = await imageProcessing.ProcessAsync(
+                uploadFileStream, ImageProcessingOptions.Uploads, HttpContext.RequestAborted);
+        }
+
+        var fileId = Guid.NewGuid();
+        var blobName = fileId + ImageContentTypes.ExtensionFor(processed.ContentType);
+        using var stream = new MemoryStream(processed.Original, writable: false);
+        var uploadResult = await blobStorageService.UploadAsync(profileImageContainerName, blobName, stream);
+
+        context.Files.Add(new Models.File()
+        {
+            Size = processed.Original.LongLength,
+            Path = uploadResult.BlobPath,
+            Id = fileId,
+            CreatedById = userId,
+            UpdatedById = userId,
+        });
+
+        return uploadResult.BlobUri;
     }
 
     /// <summary>
@@ -351,6 +562,7 @@ public class UsersController(
     /// </summary>
     /// <returns></returns>
     [HttpDelete("me/cover-image")]
+    [Authorize(Policy = "InteractiveUserOnly")]
     public async Task<ActionResult<UserUrlDto>> RemoveCoverImage()
     {
         var userId = User.GetUserId();
@@ -366,11 +578,56 @@ public class UsersController(
             return NotFound();
         }
 
+        var removed = user.CoverPicture;
         user.CoverPicture = null;
 
         await context.SaveChangesAsync();
+        await DeleteReplacedPictureAsync(user, removed);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Deletes the blob and <c>Files</c> row of a profile or cover picture the user has just
+    /// replaced or removed. Only a picture one of the user's own <c>Files</c> rows names in the
+    /// profile container is deleted, so an external URL (the Auth0 picture) or any blob that is
+    /// not the user's is left alone. Best effort, after the change is saved: a failure is logged
+    /// and the request still succeeds. When the blob delete fails the row is kept, so account
+    /// deletion still finds the blob.
+    /// </summary>
+    private async Task DeleteReplacedPictureAsync(User user, string? replacedUrl)
+    {
+        if (string.IsNullOrWhiteSpace(replacedUrl)
+            || replacedUrl == user.ProfilePicture
+            || replacedUrl == user.CoverPicture
+            || !Uri.TryCreate(replacedUrl, UriKind.Absolute, out var uri))
+        {
+            return;
+        }
+
+        var path = Uri.UnescapeDataString(uri.AbsolutePath).TrimStart('/');
+        var prefix = profileImageContainerName + "/";
+        if (!path.StartsWith(prefix, StringComparison.Ordinal) || path.Length == prefix.Length || path.IndexOf('/', prefix.Length) >= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var file = await context.Files.FirstOrDefaultAsync(f => f.CreatedById == user.Id && f.Path == path);
+            if (file is null)
+            {
+                return;
+            }
+
+            await blobStorageService.DeleteBlobAsync(profileImageContainerName, path[prefix.Length..]);
+            context.Files.Remove(file);
+            await context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Deleting the replaced picture {BlobPath} of user {UserId} failed; it is left in storage", path, user.Id);
+        }
     }
 
     /// <summary>

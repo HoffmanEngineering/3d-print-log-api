@@ -58,6 +58,7 @@ public static class McpPrinterValidation
         McpWriteValidation.RequireMaxLength(input.Name, 100, "name");
         McpWriteValidation.RequireMaxLength(input.Description, 1000, "description");
         McpWriteValidation.RequireMaxLength(input.CategoryNickname, 50, "categoryNickname");
+        McpWriteValidation.RequireMaxLength(input.CatalogModelId, 100, "catalogModelId");
 
         RequireFiniteNonNegative(input.NozzleDiameterMm, "nozzleDiameterMm");
         RequireFiniteNonNegative(input.FilamentDiameterMm, "filamentDiameterMm");

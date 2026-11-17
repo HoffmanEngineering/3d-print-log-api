@@ -73,7 +73,7 @@ public class PrintLogWriteTools(
         McpWriteValidation.RequireMaxLength(row.Notes, 1000, "materials.notes");
     }
 
-    [McpServerTool(Name = "whoami", Title = "Who Am I", ReadOnly = true, OpenWorld = false),
+    [McpServerTool(Name = "whoami", Title = "Who Am I", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
      Description("Confirms write access is granted. Returns your internal user id.")]
     public long WhoAmI() => CurrentUserId;
 
@@ -87,8 +87,9 @@ public class PrintLogWriteTools(
         "omitted; allowFileDownloads defaults to false. 'idempotencyKey' MUST be a stable id for " +
         "this physical print: reusing it with the SAME arguments returns the same print " +
         "(wasReplayed = true); reusing it with DIFFERENT arguments is a conflict. Does NOT change " +
-        "which spools are loaded. Only your own printer/materials/project are accepted; anything " +
-        "else is 'not found'.")]
+        "which spools are loaded. Returns materialRemaining, the grams left on each spool used; " +
+        "its remainingGrams is null for a spool with no starting amount (not tracked). Only your " +
+        "own printer/materials/project are accepted; anything else is 'not found'.")]
     public async Task<CreatePrintResult> CreatePrint(
         [Description("Print title (max 100 chars).")] string title,
         [Description("Your printer id (see list_printers).")] long printerId,
@@ -423,7 +424,10 @@ public class PrintLogWriteTools(
         "Dimensions are millimetres, wattage is watts, screen resolutions are pixels — all " +
         "stored exactly as given, with no conversion. A new printer is active unless you pass " +
         "isActive = false. This tool never loads or unloads filament: use the load/unload flow " +
-        "for that. 'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
+        "for that. An optional catalogModelId fills any spec you leave out from the printer " +
+        "catalog; values you pass always win. If you can call the REST API, find an id with " +
+        "GET /api/PrinterModels?search=; otherwise omit it. " +
+        "'idempotencyKey' is OPTIONAL but recommended: with one, retrying with the " +
         "SAME arguments returns the same printer (wasReplayed = true) and reusing it with " +
         "DIFFERENT arguments is a conflict; WITHOUT one, a retried call creates a SECOND printer.")]
     public async Task<CreatePrinterResult> CreatePrinter(
@@ -444,6 +448,7 @@ public class PrintLogWriteTools(
         [Description("Optional heated-chamber flag.")] bool? hasHeatedChamber = null,
         [Description("Optional power draw in watts (>= 0).")] double? wattageW = null,
         [Description("Whether the printer is in use. Defaults to true.")] bool? isActive = null,
+        [Description("Optional printer catalog model id; fills specs left empty. If you can call the REST API, find an id with GET /api/PrinterModels?search=; otherwise omit it.")] string? catalogModelId = null,
         [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
         CancellationToken ct = default)
     {
@@ -451,7 +456,7 @@ public class PrintLogWriteTools(
             CurrentUserId, BuildPrinterInput(
                 make, model, name, description, categoryNickname, nozzleDiameterMm, filamentDiameterMm,
                 beamDiameterMm, bedWidthMm, bedDepthMm, bedHeightMm, screenResolutionXPixels,
-                screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive),
+                screenResolutionYPixels, hasHeatedBed, hasHeatedChamber, wattageW, isActive, catalogModelId),
             idempotencyKey, ct);
     }
 
@@ -508,7 +513,8 @@ public class PrintLogWriteTools(
         double? nozzleDiameterMm, double? filamentDiameterMm, double? beamDiameterMm,
         double? bedWidthMm, double? bedDepthMm, double? bedHeightMm,
         double? screenResolutionXPixels, double? screenResolutionYPixels,
-        bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive) => new()
+        bool? hasHeatedBed, bool? hasHeatedChamber, double? wattageW, bool? isActive,
+        string? catalogModelId = null) => new()
         {
             Make = make,
             Model = model,
@@ -527,6 +533,7 @@ public class PrintLogWriteTools(
             HasHeatedChamber = hasHeatedChamber,
             WattageW = wattageW,
             IsActive = isActive,
+            CatalogModelId = catalogModelId,
         };
 
     // Destructive = false: the change is a bounded, reversible delta on one quantity — the
@@ -536,7 +543,9 @@ public class PrintLogWriteTools(
         "Correct how much of one of your materials remains, by applying a delta (positive adds, " +
         "negative removes) measured as Weight (grams), Length (mm), or Volume (ml). The result " +
         "cannot go below zero or above the material's original capacity — an out-of-range " +
-        "adjustment is rejected. Returns 'beforeGrams' and 'afterGrams' — the remaining amount is " +
+        "adjustment is rejected. A material with no starting amount has no tracked remaining " +
+        "amount, so it is rejected too: set one with update_material first. Returns " +
+        "'beforeGrams' and 'afterGrams' — the remaining amount is " +
         "always reported in GRAMS, whichever unit you sent the delta in. Foreign materials " +
         "are 'not found'.")]
     public async Task<MaterialWriteResult> AdjustMaterialRemaining(
@@ -579,6 +588,8 @@ public class PrintLogWriteTools(
         [Description("Optional URL (max 1000 chars).")] string? url = null,
         [Description("Status, default InProgress.")] Project.ProjectStatus status = Project.ProjectStatus.InProgress,
         [Description("Visibility, default Private.")] Project.ProjectViewStatus viewStatus = Project.ProjectViewStatus.Private,
+        [Description("Optional manual start date as YYYY-MM-DD. Omit to derive it from the project's prints.")] DateOnly? startDate = null,
+        [Description("Optional manual finish date as YYYY-MM-DD. Omit to derive it from the project's prints.")] DateOnly? finishDate = null,
         [Description("Optional stable key making a retry safe. Strongly recommended.")] string? idempotencyKey = null,
         CancellationToken ct = default)
     {
@@ -588,7 +599,8 @@ public class PrintLogWriteTools(
         }
         ValidateProjectFields(name, reference, description, url, status, viewStatus);
         return await projectService.CreateProjectForMcp(
-            CurrentUserId, name, reference, description, url, status, viewStatus, idempotencyKey, ct);
+            CurrentUserId, name, reference, description, url, status, viewStatus,
+            startDate, finishDate, idempotencyKey, ct);
     }
 
     // Destructive = true, matching the other update_* tools: passing a field overwrites whatever
@@ -596,7 +608,9 @@ public class PrintLogWriteTools(
     [McpServerTool(Title = "Update Project", Idempotent = false, Destructive = true, ReadOnly = false, OpenWorld = false),
      Description(
         "Edit one of your own projects. Only fields you pass are changed. viewStatus changes " +
-        "visibility; the result echoes the resulting visibility. Foreign projects are 'not found'.")]
+        "visibility; the result echoes the resulting visibility. startDate/finishDate pin the " +
+        "project's dates; clearStartDate/clearFinishDate go back to deriving them from the " +
+        "project's prints. Foreign projects are 'not found'.")]
     public async Task<ProjectWriteResult> UpdateProject(
         [Description("The project id.")] Guid id,
         [Description("Optional new name (max 100 chars).")] string? name = null,
@@ -605,10 +619,17 @@ public class PrintLogWriteTools(
         [Description("Optional new URL (max 1000 chars).")] string? url = null,
         [Description("Optional new status.")] Project.ProjectStatus? status = null,
         [Description("Optional new visibility.")] Project.ProjectViewStatus? viewStatus = null,
+        [Description("Optional manual start date as YYYY-MM-DD. Pass clearStartDate to go back to automatic.")] DateOnly? startDate = null,
+        [Description("Optional manual finish date as YYYY-MM-DD. Pass clearFinishDate to go back to automatic.")] DateOnly? finishDate = null,
+        [Description("Set true to clear a manual start date and derive it from prints again.")] bool clearStartDate = false,
+        [Description("Set true to clear a manual finish date and derive it from prints again.")] bool clearFinishDate = false,
         CancellationToken ct = default)
     {
         ValidateProjectFields(name, reference, description, url, status, viewStatus);
-        return await projectService.UpdateProjectForMcp(CurrentUserId, id, name, reference, description, url, status, viewStatus, ct);
+        ValidateProjectDateArguments(startDate, finishDate, clearStartDate, clearFinishDate);
+        return await projectService.UpdateProjectForMcp(
+            CurrentUserId, id, name, reference, description, url, status, viewStatus,
+            startDate, finishDate, clearStartDate, clearFinishDate, ct);
     }
 
     private static void ValidateProjectFields(
@@ -626,6 +647,25 @@ public class PrintLogWriteTools(
         if (viewStatus.HasValue)
         {
             McpWriteValidation.RequireDefinedEnum(viewStatus.Value, "viewStatus");
+        }
+    }
+
+    /// <summary>
+    /// This tool is patch-style: omitting a field leaves it alone. That makes "set to null" and
+    /// "leave alone" indistinguishable in a single parameter, so clearing needs its own explicit
+    /// channel — and passing both at once is a caller bug worth naming rather than resolving by
+    /// precedence, which would silently discard one of the two instructions.
+    /// </summary>
+    private static void ValidateProjectDateArguments(
+        DateOnly? startDate, DateOnly? finishDate, bool clearStartDate, bool clearFinishDate)
+    {
+        if (startDate.HasValue && clearStartDate)
+        {
+            throw McpToolException.InvalidArguments("Pass either startDate or clearStartDate, not both.");
+        }
+        if (finishDate.HasValue && clearFinishDate)
+        {
+            throw McpToolException.InvalidArguments("Pass either finishDate or clearFinishDate, not both.");
         }
     }
 

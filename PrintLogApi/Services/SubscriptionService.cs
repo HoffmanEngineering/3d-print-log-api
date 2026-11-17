@@ -18,19 +18,25 @@ public class SubscriptionService : ISubscriptionService
     private readonly TelemetryClient _telemetry;
     private readonly StripeOptions _stripeOptions;
     private readonly INotificationService _notificationService;
+    private readonly IMediaStorageQuotaService _quota;
+    private readonly Spoolman.ISpoolmanConnectionService _spoolman;
 
     public SubscriptionService(
         PrintLogContext context,
         IMapper mapper,
         TelemetryClient telemetry,
         IOptions<StripeOptions> stripeOptions,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IMediaStorageQuotaService quota,
+        Spoolman.ISpoolmanConnectionService spoolman)
     {
         _context = context;
         _mapper = mapper;
         _telemetry = telemetry;
         _stripeOptions = stripeOptions.Value;
         _notificationService = notificationService;
+        _quota = quota;
+        _spoolman = spoolman;
     }
 
     public async Task<SubscriptionDto> GetSubscriptionForUser(long userId)
@@ -59,21 +65,13 @@ public class SubscriptionService : ISubscriptionService
             dto = _mapper.Map<SubscriptionDto>(subscription);
         }
 
-        dto.MaxImagesPerPrint = isPro ? SubscriptionLimits.ProMaxImagesPerPrint : SubscriptionLimits.FreeMaxImagesPerPrint;
+        dto.MaxImages = isPro ? SubscriptionLimits.ProMaxImages : SubscriptionLimits.FreeMaxImages;
+        dto.MaxImagesPerPrint = dto.MaxImages;
         dto.MaxFilesPerPrint = isPro ? SubscriptionLimits.ProMaxFilesPerPrint : SubscriptionLimits.FreeMaxFilesPerPrint;
         dto.MaxFileStorageBytes = isPro ? SubscriptionLimits.ProMaxFileStorageBytes : SubscriptionLimits.FreeMaxFileStorageBytes;
-        // Must count exactly what FilamentImageService.EnsureAccountStorageQuotaAsync counts.
-        // Reporting only attachments here while enforcement also counts filament images shows
-        // the user less usage than the number they are actually rejected against.
-        var attachmentBytes = await _context.PrintAttachments
-            .Where(pa => pa.CreatedById == userId)
-            .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
-
-        var filamentImageBytes = await _context.FilamentImages
-            .Where(fi => fi.CreatedById == userId)
-            .SumAsync(fi => (long?)fi.File.Size + (fi.ThumbnailFile != null ? fi.ThumbnailFile.Size : 0L)) ?? 0L;
-
-        dto.UsedFileStorageBytes = attachmentBytes + filamentImageBytes;
+        // Reported usage and enforced usage read the same calculator. Reporting a smaller
+        // figure than enforcement uses shows the user headroom they do not have.
+        dto.UsedFileStorageBytes = await _quota.GetUsedBytesAsync(userId);
 
         return dto;
     }
@@ -187,6 +185,11 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task HandleStripeWebhook(string json, string signature)
     {
+        // The controller answers 503 before this, but a blank secret must never reach
+        // ConstructEvent from any caller: Stripe.net accepts a payload signed with an empty key.
+        if (string.IsNullOrWhiteSpace(_stripeOptions.WebhookSecret))
+            throw new InvalidOperationException("Stripe:WebhookSecret is not configured.");
+
         var stripeEvent = EventUtility.ConstructEvent(json, signature, _stripeOptions.WebhookSecret);
 
         switch (stripeEvent.Type)
@@ -245,6 +248,8 @@ public class SubscriptionService : ISubscriptionService
         subscription.Status = SubscriptionStatus.Canceled;
         subscription.CanceledAt = DateTimeOffset.UtcNow;
         await _context.SaveChangesAsync();
+
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
 
         _telemetry.TrackEvent("Subscription_CanceledImmediately", new Dictionary<string, string>
         {
@@ -323,13 +328,31 @@ public class SubscriptionService : ISubscriptionService
 
         subscription.StripeSubscriptionId = stripeSubscriptionId;
         subscription.StripePriceId = priceId;
-        subscription.Status = SubscriptionStatus.Active;
+        // The subscription's live status, not "Active": Stripe does not order or deduplicate
+        // deliveries, so this event can arrive (late, retried or resent) after the subscription
+        // was canceled, and a canceled subscription sends nothing afterwards to correct it.
+        subscription.Status = MapStripeStatus(stripeSubscription.Status);
         subscription.Plan = MapPriceIdToPlan(priceId);
         subscription.CurrentPeriodStart = stripeItem?.CurrentPeriodStart;
         subscription.CurrentPeriodEnd = stripeItem?.CurrentPeriodEnd;
         subscription.CancelAtPeriodEnd = stripeSubscription.CancelAtPeriodEnd;
 
+        if (stripeSubscription.CanceledAt.HasValue)
+            subscription.CanceledAt = stripeSubscription.CanceledAt;
+
         await _context.SaveChangesAsync();
+
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
+        if (subscription.Status != SubscriptionStatus.Active)
+        {
+            _telemetry.TrackEvent("Subscription_CheckoutCompletedNotActive", new Dictionary<string, string>
+            {
+                { "userId", subscription.UserId.ToString() },
+                { "status", stripeSubscription.Status ?? "" }
+            });
+            return;
+        }
 
         _telemetry.TrackEvent("Subscription_Activated", new Dictionary<string, string>
         {
@@ -379,6 +402,8 @@ public class SubscriptionService : ISubscriptionService
 
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         _telemetry.TrackEvent("Subscription_Updated", new Dictionary<string, string>
         {
             { "userId", subscription.UserId.ToString() },
@@ -403,6 +428,8 @@ public class SubscriptionService : ISubscriptionService
         subscription.CanceledAt = DateTimeOffset.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
 
         try
         {
@@ -434,6 +461,8 @@ public class SubscriptionService : ISubscriptionService
 
         await _context.SaveChangesAsync();
 
+        await ApplySpoolmanTierBestEffort(subscription.UserId);
+
         try
         {
             await _notificationService.CreateSubscriptionPaymentFailedNotification(subscription.UserId);
@@ -449,6 +478,24 @@ public class SubscriptionService : ISubscriptionService
         });
     }
 
+    /// <summary>
+    /// Pauses or resumes the user's Spoolman connections to match the status just saved (#175):
+    /// a downgrade keeps the oldest active, a re-subscribe resumes the rest. Best-effort, because
+    /// the status is already committed and the webhook must still succeed; authentication
+    /// re-applies the tier defensively in any case.
+    /// </summary>
+    private async Task ApplySpoolmanTierBestEffort(long userId)
+    {
+        try
+        {
+            await _spoolman.ApplyTierAsync(userId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _telemetry.TrackException(ex);
+        }
+    }
+
     private SubscriptionPlan MapPriceIdToPlan(string? priceId)
     {
         if (priceId == _stripeOptions.ProMonthlyPriceId) return SubscriptionPlan.ProMonthly;
@@ -456,7 +503,12 @@ public class SubscriptionService : ISubscriptionService
         return SubscriptionPlan.Free;
     }
 
-    private static SubscriptionStatus MapStripeStatus(string stripeStatus)
+    /// <summary>
+    /// Only <c>active</c> and <c>trialing</c> grant Pro. Anything else, including <c>incomplete</c>,
+    /// <c>incomplete_expired</c>, <c>paused</c> and any status Stripe adds later, maps to a status
+    /// that does not.
+    /// </summary>
+    private static SubscriptionStatus MapStripeStatus(string? stripeStatus)
     {
         return stripeStatus switch
         {

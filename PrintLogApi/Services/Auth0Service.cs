@@ -170,7 +170,8 @@ public class Auth0Service(
     /// secret-free <see cref="Auth0ApiException"/>.
     /// </summary>
     private async Task<string> SendManagementAsync(
-        HttpMethod method, string url, CancellationToken ct, bool treat404AsSuccess = false)
+        HttpMethod method, string url, CancellationToken ct, bool treat404AsSuccess = false,
+        Func<HttpContent>? contentFactory = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -178,6 +179,11 @@ public class Auth0Service(
             using var client = CreateClient();
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Add("Authorization", $"Bearer {token}");
+            // Fresh content per attempt: a sent HttpContent cannot be reused for the 401 retry.
+            if (contentFactory != null)
+            {
+                request.Content = contentFactory();
+            }
 
             var response = await client.SendAsync(request, ct);
 
@@ -239,15 +245,67 @@ public class Auth0Service(
     private sealed class Auth0User
     {
         [JsonPropertyName("email")] public string? Email { get; set; }
+        [JsonPropertyName("email_verified")] public bool EmailVerified { get; set; }
     }
 
     /// <summary>
-    ///   Permanently delete a user from Auth0 by their oauth id.
+    ///   Get a user's email address and verification flag from Auth0. Null on an empty body.
+    /// </summary>
+    public async Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}" +
+                         "?fields=email,email_verified&include_fields=true";
+        var json = await SendManagementAsync(HttpMethod.Get, requestUrl, ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        var user = JsonSerializer.Deserialize<Auth0User>(json);
+        return user == null ? null : new Auth0EmailStatus(user.Email, user.EmailVerified);
+    }
+
+    /// <summary>
+    ///   Get the picture URL on a user's Auth0 profile. Null when it has none or the body is empty.
+    /// </summary>
+    public async Task<string?> GetUserPicture(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId)}" +
+                         "?fields=picture&include_fields=true";
+        var json = await SendManagementAsync(HttpMethod.Get, requestUrl, ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        var user = JsonSerializer.Deserialize<Auth0UserPicture>(json);
+        return string.IsNullOrWhiteSpace(user?.Picture) ? null : user.Picture;
+    }
+
+    private sealed class Auth0UserPicture
+    {
+        [JsonPropertyName("picture")] public string? Picture { get; set; }
+    }
+
+    /// <summary>
+    ///   Ask Auth0 to send the user a verification email.
+    /// </summary>
+    public async Task SendVerificationEmail(string oauthUserId, CancellationToken ct)
+    {
+        var requestUrl = $"{ManagementBaseUrl}/jobs/verification-email";
+        await SendManagementAsync(HttpMethod.Post, requestUrl, ct,
+            contentFactory: () => JsonContent.Create(new { user_id = oauthUserId }));
+    }
+
+    /// <summary>
+    ///   Permanently delete a user from Auth0 by their oauth id. An account that is already gone
+    ///   (404) counts as deleted: the pending-deletion job deletes the Auth0 account before the
+    ///   database rows, and repeats both for a user whose database delete failed.
     /// </summary>
     public async Task DeleteUser(string? oauthUserId)
     {
         var requestUrl = $"{ManagementBaseUrl}/users/{Uri.EscapeDataString(oauthUserId!)}";
-        await SendManagementAsync(HttpMethod.Delete, requestUrl, CancellationToken.None);
+        await SendManagementAsync(HttpMethod.Delete, requestUrl, CancellationToken.None, treat404AsSuccess: true);
     }
 
     private sealed class GrantsPage

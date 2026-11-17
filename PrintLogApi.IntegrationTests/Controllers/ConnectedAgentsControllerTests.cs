@@ -1,4 +1,6 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Controllers;
 using PrintLogApi.Exceptions;
@@ -34,6 +36,15 @@ public class ConnectedAgentsControllerTests
             return Task.CompletedTask;
         }
 
+        public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task<string?> GetUserPicture(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task SendVerificationEmail(string oauthUserId, CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task DeleteUser(string? oauthUserId) => Task.CompletedTask;
         public Task<string> GetManagementApiBearerToken() => Task.FromResult(string.Empty);
         public Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct) => Task.FromResult<string?>(null);
@@ -43,7 +54,7 @@ public class ConnectedAgentsControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             new[] { new Claim(ClaimTypes.Upn, subject) }, "test"));
-        return new ConnectedAgentsController(service)
+        return new ConnectedAgentsController(service, new TelemetryClient(TelemetryConfiguration.CreateDefault()))
         {
             ControllerContext = new ControllerContext
             {

@@ -445,6 +445,24 @@ public class OctoprintControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
+    public async Task OctoprintWebhook_RecordsOctoPrint()
+    {
+        var fileName = UniqueFileName("records_source_test");
+        var content = CreateWebhookFormContent(
+            topic: "Print Started",
+            deviceIdentifier: IntegrationTestSeeder.TestPrinterId.ToString(),
+            fileName: fileName,
+            estimatedPrintTime: 600);
+
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(content), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var print = FindPrintByFileNameInDb(fileName)!;
+        Assert.Equal(PrintSource.OctoPrint, print.Source);
+        Assert.Null(print.Slicer);
+    }
+
+    [Fact]
     public async Task Webhook_PrintStarted_CreatesNewPrint()
     {
         // Arrange

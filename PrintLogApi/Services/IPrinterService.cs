@@ -1,13 +1,50 @@
 ﻿using PrintLogApi.Mcp;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Printer;
 
 namespace PrintLogApi.Services;
 
 public interface IPrinterService
 {
     Task DeletePrinter(long printerId);
+
+    /// <summary>Images allowed on one printer, by subscription tier.</summary>
+    Task<int> GetMaxImagesPerPrinter(long userId);
+
+    /// <summary>Signs every image on a printer into its detail DTO.</summary>
+    Task HydrateDetailImageUrlsAsync(PrinterDetailDto detail, CancellationToken ct = default);
+
+    /// <summary>Signs one just-uploaded image into its response DTO.</summary>
+    Task<PrinterImageDto> HydrateImageDtoAsync(PrinterImage image, CancellationToken ct = default);
+
+    /// <summary>
+    /// Signs one printer-image blob path, or returns null if signing fails. The printer
+    /// summary endpoint calls this AFTER its HybridCache read: a signed URL must never be
+    /// cached, because it would outlive its signature.
+    /// </summary>
+    Task<string?> SignImageOrNullAsync(
+        string? path, string contentType, long printerId, CancellationToken ct = default);
     Task<Printer?> getPrinterById(long printerId);
-    Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds);
+    /// <summary>
+    /// Makes <paramref name="loadedFilamentIds"/> the printer's loaded spools, with no slot.
+    /// With <paramref name="fillPrintingRows"/> (the printer page's save) on a printer with one
+    /// slot or fewer, a single spool newly loaded is also linked to the row with no spool of each
+    /// print still printing on it, as <see cref="LoadSlot"/> does.
+    /// </summary>
+    Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false);
+
+    /// <summary>
+    /// Loads a spool into one slot of <paramref name="printer"/>, unloading whatever is in that
+    /// slot and the spool from wherever else it is loaded. Reloading the spool already there
+    /// keeps its row and loaded time. The spool is also linked to the row with no spool on that
+    /// slot of each print still printing on the printer (printlog-bridge#128), so an "Other" row
+    /// the connector created takes the spool the user loads. Finished prints are never changed.
+    /// The caller validates the slot and saves.
+    /// </summary>
+    Task LoadSlot(Printer printer, int slot, Guid filamentId, string? slotLabel);
+
+    /// <summary>Unloads whatever is in one slot of <paramref name="printer"/>. The caller saves.</summary>
+    Task UnloadSlot(Printer printer, int slot);
 
     /// <summary>
     /// The caller's printers, paginated. Lets an agent resolve a printer by name to an id;

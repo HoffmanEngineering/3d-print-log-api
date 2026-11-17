@@ -21,6 +21,12 @@ public static class TestJwt
     /// <summary>Dedicated MCP audience (Auth0:McpIdentifier in IntegrationTesting).</summary>
     public const string McpAudience = "https://test.mcp";
 
+    /// <summary>Device pairing audience (DevicePairing:Audience in IntegrationTesting, #148).</summary>
+    public const string DeviceAudience = "https://test.device";
+
+    /// <summary>The Native app the bridge pairs through (DevicePairing:ClientId in IntegrationTesting).</summary>
+    public const string DeviceClientId = "test-device-client";
+
     /// <summary>Stable signing key shared by the token minter and the JwtBearer validators.</summary>
     public static readonly RsaSecurityKey SigningKey =
         new(RSA.Create(2048)) { KeyId = "integration-test-key" };
@@ -31,7 +37,9 @@ public static class TestJwt
         IEnumerable<string>? scopes = null,
         string issuer = Issuer,
         DateTime? expires = null,
-        DateTime? notBefore = null)
+        DateTime? notBefore = null,
+        IEnumerable<Claim>? extraClaims = null,
+        DateTime? issuedAt = null)
     {
         var handler = new JsonWebTokenHandler();
         var claims = new List<Claim>();
@@ -43,6 +51,10 @@ public static class TestJwt
         {
             claims.Add(new Claim("scope", string.Join(' ', scopes)));
         }
+        if (extraClaims != null)
+        {
+            claims.AddRange(extraClaims);
+        }
 
         var now = DateTime.UtcNow;
         var descriptor = new SecurityTokenDescriptor
@@ -50,8 +62,8 @@ public static class TestJwt
             Issuer = issuer,
             Audience = audience,
             Subject = new ClaimsIdentity(claims),
-            IssuedAt = now,
-            NotBefore = notBefore ?? now,
+            IssuedAt = issuedAt ?? now,
+            NotBefore = notBefore ?? issuedAt ?? now,
             Expires = expires ?? now.AddHours(1),
             SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.RsaSha256),
         };

@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PrintLogApi.Models;
 
@@ -10,10 +11,16 @@ public class CuraSetting
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public Guid Id { get; set; }
 
-    [StringLength(100)]
+    /// <summary>Column length of <see cref="CuraVersion"/> and <see cref="PluginVersion"/>.</summary>
+    public const int MaxVersionLength = 100;
+
+    /// <summary>Column length of <see cref="Slicer"/>.</summary>
+    public const int MaxSlicerLength = 50;
+
+    [StringLength(MaxVersionLength)]
     public string? CuraVersion { get; set; }
 
-    [StringLength(100)]
+    [StringLength(MaxVersionLength)]
     public string? PluginVersion { get; set; }
 
     //// https://docs.microsoft.com/en-us/ef/core/modeling/backing-field
@@ -39,4 +46,25 @@ public class CuraSetting
     /// </summary>
     public long? UserId { get; set; }
 
+    /// <summary>
+    /// The slicer name the Slic3r uploader posts (its parser's <c>SlicerName</c>). Null means the
+    /// Cura plugin, which does not send the field. Copied onto the print when one is created.
+    /// </summary>
+    [StringLength(MaxSlicerLength)]
+    public string? Slicer { get; set; }
+
+    /// <summary>
+    /// The print a connector sent these settings for (#164), at most one record per print. Null for
+    /// settings the Cura plugin or the Slic3r uploader posted: a print created from those does not
+    /// link back to them. Deleting the print deletes the record.
+    /// <para>
+    /// Server-side only: <c>GET /api/Cura/settings</c> returns this entity, and the Cura plugin and
+    /// the uploader read that shape, so neither member is serialized (or bound from a request).
+    /// </para>
+    /// </summary>
+    [JsonIgnore]
+    public long? PrintId { get; set; }
+
+    [JsonIgnore]
+    public Print? Print { get; set; }
 }

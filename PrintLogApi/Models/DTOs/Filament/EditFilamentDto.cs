@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Enums;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament;
@@ -144,4 +145,12 @@ public class EditFilamentDto
     public FilamentFinishType? FinishType { get; set; }
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// Decoded tag readings to keep with the spool's tags, matched to <c>TagUids</c> by UID. A
+    /// reading for a UID that is not in <c>TagUids</c> is ignored. When a spool is updated, a
+    /// tag's stored reading is replaced only when a new one is sent for it.
+    /// </summary>
+    public List<TagReadingInputDto>? TagReadings { get; set; }
+
 }

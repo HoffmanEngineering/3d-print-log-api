@@ -1,0 +1,561 @@
+﻿using System.Net;
+using System.Security;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using Microsoft.ApplicationInsights;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using PrintLogApi.Email;
+using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Spoolman;
+
+namespace PrintLogApi.Services.Spoolman;
+
+public interface ISpoolmanConnectionService
+{
+    /// <summary>
+    /// Makes the printer's Spoolman connection, revoking the one it had, and returns the secret
+    /// once with the block to paste: <c>[spoolman]</c>, plus the <c>[notifier 3d_print_log]</c>
+    /// unless the printer has a printlog-bridge connection or is a Snapmaker U1 (its Moonraker
+    /// can't load the notifier). Null when the printer is not the
+    /// user's. Throws
+    /// <see cref="SpoolmanConnectionLimitException"/> when Free's one connection is taken by
+    /// another printer.
+    /// </summary>
+    /// <param name="requestOrigin">The request's scheme and host, used when <c>Spoolman:ServerUrl</c> is blank.</param>
+    Task<SpoolmanConnectionCreatedDto?> CreateAsync(long userId, long printerId, string requestOrigin, CancellationToken ct);
+
+    /// <summary>All of the user's connections, revoked ones included, newest first.</summary>
+    Task<IReadOnlyList<SpoolmanConnectionDto>> ListAsync(long userId, CancellationToken ct);
+
+    /// <summary>Revokes one of the user's connections. False when it is not theirs.</summary>
+    Task<bool> RevokeAsync(long userId, Guid connectionId, CancellationToken ct);
+
+    /// <summary>
+    /// Brings the user's connections in line with their tier: on Free, every active connection
+    /// but the oldest is paused; on Pro, every connection a downgrade paused is resumed. Returns
+    /// the ids it changed. Idempotent.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ApplyTierAsync(long userId, CancellationToken ct);
+
+    /// <summary>
+    /// Records that one of the user's connections connected from <paramref name="address"/>'s
+    /// network, and emails the admin when that makes more than the fair-use number this week.
+    /// Best-effort: false when the database failed and nothing was recorded, so the caller can
+    /// try again sooner.
+    /// </summary>
+    Task<bool> RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct);
+}
+
+/// <summary>
+/// Spoolman connection tokens, their tier limits and the fair-use alert (#175).
+///
+/// <para><b>Tier rule.</b> Free allows one <i>active</i> connection. Paused (disabled) and
+/// revoked ones do not count, so a user downgraded from Pro can still connect a different
+/// printer once they disconnect the one that stayed active. A downgrade pauses rather than
+/// deletes, keeping the oldest active, and re-subscribing resumes everything it paused.</para>
+///
+/// <para><b>"Is Pro"</b> is the direct query on <c>Subscriptions</c> used everywhere else (see
+/// <c>PrinterService.GetMaxImagesPerPrinter</c>), not a helper, so there is one definition.</para>
+/// </summary>
+public sealed partial class SpoolmanConnectionService(
+    PrintLogContext context,
+    IOptions<SpoolmanOptions> options,
+    IOptions<EmailOptions> emailOptions,
+    IEmailSender emailSender,
+    ISpoolmanCredentialCache credentials,
+    TimeProvider clock,
+    TelemetryClient telemetry,
+    ILogger<SpoolmanConnectionService> logger) : ISpoolmanConnectionService
+{
+    public const int FreeConnectionLimit = 1;
+
+    /// <summary>
+    /// The fallback network-hash key when none is configured: random, and shared by every
+    /// instance of the service in this process so the counts at least last until a restart.
+    /// </summary>
+    private static readonly byte[] ProcessNetworkKey = RandomNumberGenerator.GetBytes(32);
+
+    private readonly SpoolmanOptions _options = options.Value;
+
+    public async Task<SpoolmanConnectionCreatedDto?> CreateAsync(long userId, long printerId, string requestOrigin, CancellationToken ct)
+    {
+        var printer = await context.Printers
+            .Where(p => p.Id == printerId && p.UserId == userId)
+            .Select(p => new { p.Id, p.Name, p.Make, p.Model, p.CatalogModelId })
+            .SingleOrDefaultAsync(ct);
+        if (printer is null)
+        {
+            return null;
+        }
+
+        if (!await IsProAsync(userId, ct))
+        {
+            // This printer's own connection does not count: reconnecting it is a rotation, which
+            // must work on Free or a user who lost their secret could never recover.
+            var activeElsewhere = await context.SpoolmanConnections.CountAsync(c =>
+                c.UserId == userId && c.RevokedAt == null && c.DisabledAt == null && c.PrinterId != printerId, ct);
+            if (activeElsewhere >= FreeConnectionLimit)
+            {
+                telemetry.TrackEvent("SpoolmanConnection_LimitReached");
+                throw new SpoolmanConnectionLimitException(FreeConnectionLimit);
+            }
+        }
+
+        var secret = SpoolmanSecret.Generate();
+        var now = clock.GetUtcNow().UtcDateTime;
+        var connection = new SpoolmanConnection
+        {
+            UserId = userId,
+            PrinterId = printer.Id,
+            Name = Truncate(string.IsNullOrWhiteSpace(printer.Name) ? $"Printer {printer.Id}" : printer.Name.Trim(), 100),
+            SecretHash = SpoolmanSecret.Hash(secret),
+            HashAlgorithm = SpoolmanSecret.HashAlgorithm,
+            CreatedDate = now,
+        };
+
+        // Revoke-then-insert as one unit: the filtered unique index allows one unrevoked
+        // connection per printer, so the insert must see the revocation, and a failure must not
+        // leave the printer with neither. The execution strategy wraps it because SQL Server's
+        // retrying strategy refuses a user transaction outside one.
+        // The hashes being revoked, so their cached "valid" lookups can be evicted after commit.
+        var rotatedHashes = await context.SpoolmanConnections
+            .Where(c => c.PrinterId == printer.Id && c.RevokedAt == null)
+            .Select(c => c.SecretHash)
+            .ToListAsync(ct);
+
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await context.Database.BeginTransactionAsync(ct);
+            await context.SpoolmanConnections
+                .Where(c => c.PrinterId == printer.Id && c.RevokedAt == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.RevokedAt, now), ct);
+            context.SpoolmanConnections.Add(connection);
+            await context.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        });
+
+        await credentials.InvalidateAsync(rotatedHashes);
+        telemetry.TrackEvent("SpoolmanConnection_Created");
+
+        var activeCount = await context.SpoolmanConnections
+            .CountAsync(c => c.UserId == userId && c.RevokedAt == null && c.DisabledAt == null, ct);
+        if (activeCount > _options.FairUseConnectionThreshold)
+        {
+            await AlertBestEffortAsync(userId, SpoolmanFairUseAlert.ConnectionCountSignal,
+                $"More than {_options.FairUseConnectionThreshold} active Spoolman connections.");
+        }
+
+        var serverUrl = ServerUrl(requestOrigin, printer.Id, secret);
+        var created = new SpoolmanConnectionCreatedDto
+        {
+            Secret = secret,
+            ServerUrl = serverUrl,
+            ConfigBlock = ConfigBlock(serverUrl,
+                IsSnapmakerU1(printer.CatalogModelId, printer.Make, printer.Model) || await HasBridgeAsync(userId, printer.Id, ct)
+                    ? null
+                    : NotifierUrl(requestOrigin, printer.Id, secret)),
+        };
+        Fill(created, connection, printer.Name);
+        return created;
+    }
+
+    public async Task<IReadOnlyList<SpoolmanConnectionDto>> ListAsync(long userId, CancellationToken ct)
+    {
+        var rows = await context.SpoolmanConnections
+            .AsNoTracking()
+            .Where(c => c.UserId == userId)
+            .OrderByDescending(c => c.CreatedDate)
+            .Select(c => new { Connection = c, PrinterName = c.Printer != null ? c.Printer.Name : null })
+            .ToListAsync(ct);
+
+        return rows.Select(r => Fill(new SpoolmanConnectionDto(), r.Connection, r.PrinterName)).ToList();
+    }
+
+    public async Task<bool> RevokeAsync(long userId, Guid connectionId, CancellationToken ct)
+    {
+        var connection = await context.SpoolmanConnections
+            .SingleOrDefaultAsync(c => c.Id == connectionId && c.UserId == userId, ct);
+        if (connection is null)
+        {
+            return false;
+        }
+
+        if (connection.RevokedAt is null)
+        {
+            connection.RevokedAt = clock.GetUtcNow().UtcDateTime;
+            await context.SaveChangesAsync(ct);
+            await credentials.InvalidateAsync([connection.SecretHash]);
+            telemetry.TrackEvent("SpoolmanConnection_Revoked");
+        }
+
+        return true;
+    }
+
+    public async Task<IReadOnlyList<Guid>> ApplyTierAsync(long userId, CancellationToken ct)
+    {
+        var live = await context.SpoolmanConnections
+            .Where(c => c.UserId == userId && c.RevokedAt == null)
+            .OrderBy(c => c.CreatedDate).ThenBy(c => c.Id)
+            .ToListAsync(ct);
+
+        var changed = new List<Guid>();
+        if (await IsProAsync(userId, ct))
+        {
+            foreach (var connection in live.Where(c => c.DisabledReason == SpoolmanConnection.TierDisabledReason))
+            {
+                connection.DisabledAt = null;
+                connection.DisabledReason = null;
+                changed.Add(connection.Id);
+            }
+        }
+        else
+        {
+            var now = clock.GetUtcNow().UtcDateTime;
+            foreach (var connection in live.Where(c => c.DisabledAt == null).Skip(FreeConnectionLimit))
+            {
+                connection.DisabledAt = now;
+                connection.DisabledReason = SpoolmanConnection.TierDisabledReason;
+                changed.Add(connection.Id);
+            }
+        }
+
+        if (changed.Count > 0)
+        {
+            await context.SaveChangesAsync(ct);
+            await credentials.InvalidateAsync(live.Where(c => changed.Contains(c.Id)).Select(c => c.SecretHash));
+            telemetry.TrackEvent("SpoolmanConnection_TierApplied", new Dictionary<string, string>
+            {
+                ["changed"] = changed.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Best-effort bookkeeping: a database failure here is reported to telemetry and swallowed,
+    /// because the caller is a websocket handshake whose credential is already accepted, and a
+    /// blip in a fair-use count must not cost the printer its socket. Only a cancelled request
+    /// propagates.
+    /// </summary>
+    public async Task<bool> RecordNetworkAsync(long userId, IPAddress address, CancellationToken ct)
+    {
+        int networks;
+        try
+        {
+            networks = await RecordSightingAsync(userId, address, ct);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            context.ChangeTracker.Clear();
+            telemetry.TrackEvent("SpoolmanFairUse_NetworkRecordFailed");
+            telemetry.TrackException(ex);
+            return false;
+        }
+
+        if (networks > _options.FairUseNetworkThreshold)
+        {
+            await AlertBestEffortAsync(userId, SpoolmanFairUseAlert.NetworkCountSignal,
+                $"Spoolman connections from more than {_options.FairUseNetworkThreshold} networks in the last 7 days.");
+        }
+        return true;
+    }
+
+    /// <summary>Records the sighting and returns the user's distinct networks in the last 7 days.</summary>
+    private async Task<int> RecordSightingAsync(long userId, IPAddress address, CancellationToken ct)
+    {
+        var hash = SpoolmanNetwork.Hash(address, NetworkKey());
+        var now = clock.GetUtcNow().UtcDateTime;
+        var weekAgo = now - TimeSpan.FromDays(7);
+
+        var expired = now - SpoolmanNetworkSighting.Retention;
+        await context.SpoolmanNetworkSightings
+            .Where(s => s.UserId == userId && s.LastSeenAt < expired)
+            .ExecuteDeleteAsync(ct);
+
+        var seen = await context.SpoolmanNetworkSightings
+            .Where(s => s.UserId == userId && s.NetworkHash == hash)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastSeenAt, now), ct);
+
+        var networks = await context.SpoolmanNetworkSightings
+            .CountAsync(s => s.UserId == userId && s.LastSeenAt >= weekAgo, ct);
+
+        // At the cap a new network adds no signal (the count is already past the threshold), so
+        // it is not stored. That bounds what a secret holder hopping networks can insert. The cap
+        // never sits at or below a configured threshold, or the alert could never fire.
+        var cap = Math.Max(SpoolmanNetworkSighting.MaxPerUserPerWeek, _options.FairUseNetworkThreshold + 1);
+        if (seen == 0 && networks < cap)
+        {
+            context.SpoolmanNetworkSightings.Add(new SpoolmanNetworkSighting
+            {
+                UserId = userId,
+                NetworkHash = hash,
+                FirstSeenAt = now,
+                LastSeenAt = now,
+            });
+            try
+            {
+                await context.SaveChangesAsync(ct);
+                networks++;
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent handshake from the same network inserted it first. Either row
+                // records the same fact.
+                context.ChangeTracker.Clear();
+            }
+        }
+
+        return networks;
+    }
+
+    private Task<bool> IsProAsync(long userId, CancellationToken ct) =>
+        context.Subscriptions.AnyAsync(s => s.UserId == userId && s.Status == SubscriptionStatus.Active, ct);
+
+    private byte[] NetworkKey()
+    {
+        if (string.IsNullOrWhiteSpace(_options.NetworkHashKey))
+        {
+            return ProcessNetworkKey;
+        }
+
+        try
+        {
+            return Convert.FromBase64String(_options.NetworkHashKey);
+        }
+        catch (FormatException)
+        {
+            logger.LogWarning("Spoolman:NetworkHashKey is not base64; using a per-process key.");
+            return ProcessNetworkKey;
+        }
+    }
+
+    /// <summary>
+    /// Emails the admin about a fair-use signal, at most once per user per signal per week.
+    /// Never blocks anything, and never fails the caller: the connection is already made, and a
+    /// mail outage must not turn into a failed connect.
+    ///
+    /// The cool-down is claimed before sending, with a conditional update or a unique insert, so
+    /// two requests crossing the threshold together send one email between them. A failed send
+    /// releases the claim, restoring the previous <c>LastSentAt</c> or deleting the row this call
+    /// inserted, so a mail outage does not silence the signal for a week.
+    /// </summary>
+    private async Task AlertBestEffortAsync(long userId, string signal, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(_options.AdminEmailAddress))
+        {
+            return;
+        }
+
+        // What to undo if the send fails: the claimed row, and its LastSentAt before the claim
+        // (null when this call inserted it).
+        (long Id, DateTime? Previous)? claim = null;
+        var now = clock.GetUtcNow().UtcDateTime;
+        try
+        {
+            var cutoff = now - SpoolmanFairUseAlert.Cooldown;
+
+            var existing = await context.SpoolmanFairUseAlerts
+                .Where(a => a.UserId == userId && a.Signal == signal)
+                .Select(a => new { a.Id, a.LastSentAt })
+                .SingleOrDefaultAsync(CancellationToken.None);
+            if (existing is not null)
+            {
+                if (existing.LastSentAt > cutoff)
+                {
+                    return; // inside the cool-down
+                }
+
+                // Conditional on the value just read, so of two requests claiming together only
+                // one matches the row.
+                var claimed = await context.SpoolmanFairUseAlerts
+                    .Where(a => a.Id == existing.Id && a.LastSentAt == existing.LastSentAt)
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, now), CancellationToken.None) > 0;
+                if (!claimed)
+                {
+                    return; // another request claimed it first
+                }
+                claim = (existing.Id, existing.LastSentAt);
+            }
+            else
+            {
+                var alert = new SpoolmanFairUseAlert { UserId = userId, Signal = signal, LastSentAt = now };
+                context.SpoolmanFairUseAlerts.Add(alert);
+                try
+                {
+                    await context.SaveChangesAsync(CancellationToken.None);
+                }
+                catch (DbUpdateException)
+                {
+                    context.ChangeTracker.Clear();
+                    return; // another request claimed it first
+                }
+                claim = (alert.Id, null);
+            }
+
+            var weekAgo = now - TimeSpan.FromDays(7);
+            var activeConnections = await context.SpoolmanConnections
+                .CountAsync(c => c.UserId == userId && c.RevokedAt == null && c.DisabledAt == null, CancellationToken.None);
+            var networks = await context.SpoolmanNetworkSightings
+                .CountAsync(s => s.UserId == userId && s.LastSeenAt >= weekAgo, CancellationToken.None);
+            var isPro = await IsProAsync(userId, CancellationToken.None);
+            var webBase = emailOptions.Value.WebBaseUrl?.TrimEnd('/');
+
+            var body = $@"Spoolman fair-use signal: {SecurityElement.Escape(reason)}<br>
+<br>
+User id: {userId}<br>
+Plan: {(isPro ? "Pro" : "Free")}<br>
+Active Spoolman connections: {activeConnections}<br>
+Distinct networks in the last 7 days: {networks}<br>
+User: {SecurityElement.Escape($"{webBase}/users/{userId}")}<br>
+<br>
+Nothing has been blocked. Contact the account holder before capping anything.<br>
+";
+            await emailSender.SendEmailAsync(_options.AdminEmailAddress, "3D Print Log: Spoolman fair-use alert", body);
+            telemetry.TrackEvent("SpoolmanFairUse_AlertSent", new Dictionary<string, string> { ["signal"] = signal });
+        }
+        catch (Exception ex)
+        {
+            telemetry.TrackEvent("SpoolmanFairUse_AlertFailed", new Dictionary<string, string> { ["signal"] = signal });
+            telemetry.TrackException(ex);
+            // A failed insert other than a unique-key loss would otherwise stay tracked and be
+            // retried by the next SaveChanges on this context.
+            context.ChangeTracker.Clear();
+            if (claim is { } held)
+            {
+                await ReleaseClaimBestEffortAsync(held.Id, held.Previous, now);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Undoes a cool-down claim whose email was never sent. Conditional on the row still holding
+    /// this call's claim, so it can never undo a later one.
+    /// </summary>
+    private async Task ReleaseClaimBestEffortAsync(long alertId, DateTime? previous, DateTime claimedAt)
+    {
+        try
+        {
+            var mine = context.SpoolmanFairUseAlerts.Where(a => a.Id == alertId && a.LastSentAt == claimedAt);
+            if (previous is { } restored)
+            {
+                await mine.ExecuteUpdateAsync(s => s.SetProperty(a => a.LastSentAt, restored), CancellationToken.None);
+            }
+            else
+            {
+                await mine.ExecuteDeleteAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            telemetry.TrackException(ex);
+        }
+    }
+
+    private Uri BaseUri(string requestOrigin)
+    {
+        var configured = string.IsNullOrWhiteSpace(_options.ServerUrl)
+            ? requestOrigin.TrimEnd('/') + "/spoolman"
+            : _options.ServerUrl;
+        return new Uri(configured);
+    }
+
+    private string ServerUrl(string requestOrigin, long printerId, string secret)
+    {
+        var uri = BaseUri(requestOrigin);
+        return $"{uri.Scheme}://printer-{printerId}:{secret}@{uri.Authority}{uri.AbsolutePath.TrimEnd('/')}";
+    }
+
+    /// <summary>
+    /// The Moonraker notifier's Apprise URL: <c>jsons</c> over https, <c>json</c> over http, with
+    /// the same userinfo as the server URL (Apprise sends it as HTTP Basic). The secret is
+    /// base64url, so it is safe unescaped in userinfo.
+    /// </summary>
+    private string NotifierUrl(string requestOrigin, long printerId, string secret)
+    {
+        var uri = BaseUri(requestOrigin);
+        var apprise = uri.Scheme == Uri.UriSchemeHttps ? "jsons" : "json";
+        return $"{apprise}://printer-{printerId}:{secret}@{uri.Authority}{uri.AbsolutePath.TrimEnd('/')}/notifier";
+    }
+
+    /// <summary>
+    /// Whether the printer has a printlog-bridge connection of any adapter kind
+    /// (<see cref="Connection.BridgeKinds"/>), live or stale: any bridge logs the printer's prints
+    /// itself, so a notifier would only duplicate them (printlog-bridge#82). Any registered one
+    /// counts, not only one seen in the last <see cref="Connection.StaleAfter"/>: the block is
+    /// pasted once and kept, so it should follow whether the printer runs the bridge, not whether
+    /// the bridge happened to be up at that moment. A bridge that is down for good is removed in
+    /// the web app (which deletes the row), and the next connect includes the notifier again.
+    /// </summary>
+    private Task<bool> HasBridgeAsync(long userId, long printerId, CancellationToken ct) =>
+        context.Connections.AnyAsync(c =>
+            c.UserId == userId && c.PrinterId == printerId && Connection.BridgeKinds.Contains(c.Kind), ct);
+
+    /// <summary>
+    /// Whether the printer is a Snapmaker U1: linked to the catalog model <c>snapmaker-u1</c>, or, for a
+    /// printer with no such link, by the same make and model rule as the web app's Spoolman panel.
+    /// The U1's stock Moonraker ships without <c>apprise</c>, so a <c>[notifier]</c> section fails
+    /// to load ("failed plugins: notifier") and logs nothing: the U1 logs prints with
+    /// printlog-bridge instead.
+    /// </summary>
+    private static bool IsSnapmakerU1(string? catalogModelId, string? make, string? model) =>
+        string.Equals(catalogModelId, SnapmakerU1CatalogId, StringComparison.OrdinalIgnoreCase)
+        || IsSnapmakerU1ByName(make, model);
+
+    /// <summary>The printer catalog id of the Snapmaker U1.</summary>
+    private const string SnapmakerU1CatalogId = "snapmaker-u1";
+
+    private static bool IsSnapmakerU1ByName(string? make, string? model) =>
+        make?.Contains("snapmaker", StringComparison.OrdinalIgnoreCase) == true
+        && model is not null
+        && U1Model().IsMatch(model);
+
+    [GeneratedRegex(@"\bu1\b", RegexOptions.IgnoreCase)]
+    private static partial Regex U1Model();
+
+    /// <summary>
+    /// The <c>moonraker.conf</c> text to paste: <c>[spoolman]</c>, plus the
+    /// <c>[notifier 3d_print_log]</c> that logs prints when <paramref name="notifierUrl"/> is
+    /// given. It is null for a printer with printlog-bridge, which logs its prints itself: the
+    /// notifier's events would be dropped while the bridge is live, could duplicate its prints
+    /// while it is stale, and the bridge tells the user to delete any notifier that posts here.
+    /// </summary>
+    private static string ConfigBlock(string serverUrl, string? notifierUrl)
+    {
+        var spoolman = $"[spoolman]\nserver: {serverUrl}\n";
+        if (notifierUrl is null)
+        {
+            return spoolman;
+        }
+
+        return spoolman + "\n"
+            + "[notifier 3d_print_log]\n"
+            + $"url: {notifierUrl}\n"
+            + "events: started, complete, error, cancelled\n"
+            + "body:\n"
+            + "    {% set payload = {\"event_name\": event_name} %}\n"
+            + "    {% do payload.update(event_args[1]) %}\n"
+            + "    { payload|tojson }\n";
+    }
+
+    private static T Fill<T>(T dto, SpoolmanConnection connection, string? printerName) where T : SpoolmanConnectionDto
+    {
+        dto.Id = connection.Id;
+        dto.PrinterId = connection.PrinterId;
+        dto.PrinterName = connection.PrinterId.HasValue ? printerName : null;
+        dto.Name = connection.Name;
+        dto.CreatedDate = connection.CreatedDate;
+        dto.LastSeenAt = connection.LastSeenAt;
+        dto.DisabledAt = connection.DisabledAt;
+        dto.DisabledReason = connection.DisabledReason;
+        dto.RevokedAt = connection.RevokedAt;
+        dto.State = connection.RevokedAt.HasValue
+            ? SpoolmanConnectionDto.RevokedState
+            : connection.DisabledAt.HasValue ? SpoolmanConnectionDto.DisabledState : SpoolmanConnectionDto.ActiveState;
+        return dto;
+    }
+
+    private static string Truncate(string value, int length) => value.Length <= length ? value : value[..length];
+}

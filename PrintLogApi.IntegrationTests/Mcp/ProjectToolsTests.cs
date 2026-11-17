@@ -1,5 +1,7 @@
 ﻿using System.Text.Json;
 using ModelContextProtocol.Protocol;
+using PrintLogApi.IntegrationTests.Support;
+using PrintLogApi.Mcp;
 using Xunit;
 
 namespace PrintLogApi.IntegrationTests.Mcp;
@@ -187,5 +189,363 @@ public class ProjectToolsTests : IClassFixture<McpDataWebApplicationFactory>
             });
 
         Assert.Equal("not_found", code);
+    }
+
+    // ---------------------------------------------------------------------
+    // Project start / finish dates
+    // ---------------------------------------------------------------------
+
+    private static string NewKey() => $"key-{Guid.NewGuid():N}";
+
+    // A project with no prints derives its start date as TODAY, so a finish-only override must
+    // be in the future or validation correctly rejects it as an inverted range. Computed rather
+    // than hardcoded so these tests do not rot into the past.
+    private static string FutureDay(int offsetDays = 0) =>
+        DateTime.UtcNow.AddYears(1).AddDays(offsetDays).ToString("yyyy-MM-dd");
+
+    /// <summary>
+    /// Calls a tool and parses its single text block as JSON. Driving these through
+    /// CallToolAsync rather than the C# methods is the point: it proves DateOnly survives the
+    /// real JSON boundary in both directions, which a direct method call would not.
+    /// </summary>
+    private async Task<JsonDocument> CallJsonAsync(
+        string tool, Dictionary<string, object?> args)
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var result = await client.CallToolAsync(tool, args, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(result.IsError != true, $"{tool} returned an error: " +
+            string.Join(" ", result.Content.OfType<TextContentBlock>().Select(c => c.Text)));
+        return JsonDocument.Parse(result.Content.OfType<TextContentBlock>().First().Text);
+    }
+
+    private async Task AssertToolErrorAsync(string tool, Dictionary<string, object?> args)
+    {
+        await using var client = await _factory.ConnectAsync(IntegrationTestSeeder.TestUserOAuthId, ReadWrite);
+        var result = await client.CallToolAsync(tool, args, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(result.IsError == true, $"expected {tool} to fail but it succeeded");
+    }
+
+    [Fact]
+    public async Task CreateProject_WithDates_PersistsAndEchoesThem()
+    {
+        using var doc = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"dated-{Guid.NewGuid():N}",
+            ["startDate"] = "2026-02-01",
+            ["finishDate"] = "2026-03-01",
+            ["idempotencyKey"] = NewKey(),
+        });
+
+        var project = doc.RootElement.GetProperty("project");
+        Assert.Equal("2026-02-01", project.GetProperty("startDate").GetString());
+        Assert.Equal("2026-03-01", project.GetProperty("finishDate").GetString());
+    }
+
+    [Fact]
+    public async Task CreateProject_SameKeyDifferentStartDate_Conflicts()
+    {
+        var key = NewKey();
+        var name = $"conf-{Guid.NewGuid():N}";
+        using var _ = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = key,
+        });
+
+        await AssertToolErrorAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["startDate"] = "2026-02-02",
+            ["idempotencyKey"] = key,
+        });
+    }
+
+    [Fact]
+    public async Task CreateProject_SameKeyDifferentFinishDate_Conflicts()
+    {
+        var key = NewKey();
+        var name = $"conf2-{Guid.NewGuid():N}";
+        using var _ = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["finishDate"] = FutureDay(),
+            ["idempotencyKey"] = key,
+        });
+
+        await AssertToolErrorAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["finishDate"] = FutureDay(1),
+            ["idempotencyKey"] = key,
+        });
+    }
+
+    [Fact]
+    public async Task CreateProject_SameKeySameDates_Replays()
+    {
+        var key = NewKey();
+        var name = $"replay-{Guid.NewGuid():N}";
+        var args = new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = key,
+        };
+
+        using var first = await CallJsonAsync("create_project", args);
+        using var second = await CallJsonAsync("create_project", args);
+
+        Assert.True(second.RootElement.GetProperty("wasReplayed").GetBoolean());
+        Assert.Equal(
+            first.RootElement.GetProperty("project").GetProperty("projectId").GetString(),
+            second.RootElement.GetProperty("project").GetProperty("projectId").GetString());
+    }
+
+    /// <summary>
+    /// A date-less create must still replay against a fingerprint recorded BEFORE the date
+    /// fields existed. Appending two "absent" flags unconditionally would change the hashed
+    /// bytes and turn every such retry into a spurious conflict.
+    /// </summary>
+    [Fact]
+    public async Task CreateProject_WithoutDates_StillReplaysOnTheSameKey()
+    {
+        var key = NewKey();
+        var name = $"legacy-{Guid.NewGuid():N}";
+        var args = new Dictionary<string, object?> { ["name"] = name, ["idempotencyKey"] = key };
+
+        using var first = await CallJsonAsync("create_project", args);
+        using var second = await CallJsonAsync("create_project", args);
+
+        Assert.True(second.RootElement.GetProperty("wasReplayed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task UpdateProject_SetsDates()
+    {
+        using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"upd-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
+        });
+        var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
+
+        using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["startDate"] = "2026-02-01",
+            ["finishDate"] = "2026-03-01",
+        });
+
+        Assert.Equal("2026-02-01", updated.RootElement.GetProperty("startDate").GetString());
+        Assert.Equal("2026-03-01", updated.RootElement.GetProperty("finishDate").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateProject_ClearStartDate_ReturnsToAutomatic()
+    {
+        using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"clr-{Guid.NewGuid():N}",
+            ["startDate"] = "2026-02-01",
+            ["idempotencyKey"] = NewKey(),
+        });
+        var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
+
+        using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["clearStartDate"] = true,
+        });
+
+        // No prints, so it falls back to the project's creation date.
+        Assert.Equal(
+            DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            updated.RootElement.GetProperty("startDate").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateProject_ClearFinishDate_ReturnsToAutomatic()
+    {
+        using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"clrf-{Guid.NewGuid():N}",
+            ["finishDate"] = FutureDay(),
+            ["idempotencyKey"] = NewKey(),
+        });
+        var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
+
+        using var updated = await CallJsonAsync("update_project", new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["clearFinishDate"] = true,
+        });
+
+        // An automatic finish date on a project with no dated prints has no value at all. The
+        // serializer omits null members rather than emitting an explicit null, so "absent" is
+        // the wire contract a client sees — accept either, reject an actual date.
+        var hasFinish = updated.RootElement.TryGetProperty("finishDate", out var finish);
+        Assert.True(!hasFinish || finish.ValueKind == JsonValueKind.Null,
+            $"expected no finish date, got {(hasFinish ? finish.ToString() : "<absent>")}");
+    }
+
+    [Fact]
+    public async Task UpdateProject_DateAndItsClearFlagTogether_IsRejected()
+    {
+        using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"rej-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
+        });
+        var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
+
+        await AssertToolErrorAsync("update_project", new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["startDate"] = "2026-02-01",
+            ["clearStartDate"] = true,
+        });
+    }
+
+    [Fact]
+    public async Task UpdateProject_RejectsInvertedDates()
+    {
+        using var created = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"inv-{Guid.NewGuid():N}",
+            ["idempotencyKey"] = NewKey(),
+        });
+        var id = created.RootElement.GetProperty("project").GetProperty("projectId").GetGuid();
+
+        await AssertToolErrorAsync("update_project", new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["startDate"] = "2026-05-01",
+            ["finishDate"] = "2026-04-01",
+        });
+    }
+
+    [Fact]
+    public async Task CreateProject_RejectsInvertedDates()
+    {
+        await AssertToolErrorAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = $"cinv-{Guid.NewGuid():N}",
+            ["startDate"] = "2026-05-01",
+            ["finishDate"] = "2026-04-01",
+            ["idempotencyKey"] = NewKey(),
+        });
+    }
+
+    [Fact]
+    public async Task ListProjects_ResolvesDatesFromPrints()
+    {
+        // Seeds a project with KNOWN prints and asserts the exact resolved dates. Asserting
+        // only that startDate is date-shaped would pass just as happily on the creation-date
+        // fallback, which is the bug this is meant to catch.
+        var name = $"list-{Guid.NewGuid():N}";
+        await ProjectDateSeedHelpers.SeedProjectWithPrintsAsync(
+            _factory, IntegrationTestSeeder.TestUserId, name);
+
+        using var page = await CallJsonAsync("list_projects", new Dictionary<string, object?>
+        {
+            ["search"] = name,
+        });
+
+        var items = page.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var item = Assert.Single(items, i => i.GetProperty("name").GetString() == name);
+
+        // Prints run 2026-03-02 (4 days) and 2026-03-05 (1 hour): the LONG one finishes last.
+        Assert.Equal("2026-03-02", item.GetProperty("startDate").GetString());
+        Assert.Equal("2026-03-06", item.GetProperty("finishDate").GetString());
+    }
+
+    [Fact]
+    public async Task ListProjects_HonorsAStartOverrideRatherThanThePrintDates()
+    {
+        var name = $"list-ovr-{Guid.NewGuid():N}";
+        var projectId = await ProjectDateSeedHelpers.SeedProjectWithPrintsAsync(
+            _factory, IntegrationTestSeeder.TestUserId, name);
+        await ProjectDateSeedHelpers.SetStartOverrideAsync(
+            _factory, projectId, new DateOnly(2026, 1, 1));
+
+        using var page = await CallJsonAsync("list_projects", new Dictionary<string, object?>
+        {
+            ["search"] = name,
+        });
+
+        var items = page.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var item = Assert.Single(items, i => i.GetProperty("name").GetString() == name);
+
+        Assert.Equal("2026-01-01", item.GetProperty("startDate").GetString());
+        // The finish stays derived — the two overrides are independent.
+        Assert.Equal("2026-03-06", item.GetProperty("finishDate").GetString());
+    }
+
+    /// <summary>
+    /// A keyed create that was valid when it was first made must still REPLAY later, even if
+    /// the same arguments would no longer pass validation.
+    /// </summary>
+    /// <remarks>
+    /// Validation of a create with no start override resolves the start from "now", so a
+    /// finish-only override drifts out of validity as soon as the clock passes it. Validating
+    /// before the idempotency lookup meant a legitimate retry of an already-created project
+    /// came back as an invalid-argument error instead of the original project — the retry
+    /// safety the key exists to provide, lost precisely when a caller needs it.
+    ///
+    /// Seeds the stored record directly rather than waiting for midnight: a finish date in the
+    /// past is invalid for a NEW project today, which is the same condition a cross-midnight
+    /// retry hits.
+    /// </remarks>
+    [Fact]
+    public async Task CreateProject_ReplaysEvenWhenTheArgumentsAreNoLongerValid()
+    {
+        var name = $"stale-{Guid.NewGuid():N}";
+        var key = NewKey();
+        var staleFinish = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-5);
+
+        Guid projectId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            var userId = context.Users.Single(u => u.OAuthUserId == IntegrationTestSeeder.TestUserOAuthId).Id;
+
+            var project = new Models.Project
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Status = Models.Project.ProjectStatus.InProgress,
+                ViewStatus = Models.Project.ProjectViewStatus.Private,
+                FinishDateOverride = staleFinish,
+                CreatedById = userId,
+                UpdatedById = userId,
+            };
+            context.Projects.Add(project);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            projectId = project.Id;
+
+            // The fingerprint the original create would have recorded for these arguments.
+            var fingerprint = McpRequestFingerprint.ComputeCreateProject(
+                name, null, null, null,
+                Models.Project.ProjectStatus.InProgress,
+                Models.Project.ProjectViewStatus.Private,
+                null, staleFinish);
+
+            context.McpIdempotencyRecords.Add(
+                McpIdempotencyRecordFactory.ForProject(userId, key, fingerprint, projectId));
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var doc = await CallJsonAsync("create_project", new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["finishDate"] = staleFinish.ToString("yyyy-MM-dd"),
+            ["idempotencyKey"] = key,
+        });
+
+        Assert.True(doc.RootElement.GetProperty("wasReplayed").GetBoolean());
+        Assert.Equal(
+            projectId.ToString(),
+            doc.RootElement.GetProperty("project").GetProperty("projectId").GetString());
     }
 }

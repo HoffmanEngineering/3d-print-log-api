@@ -20,6 +20,14 @@ public class BlobUploadResult
     public Uri BlobUri { get; set; } = null!;
 }
 
+/// <summary>A blob opened for reading, and its full length in bytes.</summary>
+/// <remarks>The caller owns <see cref="Content"/> and must dispose it.</remarks>
+public sealed record BlobContent(Stream Content, long Length);
+
+/// <summary>One blob in a container listing, with its metadata.</summary>
+public sealed record StoredBlob(
+    string Name, DateTimeOffset? LastModified, long? Length, IReadOnlyDictionary<string, string> Metadata);
+
 /// <summary>
 /// Service for managing blob storage operations (file uploads).
 /// </summary>
@@ -33,6 +41,19 @@ public interface IBlobStorageService
     /// <param name="stream">The file stream to upload</param>
     /// <returns>Upload result containing blob path and URI</returns>
     Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream);
+
+    /// <summary>
+    /// Uploads a file stream with blob metadata (names must be valid C# identifiers, values
+    /// ASCII). Overwrites an existing blob, metadata included.
+    /// </summary>
+    Task<BlobUploadResult> UploadAsync(
+        string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata);
+
+    /// <summary>
+    /// Every blob in a container, with its metadata; nothing when the container does not exist.
+    /// For tools (the image backfill's transparency repair). No request path lists a container.
+    /// </summary>
+    IAsyncEnumerable<StoredBlob> ListBlobsAsync(string containerName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates a time-limited SAS URL that allows a client to PUT a file directly to Azure Blob Storage.
@@ -74,6 +95,24 @@ public interface IBlobStorageService
     /// Returns null if the blob does not exist.
     /// </summary>
     Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName);
+
+    /// <summary>
+    /// Opens a blob for streaming to a response, without buffering it and without a separate
+    /// existence check. Returns null if the blob does not exist.
+    /// </summary>
+    /// <param name="seekable">
+    /// True when the caller needs to seek (a range request). That costs a properties read
+    /// before the first byte; otherwise the stream is a single forward-only download.
+    /// </param>
+    Task<BlobContent?> OpenReadAsync(
+        string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The blob's length in bytes, read from storage, or null if the blob does not exist. For a
+    /// blob a client wrote through a SAS URL, which cannot bound its size, this is the only
+    /// trustworthy figure.
+    /// </summary>
+    Task<long?> GetBlobLengthAsync(string containerName, string blobName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a blob from storage. Does nothing if the blob does not exist.

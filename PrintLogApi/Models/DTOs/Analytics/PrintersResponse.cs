@@ -6,6 +6,9 @@ namespace PrintLogApi.Models.DTOs.Analytics;
 /// One printer's figures for the window. IsIdle is true when the printer produced nothing in
 /// range — returned as a row rather than omitted, because "this printer did nothing" is the
 /// most actionable line on the tab and a missing row says it silently.
+///
+/// <para>MaterialMl (#294) is the printer's resin in milliliters: only usage recorded as a volume.
+/// MaterialMg still counts everything, resin included by density; the two are never added.</para>
 /// </summary>
 public sealed record PrinterRow(
     long PrinterId,
@@ -19,7 +22,8 @@ public sealed record PrinterRow(
     decimal? Cost,
     decimal? MaintenanceCost,
     double? UtilizationPercent,
-    double? CostPerPrintHour);
+    double? CostPerPrintHour,
+    double MaterialMl);
 
 /// <summary>Keyed by printer id as a string so it serializes as a JSON object, not an array.</summary>
 public sealed record PrinterSeriesBucket(

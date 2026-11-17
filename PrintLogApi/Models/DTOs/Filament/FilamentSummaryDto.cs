@@ -3,12 +3,19 @@ using PrintLogApi.Enums;
 using PrintLogApi.Models.DTOs.MaterialCategory;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Services;
+using static PrintLogApi.Models.Filament;
 
 namespace PrintLogApi.Models.DTOs.Filament;
 
 public class FilamentSummaryDto
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// The user's own number for this spool (1, 2, 3…), which Spoolman clients use as its id.
+    /// Read-only: assigned on create, never reused, and ignored on PUT.
+    /// </summary>
+    public int? SpoolNumber { get; set; }
 
     /// <summary>
     /// Common name for the roll of filament.
@@ -30,6 +37,12 @@ public class FilamentSummaryDto
     /// The material category (ie, filament, resin, etc).
     /// </summary>
     public MaterialCategoryDto? MaterialCategory { get; set; }
+
+    /// <summary>
+    /// The measurement this spool or bottle is tracked in (1 Weight, 2 Length, 3 Volume): a resin
+    /// bottle is Volume. Read-only here: ignored when this DTO is mapped back to a filament.
+    /// </summary>
+    public SourceMeasurement? Source { get; set; }
 
     /// <summary>
     /// The Density of the Material

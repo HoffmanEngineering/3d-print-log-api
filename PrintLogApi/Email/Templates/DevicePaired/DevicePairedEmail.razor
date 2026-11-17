@@ -1,0 +1,31 @@
+@* A security notice (api#287): which device, when, what it can do, and where to revoke it. The
+   device chose its own name, so it appears only here, as encoded text in a panel, and never in
+   the subject or headline. No supporter line, no images beyond the layout's. *@
+<EmailLayout Title="@DevicePairedTemplates.Subject(Model)" Kicker="Security notice" Headline="@Headline" Preheader="@DevicePairedTemplates.IfNotYou" Footer="Footer">
+    <p style="margin:0 0 16px 0;">@EmailFormat.Greeting(Model.Name)</p>
+    <p style="margin:0 0 20px 0;">@DevicePairedTemplates.Intro(Model)</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0;">
+        <tr>
+            <td class="em-panel" style="padding:16px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px;line-height:22px;">
+                <div><strong>Device:</strong> @Model.DeviceName</div>
+                <div><strong>Paired:</strong> @Model.When</div>
+                @if (Model.IpAddress is { } ip)
+                {
+                    <div><strong>From IP address:</strong> @ip</div>
+                }
+                <div><strong>It can:</strong> @Model.Permissions</div>
+            </td>
+        </tr>
+    </table>
+    <p style="margin:0 0 8px 0;">@DevicePairedTemplates.IfYou</p>
+    <p style="margin:0;">@DevicePairedTemplates.IfNotYou</p>
+    <EmailButton Href="@Model.ReviewUrl" Text="@DevicePairedTemplates.ButtonLabel" />
+</EmailLayout>
+
+@code {
+    [Parameter, EditorRequired] public DevicePairedModel Model { get; set; } = default!;
+
+    [Parameter, EditorRequired] public EmailFooterModel Footer { get; set; } = default!;
+
+    private string Headline => Model.Repaired ? "A device was paired again" : "A new device was paired";
+}
