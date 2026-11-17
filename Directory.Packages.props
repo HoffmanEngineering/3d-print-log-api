@@ -34,7 +34,7 @@
 
   <!-- Application dependencies. -->
   <ItemGroup>
-    <PackageVersion Include="AutoMapper" Version="16.1.1" />
+    <PackageVersion Include="AutoMapper" Version="16.3.0" />
     <PackageVersion Include="AWSSDK.SimpleEmailV2" Version="4.0.106.1" />
     <PackageVersion Include="AWSSDK.SimpleNotificationService" Version="4.0.100.16" />
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.30.1" />
