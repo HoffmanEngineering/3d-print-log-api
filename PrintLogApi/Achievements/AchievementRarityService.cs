@@ -28,7 +28,7 @@ public sealed class RarityTable
 
 /// <summary>
 /// "Earned by 9% of makers". Computed by one grouped query and cached for an hour through
-/// HybridCache (see AGENTS.md, Caching): rarity drifts slowly, and a stale hour costs nothing.
+/// HybridCache (see docs/agents/caching.md): rarity drifts slowly, and a stale hour costs nothing.
 /// </summary>
 public sealed class AchievementRarityService(HybridCache cache, CachedComputation computation)
 {

@@ -7,7 +7,7 @@ namespace PrintLogApi.Services.PublicPrints;
 
 /// <summary>
 /// The public print index behind <c>GET api/Prints/public</c> and <c>public/sitemap</c>, read
-/// once per <see cref="Lifetime"/> through HybridCache (see AGENTS.md, Caching). That read took
+/// once per <see cref="Lifetime"/> through HybridCache (see docs/agents/caching.md). That read took
 /// 60 s and more on the production database while it scanned Prints (api#309); crawlers and the
 /// sitemap generator ask for it far more often than it changes, and both endpoints are anonymous,
 /// so a print made public or private shows up within ten minutes, like the five minutes of

@@ -88,7 +88,7 @@ jobs:
       #
       # DOTNET_USE_POLLING_FILE_WATCHER: every test host's JSON configuration source starts its own
       # file watcher, one inotify instance each, and the runner allows 128. From 2026-11-15 the
-      # suite hit that limit and ~1,850 tests failed with IOException (see AGENTS.md, "inotify
+      # suite hit that limit and ~1,850 tests failed with IOException (see docs/agents/testing.md, "inotify
       # limits"). Polling watchers use no inotify instances; the suite never edits config files.
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal

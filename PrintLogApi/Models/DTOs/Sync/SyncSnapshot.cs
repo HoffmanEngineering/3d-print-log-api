@@ -3,7 +3,7 @@
 /// <summary>
 /// Everything a home-automation client renders, in one response (#234). Built server-side only,
 /// so the positional parameters are the contract, and the parameter docs below are the field
-/// rules. AGENTS.md ("Integration polling") has the caching reasoning. Assembled per request from
+/// rules. docs/agents/integration-polling.md has the caching reasoning. Assembled per request from
 /// cached parts; the printers and spools lists may be shared with the cache, so treat them as
 /// read-only.
 /// </summary>

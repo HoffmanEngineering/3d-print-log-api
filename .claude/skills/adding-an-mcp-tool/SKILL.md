@@ -40,7 +40,7 @@ the gotchas. `CLAUDE.md` holds the endpoint-level authorization topology.
    filter/validation rule, and invalid input → error.
 6. **Public skill** — if the tool changes how an agent should work (a new workflow, a renamed
    parameter, a new guardrail), update `skills/3d-print-log/SKILL.md`. `AgentSkillTests` fails on
-   any tool or argument the skill names that no longer exists. See AGENTS.md for the UI mirror.
+   any tool or argument the skill names that no longer exists. See docs/agents/mcp.md for the UI mirror.
 
 ## Extra steps for a WRITE tool
 

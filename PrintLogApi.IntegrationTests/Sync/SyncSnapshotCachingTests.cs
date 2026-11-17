@@ -163,7 +163,7 @@ public class SyncSnapshotCachingTests(SyncTestFactory factory) : IClassFixture<S
     /// <summary>
     /// A heavy but realistic account: 300 spools (most with two colors and a storage location),
     /// six printers with loaded slots. Its cached core is what the shared 8 MiB budget is charged,
-    /// so the figure is noted in CacheBudget and AGENTS.md.
+    /// so the figure is noted in CacheBudget and docs/agents/integration-polling.md.
     /// </summary>
     [Fact]
     public async Task RealisticCore_StaysWellInsideTheBudget()
