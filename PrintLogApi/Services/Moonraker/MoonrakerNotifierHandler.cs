@@ -105,7 +105,7 @@ public class MoonrakerNotifierHandler(
             throw new Exception("Invalid PrinterId");
         }
 
-        var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename);
+        var filenameWithoutExtension = Path.GetFileNameWithoutExtension(data.Filename) ?? "";
         var filenameWithExtension = Path.GetFileName(data.Filename) ?? "";
 
         var splitFilename = filenameWithoutExtension.Humanize();
