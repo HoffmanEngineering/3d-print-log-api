@@ -85,10 +85,16 @@ jobs:
 
       # OPENAPI_DOCUMENT_OUTPUT makes OpenApiDocumentTests write the generated document, so the
       # lint below reads exactly what the app serves rather than a copy that could drift.
+      #
+      # DOTNET_USE_POLLING_FILE_WATCHER: every test host's JSON configuration source starts its own
+      # file watcher, one inotify instance each, and the runner allows 128. From 2026-11-15 the
+      # suite hit that limit and ~1,850 tests failed with IOException (see AGENTS.md, "inotify
+      # limits"). Polling watchers use no inotify instances; the suite never edits config files.
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
         env:
           OPENAPI_DOCUMENT_OUTPUT: ${{ runner.temp }}/openapi.json
+          DOTNET_USE_POLLING_FILE_WATCHER: 'true'
 
       # Agents build function-calling tools from this document, and production once served an
       # invalid one (duplicate operationIds, illegal component names; #126). Fails on errors only;

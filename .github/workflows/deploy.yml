@@ -30,8 +30,12 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      # Polling file watchers: the test hosts otherwise exhaust the runner's 128 inotify instances
+      # (see the Test step in ci.yml).
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+        env:
+          DOTNET_USE_POLLING_FILE_WATCHER: 'true'
 
       - name: Publish app
         run: dotnet publish PrintLogApi/PrintLogApi.csproj --configuration Release --output ./publish
