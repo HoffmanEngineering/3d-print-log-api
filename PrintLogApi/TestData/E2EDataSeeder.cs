@@ -24,6 +24,19 @@ public static class E2EDataSeeder
         };
         context.Users.Add(user);
         context.SaveChanges();
+
+        // Achievement celebrations open a modal for big moments (the launch summary, a first
+        // print), and its backdrop would cover whatever the next Cypress step clicks. Specs about
+        // other features run with celebrations off; a spec that tests celebrations turns them on.
+        context.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            UserSettingTypeId = 18, // Achievements_Celebrations
+            Value = "off",
+            CreatedById = user.Id,
+            UpdatedById = user.Id,
+        });
+        context.SaveChanges();
         return user;
     }
 

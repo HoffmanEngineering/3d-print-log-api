@@ -1,0 +1,9 @@
+{
+    "name": "blacklist",
+    "machine_model_list": [
+        {
+            "name": "Blocked Printer",
+            "sub_path": "machine/Blocked Printer.json"
+        }
+    ]
+}

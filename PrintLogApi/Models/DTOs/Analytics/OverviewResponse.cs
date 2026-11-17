@@ -15,13 +15,18 @@ public sealed record OverviewHighlights(
     HighlightRef? LongestPrint,
     HighlightRef? PriciestPrint);
 
+/// <summary>
+/// FilamentMl (#294) is the resin used, in milliliters: only usage recorded as a volume, beside
+/// FilamentGrams (which still counts everything, resin included, by density) and never added to it.
+/// </summary>
 public sealed record OverviewTiles(
     Metric PrintCount,
     Metric SuccessRatePercent,
     Metric FilamentGrams,
     Metric PrintTimeSeconds,
     MoneyMetric TotalCost,
-    Metric AvgPrintTimeSeconds);
+    Metric AvgPrintTimeSeconds,
+    Metric FilamentMl);
 
 // [ImmutableObject(true)] is read by HybridCache: it permits the cached instance to be
 // shared from L1 rather than deserialized per hit. The record'''s own members are init-only,

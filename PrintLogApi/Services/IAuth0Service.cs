@@ -23,6 +23,26 @@ public interface IAuth0Service
     Task<string?> GetUserEmail(string oauthUserId, CancellationToken ct);
 
     /// <summary>
+    /// The user's email address and whether Auth0 considers it verified, or null when Auth0
+    /// returns no body. Throws <see cref="Exceptions.Auth0ApiException"/> on failure.
+    /// </summary>
+    Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, CancellationToken ct);
+
+    /// <summary>
+    /// The <c>picture</c> on the user's Auth0 profile (Gravatar or the social provider's avatar),
+    /// or null when it has none. The web app sets it as the profile picture at first sign-in, and
+    /// this is how the API checks that a submitted URL really is that picture. Throws
+    /// <see cref="Exceptions.Auth0ApiException"/> on failure; callers degrade.
+    /// </summary>
+    Task<string?> GetUserPicture(string oauthUserId, CancellationToken ct);
+
+    /// <summary>
+    /// Asks Auth0 to send the user a verification email. Throws
+    /// <see cref="Exceptions.Auth0ApiException"/> on any non-success response (including 429).
+    /// </summary>
+    Task SendVerificationEmail(string oauthUserId, CancellationToken ct);
+
+    /// <summary>
     /// Lists the user's Auth0 grants for the dedicated MCP audience that include the
     /// read:printdata scope, across all pages. Used to show and revoke connected AI agents.
     /// </summary>
@@ -35,3 +55,5 @@ public interface IAuth0Service
     /// </summary>
     Task RevokeMcpGrant(string authUserId, string grantId, CancellationToken ct);
 }
+
+public sealed record Auth0EmailStatus(string? Email, bool EmailVerified);

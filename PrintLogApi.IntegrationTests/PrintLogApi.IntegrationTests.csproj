@@ -32,6 +32,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="NJsonSchema" />
     <PackageReference Include="xunit.v3" />
     <!-- MTP's code-coverage extension, the replacement for the coverlet.collector datacollector.
          Deliberately without PrivateAssets=all: it registers the coverage command-line options on
@@ -48,6 +49,38 @@
   <ItemGroup>
     <None Include="..\tests-fixtures\cost-fixtures.json" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\cost-fixtures.json" />
     <None Include="..\tests-fixtures\exif-orientation-6.jpg" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\exif-orientation-6.jpg" />
+    <!-- GIF (two frames) and BMP images in the formats older uploads accepted (ImageBackfillTests). -->
+    <None Include="..\tests-fixtures\legacy-animated.gif" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\legacy-animated.gif" />
+    <None Include="..\tests-fixtures\legacy.bmp" CopyToOutputDirectory="PreserveNewest" Link="tests-fixtures\legacy.bmp" />
+    <!-- Notifier and OctoPrint webhook bodies in the shape real traffic has (PrintEventPipelineTests). -->
+    <None Include="..\tests-fixtures\print-events\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\print-events" />
+    <!-- Raw tag dumps (signature region zeroed) for the spool tag decoders. -->
+    <None Include="..\tests-fixtures\spool-tags\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\spool-tags" />
+    <!-- Settings blocks cut from the slicer parser library's fixtures, and the uploader's own
+         dry-run note for each (PrintsControllerSlicerSettingsTests). -->
+    <None Include="..\tests-fixtures\slicer-settings\*.txt" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\slicer-settings" />
+    <!-- A minimal Cura tree and Orca profile folder for the printer catalog generator
+         (CatalogGeneratorTests). Facts-shaped stand-ins, not copies of real profiles. -->
+    <None Include="..\tests-fixtures\printer-catalog\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="tests-fixtures\printer-catalog" />
+    <!-- The hand-maintained overrides, so PrinterCatalogGoldenTests can check that every exception carries a note. -->
+    <None Include="..\PrintLogApi\PrinterCatalog\catalog-overrides.json" CopyToOutputDirectory="PreserveNewest" Link="printer-catalog-data\catalog-overrides.json" />
+    <!-- Every achievement key ever shipped; AchievementCatalogTests fails if one disappears. -->
+    <None Update="Achievements\ShippedAchievementKeys.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Approved email renderings; see Email/Golden/GoldenFile.cs for how to update them. -->
+    <None Update="Email\Golden\**\*.approved.*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The MCP Registry listing and the schema it must satisfy; see ServerJsonTests. -->
+    <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Registry\server.json" />
+    <None Update="Mcp\Registry\server.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The agent skill and the plugin manifests that bundle it; see AgentSkillTests and
+         PluginManifestTests. server.json is copied alongside so the endpoints can be compared. -->
+    <None Include="..\skills\**\*" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\skills\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\plugin.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\plugin.json" />
+    <None Include="..\mcp.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\mcp.json" />
+    <None Include="..\.claude-plugin\marketplace.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\marketplace.json" />
+    <None Include="..\server.json" CopyToOutputDirectory="PreserveNewest" Link="Mcp\Plugin\server.json" />
+    <None Update="Mcp\Plugin\*.schema.*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The sealed-credential test vectors the bridge and the web app copy (printlog-bridge#100). -->
+    <None Include="..\docs\bridge-credential-sealing.vectors.json" CopyToOutputDirectory="PreserveNewest" Link="Bridges\bridge-credential-sealing.vectors.json" />
   </ItemGroup>
 
 </Project>

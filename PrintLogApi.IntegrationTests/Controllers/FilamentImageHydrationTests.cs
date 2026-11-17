@@ -210,7 +210,7 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
     [Fact]
     public async Task FilamentList_ClampsPageSize()
     {
-        // PagedRequest.PageSize is an unconstrained int passed straight to Take().
+        // Clamped twice: PagedRequest to 250 (#314), then FilamentService to 100.
         var resp = await _client.SendAsync(
             AuthenticatedRequest(HttpMethod.Get, "/api/Filaments?pageSize=100000"),
             TestContext.Current.CancellationToken);
@@ -263,6 +263,13 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
         public Task<BlobUploadResult> UploadAsync(string containerName, string blobName, Stream stream)
             => _inner.UploadAsync(containerName, blobName, stream);
 
+        public Task<BlobUploadResult> UploadAsync(
+            string containerName, string blobName, Stream stream, IReadOnlyDictionary<string, string> metadata)
+            => _inner.UploadAsync(containerName, blobName, stream, metadata);
+
+        public IAsyncEnumerable<StoredBlob> ListBlobsAsync(string containerName, CancellationToken cancellationToken = default)
+            => _inner.ListBlobsAsync(containerName, cancellationToken);
+
         public Task<Uri> GenerateSasUploadUrlAsync(string containerName, string blobName, TimeSpan expiry)
             => _inner.GenerateSasUploadUrlAsync(containerName, blobName, expiry);
 
@@ -278,6 +285,12 @@ public class FilamentImageHydrationTests(CustomWebApplicationFactory factory)
 
         public Task<(Stream stream, string fileName)?> DownloadAsync(string containerName, string blobName)
             => _inner.DownloadAsync(containerName, blobName);
+
+        public Task<BlobContent?> OpenReadAsync(string containerName, string blobName, bool seekable, CancellationToken cancellationToken = default)
+            => _inner.OpenReadAsync(containerName, blobName, seekable, cancellationToken);
+
+        public Task<long?> GetBlobLengthAsync(string containerName, string blobName, CancellationToken cancellationToken = default)
+            => _inner.GetBlobLengthAsync(containerName, blobName, cancellationToken);
 
         public Task DeleteBlobAsync(string containerName, string blobName)
             => _inner.DeleteBlobAsync(containerName, blobName);

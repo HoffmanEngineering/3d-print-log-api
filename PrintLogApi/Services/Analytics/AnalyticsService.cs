@@ -1,7 +1,9 @@
 ﻿using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Analytics;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services.Analytics;
 
@@ -81,7 +83,8 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         Dictionary<string, int> StatusCounts,
         IReadOnlyList<SeriesBucket> Series,
         bool SeriesTruncated,
-        OverviewHighlights Highlights);
+        OverviewHighlights Highlights,
+        double MaterialMl);
 
     private async Task<AggregateResult> Aggregate(
         long userId, AnalyticsFilter filter,
@@ -105,6 +108,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         var durationEstimated = await scoped.CountAsync(PrintMetrics.DurationIsEstimatedExpr, ct);
         var materialMg = await scoped.SumAsync(PrintMetrics.MaterialMgExpr, ct);
         var materialEstimated = await scoped.CountAsync(PrintMetrics.MaterialIsEstimatedExpr, ct);
+        var materialMl = await scoped.SumAsync(PrintMetrics.MaterialMlExpr, ct);
 
         var statusCounts = await scoped
             .GroupBy(p => p.Status)
@@ -121,7 +125,7 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
 
         return new AggregateResult(printCount, undatedCount, durationSeconds, durationEstimated,
             materialMg, materialEstimated, cost, costExclusions, currency, statusCounts,
-            series, seriesTruncated, highlights);
+            series, seriesTruncated, highlights, PrintMetrics.RoundMl(materialMl));
     }
 
     /// <summary>
@@ -227,14 +231,14 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
         // Spec §5: ranked by print count, tie-broken by DURATION then MATERIAL MASS, then id
         // as a final deterministic backstop. Both tie-breakers must be projected, or the
         // ordering silently degrades to "lowest id wins", which is not the specified rule.
-        // The sums are inlined rather than using PrintMetrics.*Expr because g.Sum takes a
-        // Func, not an Expression (PrintMetrics.cs:31-38).
+        // Duration is inlined because g.Sum takes a Func, not an Expression. Material is the
+        // shared PrintMetrics.MaterialMgExpr, spliced in as that Func by SelectWith.
         // Owner-scoped before the group: this projection reads printer NAME, make and model,
         // so an unowned reference here would surface another user's machine on the tile.
         var topPrinter = await scoped
             .Where(p => p.Printer.UserId == userId)
             .GroupBy(p => new { p.PrinterId, p.Printer.Name, p.Printer.Make, p.Printer.Model })
-            .Select(g => new
+            .SelectWith((g, material) => new
             {
                 g.Key.PrinterId,
                 g.Key.Name,
@@ -245,15 +249,8 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
                     p.PrintTimeInSeconds.HasValue && p.PrintTimeInSeconds > 0 ? p.PrintTimeInSeconds.Value
                     : p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0 ? p.EstimatedPrintTimeInSeconds.Value
                     : 0),
-                MaterialMg = g.Sum(p =>
-                    p.FilamentUsage!.Sum(pf =>
-                        pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                        : 0)
-                    + (p.FilamentUsageMg.HasValue && p.FilamentUsageMg > 0 ? p.FilamentUsageMg.Value
-                       : p.EstimatedFilamentUsageMg.HasValue && p.EstimatedFilamentUsageMg > 0 ? p.EstimatedFilamentUsageMg.Value
-                       : 0)),
-            })
+                MaterialMg = g.Sum(material),
+            }, PrintMetrics.MaterialMgExpr)
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.DurationSeconds)
             .ThenByDescending(x => x.MaterialMg)
@@ -270,17 +267,14 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
             // rank here, so `linked AND owned` is the right predicate in this one place.
             .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId)
             .GroupBy(pf => new { pf.FilamentId, pf.Filament!.DisplayName, pf.Filament.MaterialType })
-            .Select(g => new
+            .SelectWith((g, row) => new
             {
                 g.Key.FilamentId,
                 g.Key.DisplayName,
                 g.Key.MaterialType,
                 Count = g.Count(),
-                MaterialMg = g.Sum(pf =>
-                    pf.AmountMg.HasValue && pf.AmountMg > 0 ? pf.AmountMg.Value
-                    : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0 ? pf.EstimatedAmountMg.Value
-                    : 0),
-            })
+                MaterialMg = g.Sum(row),
+            }, FilamentProfile.UsageRowMg)
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.MaterialMg)
             .ThenBy(x => x.FilamentId)
@@ -357,6 +351,10 @@ public sealed class AnalyticsService(PrintLogContext context, TimeProvider timeP
             TotalCost: new MoneyMetric(c.Cost, p?.Cost, c.Currency,
                 Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
                     c.CostExclusions.Select(kv => (kv.Key, kv.Value)).ToArray())),
-            AvgPrintTimeSeconds: new Metric(Avg(c), Avg(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)));
+            AvgPrintTimeSeconds: new Metric(Avg(c), Avg(p), Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount)),
+            // Resin by volume (#294): the same population and estimate exclusion as FilamentGrams.
+            FilamentMl: new Metric(c.MaterialMl, p?.MaterialMl,
+                Cov("prints", c.PrintCount, c.PrintCount, c.UndatedCount,
+                    (ExclusionReason.MaterialEstimated, c.MaterialEstimatedCount))));
     }
 }

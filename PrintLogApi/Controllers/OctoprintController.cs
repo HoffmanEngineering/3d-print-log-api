@@ -1,8 +1,6 @@
 ﻿using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Octoprint;
@@ -21,18 +19,22 @@ public class OctoprintController(
     PrintLogContext context,
     TelemetryClient telemetry,
     ILogger<OctoprintController> logger,
-    IPrintService printService,
-    INotificationService notificationService,
-    IBlobStorageService blobStorageService,
-    ICacheVersionService cacheVersionService) : ControllerBase
+    IPrintEventService printEventService) : ControllerBase
 {
-    private const string printImageContainerName = BlobContainers.PrintImages;
+    /// <summary>The <c>externalSource</c> of prints the webhook logs.</summary>
+    public const string WebhookSource = "octoprint-webhook";
 
     /// <summary>
-    /// Webhook endpoint for the Octoprint Webhooks plugin. Takes in webhook data and uses that to create or 
-    /// update prints based on the statuses sent by Octoprint. See https://www.3dprintlog.com/docs/octoprint-webhookOctoprint 
-    /// Webhook Docs for more information.
+    /// Receive a print event from the OctoPrint Webhooks plugin.
     /// </summary>
+    /// <remarks>
+    /// Called by the OctoPrint-Webhooks plugin, not by hand. Set it up as described at
+    /// https://www.3dprintlog.com/docs/octoprint-webhook, authenticating with a personal API key.
+    ///
+    /// The body is form data. `deviceIdentifier` must be the id of one of the caller's printers. A
+    /// `Print Started` event creates a print in the Printing status. `Print Done` marks it Success,
+    /// and `Print Failed` or `Error` mark it Failed.
+    /// </remarks>
     /// <param name="data">The wehbook data sent by Octoprint.</param>
     /// <response code="200">Returned if the webhook was handled successfully.</response>
     /// <response code="400">Returned if required data is missing in the webhook (like the DeviceIdentifier, etc).</response>
@@ -78,6 +80,11 @@ public class OctoprintController(
             return Ok($"Webhook Connection to 3D Print Log is Good!\nPrinter is {printerName}.\nReady to start logging prints.");
         }
 
+        if (await DroppedForBridge(data, userId.Value))
+        {
+            return Ok(data);
+        }
+
         try
         {
             switch (data.Topic)
@@ -104,15 +111,52 @@ public class OctoprintController(
                     break;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            logger.LogError("An error occurred in the Octoprint Webhook", data);
+            logger.LogError(ex, "An error occurred in the Octoprint Webhook");
             throw;
         }
 
         return Ok(data);
 
     }
+
+    /// <summary>
+    /// True, after counting the drop, when this is a print event for a printer a live OctoPrint
+    /// bridge is logging (#291): the bridge reports the same job, so logging it here too would
+    /// record it twice. The count tells the user to turn the Webhooks plugin off. Matched on the
+    /// <c>octoprint</c> kind only, as the Moonraker notifier is on <c>moonraker</c> (#150).
+    /// <para>
+    /// A finish is never dropped while the webhook has its own print of the job open on that
+    /// printer: it started before the bridge went live (installed mid-print, or back from being
+    /// stale), so the bridge may never report that job, and dropping the finish would leave the
+    /// print in Printing for good. A duplicate beats a lost print (#290). It is not counted.
+    /// </para>
+    /// </summary>
+    private async Task<bool> DroppedForBridge(OctoprintWebhookDto data, long userId)
+    {
+        if (data.Topic is not { } topic || !PrintTopics.Contains(topic)
+            || !long.TryParse(data.DeviceIdentifier, out var printerId))
+        {
+            return false;
+        }
+
+        if (topic != "Print Started"
+            && await printEventService.HasPrintToFinish(Finished(data, userId, PrintStatus.Success)))
+        {
+            return false;
+        }
+
+        if (!await printEventService.DropNotifierEventForBridge(userId, printerId, Connection.OctoPrintKind))
+        {
+            return false;
+        }
+
+        telemetry.TrackEvent("OctoPrint_Webhook_DroppedForBridge", new Dictionary<string, string> { { "Topic", topic } });
+        return true;
+    }
+
+    private static readonly HashSet<string> PrintTopics = ["Print Started", "Print Done", "Print Failed", "Error"];
 
     private bool isTestWebhook(OctoprintWebhookDto data)
     {
@@ -126,468 +170,83 @@ public class OctoprintController(
 
     private async Task HandlePrintStarted(OctoprintWebhookDto data, long userId)
     {
-        // Computed here rather than inline below: a local cannot be declared inside an object
-        // initializer.
-        //
         // The two sources must be chosen between with the canonical rule, NOT with `??`.
         // `AveragePrintTime ?? EstimatedPrintTime` picks Average whenever it is non-null — and
         // 0.0 is non-null, so a zero average would silently discard a perfectly good
-        // EstimatedPrintTime. That is the same "a stored 0 beats a real value" defect this
-        // change exists to eliminate.
+        // EstimatedPrintTime.
         //
         // Round FIRST, then test positivity: 0.3 is > 0 but rounds to 0, and a stored zero
         // estimate is worse than a null, because no fallback can recover from it.
-        var octoAverage = (int)Math.Round(data?.Job?.AveragePrintTime ?? 0.0);
-        var octoEstimated = (int)Math.Round(data?.Job?.EstimatedPrintTime ?? 0.0);
+        var octoAverage = (int)Math.Round(data.Job?.AveragePrintTime ?? 0.0);
+        var octoEstimated = (int)Math.Round(data.Job?.EstimatedPrintTime ?? 0.0);
         var octoEstimate = PrintMetrics.Resolve(octoAverage, octoEstimated);
 
-        var newPrint = new Print
-        {
-            Status = PrintStatus.Printing,
-            CreatedById = userId,
-            UpdatedById = userId,
-            Title = data?.Job?.File?.Name!.Substring(0, Math.Min(data.Job.File.Name.Length, 100)) ?? "",
-            EstimatedPrintTimeInSeconds = octoEstimate > 0 ? octoEstimate : (int?)null,
-            FilamentUsage = new List<PrintFilament>(),
-            FileName = data?.Job?.File?.Name ?? ""
-        };
-
-        // `data` is a [FromForm]-bound complex type, which MVC always instantiates, so it is
-        // never null here. The compiler only treats it as maybe-null because the defensive
-        // `data?.` chains above widen its null state. Same reasoning at every `data!` below.
-        if (long.TryParse(data!.DeviceIdentifier, out long printerId))
-        {
-            // Check the Printer to make sure the user has access to it.
-            var printer = await context.Printers
-                .Where(p => p.Id == printerId)
-                .Include(p => p.LoadedFilaments)
-                .FirstOrDefaultAsync();
-            newPrint.Printer = printer!;
-
-            // Check if the user had access to that printer!
-            // Null-forgiven: an unknown printerId already threw here before nullable analysis
-            // was enabled. It still fails closed, just as a 500 rather than a clean error.
-            // Turning that into an explicit not-found is a behaviour change, tracked in #57.
-            if (userId != printer!.UserId)
-            {
-                throw new UserCannotAccessPrinterException();
-            }
-        }
-        else
+        if (!long.TryParse(data.DeviceIdentifier, out long printerId))
         {
             throw new Exception("Invalid Device Identifier");
         }
 
+        var fileName = data.Job?.File?.Name;
+        var filament = data.Meta?.Analysis?.filament;
+        var tools = new[] { filament?.tool0, filament?.tool1, filament?.tool2, filament?.tool3, filament?.tool4 };
+        var usage = tools
+            .Select((tool, slot) => (tool, slot))
+            .Where(t => t.tool is not null)
+            .Select(t => new PrintEventUsage(
+                t.slot,
+                EstimatedSource: PrintFilament.SourceMeasurement.Length,
+                EstimatedLengthInM: Math.Round(t.tool!.length / 1000, 3),
+                Source: PrintFilament.SourceMeasurement.Weight,
+                LengthInM: null,
+                Notes: ""))
+            .ToList();
 
-        try
+        // The job is the file on this printer started at this moment: currentTime on a start
+        // event is when the job began, and a redelivery carries the same one.
+        var externalId = $"{printerId}:{data.Meta?.Hash ?? fileName}:{data.CurrentTime}";
+
+        await printEventService.Started(new PrintStartedEvent
         {
-            // Determine the Allow Comments settings
-            var lastSelectedAllowCommentsUserSettingTypeId = 3;
-            var setting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == lastSelectedAllowCommentsUserSettingTypeId).FirstOrDefaultAsync();
-            // Null-forgiven deliberately: a user with no saved default has no row here, and
-            // the resulting throw is what the catch below turns into the fallback value.
-            // The catch is load-bearing control flow, not defensive padding.
-            var lastSelectedAllowCommentsValue = setting!.Value;
-
-            if (bool.TryParse(lastSelectedAllowCommentsValue, out bool allowComments))
-            {
-                newPrint.AllowComments = allowComments;
-            }
-            else
-            {
-                // Printer isn't found, so... shrug
-                newPrint.AllowComments = false;
-            }
-        }
-        catch (Exception)
-        {
-            newPrint.AllowComments = false;
-        }
-
-        try
-        {
-            // Determine the last view status
-            var defaultViewStatus = 1;
-            var defaultPrintViewStatusSetting = await context.UserSettings.Where(u => u.UserId == userId && u.UserSettingTypeId == defaultViewStatus).FirstOrDefaultAsync();
-            // Null-forgiven deliberately — see the preceding try block; the catch turns the
-            // missing-row throw into the Private fallback.
-            var viewStatusValue = defaultPrintViewStatusSetting!.Value;
-
-            if (PrintViewStatus.TryParse(viewStatusValue, out PrintViewStatus viewStatus))
-            {
-                newPrint.ViewStatus = viewStatus;
-            }
-            else
-            {
-                // Printer isn't found, so... shrug
-                newPrint.ViewStatus = PrintViewStatus.Private;
-            }
-        }
-        catch (Exception)
-        {
-            newPrint.ViewStatus = PrintViewStatus.Private;
-        }
-
-        // Handle Filament Usage
-
-        if (data?.Meta?.Analysis?.filament is not null)
-        {
-            // Provably non-null: Printer is assigned from the query above, and the access
-            // check that follows it already dereferenced the same instance, so a null would
-            // have thrown before reaching this line.
-            var printersLoadedFilament = newPrint.Printer!.LoadedFilaments ?? new List<PrinterFilament>();
-
-            if (data?.Meta?.Analysis?.filament?.tool0 is not null)
-            {
-                newPrint.FilamentUsage.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(0)?.FilamentId ?? null,
-                    EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool0?.length / 1000 ?? 0.0, 3),
-                    Source = PrintFilament.SourceMeasurement.Weight,
-                    Notes = ""
-                });
-            }
-
-            if (data?.Meta?.Analysis?.filament?.tool1 is not null)
-            {
-                newPrint.FilamentUsage.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(1)?.FilamentId ?? null,
-                    EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool1?.length / 1000 ?? 0.0, 3),
-                    Source = PrintFilament.SourceMeasurement.Weight,
-                    Notes = ""
-                });
-            }
-
-            if (data?.Meta?.Analysis?.filament?.tool2 is not null)
-            {
-                newPrint.FilamentUsage.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(2)?.FilamentId ?? null,
-                    EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool2?.length / 1000 ?? 0.0, 3),
-                    Source = PrintFilament.SourceMeasurement.Weight,
-                    Notes = ""
-                });
-            }
-
-            if (data?.Meta?.Analysis?.filament?.tool3 is not null)
-            {
-                newPrint.FilamentUsage.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(3)?.FilamentId ?? null,
-                    EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool3?.length / 1000 ?? 0.0, 3),
-                    Source = PrintFilament.SourceMeasurement.Weight,
-                    Notes = ""
-                });
-            }
-
-            if (data?.Meta?.Analysis?.filament?.tool4 is not null)
-            {
-                newPrint.FilamentUsage.Add(new PrintFilament
-                {
-                    EstimatedSource = PrintFilament.SourceMeasurement.Length,
-                    Id = Guid.Empty,
-                    FilamentId = printersLoadedFilament.ElementAtOrDefault(4)?.FilamentId ?? null,
-                    EstimatedLengthInM = Math.Round(data?.Meta?.Analysis?.filament?.tool4?.length / 1000 ?? 0.0, 3),
-                    Source = PrintFilament.SourceMeasurement.Weight,
-                    Notes = ""
-                });
-            }
-
-            await printService.UpdateFilamentUsageWeights(newPrint);
-        }
-
-        // Work with File Hash
-        if (data?.Meta?.Hash is not null)
-        {
-            newPrint.FileHash = StringToByteArray(data.Meta.Hash);
-        }
-
-
-        newPrint.StartDate = DateTimeOffset.FromUnixTimeSeconds(data!.CurrentTime);
-
-
-        context.Prints.Add(newPrint);
-
-
-        if (data.snapshot is not null)
-        {
-            var maxImages = await printService.GetMaxImagesPerPrint(userId);
-            // No existing images to count: this is a newly created print, so count is always 0.
-            if (0 < maxImages)
-            {
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
-                {
-                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-                    var file = new Models.File()
-                    {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    context.Files.Add(file);
-
-                    // DisplayOrder = 0: this is the first (and only) image for a newly created print from a webhook.
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = newPrint,
-                        IsDefault = true,
-                        DisplayOrder = 0,
-                    };
-                    context.PrintImages.Add(printImage);
-                }
-            }
-        }
-
-
-        await context.SaveChangesAsync();
-
-        // Webhook-created prints must invalidate the same caches the controllers do, or the
-        // print list and analytics keep serving figures from before the print existed.
-        cacheVersionService.InvalidateUserCache(userId);
+            UserId = userId,
+            PrinterId = printerId,
+            Source = PrintSource.OctoPrint,
+            ExternalSource = WebhookSource,
+            ExternalId = externalId[..Math.Min(externalId.Length, 200)],
+            Title = fileName?[..Math.Min(fileName.Length, 100)] ?? "",
+            FileName = fileName ?? "",
+            FileHash = data.Meta?.Hash is { } hash ? StringToByteArray(hash) : null,
+            StartDate = DateTimeOffset.FromUnixTimeSeconds(data.CurrentTime),
+            EstimatedPrintTimeInSeconds = octoEstimate > 0 ? octoEstimate : null,
+            Usage = usage,
+            Snapshot = data.snapshot,
+        });
     }
 
-    private async Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
+    private Task HandlePrintFailed(OctoprintWebhookDto data, long userId)
+        => printEventService.Finished(Finished(data, userId, PrintStatus.Failed));
+
+    private Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
+        => printEventService.Finished(Finished(data, userId, PrintStatus.Success));
+
+    private static PrintFinishedEvent Finished(OctoprintWebhookDto data, long userId, PrintStatus status)
     {
-        Print? print = null;
-
-        // Find a print thats Printing with that same hash.
-        if (data?.Meta?.Hash is not null)
-        {
-            var hash = StringToByteArray(data.Meta.Hash);
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileHash == hash
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .FirstOrDefaultAsync();
-        }
-        else if (data?.Job?.File?.Name is not null)
-        {
-            // if the hash doesn't exist, then look for the same file name?
-            var fileName = data?.Job?.File?.Name;
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileName == fileName
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .FirstOrDefaultAsync();
-        }
-        else
-        {
-            // We have no other way of coorlating files other than filehash or name, so...
-            logger.LogWarning("Not enough information from octoprint to find matching print.", data);
-            return;
-        }
-
-        if (print == null)
-        {
-            logger.LogWarning("Matching print was not found.", data);
-            return;
-        }
-
-        print.Status = PrintStatus.Failed;
-
         // Round FIRST, then test positivity: 0.3 rounds to 0, and persisting that 0 would
-        // recreate the "looks recorded but isn't" row we are eliminating.
-        var failedElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
-        print.PrintTimeInSeconds = failedElapsed > 0 ? failedElapsed : (int?)null;
-        print.UpdatedById = userId;
-        context.Entry(print).State = EntityState.Modified;
-
-        // Images
-        if (data.snapshot != null)
+        // recreate the "looks recorded but isn't" row.
+        var elapsed = (int)Math.Round(data.Extra?.Time ?? 0.0);
+        return new PrintFinishedEvent
         {
-            var maxImages = await printService.GetMaxImagesPerPrint(userId);
-            var existingImageCount = await context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
-            if (existingImageCount < maxImages)
-            {
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
-                {
-                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-                    var file = new Models.File()
-                    {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    context.Files.Add(file);
-
-                    // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await context.PrintImages
-                        .Where(pi => pi.PrintId == print.Id)
-                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
-
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = print,
-                        IsDefault = true,
-                        DisplayOrder = maxDisplayOrder + 1,
-                    };
-                    context.PrintImages.Add(printImage);
-
-
-                    // Set other defaults to false;
-                    var otherEntities = await context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                    otherEntities.ForEach(p => p.IsDefault = false);
-                }
-            }
-        }
-
-        await context.SaveChangesAsync();
-        cacheVersionService.InvalidateUserCache(userId);
-
-        // Send notification for print failure
-        await notificationService.CreatePrintFailedNotification(userId, print.Id, print.Title);
-
-    }
-
-    private async Task HandlePrintCompleted(OctoprintWebhookDto data, long userId)
-    {
-        Print? print = null;
-
-        // Find a print thats Printing with that same hash.
-        if (data?.Meta?.Hash is not null)
-        {
-            var hash = StringToByteArray(data.Meta.Hash);
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileHash == hash
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .FirstOrDefaultAsync();
-        }
-        else if (data?.Job?.File?.Name is not null)
-        {
-            // if the hash doesn't exist, then look for the same file name?
-            var fileName = data?.Job?.File?.Name;
-            print = await context.Prints
-            .Where(p => p.CreatedById == userId
-                            && p.Status == PrintStatus.Printing
-
-                            && p.FileName == fileName
-                            )
-            .OrderByDescending(p => p.CreatedDate)
-            .Include(p => p.FilamentUsage!)
-            .ThenInclude(pf => pf.Filament)
-            .FirstOrDefaultAsync();
-        }
-        else
-        {
-            // We have no other way of coorlating files other than filehash or name, so...
-            logger.LogWarning("Not enough information from octoprint to find matching print.", data);
-            return;
-        }
-
-        if (print == null)
-        {
-            logger.LogWarning("Matching print was not found.", data);
-            return;
-        }
-
-        print.Status = PrintStatus.Success;
-
-        // Round FIRST, then test positivity — see HandlePrintFailed.
-        var successElapsed = (int)Math.Round(data!.Extra!.Time ?? 0.0);
-        print.PrintTimeInSeconds = successElapsed > 0 ? successElapsed : (int?)null;
-        print.UpdatedById = userId;
-        context.Entry(print).State = EntityState.Modified;
-
-        // Images
-        if (data.snapshot != null)
-        {
-            var maxImages = await printService.GetMaxImagesPerPrint(userId);
-            var existingImageCount = await context.PrintImages.CountAsync(pi => pi.PrintId == print.Id);
-            if (existingImageCount < maxImages)
-            {
-                var image = data.snapshot;
-                var fileId = Guid.NewGuid();
-                var fileName = fileId + Path.GetExtension(image.FileName);
-
-                using (var uploadFileStream = image.OpenReadStream())
-                {
-                    var uploadResult = await blobStorageService.UploadAsync(printImageContainerName, fileName, uploadFileStream);
-
-                    var file = new Models.File()
-                    {
-                        Size = image.Length,
-                        Path = uploadResult.BlobPath,
-                        Id = fileId,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                    };
-                    context.Files.Add(file);
-
-                    // Calculate next display order: the print may already have an image from the "Started" webhook.
-                    var maxDisplayOrder = await context.PrintImages
-                        .Where(pi => pi.PrintId == print.Id)
-                        .MaxAsync(pi => (int?)pi.DisplayOrder) ?? -1;
-
-                    var printImage = new PrintImage()
-                    {
-                        File = file,
-                        CreatedById = userId,
-                        UpdatedById = userId,
-                        Print = print,
-                        IsDefault = true,
-                        DisplayOrder = maxDisplayOrder + 1,
-                    };
-                    context.PrintImages.Add(printImage);
-
-
-                    // Set other defaults to false;
-                    var otherEntities = await context.PrintImages.Where(p => p.PrintId == print.Id && p.IsDefault == true && p.FileId != fileId).ToListAsync();
-                    otherEntities.ForEach(p => p.IsDefault = false);
-                }
-            }
-        }
-
-        await context.SaveChangesAsync();
-        cacheVersionService.InvalidateUserCache(userId);
-
-        // Send notification for print completion
-        await notificationService.CreatePrintCompletedNotification(userId, print.Id, print.Title);
-
+            UserId = userId,
+            // Only the webhook's own prints, on its printer when the device identifier names one
+            // (#291). Without these, a Print Done could finish the OctoPrint bridge's print of the
+            // same file, or the same file printing on another printer, and leave its own Printing.
+            PrinterId = long.TryParse(data.DeviceIdentifier, out var printerId) ? printerId : null,
+            ExternalSource = WebhookSource,
+            FileHash = data.Meta?.Hash is { } hash ? StringToByteArray(hash) : null,
+            FileName = data.Job?.File?.Name,
+            Status = status,
+            PrintTimeInSeconds = elapsed > 0 ? elapsed : null,
+            Snapshot = data.snapshot,
+        };
     }
 
     public static byte[] StringToByteArray(string hex)

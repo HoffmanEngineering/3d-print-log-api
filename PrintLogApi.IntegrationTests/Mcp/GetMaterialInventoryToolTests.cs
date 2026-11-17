@@ -15,7 +15,7 @@ public class GetMaterialInventoryToolTests : IClassFixture<McpDataWebApplication
     public GetMaterialInventoryToolTests(McpDataWebApplicationFactory factory) => _factory = factory;
 
     private sealed record Item(Guid Id, string Name, string Brand, string Material,
-        string Color, double RemainingGrams, bool IsActive,
+        string Color, double? RemainingGrams, bool IsActive,
         string StorageLocation, double? DiameterMm);
 
     private sealed record PageResult(List<Item> Items, int Page, int PageSize, int TotalCount, int TotalPages);
@@ -52,14 +52,14 @@ public class GetMaterialInventoryToolTests : IClassFixture<McpDataWebApplication
     }
 
     [Fact]
-    public async Task IncludeInactive_AddsInactiveWithZeroRemaining()
+    public async Task IncludeInactive_AddsInactive_AnUntrackedSpoolReportingNullRemaining()
     {
         await using var client = await _factory.ConnectAsync();
         var page = await Get(client, new() { ["includeInactive"] = true, ["pageSize"] = 100 });
 
         var inactive = page.Items.Single(i => i.Id == McpTestData.InactiveFilamentId);
         Assert.False(inactive.IsActive);
-        Assert.Equal(0d, inactive.RemainingGrams); // null initial weight => 0 grams
+        Assert.Null(inactive.RemainingGrams); // null initial weight => not tracked (#230)
     }
 
     [Fact]

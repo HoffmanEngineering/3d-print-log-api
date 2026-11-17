@@ -1,9 +1,9 @@
 ﻿using System.IO.Compression;
-using System.Reflection;
 using System.Security.Claims;
 using System.Security.Principal;
 using System.Text.Json;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -13,21 +13,32 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Authentication;
+using PrintLogApi.Achievements;
+using PrintLogApi.Achievements.Triggers;
 using PrintLogApi.Authentication;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Authentication.Handlers;
+using PrintLogApi.Authentication.Spoolman;
 using PrintLogApi.Caching;
+using PrintLogApi.Email;
 using PrintLogApi.Extensions;
+using PrintLogApi.Mcp;
+using PrintLogApi.Middleware;
 using PrintLogApi.Models.Smtp;
 using PrintLogApi.Models.Stripe;
+using PrintLogApi.OpenApi;
+using PrintLogApi.PrinterCatalog;
 using PrintLogApi.Serialization;
 using PrintLogApi.Services;
+using PrintLogApi.Services.Moonraker;
 using PrintLogApi.Services.Push;
+using PrintLogApi.Services.UserDeletion;
+using PrintLogApi.SpoolTags;
+using PrintLogApi.Telemetry;
 using PrintLogApi.TestData;
 using PrintLogApi.Users;
-using Prometheus;
-using Swashbuckle.AspNetCore.SwaggerGen;
+using PrintLogApi.Webhooks;
 
 namespace PrintLogApi;
 
@@ -61,13 +72,17 @@ public class Startup
 
         services.AddCors();
 
+        // RFC 7807 bodies for responses that have none (#127). See ProblemDetailsStatusCodePages
+        // for what this does and, as importantly, what it leaves alone.
+        services.AddProblemDetails();
+
         ConfigureResponseCompression(services);
 
         services.AddHttpClient();
 
         ConfigureAuthentication(services);
 
-        services.AddDbContext<PrintLogContext>(opts =>
+        services.AddDbContext<PrintLogContext>((sp, opts) =>
         {
             opts.UseSqlServer(
                 Configuration["ConnectionString:PrintLogDb"],
@@ -78,80 +93,13 @@ public class Startup
                         maxRetryDelay: TimeSpan.FromSeconds(30),
                         errorNumbersToAdd: null);
                 });
+            opts.AddAchievementInterceptors(sp);
         });
 
-        services.AddSwaggerGen(c =>
-        {
-            c.SwaggerDoc("v1", new OpenApiInfo
-            {
-                Title = "3D Print Log Api",
-                Version = "v1",
-                Description = @"HTTP API powering <https://3dprintlog.com>, allowing users to manage their prints, printers, and filaments.
-
-For additional documentation, please visit <https://www.3dprintlog.com/docs/getting-started>. Please contact us at <hello@3dprintlog.com> with any questions or comments.
-
-Authentication can be done using a personal API Key. After creating an account on the 3D Print Log website, create an API key using the following:
-- Navigate to the [Personal Api Keys](https://www.3dprintlog.com/api-keys) page by clicking on your User Profile Picture at the top-left, and selecting ""Personal Api Keys"".
-- Click Create new API Key.
-- Enter a new description(such a ""API Access Key"").
-- Click Submit to generate a new key.
-- Copy the new 32 - character key.
-   - Note: The API Key cannot be retrieved after you leave the page, so copy it to a secure location, otherwise you will have to generate a new key
-
-The API key can be used either by adding a **X-Api-Key header** with the key, or by including a **api_key query param** to each request.
-",
-                Contact = new OpenApiContact
-                {
-                    Email = "hello@3dprintlog.com",
-                    Name = "Christopher Hoffman",
-                    Url = new Uri("https://www.hoffman.engineering")
-                }
-            });
-
-            c.CustomOperationIds(apiDesc =>
-            {
-                return apiDesc.TryGetMethodInfo(out MethodInfo methodInfo) ? methodInfo.Name : null;
-            });
-
-            c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
-            {
-                Type = SecuritySchemeType.OAuth2,
-                Flows = new OpenApiOAuthFlows
-                {
-                    Implicit = new OpenApiOAuthFlow
-                    {
-                        AuthorizationUrl = new Uri($"https://{Configuration["Auth0:Domain"]}/authorize"),
-
-                        Scopes = new Dictionary<string, string>
-                        {
-                            {"api1", "Demo API - full access"}
-                        }
-                    }
-                },
-                In = ParameterLocation.Header,
-                Scheme = "bearer",
-                BearerFormat = "JWT"
-            });
-
-            c.AddSecurityDefinition("apikey", new OpenApiSecurityScheme
-            {
-                Type = SecuritySchemeType.ApiKey,
-
-                In = ParameterLocation.Header,
-                Name = "X-Api-Key"
-            });
-
-            c.OperationFilter<AuthorizeCheckOperationFilter>();
-
-            var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-            c.IncludeXmlComments(xmlPath, true);
-
-            c.CustomSchemaIds(type => type.ToString());
-
-        });
+        services.AddPrintLogOpenApi(Configuration);
 
         services.Configure<PushOptions>(Configuration.GetSection(PushOptions.SectionName));
+        services.Configure<UserOnboardingOptions>(Configuration.GetSection(UserOnboardingOptions.SectionName));
 
         var pushOptions = Configuration.GetSection(PushOptions.SectionName).Get<PushOptions>() ?? new PushOptions();
         var pushConfigured = false;
@@ -206,24 +154,64 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         );
         services.AddTransient<IUserService, UserService>();
         services.AddTransient<IPrintService, PrintService>();
+        services.AddScoped<Services.SlicerSettings.IPrintSlicerSettingsService, Services.SlicerSettings.PrintSlicerSettingsService>();
         services.AddTransient<IPrinterService, PrinterService>();
         services.AddTransient<IPrinterCategoryService, PrinterCategoryService>();
         services.AddTransient<ICommentService, CommentService>();
-        services.AddTransient<IPrintImageService, PrintImageService>();
+        services.AddScoped<SocialImageLookup>();
+        services.AddScoped<SeoMetadataService>();
+        services.AddScoped<IProcessedImageWriter, ProcessedImageWriter>();
         services.AddTransient<IFilamentService, FilamentService>();
+        services.AddTransient<IMediaStorageQuotaService, MediaStorageQuotaService>();
         services.AddTransient<IFilamentImageService, FilamentImageService>();
+        services.AddTransient<IPrinterImageService, PrinterImageService>();
         services.AddTransient<IUserApiKeyService, UserApiKeyService>();
         services.AddTransient<IUserDeletionService, UserDeletionService>();
         services.AddTransient<IAuth0Service, Auth0Service>();
         services.AddTransient<IPrinterMaintenanceService, PrinterMaintenanceService>();
         services.AddTransient<INotificationService, NotificationService>();
         services.AddTransient<IDeviceTokenService, DeviceTokenService>();
+        // Paired devices and their scoped tokens (#148); the scheme and policy are in ConfigureAuthentication.
+        services.AddTransient<Services.DeviceGrants.IDeviceGrantService, Services.DeviceGrants.DeviceGrantService>();
+        services.AddScoped<Services.DeviceGrants.IDevicePairingNotifier, Services.DeviceGrants.DevicePairingNotifier>();
+        services.AddTransient<IConnectionService, ConnectionService>();
+        services.AddTransient<Services.Bridges.IBridgeService, Services.Bridges.BridgeService>();
+        services.AddTransient<Services.Bridges.IBridgePrintGuard, Services.Bridges.BridgePrintGuard>();
+        // The latest agent release a connection's check-in reports (printlog-bridge#39).
+        // Singleton: it holds the versions read from GitHub.
+        services.Configure<Services.AgentReleases.AgentReleaseOptions>(Configuration.GetSection(Services.AgentReleases.AgentReleaseOptions.SectionName));
+        services.AddSingleton<Services.AgentReleases.IAgentReleaseCatalog, Services.AgentReleases.AgentReleaseCatalog>();
+        services.AddHttpClient(Services.AgentReleases.AgentReleaseCatalog.HttpClientName, client =>
+            {
+                // GitHub refuses a request with no User-Agent.
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("3dprintlog-api");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
+        services.AddTransient<IPrintEventService, PrintEventService>();
+        services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
+        services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
+        services.AddTransient<IPrintStartNotifier, PrintStartNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();
         services.AddTransient<IFileAttachmentService, FileAttachmentService>();
         services.AddTransient<IProjectService, ProjectService>();
         services.AddTransient<IFeedbackService, FeedbackService>();
         services.AddTransient<IMcpStatisticsService, McpStatisticsService>();
+        services.Configure<Services.Spoolman.SpoolmanOptions>(Configuration.GetSection(Services.Spoolman.SpoolmanOptions.SectionName));
+        services.AddTransient<Services.Spoolman.ISpoolmanConnectionService, Services.Spoolman.SpoolmanConnectionService>();
+        // Singleton: it holds only HybridCache and CachedComputation, both singletons.
+        services.AddSingleton<Services.Spoolman.ISpoolmanCredentialCache, Services.Spoolman.SpoolmanCredentialCache>();
+        services.AddTransient<Services.Spoolman.ISpoolmanInventoryService, Services.Spoolman.SpoolmanInventoryService>();
+        services.AddTransient<Services.Sync.ISyncSnapshotService, Services.Sync.SyncSnapshotService>();
+        services.AddTransient<Services.Spoolman.ISpoolmanUsageRecorder, Services.Spoolman.SpoolmanUsageRecorder>();
+        // Singleton: it is the registry of this process's open sockets (#178).
+        services.AddSingleton<Services.Spoolman.SpoolmanSocketHost>();
+        services.AddHostedService<Services.Spoolman.SpoolmanSocketSampler>();
         // The wall clock, as a dependency. Every analytics service reads "now" to close an
         // open-ended window (a filter with no ToDate means "up to now"), and a test that has
         // to construct its fixture relative to the real current date can only assert what is
@@ -233,6 +221,7 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // with a SettableTimeProvider (see PinnedClockDataFactory) rather than adding a second
         // one, so this stays the single source of "now" for the whole app.
         services.AddSingleton(TimeProvider.System);
+        services.AddAchievements();
         services.AddScoped<Services.Analytics.IAnalyticsService, Services.Analytics.AnalyticsService>();
         services.AddScoped<Services.Analytics.IActivityAnalyticsService, Services.Analytics.ActivityAnalyticsService>();
         services.AddScoped<Services.Analytics.IPrinterAnalyticsService, Services.Analytics.PrinterAnalyticsService>();
@@ -247,9 +236,53 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         services.AddSingleton<ICacheVersionService, CacheVersionService>();
         services.AddApplicationInsightsTelemetry();
+        // The SDK stops adding its own correlation headers (Request-Context, and Request-Id where it
+        // would) to outbound calls. Webhook receivers (#235) are third parties, and the SDK cannot
+        // be told which hosts those are: their URLs are user data. This is process-wide, but narrow:
+        // the runtime still adds traceparent to every other HttpClient's calls; only the webhook
+        // client drops that too, through the no-output propagator on its handler
+        // (WebhookHttpHandlerFactory). Dependency telemetry itself is unaffected.
+        //
+        // SQL command text is collected so a DTU spike can be traced to a statement, and then
+        // cleared again by SqlCommandTextTelemetryProcessor on every call that was fast and
+        // succeeded; see that type for the volume and privacy reasoning.
+        services.ConfigureTelemetryModule<Microsoft.ApplicationInsights.DependencyCollector.DependencyTrackingTelemetryModule>(
+            (module, _) =>
+            {
+                module.SetComponentCorrelationHttpHeaders = false;
+                module.EnableSqlCommandTextInstrumentation = true;
+            });
+        // Who and how, on every item; then drop the rows that only ever say "still polling".
+        // See each type's remarks for the numbers behind them.
+        services.AddSingleton<ITelemetryInitializer, TelemetryEnrichmentInitializer>();
+        services.AddSingleton<ITelemetryInitializer, EmailTokenRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, ApiKeyRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, TagUidRedactionInitializer>();
+        services.AddSingleton<ITelemetryInitializer, WebhookTelemetryRedactionInitializer>();
+        services.AddApplicationInsightsTelemetryProcessor<NoiseTelemetryProcessor>();
+        services.AddApplicationInsightsTelemetryProcessor<SqlCommandTextTelemetryProcessor>();
+        if (TelemetryEnvironment.IsDisabled(Environment, Configuration))
+        {
+            // Test runs, and then a developer machine, were reaching the production resource:
+            // the per-environment appsettings set the key to "", which the SDK treats as unset,
+            // so the base file's key won. Switching telemetry off here is deterministic whatever
+            // the config layers say. Development opts back in with
+            // ApplicationInsights:EnableInDevelopment; see TelemetryEnvironment.
+            services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = true);
+        }
 
 
         services.AddTransient<IEmailSender, SmtpEmailSender>();
+        services.AddEmail(Configuration);
+        services.AddSpoolTags(Configuration);
+        services.AddPrinterCatalog(Configuration);
+        services.AddOptions<Services.SlicerSettings.CuraSettingsRetentionOptions>()
+            .Bind(Configuration.GetSection(Services.SlicerSettings.CuraSettingsRetentionOptions.SectionName));
+        services.AddHostedService<Services.SlicerSettings.CuraSettingsRetentionJob>();
+        // Deletes accounts once their deactivation grace period is over. Replaced the Azure
+        // Function that called the anonymous DELETE /api/Users/pending-deactivation.
+        services.AddPendingUserDeletion(Configuration, Environment);
+        services.AddWebhooks(Configuration, Environment);
         services.Configure<SmtpEmailSenderOptions>(options =>
         {
             options.Host = Configuration["ExternalProviders:Smtp:Host"];
@@ -260,7 +293,9 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             options.SenderName = Configuration["ExternalProviders:Smtp:SenderName"];
         });
 
-        services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
+        // Validated on start (AllowedReturnOrigins). A blank Stripe:WebhookSecret only turns the
+        // webhook off (503), and is logged at Critical on startup in Production.
+        services.AddStripeOptions(Configuration, Environment);
         Stripe.StripeConfiguration.ApiKey = Configuration["Stripe:SecretKey"];
 
         ConfigureMcpServer(services);
@@ -274,11 +309,26 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             {
                 if (context.Lease.TryGetMetadata(System.Threading.RateLimiting.MetadataName.RetryAfter, out var retryAfter))
                 {
+                    // Rounded up, never down: Retry-After is whole seconds, and the connector
+                    // token bucket refills at fractional intervals for most rates. Truncating
+                    // sends a client that honours the header back before a token exists.
+                    var seconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
                     context.HttpContext.Response.Headers.RetryAfter =
-                        ((int)retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
                 return System.Threading.Tasks.ValueTask.CompletedTask;
             };
+            // Email endpoints (spec §6.8): a per-token budget, a webhook budget, and a ceiling
+            // across all /api/email callers. All read Email:RateLimits; 0 disables, as in tests.
+            options.AddPolicy<string, EmailRateLimiting.TokenPolicyImpl>(EmailRateLimiting.TokenPolicy);
+            options.AddPolicy<string, EmailRateLimiting.EventsPolicyImpl>(EmailRateLimiting.EventsPolicy);
+            // The global limiter runs in addition to each endpoint's own policy, so it also
+            // carries the per-credential connector write budget (#151); see
+            // ConnectorWriteRateLimiting for why it lives here rather than as a policy.
+            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.CreateChained(
+                EmailRateLimiting.CreateGlobalLimiter(Configuration),
+                ConnectorWriteRateLimiting.CreateLimiter(Configuration));
+
             options.AddPolicy("mcp", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: httpContext.User.GetUserId()?.ToString() ?? "anon",
@@ -288,6 +338,81 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
+
+            // The anonymous docs endpoint has no user to partition on. Per socket peer, with the
+            // same caveat as the anonymous "api" budget below: behind a front end that terminates
+            // the connection, callers share one bucket, so the default stays generous.
+            options.AddPolicy(Mcp.Docs.McpDocsEndpoint.RateLimitPolicy, httpContext =>
+            {
+                var limit = Configuration.GetValue("Mcp:DocsRateLimitPerMinute", 120);
+                if (limit <= 0)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("mcp-docs-unlimited");
+                }
+
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"mcp-docs:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // The anonymous printer catalog, like the docs endpoint above. The partition is the
+            // socket peer (RemoteIpAddress), which is a client only when the host's forwarded
+            // headers are on (ASPNETCORE_FORWARDEDHEADERS_ENABLED; check it is set on the App
+            // Service); without them every request behind the front end shares one partition.
+            options.AddPolicy(Controllers.PrinterModelsController.RateLimitPolicy, httpContext =>
+            {
+                var limit = httpContext.RequestServices
+                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<PrinterCatalogOptions>>().Value.RateLimitPerMinute;
+                if (limit <= 0)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("catalog-unlimited");
+                }
+
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"catalog:{ip}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // The Spoolman API (#177), partitioned by connection rather than by user, so a user's
+            // own REST traffic cannot spend the budget their printers need, and one printer's
+            // retry loop cannot starve another's. Generous: Moonraker reports usage every 5 s
+            // and Mainsail polls /spool, both well inside it. 0 disables, as in tests.
+            options.AddPolicy(Controllers.SpoolmanController.RateLimitPolicy, httpContext =>
+            {
+                var limit = Configuration.GetValue("Spoolman:RateLimitPerMinute", 600);
+                var connection = httpContext.User.FindFirst(SpoolmanAuthentication.ConnectionIdClaim)?.Value;
+                if (limit <= 0 || connection is null)
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("spoolman-unlimited");
+                }
+
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"spoolman:{connection}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // Webhooks (#235): the test endpoint and the writes make the server resolve and call
+            // hosts the caller chose, so each has a small per-user budget of its own. An endpoint
+            // with one of these does not also get "api" (see the MapControllers convention).
+            AddWebhookPolicy(options, Controllers.WebhooksController.TestRateLimitPolicy, "Webhooks:TestRateLimitPerMinute", 5);
+            AddWebhookPolicy(options, Controllers.WebhooksController.WriteRateLimitPolicy, "Webhooks:WriteRateLimitPerMinute", 20);
 
             // Per-caller rate limiting for the REST controllers. Two separate budgets, because
             // the two populations behave nothing alike:
@@ -344,9 +469,10 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("api-anon-unlimited");
                 }
 
-                // NOTE: this is the socket peer, not necessarily the browser. Nothing in the
-                // pipeline calls UseForwardedHeaders, so if the App Service front end terminates
-                // the connection every anonymous caller collapses into one shared bucket. The
+                // NOTE: this is the socket peer, not necessarily the browser. Startup never calls
+                // UseForwardedHeaders; only the host's ASPNETCORE_FORWARDEDHEADERS_ENABLED switch
+                // makes RemoteIpAddress the client (as for the catalog policy above). Without it,
+                // every anonymous caller behind the front end collapses into one shared bucket. The
                 // default is set high enough that a shared bucket still clears normal public
                 // traffic; tune Api:AnonymousRateLimitPerMinute (or set it to 0) rather than
                 // trusting a client-supplied X-Forwarded-For, which a brute-forcer would rotate.
@@ -361,6 +487,29 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                         QueueLimit = 0,
                     });
             });
+        });
+    }
+
+    /// <summary>A fixed one-minute window per user; 0 or less disables it.</summary>
+    private void AddWebhookPolicy(Microsoft.AspNetCore.RateLimiting.RateLimiterOptions options, string policy, string setting, int defaultPerMinute)
+    {
+        options.AddPolicy(policy, httpContext =>
+        {
+            var limit = Configuration.GetValue(setting, defaultPerMinute);
+            var userId = httpContext.User.GetUserId();
+            if (limit <= 0 || userId is null)
+            {
+                return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter($"{policy}-unlimited");
+            }
+
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: $"{policy}:{userId.Value}",
+                _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = limit,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                });
         });
     }
 
@@ -410,12 +559,11 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     /// expensive one. Paying 3x the CPU on a path selected mostly by adversaries is the wrong
     /// side of that trade, and gzip Fastest still removes ~86% of the bytes.
     ///
-    /// That reasoning is bounded by response size, and response size here is not bounded:
-    /// PagedRequest.PageSize is an unconstrained int that flows into Take(), so a caller can
-    /// ask any of the paged endpoints for an arbitrarily large body. Compression is not the
-    /// origin of that (the SQL and the serialization on that path cost far more than any
-    /// codec) and capping it is a caller-visible change that belongs in its own issue — but it
-    /// is the reason not to spend extra CPU per byte here.
+    /// That reasoning is bounded by response size. PagedRequest.PageSize is clamped to
+    /// PagedRequest.MaxPageSize (250 rows, #314); before that it was an unconstrained int that
+    /// flowed into Take(), so a caller could ask any of the paged endpoints for an arbitrarily
+    /// large body. 250 rows can still be a large body, and an attacker still picks the codec, so
+    /// it remains the reason not to spend extra CPU per byte here.
     ///
     /// Brotli is registered first so it wins when a client offers both at equal quality.
     ///
@@ -488,7 +636,12 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 Expiration = TimeSpan.FromMinutes(15),
                 LocalCacheExpiration = TimeSpan.FromMinutes(15),
             };
-        });
+        })
+            // Binary, not JSON: as JSON the public print index would near the 1 MiB payload limit.
+            .AddSerializer<Services.PublicPrints.PublicPrintIndex, Services.PublicPrints.PublicPrintIndexSerializer>();
+
+        // Singleton: it holds only HybridCache and CachedComputation, both singletons.
+        services.AddSingleton<Services.PublicPrints.PublicPrintIndexCache>();
 
         // Singleton: it holds only the scope factory, and the scopes it creates must be
         // independent of any request scope — which is the entire point. See CachedComputation.
@@ -559,11 +712,39 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
     {
         services.AddSingleton<Mcp.IMcpToolTelemetry, Mcp.McpToolTelemetry>();
 
+        // The public docs (#129): fetched from the site's Markdown twins and served on /mcp and,
+        // anonymously, on /mcp/docs. See McpDocsEndpoint for why that is a second endpoint.
+        services.Configure<Mcp.Docs.DocsOptions>(Configuration.GetSection(Mcp.Docs.DocsOptions.SectionName));
+        services.AddSingleton<Mcp.Docs.IDocsCatalog, Mcp.Docs.DocsCatalog>();
+        services.AddHttpClient(Mcp.Docs.DocsCatalog.HttpClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Accept.ParseAdd("text/markdown");
+                client.DefaultRequestHeaders.Accept.ParseAdd("text/plain;q=0.9");
+            })
+            // No redirects: the configured origin is the only host ever fetched, and a redirect
+            // is the one way a response could move a request somewhere else.
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
+
         services.AddMcpServer()
-            .WithHttpTransport(options => options.Stateless = true)
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = true;
+                options.ConfigureSessionOptions = Mcp.Docs.McpDocsEndpoint.ConfigureSessionOptions;
+            })
             .AddAuthorizationFilters()
             .WithTools<Mcp.PrintLogReadTools>()
             .WithTools<Mcp.PrintLogWriteTools>()
+            .WithTools<Mcp.Docs.PrintLogDocsTools>()
+            // docs:// pages (#129) and the ui:// MCP Apps views (#130) share these handlers.
+            // McpAppResources wraps the docs ones and keeps the views off /mcp/docs.
+            .WithListResourcesHandler(Mcp.Apps.McpAppResources.ListResources)
+            .WithListResourceTemplatesHandler(Mcp.Docs.McpDocsEndpoint.ListResourceTemplates)
+            .WithReadResourceHandler(Mcp.Apps.McpAppResources.ReadResource)
             .WithRequestFilters(requestFilters =>
             {
                 // Single choke point for tool errors AND telemetry: map our typed codes to safe
@@ -663,6 +844,21 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             {
                 jwtOptions.Authority = domain;
                 jwtOptions.Audience = Configuration["Auth0:ApiIdentifier"];
+                // A device token (#148) is also sent as a bearer, and is DeviceTokenMiddleware's
+                // to judge. Stepping aside keeps this scheme from logging a parse failure for
+                // every bridge request; it would reject the value anyway.
+                jwtOptions.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        if (Authentication.Devices.DeviceTokenFormat.FromAuthorizationHeader(ctx.Request.Headers.Authorization.ToString()) is not null)
+                        {
+                            ctx.NoResult();
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                };
             })
             // Isolated MCP bearer accepts ONLY the dedicated MCP audience. Never accept
             // MCP-audience tokens through the default scheme, nor app tokens through this one.
@@ -701,22 +897,43 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
             });
         }
 
+        // Device pairing (#148): the DevicePairing scheme and policy, in every environment. Off
+        // (fails closed) until the DevicePairing section names a client and an audience.
+        services.AddDevicePairing(Configuration);
+
+        // The Spoolman-compatible API's own credential (#176), in every environment: the dev
+        // bypass does not reach /spoolman, because the policy below pins this scheme.
+        services.AddAuthentication()
+            .AddScheme<AuthenticationSchemeOptions, Authentication.Spoolman.SpoolmanBasicAuthenticationHandler>(
+                Authentication.Spoolman.SpoolmanAuthentication.Scheme, null);
+
         // These policies use custom requirements (not scope-based) and are needed in all environments
         services.AddAuthorization(options =>
         {
+            // Every /spoolman endpoint. Pinning the scheme is what keeps JWTs, API keys and the
+            // dev bypass out: authorization re-authenticates with SpoolmanBasic alone, so any
+            // other identity arrives anonymous and is challenged with Spoolman's 401.
+            options.AddPolicy(Authentication.Spoolman.SpoolmanAuthentication.Policy, policy =>
+            {
+                policy.AuthenticationSchemes.Add(Authentication.Spoolman.SpoolmanAuthentication.Scheme);
+                policy.RequireAuthenticatedUser();
+                policy.RequireClaim(Authentication.Spoolman.SpoolmanAuthentication.ConnectionIdClaim);
+            });
+
             // ApiKeyMiddleware authenticates any /api request bearing a valid X-Api-Key header or
             // api_key query parameter, in the "ApiUser" role. Those are long-lived credentials
             // living in printer config files; they must not be able to register or delete the
             // phones a user receives push notifications on.
             //
             // The scheme is pinned rather than only blacklisting the role, so a future
-            // authentication scheme does not silently gain access. The role check stays as
-            // defence in depth.
+            // authentication scheme does not silently gain access. The role checks stay as
+            // defence in depth; device tokens (#148) are refused the same way.
             options.AddPolicy("InteractiveUserOnly", policy =>
             {
                 policy.AuthenticationSchemes.Add(interactiveScheme);
                 policy.RequireAuthenticatedUser();
-                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser"));
+                policy.RequireAssertion(ctx => !ctx.User.IsInRole("ApiUser")
+                    && !ctx.User.IsInRole(Authentication.Devices.DeviceTokenMiddleware.Role));
             });
 
             options.AddPolicy("ViewPrint", policy =>
@@ -805,8 +1022,8 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
 
         // Outside every middleware that writes a response body, which is the actual constraint:
         // this swaps IHttpResponseBodyFeature for a wrapper, so anything that has already
-        // started writing would bypass it. That puts it above routing, endpoints, Swagger and
-        // /metrics, and below the HTTPS redirect (no point compressing a 307 with no body).
+        // started writing would bypass it. That puts it above routing, endpoints and Swagger,
+        // and below the HTTPS redirect (no point compressing a 307 with no body).
         //
         // It also sits inside UseClientAbortHandling so that anything thrown while finalizing
         // the compressed frame passes back through that handler. Do not read more into that
@@ -818,27 +1035,45 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         // ClientAbortMiddleware matches only OperationCanceledException and
         // InvalidOperationException, so an IOException surfacing from a dead-socket write would
         // still escape. Widening that is a change to that middleware, not to this line.
-        //
-        // Ordering against UseHttpMetrics was checked (issue #66 raised it): prometheus-net 8's
-        // UseHttpMetrics records request counts, in-flight gauge and duration — it has no
-        // response-size metric, so no recorded byte count can be distorted by compression.
-        // Duration is a different story and worth stating accurately: the codec runs during the
-        // WriteAsync calls the endpoint makes, which happen while UseHttpMetrics is still
-        // awaiting, so request duration INCLUDES compression. Only the trailing finalization
-        // falls outside it. At the measured 0.15 ms that is under the noise floor of these
-        // handlers, but a dashboard reading duration is not reading pure handler latency.
         app.UseResponseCompression();
 
         app.UseCors(builder =>
         {
-            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Request-Context");
         });
 
+        // Both wrap routing, authentication and ApiKeyMiddleware, because that is where the
+        // body-less 404/405/401 responses come from (#127). Inside response compression, so the
+        // problem bodies are compressed like any other JSON, and inside CORS, so they carry the
+        // CORS headers a browser needs to read them. Neither touches /mcp.
+        app.UseProblemDetailsStatusCodePages();
+        app.UseRestResourceMetadataChallenge();
+        // The same job for /spoolman, in Spoolman's {"message"} shape (#176).
+        app.UseSpoolmanErrorBodies();
 
+        // RFC 9728 metadata for the REST audience, which every REST 401 points at. Before
+        // UseAuthentication, or the MCP SDK's handler answers this path with the MCP document;
+        // see RestProtectedResource for that and for why REST needs a document of its own.
+        app.UseRestProtectedResourceMetadata();
+
+        // Spoolman's websockets (#178). Before routing and authentication, so the upgrade is
+        // recognised when SpoolmanBasic authenticates the handshake. The server pings every 30 s
+        // and drops a peer that has not answered within 60 s more, comfortably inside Azure App
+        // Service's 230-second idle timeout and ahead of an older Moonraker that never pings.
+        // Needs "Web sockets" switched on in App Service, General settings.
+        app.UseWebSockets(new WebSocketOptions
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(30),
+            KeepAliveTimeout = TimeSpan.FromSeconds(60),
+        });
 
         app.UseRouting();
 
         app.UseAuthentication();
+        // Device tokens (#148) before API keys: it refuses a request carrying both, and on an
+        // endpoint without [DeviceAccess] it answers 403 itself, so a device principal never
+        // reaches authorization there.
+        app.UseMiddleware<Authentication.Devices.DeviceTokenMiddleware>();
         app.UseApiKeyAuthentication();
         app.UseAuthorization();
         // After authorization so the /mcp partition key sees the authenticated MCP user and
@@ -848,24 +1083,21 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
         JsonWebTokenHandler.DefaultMapInboundClaims = true;
         JsonWebTokenHandler.DefaultInboundClaimTypeMap[JwtRegisteredClaimNames.Sub] = ClaimTypes.Upn;
 
-        // Enable middleware to serve generated Swagger as a JSON endpoint.
-        app.UseSwagger();
-
-        // Enable middleware to serve swagger-ui (HTML, JS, CSS, etc.),
-        // specifying the Swagger JSON endpoint.
-        app.UseSwaggerUI(c =>
-        {
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Print Log API V1");
-            c.OAuthClientId(Configuration["Auth0:SwaggerClientId"]);
-            c.OAuthAdditionalQueryStringParams(new Dictionary<string, string>() { { "audience", "https://dev.3dprintlog.com/api" } });
-        });
-
-        app.UseMetricServer();
-        app.UseHttpMetrics();
+        app.UsePrintLogOpenApi(Configuration);
 
         app.UseEndpoints(endpoints =>
         {
-            endpoints.MapControllers().RequireRateLimiting("api");
+            // The "api" policy for every controller that does not name its own. A convention
+            // runs after the controller's attributes, and the limiter reads the LAST
+            // [EnableRateLimiting] it finds, so applying "api" unconditionally would silently
+            // replace an endpoint's own policy (EmailController's per-token budget).
+            endpoints.MapControllers().Add(endpoint =>
+            {
+                if (!endpoint.Metadata.OfType<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>().Any())
+                {
+                    endpoint.Metadata.Add(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("api"));
+                }
+            });
 
             // Liveness: the path to configure under App Service > Monitoring > Health check.
             // Plain text, no dependencies — see ConfigureHealthChecks for why it stays shallow.
@@ -882,62 +1114,27 @@ The API key can be used either by adding a **X-Api-Key header** with the key, or
                 ResponseWriter = WriteHealthResponse,
             }).AllowAnonymous();
 
+            // App Service's Always On pings "/" to keep the site warm; unmapped, that was ~300
+            // 404s a day. Anonymous, outside OpenAPI, and on no rate-limit policy (the global
+            // limiters only match /api/email and connector writes). NoiseTelemetryProcessor drops
+            // its successful requests.
+            endpoints.MapGet("/", () => Results.Ok()).AllowAnonymous().ExcludeFromDescription();
+
             // MCP endpoint (Streamable HTTP, stateless). The endpoint-level "Mcp" policy
             // enforces the dedicated MCP bearer + a mapped user before dispatch; the read/write
             // scope gate is applied per tool class (McpRead / McpWrite).
             endpoints.MapMcp("/mcp").RequireAuthorization("Mcp").RequireRateLimiting("mcp");
+
+            // The public docs, anonymously (#129). Same server registration, narrowed to the docs
+            // tools per request by McpDocsEndpoint.ConfigureSessionOptions; /mcp above is untouched.
+            endpoints.MapMcp(Mcp.Docs.McpDocsEndpoint.Path)
+                .AllowAnonymous()
+                .RequireRateLimiting(Mcp.Docs.McpDocsEndpoint.RateLimitPolicy);
+
+            // OpenAI's domain-verification token for the ChatGPT plugin directory; 404 unless
+            // configured. See OpenAiAppsChallenge and docs/mcp-registry-listing.md.
+            endpoints.MapOpenAiAppsChallenge();
         });
 
-    }
-}
-
-public class AuthorizeCheckOperationFilter : IOperationFilter
-{
-    public void Apply(OpenApiOperation operation, OperationFilterContext context)
-    {
-        var hasAuthorize =
-          // DeclaringType is never null for a controller action method.
-          context.MethodInfo.DeclaringType!.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
-          || context.MethodInfo.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any();
-
-        if (hasAuthorize)
-        {
-            if (!operation.Responses.Any(kvp => kvp.Key == "401"))
-            {
-                operation.Responses.Add("401", new OpenApiResponse { Description = "Unauthorized" });
-            }
-
-            if (!operation.Responses.Any(kvp => kvp.Key == "403"))
-            {
-                operation.Responses.Add("403", new OpenApiResponse { Description = "Forbidden" });
-            }
-
-
-            operation.Security = new List<OpenApiSecurityRequirement>
-        {
-            new OpenApiSecurityRequirement
-            {
-                [
-                    new OpenApiSecurityScheme {Reference = new OpenApiReference
-                    {
-                        Type = ReferenceType.SecurityScheme,
-                        Id = "oauth2"}
-                    }
-                ] = new[] {"api1"}
-            },
-            new OpenApiSecurityRequirement
-            {
-                [
-                    new OpenApiSecurityScheme {
-                        Reference = new OpenApiReference
-                    {
-                        Type = ReferenceType.SecurityScheme,
-                        Id = "apikey"}
-                    }
-                ] = new[] {"api1"}
-            }
-        };
-
-        }
     }
 }

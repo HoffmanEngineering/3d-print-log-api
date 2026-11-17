@@ -17,7 +17,9 @@ public class ProjectsController(
     IProjectService projectService,
     IMapper mapper,
     ICacheVersionService cacheVersionService,
-    TelemetryClient telemetry) : ControllerBase
+    TelemetryClient telemetry,
+    IBlobStorageService blobStorage,
+    SocialImageLookup socialImages) : ControllerBase
 {
     /// <summary>Get a paged list of the current user's projects.</summary>
     [HttpGet]
@@ -38,6 +40,25 @@ public class ProjectsController(
         return Ok(result);
     }
 
+    /// <summary>
+    /// Returns the ids of every Public project, for the UI's deploy-time sitemap.
+    /// </summary>
+    /// <remarks>
+    /// Each id is one <c>GET {id}</c> serves to an anonymous caller. Unlisted projects are left out
+    /// even though they are viewable by link, matching <c>/api/Prints/public</c>.
+    /// </remarks>
+    /// <response code="200">The public project ids, ordered.</response>
+    // Declared before {id} only for reading order: the literal segment outranks the parameter regardless.
+    [AllowAnonymous]
+    [HttpGet("public")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Any, NoStore = false)]
+    public async Task<ActionResult<IEnumerable<Guid>>> GetPublicProjectIds(CancellationToken cancellationToken)
+    {
+        telemetry.TrackEvent("PublicProjectsQueried");
+        return await projectService.GetPublicProjectIdsAsync(cancellationToken);
+    }
+
     /// <summary>Get a project's full detail by ID. Public/Unlisted projects are accessible without auth.</summary>
     [HttpGet("{id}")]
     [AllowAnonymous]
@@ -53,7 +74,7 @@ public class ProjectsController(
         var currentUserId = User.GetUserId();
         var isOwner = currentUserId.HasValue && project.CreatedById == currentUserId.Value;
 
-        if (project.ViewStatus == Project.ProjectViewStatus.Private && !isOwner)
+        if (!isOwner && !Project.IsViewableByNonOwner(project.ViewStatus))
             return Forbid();
 
         return Ok(mapper.Map<ProjectDetailDto>(project));
@@ -69,11 +90,16 @@ public class ProjectsController(
         if (!userId.HasValue)
             return Unauthorized();
 
-        var project = await projectService.CreateProjectAsync(dto, userId.Value);
-        cacheVersionService.InvalidateUserCache(userId.Value);
+        try
+        {
+            var project = await projectService.CreateProjectAsync(dto, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectAdded");
 
-        return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
-            mapper.Map<ProjectDetailDto>(project));
+            return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
+                mapper.Map<ProjectDetailDto>(project));
+        }
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
     }
 
     /// <summary>Update a project's metadata.</summary>
@@ -97,10 +123,17 @@ public class ProjectsController(
         if (existing.CreatedById != userId.Value)
             return Forbid();
 
-        var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
-        cacheVersionService.InvalidateUserCache(userId.Value);
+        try
+        {
+            var updated = await projectService.UpdateProjectAsync(id, dto, userId.Value);
+            cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectEdit");
 
-        return Ok(mapper.Map<ProjectDetailDto>(updated));
+            return Ok(mapper.Map<ProjectDetailDto>(updated));
+        }
+        // There is no global exception-to-status mapping in this app, so without the catch an
+        // inverted date range surfaces as a 500.
+        catch (BadRequestException ex) { return BadRequest(ex.Message); }
     }
 
     /// <summary>
@@ -128,6 +161,10 @@ public class ProjectsController(
         {
             await projectService.DeleteProjectAsync(id, deletePrints, userId.Value);
             cacheVersionService.InvalidateUserCache(userId.Value);
+            telemetry.TrackEvent("ProjectDelete", new Dictionary<string, string>
+            {
+                ["deletePrints"] = deletePrints ? "true" : "false",
+            });
             return Ok();
         }
         catch (DoesNotExistException)
@@ -137,21 +174,80 @@ public class ProjectsController(
     }
 
     /// <summary>Get a project image.</summary>
+    /// <remarks>
+    /// Anyone can read an image of a public or unlisted project; a private project's images only
+    /// its owner (anyone else gets 404). Responses carry a strong `ETag` (answering
+    /// `If-None-Match` with 304) and support `Range`. An image anyone can read is
+    /// `Cache-Control: public, max-age=3600`; a private project's image is `private`.
+    /// </remarks>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range of the image.</response>
+    /// <response code="304">The image has not changed since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">No such image, or the project is private and the caller is not its owner.</response>
     [AllowAnonymous]
     [HttpGet("{id}/images/{imageId}")]
-    [ResponseCache(Duration = 604800, Location = ResponseCacheLocation.Client, NoStore = false)]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [MediaEndpoint]
-    public async Task<IActionResult> GetProjectImage(Guid id, int imageId)
-    {
-        var userId = User.GetUserId();
-        var result = await projectService.GetImageAsync(id, imageId, userId);
-        if (result == null) return NotFound();
+    public Task<IActionResult> GetProjectImage(Guid id, int imageId)
+        => ServeProjectImageAsync(id, imageId, thumbnail: false);
 
-        new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
-            .TryGetContentType(result.Value.fileName, out var contentType);
-        return File(result.Value.stream, contentType ?? "application/octet-stream");
+    /// <summary>Get the 320px thumbnail of a project image, for list views.</summary>
+    /// <remarks>
+    /// Same access, caching and headers as the image itself. An image stored before thumbnails
+    /// existed returns the original instead.
+    /// </remarks>
+    /// <response code="200">The thumbnail, or the original when the image has none.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">No such image, or the project is private and the caller is not its owner.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/images/{imageId}/thumbnail")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public Task<IActionResult> GetProjectImageThumbnail(Guid id, int imageId)
+        => ServeProjectImageAsync(id, imageId, thumbnail: true);
+
+    /// <summary>Get the link-preview image of a public project: its default image, about 1200px on the long edge.</summary>
+    /// <remarks>
+    /// This is the `og:image` the project's `/seo` metadata points at, with a `?v=` that changes
+    /// when the image does; the parameter is otherwise ignored. Returns the original when the
+    /// image has no social derivative yet. 404 for a project that is not public (even to its
+    /// owner) or has no image.
+    /// </remarks>
+    /// <response code="200">The image.</response>
+    /// <response code="206">The requested byte range.</response>
+    /// <response code="304">Unchanged since the `ETag` sent in `If-None-Match`.</response>
+    /// <response code="404">The project does not exist, is not public, or has no image.</response>
+    [AllowAnonymous]
+    [HttpGet("{id}/social-image")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [MediaEndpoint]
+    public async Task<IActionResult> GetProjectSocialImage(Guid id)
+    {
+        var image = await socialImages.ForProjectAsync(id, HttpContext.RequestAborted);
+        if (image is null) return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorage, BlobContainers.ProjectImages, image.Served, HttpContext.RequestAborted);
+    }
+
+    private async Task<IActionResult> ServeProjectImageAsync(Guid id, int imageId, bool thumbnail)
+    {
+        var image = await projectService.GetImageRefAsync(
+            id, imageId, User.GetUserId(), thumbnail, HttpContext.RequestAborted);
+        if (image == null) return NotFound();
+
+        return await ImageFileResult.ServeAsync(
+            this, blobStorage, BlobContainers.ProjectImages, image, HttpContext.RequestAborted);
     }
 
     /// <summary>Upload an image to a project.</summary>
@@ -173,9 +269,10 @@ public class ProjectsController(
         if (file == null)
             return BadRequest("Image file is required.");
 
-        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp" };
+        // A cheap early answer for an obviously wrong file. The decode in the service decides.
+        var allowedImageTypes = new[] { "image/jpeg", "image/png", "image/webp" };
         if (!allowedImageTypes.Contains(file.ContentType.ToLowerInvariant()))
-            return BadRequest("Only image files are accepted (jpeg, png, gif, webp, bmp).");
+            return BadRequest("Only image files are accepted (jpeg, png, webp).");
 
         const long maxImageSizeBytes = 10 * 1024 * 1024;
         if (file.Length > maxImageSizeBytes)
@@ -191,6 +288,15 @@ public class ProjectsController(
         catch (DoesNotExistException)
         {
             return NotFound();
+        }
+        catch (InvalidImageException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (BadRequestException ex)
+        {
+            // The per-project image cap.
+            return BadRequest(ex.Message);
         }
     }
 

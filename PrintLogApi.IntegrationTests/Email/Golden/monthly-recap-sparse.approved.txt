@@ -1,0 +1,23 @@
+Your November in prints
+
+Hi Ada,
+
+Here's how your November went.
+
+- 12 prints
+- 42h of print time
+- 1.2 kg of filament
+
+Busiest printer: Voron 2.4
+
+See your full stats: https://www.3dprintlog.test/analytics
+
+--
+YouTube: https://www.youtube.com/@hoffmanengineering
+GitHub: https://github.com/HoffmanEngineering/3d-print-log-ui
+Blog: https://hoffman.engineering/
+
+You're receiving this because of a test.
+Manage email preferences: https://www.3dprintlog.test/email-preferences#m=MANAGE
+Unsubscribe: https://www.3dprintlog.test/email-preferences#u=UNSUB
+PO Box 0, Testville, USA

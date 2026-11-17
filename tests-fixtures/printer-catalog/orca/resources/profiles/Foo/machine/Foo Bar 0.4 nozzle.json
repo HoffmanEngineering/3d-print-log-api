@@ -1,0 +1,19 @@
+{
+    "type": "machine",
+    "name": "Foo Bar 0.4 nozzle",
+    "inherits": "fdm_foo_common",
+    "from": "system",
+    "setting_id": "FB04",
+    "instantiation": "true",
+    "printer_model": "Foo Bar",
+    "printer_variant": "0.4",
+    "nozzle_diameter": [
+        "0.4"
+    ],
+    "printable_area": [
+        "-5x-5",
+        "225x-5",
+        "225x220",
+        "-5x220"
+    ]
+}

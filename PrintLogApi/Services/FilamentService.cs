@@ -4,10 +4,13 @@ using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
+using PrintLogApi.SpoolTags;
 using static PrintLogApi.Services.MeasurementUtilities;
 
 namespace PrintLogApi.Services;
@@ -237,24 +240,25 @@ public class FilamentService(
 
         // Negative RemainingGrams are reported as-is: they indicate a real data problem
         // (usage logged beyond the spool's initial weight) that the user should be able to see
-        // and fix. Only find_material clamps them, and only when summing availability.
+        // and fix. Only find_material clamps them, and only when summing availability. Null
+        // means the spool is not tracked (#230).
         var items = rows.Select(r => new MaterialInventoryItem(
             r.Id, r.DisplayName!, r.Brand, r.MaterialType!, r.ColorName,
-            McpUnits.MgToGrams(r.FilamentRemaining), r.IsActive,
+            McpUnits.MgToGramsOrNull(r.FilamentRemaining), r.IsActive,
             r.StorageLocation, r.DiameterMm)).ToList();
 
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(totalCount / (double)pageSize) : 0;
         return new McpPage<MaterialInventoryItem>(items, page, pageSize, totalCount, totalPages);
     }
 
-    public async Task<double> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
+    public async Task<double?> GetRemainingGramsForMcp(long userId, Guid materialId, CancellationToken ct)
     {
         var remainingMg = await context.Filaments.AsNoTracking()
             .Where(f => f.CreatedById == userId && f.Id == materialId)
             .ProjectTo<FilamentSummaryDto>(mapper.ConfigurationProvider)
             .Select(f => f.FilamentRemaining)
             .FirstOrDefaultAsync(ct);
-        return McpUnits.MgToGrams(remainingMg);
+        return McpUnits.MgToGramsOrNull(remainingMg);
     }
 
     public async Task<MaterialDetail> GetOwnMaterialDetailForMcp(long userId, Guid materialId, CancellationToken ct)
@@ -274,7 +278,7 @@ public class FilamentService(
     /// Projects an owned material to the MCP detail shape. The caller has ALREADY established
     /// ownership; this method does not re-check it and must never be handed a foreign row.
     /// </summary>
-    private static MaterialDetail ToMaterialDetail(Filament f, double remainingGrams)
+    private static MaterialDetail ToMaterialDetail(Filament f, double? remainingGrams)
     {
         // The authoritative amount, in the unit the user actually entered. Storage keeps length in
         // METERS while the MCP boundary is mm.
@@ -662,8 +666,10 @@ public class FilamentService(
             throw McpToolException.InvalidArguments("source and initialAmount must be provided together.");
         }
 
+        // Adjustments too: a density or diameter change re-derives them, as the web PUT does.
         var material = await context.Filaments
             .Include(f => f.MaterialCategory)
+            .Include(f => f.FilamentAdjustments)
             .FirstOrDefaultAsync(f => f.Id == materialId && f.CreatedById == userId, ct);
         if (material == null)
         {
@@ -697,6 +703,10 @@ public class FilamentService(
     private async Task ApplyMaterialPatch(
         Filament material, MaterialAttributesInput input, ISet<string> clear, long userId, CancellationToken ct)
     {
+        // Taken before any field changes, to tell what the edit did to the conversion inputs.
+        var storedConversionInputs = AdjustmentConversionInputs.Of(material);
+        var storedAdjustments = SnapshotAdjustments(material);
+
         // --- Non-clearable identity/computation fields: set only. ---
         if (input.DisplayName != null)
         {
@@ -842,6 +852,19 @@ public class FilamentService(
         // current density/diameter. This is the website's behavior, mirrored deliberately.
         UpdateFilamentMeasurements(material);
 
+        // The web PUT's check (#232): an edit that leaves a converted adjustment unconvertible
+        // (a category without a diameter under a length adjustment) would make it stop counting.
+        try
+        {
+            RequireConvertibleAdjustments(material, storedAdjustments);
+        }
+        catch (BadRequestException)
+        {
+            throw McpToolException.InvalidArguments(UnconvertibleAdjustmentMessage);
+        }
+
+        await RederiveFromMaterial(material, storedConversionInputs, ct);
+
         material.UpdatedById = userId;
         await context.SaveChangesAsync(ct);
     }
@@ -935,6 +958,25 @@ public class FilamentService(
             throw McpToolException.NotFound("Material not found.");
         }
 
+        // An untracked spool has no remaining amount (it is null on every surface, #230), so there
+        // is nothing for a delta to correct and no floor or ceiling to check it against.
+        if (!material.InitialNominalWeightMg.HasValue)
+        {
+            throw McpToolException.InvalidArguments(
+                "This material has no starting amount, so its remaining amount is not tracked. " +
+                "Set initialAmount with update_material to the spool's ORIGINAL size. If you only " +
+                "know what is on it now, set initialAmount to any original size, then call " +
+                "get_material and adjust_material_remaining by the difference: logged usage is " +
+                "subtracted from initialAmount, so setting it to the current amount counts that " +
+                "usage twice.", "material_untracked");
+        }
+
+        // The same check the web app's create and update paths make (#232).
+        if (!AdjustmentConversionInputs.Of(material).CanConvert((FilamentAdjustment.SourceMeasurement)(int)source))
+        {
+            throw McpToolException.InvalidArguments(UnconvertibleAdjustmentMessage);
+        }
+
         // Record the adjustment in the caller's source unit; the existing helper derives the rest,
         // including AmountMg — the weight the remaining calculation actually sums.
         var adjustment = new FilamentAdjustment
@@ -959,24 +1001,19 @@ public class FilamentService(
         }
         UpdateFilamentAdjustmentMeasurements(adjustment, material);
 
-        if (adjustment.AmountMg is null)
-        {
-            throw McpToolException.InvalidArguments(
-                "This material is missing the density/diameter needed to convert the adjustment to a weight.");
-        }
-
         var deltaGrams = McpUnits.MgToGrams(adjustment.AmountMg);
-        var beforeGrams = await GetRemainingGramsForMcp(userId, materialId, ct);
+        // Tracked (checked above), so remaining has a value.
+        var beforeGrams = (await GetRemainingGramsForMcp(userId, materialId, ct))!.Value;
         var afterGrams = Math.Round(beforeGrams + deltaGrams, 3, MidpointRounding.AwayFromZero);
         var capacityGrams = McpUnits.MgToGrams(material.InitialNominalWeightMg);
 
         if (afterGrams < 0)
         {
-            throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.");
+            throw McpToolException.InvalidArguments("Adjustment would drive remaining below zero.", "adjustment_out_of_range");
         }
         if (capacityGrams > 0 && afterGrams > capacityGrams)
         {
-            throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.");
+            throw McpToolException.InvalidArguments("Adjustment would exceed the material's original capacity.", "adjustment_out_of_range");
         }
 
         context.FilamentAdjustments.Add(adjustment);
@@ -1025,12 +1062,18 @@ public class FilamentService(
     public async Task<FindMaterialResult> FindMaterialForMcp(
         long userId, string? material, string? color, double? requiredGrams, CancellationToken ct)
     {
-        var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false);
+        // Untracked spools are left out (#230): their remaining is null, and counting one as 0 or
+        // as anything else would make an availability answer up. Filtered on the column, not on
+        // the projected FilamentRemaining, so SQL Server does not evaluate the correlated usage
+        // sums in the WHERE as well as the SELECT. The two agree: remaining is null exactly when
+        // InitialNominalWeightMg is.
+        var projected = OwnedInventoryForMcp(userId, material, color, includeInactive: false)
+            .Where(f => f.InitialNominalWeightMg != null);
 
         // Order by remaining weight so that if the candidate set is truncated, the spools most
         // likely to satisfy the requirement are the ones that survive.
         var candidates = await projected
-            .OrderByDescending(f => f.FilamentRemaining ?? 0)
+            .OrderByDescending(f => f.FilamentRemaining)
             .ThenBy(f => f.Id)
             .Take(MaxCandidates + 1) // +1 detects truncation without a second COUNT
             .Select(f => new SpoolItem(
@@ -1147,9 +1190,9 @@ public class FilamentService(
         List<FilamentFinishType>? finishTypes = null,
         List<FilamentEffect>? effects = null)
     {
-        // PagedRequest.PageSize is an unconstrained int that flows straight into Take().
-        // Hydration now signs one URL per row, so an unbounded page is a request-thread
-        // cost as well as a response-size one.
+        // Tighter than PagedRequest.MaxPageSize (250, #314), which this predates: hydration
+        // signs one URL per row, so a page is a request-thread cost as well as a
+        // response-size one.
         const int MaxPageSize = 100;
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
 
@@ -1160,7 +1203,10 @@ public class FilamentService(
         // Filter out unloaded-filaments if requested.
         if (showLoadedFilamentOnly.HasValue && showLoadedFilamentOnly.Value == true)
         {
-            filament = filament.Where(f => f.PrinterFilaments!.Any(pf => !pf.UnloadedDateTime.HasValue));
+            // Only a load on a printer the spool's owner owns, as LoadedInPrinter reports it.
+            filament = filament.Where(ExpressionSplice.Inline<Filament, Func<PrinterFilament, bool>, bool>(
+                (f, counts) => f.PrinterFilaments!.Where(pf => !pf.UnloadedDateTime.HasValue).Any(counts),
+                SpoolOwnership.LoadedRowCounts));
         }
 
         if (!string.IsNullOrEmpty(filterByMaterialCategoryNickname))
@@ -1311,10 +1357,309 @@ public class FilamentService(
         return await context.Filaments
                 .Where(f => f.Id == id)
                 .Include(f => f.FilamentAdjustments)
-                .Include(f => f.PrintFilaments)
+                // Print and its Printer: which usage rows count is decided by who owns them
+                // (SpoolOwnership.UsageRowCounts), for the remaining figure and for DeleteFilament.
+                .Include(f => f.PrintFilaments!)
+                    .ThenInclude(pf => pf.Print)
+                        .ThenInclude(p => p.Printer)
                 .Include(f => f.MaterialCategory)
+                .Include(f => f.Tags)
                 .AsSplitQuery()
                 .SingleOrDefaultAsync();
+    }
+
+    public async Task<Filament?> GetFilamentByTag(long userId, string uid)
+    {
+        var normalized = TagUid.Normalize(uid) ?? throw InvalidTagUid(uid);
+
+        var filamentId = await context.FilamentTags
+            .Where(t => t.UserId == userId && t.Uid == normalized)
+            .Select(t => (Guid?)t.FilamentId)
+            .SingleOrDefaultAsync();
+
+        return filamentId.HasValue ? await GetFilamentById(filamentId.Value) : null;
+    }
+
+    public async Task<Filament?> GetFilamentBySpoolNumber(long userId, int spoolNumber, CancellationToken ct = default)
+    {
+        await NumberUnnumberedSpoolsAsync(userId, ct);
+
+        var filamentId = await context.Filaments
+            .Where(f => f.CreatedById == userId && f.SpoolNumber == spoolNumber)
+            .Select(f => (Guid?)f.Id)
+            .SingleOrDefaultAsync(ct);
+
+        return filamentId.HasValue ? await GetFilamentById(filamentId.Value) : null;
+    }
+
+    public async Task NumberUnnumberedSpoolsAsync(long userId, CancellationToken ct = default)
+    {
+        // Only a spool the previous app version created while the #174 migration ran can be
+        // unnumbered, so this normally finds nothing. It is still not cheap: the only SpoolNumber
+        // index is filtered IS NOT NULL, so IS NULL walks every filament the user owns through
+        // IX_Filaments_CreatedById. Keep it off hot paths (#195).
+        var unnumbered = await context.Filaments
+            .Where(f => f.CreatedById == userId && f.SpoolNumber == null)
+            .OrderBy(f => f.CreatedDate).ThenBy(f => f.Id)
+            .Select(f => f.Id)
+            .ToListAsync(ct);
+
+        var numbered = 0;
+        foreach (var id in unnumbered)
+        {
+            var number = await ReserveSpoolNumberAsync(userId, ct);
+
+            // Conditional, so two lookups racing to number the same spool cannot both win and
+            // the second overwrite the first; the loser's reserved number becomes a gap.
+            numbered += await context.Filaments
+                .Where(f => f.Id == id && f.SpoolNumber == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(f => f.SpoolNumber, number), ct);
+        }
+
+        // ExecuteUpdate bypasses SaveChanges, so nothing else bumps the version for these rows,
+        // and every cached view showing spool numbers (the summaries, the sync snapshot) would keep
+        // reporting them unnumbered. Only when something was numbered: this normally finds
+        // nothing, and a bump on every call would flush the user's caches for no change.
+        if (numbered > 0)
+        {
+            cacheVersionService.InvalidateUserCache(userId);
+        }
+    }
+
+    /// <summary>
+    /// Takes the owner's next spool number (#174) by bumping <see cref="User.LastSpoolNumber"/>
+    /// and reading the new value back in the same statement.
+    ///
+    /// <para><b>One statement is what makes it safe under concurrency.</b> The increment and the
+    /// read cannot interleave with another caller's, on SQL Server (the row's update lock is held
+    /// for the statement, and for the enclosing transaction if there is one) and on SQLite (one
+    /// writer at a time) alike, so two simultaneous creates for one user always get different
+    /// numbers with no retry loop and no explicit transaction. That matters because
+    /// <c>CreateMaterialForMcp</c> already holds one around this call, and a nested
+    /// <c>BeginTransaction</c> would throw.</para>
+    ///
+    /// <para>The high-water mark, not <c>max + 1</c>: spools are hard-deleted, so <c>max + 1</c>
+    /// would hand the deleted spool's number to the next one. The unique
+    /// <c>(CreatedById, SpoolNumber)</c> index backs this up rather than being the mechanism.</para>
+    ///
+    /// <para>Raw SQL because EF has no translation for an update that returns a value. The two
+    /// dialects differ only in where the returned column goes: <c>OUTPUT</c> on SQL Server,
+    /// <c>RETURNING</c> on SQLite (3.35+), which the integration suite runs on. The column is
+    /// aliased <c>Value</c>, which is what <c>SqlQuery&lt;int&gt;</c> reads.</para>
+    /// </summary>
+    private async Task<int> ReserveSpoolNumberAsync(long userId, CancellationToken ct = default)
+    {
+        var query = context.Database.IsSqlServer()
+            ? context.Database.SqlQuery<int>(
+                $"UPDATE [Users] SET [LastSpoolNumber] = [LastSpoolNumber] + 1 OUTPUT INSERTED.[LastSpoolNumber] AS [Value] WHERE [Id] = {userId}")
+            : context.Database.SqlQuery<int>(
+                $"UPDATE \"Users\" SET \"LastSpoolNumber\" = \"LastSpoolNumber\" + 1 WHERE \"Id\" = {userId} RETURNING \"LastSpoolNumber\" AS \"Value\"");
+
+        // AsAsyncEnumerable rather than a LINQ operator: anything composed on top would make EF
+        // wrap the statement in a SELECT, which an UPDATE cannot sit inside.
+        await foreach (var number in query.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            return number;
+        }
+
+        throw new InvalidOperationException($"User {userId} does not exist, so no spool number can be reserved.");
+    }
+
+    private const int MaxTagReadingsPerRequest = 10;
+
+    private static void ThrowIfTooManyTagReadings(ICollection<TagReadingInputDto>? readings)
+    {
+        if (readings is { Count: > MaxTagReadingsPerRequest })
+        {
+            throw new BadRequestException($"A request can carry at most {MaxTagReadingsPerRequest} tag readings.");
+        }
+    }
+
+    private static BadRequestException InvalidTagUid(string? uid) =>
+        new($"'{uid}' is not a tag UID. Expected hex bytes, such as 04:A2:3F:11.");
+
+    /// <summary>
+    /// Normalizes a requested tag list (#147), dropping duplicates that differ only in case or
+    /// separators. Throws <see cref="BadRequestException"/> for an invalid UID or too many tags.
+    /// </summary>
+    private static List<string> NormalizeTagUids(IEnumerable<string?> requested)
+    {
+        var normalized = new List<string>();
+        foreach (var uid in requested)
+        {
+            var value = TagUid.Normalize(uid) ?? throw InvalidTagUid(uid);
+            if (!normalized.Contains(value))
+            {
+                normalized.Add(value);
+            }
+        }
+
+        if (normalized.Count > TagUid.MaxPerFilament)
+        {
+            throw new BadRequestException($"A spool can carry at most {TagUid.MaxPerFilament} tags.");
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Throws <see cref="TagUidConflictException"/> naming a spool of <paramref name="ownerId"/>,
+    /// other than <paramref name="filamentId"/>, that already carries one of <paramref name="uids"/>.
+    /// </summary>
+    private async Task ThrowIfTagsHeldElsewhere(long ownerId, Guid? filamentId, IReadOnlyCollection<string> uids)
+    {
+        if (uids.Count == 0)
+        {
+            return;
+        }
+
+        var held = context.FilamentTags
+            .AsNoTracking()
+            .Where(t => t.UserId == ownerId && uids.Contains(t.Uid));
+        if (filamentId is { } own)
+        {
+            held = held.Where(t => t.FilamentId != own);
+        }
+
+        var holder = await held
+            .OrderBy(t => t.Uid)
+            .Select(t => new { t.Uid, t.FilamentId, t.Filament.DisplayName })
+            .FirstOrDefaultAsync();
+
+        if (holder is not null)
+        {
+            throw new TagUidConflictException(holder.Uid, holder.FilamentId, holder.DisplayName);
+        }
+    }
+
+    /// <summary>
+    /// Makes <paramref name="filament"/>'s tags exactly <paramref name="uids"/>, keeping the rows
+    /// (and any <see cref="FilamentTag.Format"/>) of the ones it already has.
+    /// </summary>
+    private void ReplaceTags(Filament filament, IReadOnlyCollection<string> uids)
+    {
+        foreach (var tag in filament.Tags.Where(t => !uids.Contains(t.Uid)).ToList())
+        {
+            filament.Tags.Remove(tag);
+            context.FilamentTags.Remove(tag);
+        }
+
+        foreach (var uid in uids.Where(uid => filament.Tags.All(t => t.Uid != uid)).ToList())
+        {
+            filament.Tags.Add(new FilamentTag
+            {
+                Uid = uid,
+                UserId = filament.CreatedById,
+                CreatedDate = DateTime.UtcNow,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Keeps the decoded readings a client sent with a spool's tags. A reading applies only to a
+    /// tag whose UID is in <paramref name="uids"/> (the normalized set), is sanitized first, and
+    /// is skipped when it does not fit the stored size cap, so the tag keeps what it had. The
+    /// last reading for a UID wins. Returns the tags that took a reading, for the SKU votes.
+    /// </summary>
+    private static List<FilamentTag> ApplyTagReadings(
+        Filament filament, IReadOnlyCollection<string> uids, IEnumerable<TagReadingInputDto>? readings)
+    {
+        var applied = new List<FilamentTag>();
+        foreach (var input in readings ?? [])
+        {
+            var uid = TagUid.Normalize(input?.Uid);
+            if (uid is null || input?.Reading is null || !uids.Contains(uid))
+            {
+                continue;
+            }
+
+            var tag = filament.Tags.FirstOrDefault(t => t.Uid == uid);
+            if (tag is null)
+            {
+                continue;
+            }
+
+            var reading = TagReadingSanitizer.Sanitize(input.Reading);
+            if (TagReadingJson.Serialize(reading) is not { } json)
+            {
+                continue;
+            }
+
+            tag.Format = reading.Format ?? tag.Format;
+            tag.DecodedJson = json;
+            tag.DecoderVersion = reading.DecoderVersion == 0 ? tag.DecoderVersion : reading.DecoderVersion;
+            tag.LastReadAt = DateTime.UtcNow;
+            if (!applied.Contains(tag))
+            {
+                applied.Add(tag);
+            }
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Records the user's vote that each tag's SKU is <paramref name="catalogEntryId"/>: one row per
+    /// (format, sku, user), pointed at the entry the user just chose. Saved with the filament.
+    /// </summary>
+    private async Task CastSkuVotes(long userId, string catalogEntryId, IEnumerable<FilamentTag> tags)
+    {
+        var votes = new Dictionary<(string Format, string Sku), string>();
+        foreach (var tag in tags)
+        {
+            if (string.IsNullOrEmpty(tag.Format) || TagReadingJson.Deserialize(tag.DecodedJson)?.Sku is not { Length: > 0 } sku)
+            {
+                continue;
+            }
+
+            votes[(tag.Format, sku)] = catalogEntryId;
+        }
+
+        foreach (var ((format, sku), entryId) in votes)
+        {
+            var vote = await context.FilamentCatalogSkus
+                .SingleOrDefaultAsync(s => s.UserId == userId && s.Format == format && s.Sku == sku);
+            if (vote is null)
+            {
+                context.FilamentCatalogSkus.Add(new FilamentCatalogSku
+                {
+                    Format = format,
+                    Sku = sku,
+                    CatalogEntryId = entryId,
+                    UserId = userId,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                vote.CatalogEntryId = entryId;
+            }
+        }
+    }
+
+    /// <summary>
+    /// SaveChanges, reporting a lost race on the (UserId, Uid) index as the same conflict the
+    /// pre-check raises. Any other failure is rethrown unchanged.
+    /// </summary>
+    private async Task SaveTaggedFilamentChanges(Filament filament, IReadOnlyCollection<string>? uids)
+    {
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && uids is { Count: > 0 })
+        {
+            try
+            {
+                await ThrowIfTagsHeldElsewhere(filament.CreatedById, filament.Id, uids);
+            }
+            catch (TagUidConflictException conflict)
+            {
+                throw new TagUidConflictException(conflict.TagUid, conflict.FilamentId, conflict.FilamentDisplayName, ex);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -1331,12 +1676,25 @@ public class FilamentService(
             .SingleOrDefaultAsync();
 
         return subscription?.Status == SubscriptionStatus.Active
-            ? SubscriptionLimits.ProMaxImagesPerFilament
-            : SubscriptionLimits.FreeMaxImagesPerFilament;
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task<Filament> AddFilament(AddFilamentDto filament, long userId)
     {
+        // Before anything else, so an invalid or taken tag rejects the whole create (#147).
+        var tagUids = NormalizeTagUids(filament.TagUids ?? []);
+        ThrowIfTooManyTagReadings(filament.TagReadings);
+        await ThrowIfTagsHeldElsewhere(userId, null, tagUids);
+
+        // Only a create sets the catalog entry. Removed entries are soft-deleted, so they are unknown here.
+        filament.CatalogEntryId = string.IsNullOrWhiteSpace(filament.CatalogEntryId) ? null : filament.CatalogEntryId.Trim();
+        if (filament.CatalogEntryId is { } catalogEntryId
+            && !await context.FilamentCatalogEntries.AnyAsync(e => e.Id == catalogEntryId && e.RemovedAt == null))
+        {
+            throw new BadRequestException("Unknown catalog entry.");
+        }
+
         // Backward-compat: old clients send ColorHex only — normalize to Colors array
         if ((filament.Colors == null || filament.Colors.Count == 0) && !string.IsNullOrWhiteSpace(filament.ColorHex))
         {
@@ -1367,6 +1725,8 @@ public class FilamentService(
 
         UpdateFilamentMeasurements(newFilament);
 
+        RequireConvertibleAdjustments(newFilament);
+
         foreach (var adjustment in newFilament.FilamentAdjustments!)
         {
             adjustment.CreatedById = userId;
@@ -1378,10 +1738,25 @@ public class FilamentService(
         newFilament.CreatedById = userId;
         newFilament.UpdatedById = userId;
 
+        ReplaceTags(newFilament, tagUids);
+        var readTags = ApplyTagReadings(newFilament, tagUids, filament.TagReadings);
+        if (filament.CatalogEntryId is { } votedEntryId)
+        {
+            await CastSkuVotes(userId, votedEntryId, readTags);
+        }
+
+        // Reserved before the insert, so a create that then fails (a tag conflict) leaves a gap
+        // rather than a number someone else could be given later. Gaps are harmless; reuse is not.
+        newFilament.SpoolNumber = await ReserveSpoolNumberAsync(userId);
+
         context.Filaments.Add(newFilament);
-        await context.SaveChangesAsync();
+        await SaveTaggedFilamentChanges(newFilament, tagUids);
 
         var filamentId = newFilament.Id;
+
+        // Every cached view of the user's inventory is stale now, the Spoolman one (#177)
+        // included. The MCP paths that call this invalidate again afterwards; that is harmless.
+        cacheVersionService.InvalidateUserCache(userId);
 
         telemetry.TrackEvent("FilamentAdd");
 
@@ -1389,9 +1764,141 @@ public class FilamentService(
         return (await GetFilamentById(filamentId))!;
     }
 
+    private const string UnconvertibleAdjustmentMessage =
+        "This material is missing the density/diameter needed to convert the adjustment to a weight.";
+
+    /// <summary>
+    /// What converting an adjustment to AmountMg depends on. Remaining-weight figures sum
+    /// adjustments by AmountMg alone, so one that can't be converted would be saved and then
+    /// silently count for nothing (#232). The MCP tool and the web app's create and update
+    /// paths all ask <see cref="CanConvert"/> before saving one.
+    /// </summary>
+    private readonly record struct AdjustmentConversionInputs(double Density, double? DiameterMm, bool HasDiameter)
+    {
+        public static AdjustmentConversionInputs Of(Filament filament) =>
+            new(filament.MaterialDensityGramPerCubicCm, filament.DiameterMm, filament.MaterialCategory.HasDiameter);
+
+        /// <summary>
+        /// Decided from the material, never from the converted row: UpdateFilamentAdjustmentMeasurements
+        /// leaves a client-sent AmountMg in place when it can't convert, and a density of 0 converts
+        /// any length or volume to 0 mg, which is a number but not a usable one.
+        /// </summary>
+        public bool CanConvert(FilamentAdjustment.SourceMeasurement source) => source switch
+        {
+            FilamentAdjustment.SourceMeasurement.Length => Density > 0 && HasDiameter && DiameterMm > 0,
+            FilamentAdjustment.SourceMeasurement.Volume => Density > 0,
+            // Weight, and anything the conversion itself treats as weight: AmountMg is the input.
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// A stored adjustment as it was before this update, to tell an untouched row from an edited one.
+    /// </summary>
+    private readonly record struct StoredAdjustment(
+        FilamentAdjustment.SourceMeasurement Source, double? SourceValue, long? AmountMg, bool WasConvertible);
+
+    /// <summary>The value the user entered: the field the adjustment's Source names.</summary>
+    private static double? SourceValue(FilamentAdjustment adjustment) => adjustment.Source switch
+    {
+        FilamentAdjustment.SourceMeasurement.Length => adjustment.LengthInM,
+        FilamentAdjustment.SourceMeasurement.Volume => adjustment.VolumeMl,
+        _ => adjustment.AmountMg,
+    };
+
+    /// <summary>
+    /// Rejects an adjustment that can't be converted to a weight, as the MCP tool does (#232).
+    /// <para>
+    /// An adjustment saved before this check, which already couldn't be converted, is let through
+    /// when the request re-sends it unchanged (same id, source, entered value and AmountMg). The web app
+    /// re-sends every adjustment on every save, so checking those would make each later edit of
+    /// that spool fail, renaming it included, until the user found and deleted the row. It stays
+    /// as uncounted as it was, and is converted on the save that supplies the missing density or
+    /// diameter. A stored row that DID convert is checked like a new one, so clearing the diameter
+    /// or switching to a category without one can't quietly stop it counting.
+    /// </para>
+    /// </summary>
+    private static void RequireConvertibleAdjustments(
+        Filament filament, IReadOnlyDictionary<Guid, StoredAdjustment>? stored = null)
+    {
+        var inputs = AdjustmentConversionInputs.Of(filament);
+        foreach (var adjustment in filament.FilamentAdjustments ?? [])
+        {
+            if (inputs.CanConvert(adjustment.Source))
+            {
+                continue;
+            }
+
+            var untouchedLegacyRow = stored != null
+                && stored.TryGetValue(adjustment.Id, out var before)
+                && !before.WasConvertible
+                && before.Source == adjustment.Source
+                && before.SourceValue == SourceValue(adjustment)
+                // AmountMg too: the conversion can't run on this row, so it keeps whatever weight
+                // the request carries, and a weight the server never derived would then count.
+                && before.AmountMg == adjustment.AmountMg;
+            if (!untouchedLegacyRow)
+            {
+                throw new BadRequestException(UnconvertibleAdjustmentMessage);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Snapshots the stored adjustments before an edit, for <see cref="RequireConvertibleAdjustments"/>.
+    /// </summary>
+    private static Dictionary<Guid, StoredAdjustment> SnapshotAdjustments(Filament filament)
+    {
+        var inputs = AdjustmentConversionInputs.Of(filament);
+        return (filament.FilamentAdjustments ?? []).ToDictionary(
+            a => a.Id,
+            a => new StoredAdjustment(a.Source, SourceValue(a), a.AmountMg, inputs.CanConvert(a.Source)));
+    }
+
+    /// <summary>
+    /// Re-derives everything stored against the spool in a measure its density, diameter or
+    /// category converts: every adjustment, and, when one of those inputs changed, every usage
+    /// row that records the spool. Remaining weight sums AmountMg on both, so a row left at the
+    /// old density would keep counting the old weight (#232 for adjustments). The web PUT and
+    /// MCP update_material both call this, so the same edit gives the same remaining figure
+    /// whichever client made it. Call after <see cref="RequireConvertibleAdjustments"/>; the
+    /// caller saves.
+    /// <para>
+    /// Usage rows are loaded and converted in memory, not updated in SQL, so the conversion is
+    /// the one <see cref="IPrintService.UpdateFilamentUsageWeights"/> runs on a print save
+    /// (<see cref="DeriveUsageMeasurements"/>). A side recorded by weight keeps its AmountMg.
+    /// The caller's InvalidateUserCache covers what reads them (summaries, analytics, the
+    /// grouped feed).
+    /// </para>
+    /// </summary>
+    private async Task RederiveFromMaterial(Filament filament, AdjustmentConversionInputs before, CancellationToken ct)
+    {
+        foreach (var adjustment in filament.FilamentAdjustments ?? [])
+        {
+            UpdateFilamentAdjustmentMeasurements(adjustment, filament);
+        }
+
+        if (AdjustmentConversionInputs.Of(filament) == before)
+        {
+            // Nothing a usage row's weight depends on changed, so skip the load.
+            return;
+        }
+
+        var usageRows = await context.PrintFilament
+            .Where(pf => pf.FilamentId == filament.Id)
+            .ToListAsync(ct);
+        foreach (var row in usageRows)
+        {
+            DeriveUsageMeasurements(row, filament);
+        }
+    }
+
     private void UpdateFilamentAdjustmentMeasurements(FilamentAdjustment adjustment, Filament filament)
     {
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+        // > 0, not >= 0: every conversion here divides or multiplies by the density, and 0 turns a
+        // weight's volume into Infinity, which SQL Server's float column rejects. A weight keeps
+        // its AmountMg; RequireConvertibleAdjustments has rejected any new Length or Volume row.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1399,6 +1906,16 @@ public class FilamentService(
 
         if (adjustment.Source == FilamentAdjustment.SourceMeasurement.Length)
         {
+            if (filament.MaterialCategory.HasDiameter && !(filament.DiameterMm >= 0))
+            {
+                // A length needs the diameter this category tracks. Left as it came, which is
+                // what this method has always done here; RequireConvertibleAdjustments has
+                // already rejected any such row a request adds or edits (#232). Only the Length
+                // branch needs a diameter for AmountMg: the Volume and Weight branches below
+                // convert from the density alone and skip only the length.
+                return;
+            }
+
             if (adjustment.LengthInM.HasValue)
             {
                 // The diameter test is what the Volume and Weight branches below already do.
@@ -1454,8 +1971,9 @@ public class FilamentService(
 
     private void UpdateFilamentMeasurements(Filament filament)
     {
-
-        if (filament is null || !(filament.MaterialDensityGramPerCubicCm >= 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
+        // > 0 for the reason given in UpdateFilamentAdjustmentMeasurements: density 0 would derive
+        // an Infinity volume from a nominal weight.
+        if (filament is null || !(filament.MaterialDensityGramPerCubicCm > 0) || (filament.MaterialCategory.HasDiameter && (!filament.DiameterMm.HasValue || !(filament.DiameterMm >= 0))))
         {
             // Skip any filament that doesn't have the required properties to compute.
             return;
@@ -1532,6 +2050,11 @@ public class FilamentService(
             dto.ColorHex = dto.Colors[0];
         }
 
+        // Null keeps the tags (#147): clients that predate them send the whole filament without
+        // the field, and must not wipe tags another client added.
+        var tagUids = dto.TagUids is null ? null : NormalizeTagUids(dto.TagUids);
+        ThrowIfTooManyTagReadings(dto.TagReadings);
+
         var existingFilament = await GetFilamentById(id);
 
         if (existingFilament == null)
@@ -1539,7 +2062,33 @@ public class FilamentService(
             throw new ArgumentNullException(nameof(id));
         }
 
+        if (tagUids is not null)
+        {
+            // The owner, not the caller: the controller has already checked they are the same.
+            await ThrowIfTagsHeldElsewhere(existingFilament.CreatedById, existingFilament.Id, tagUids);
+        }
+
+        // Taken before the map, which replaces the adjustment list with the request's when the
+        // request sends one (#232); a null list keeps the stored rows (#248).
+        var storedConversionInputs = AdjustmentConversionInputs.Of(existingFilament);
+        var storedAdjustments = SnapshotAdjustments(existingFilament);
+        var ownAdjustmentIds = ChildRows.IdsOf(existingFilament.FilamentAdjustments, a => a.Id);
+
         var updatedFilament = mapper.Map<FilamentDetailDto, Filament>(dto, existingFilament);
+
+        // An adjustment id this spool does not have (another user's, or a stale one) is a new
+        // adjustment of this spool, never an update of the row it names.
+        ChildRows.AddUnowned(context, updatedFilament.FilamentAdjustments!, ownAdjustmentIds, a => a.Id, (a, id) =>
+        {
+            a.Id = id;
+            a.FilamentId = updatedFilament.Id;
+        });
+
+        if (tagUids is not null)
+        {
+            ReplaceTags(updatedFilament, tagUids);
+            ApplyTagReadings(updatedFilament, tagUids, dto.TagReadings);
+        }
 
         var materialCategory = await context.MaterialCategories.FirstOrDefaultAsync(f => f.Nickname == updatedFilament.MaterialCategoryNickname);
 
@@ -1557,14 +2106,25 @@ public class FilamentService(
 
         UpdateFilamentMeasurements(updatedFilament);
 
+        try
+        {
+            RequireConvertibleAdjustments(updatedFilament, storedAdjustments);
+        }
+        catch (BadRequestException)
+        {
+            // The map has already dirtied the tracked filament. Nothing else saves in this
+            // request, but a rejected edit should leave nothing behind for one that did.
+            context.ChangeTracker.Clear();
+            throw;
+        }
+
         foreach (var adjustment in updatedFilament.FilamentAdjustments!)
         {
             adjustment.CreatedById = userId;
             adjustment.UpdatedById = userId;
-
-            UpdateFilamentAdjustmentMeasurements(adjustment, updatedFilament);
         }
 
+        await RederiveFromMaterial(updatedFilament, storedConversionInputs, CancellationToken.None);
 
         // Set UpdatedByIds
         updatedFilament.UpdatedById = userId;
@@ -1573,7 +2133,7 @@ public class FilamentService(
 
         try
         {
-            await context.SaveChangesAsync();
+            await SaveTaggedFilamentChanges(updatedFilament, tagUids);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1586,6 +2146,8 @@ public class FilamentService(
                 throw;
             }
         }
+
+        cacheVersionService.InvalidateUserCache(updatedFilament.CreatedById);
 
         telemetry.TrackEvent("FilamentEdit");
 
@@ -1661,10 +2223,18 @@ public class FilamentService(
             return;
         }
 
-        // Check if any filament is being used.
-        if (filament.PrintFilaments!.Any())
+        // Check if any filament is being used. A usage row on another user's print does not count
+        // (SpoolOwnership.UsageRowCounts): its owner could neither see nor remove it, so it would
+        // keep the spool forever. It is detached instead and keeps its amount, with no spool.
+        if (filament.PrintFilaments!.Any(SpoolOwnership.Counts))
         {
             throw new FilamentIsInUseException();
+        }
+
+        foreach (var foreignRow in filament.PrintFilaments!)
+        {
+            foreignRow.FilamentId = null;
+            foreignRow.Filament = null;
         }
 
         // Remove any adjustments
@@ -1700,6 +2270,8 @@ public class FilamentService(
         // toward an orphaned blob rather than a row pointing at destroyed bytes.
         foreach (var name in blobNames)
             await blobStorage.DeleteBlobAsync(BlobContainers.FilamentImages, name);
+
+        cacheVersionService.InvalidateUserCache(filament.CreatedById);
 
         telemetry.TrackEvent("FilamentDelete");
 

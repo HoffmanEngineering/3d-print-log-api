@@ -1,0 +1,166 @@
+name: Printer catalog refresh
+
+# On the 1st of each month, regenerate printer-catalog.json from the latest stable Cura and
+# OrcaSlicer releases and open a PR with what changed. A person reviews and merges it; this
+# workflow never merges.
+on:
+  schedule:
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Two refreshes at once would race on the branch.
+concurrency:
+  group: printer-catalog-refresh
+  cancel-in-progress: false
+
+env:
+  CATALOG_DIR: PrintLogApi/PrinterCatalog
+  BRANCH_PREFIX: chore/printer-catalog-refresh-
+  # An optional fine-grained token secret makes the PR's CI run on its own; GITHUB_TOKEN works too.
+  GH_TOKEN: ${{ secrets.CATALOG_REFRESH_TOKEN || github.token }}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      # One open refresh PR at a time: a second would regenerate from the same base and conflict.
+      - name: Look for an open refresh PR
+        id: open
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json number,headRefName \
+            | jq -r --arg prefix "$BRANCH_PREFIX" '[.[] | select(.headRefName | startswith($prefix)) | "#\(.number)"] | join(" ")')
+          if [ -n "$open" ]; then
+            echo "A refresh PR is already open ($open); skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.open.outputs.skip == 'false'
+        with:
+          ref: main
+          # The push uses this token, so a PAT here is what lets the PR trigger CI.
+          token: ${{ secrets.CATALOG_REFRESH_TOKEN || github.token }}
+
+      - name: Setup .NET
+        if: steps.open.outputs.skip == 'false'
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # `gh release view` without a tag returns the latest release, which excludes prereleases
+      # and drafts. A failure here fails the job: a stale tag must not pass for a fresh one.
+      - name: Resolve the latest release of each source
+        if: steps.open.outputs.skip == 'false'
+        run: |
+          sources="$CATALOG_DIR/catalog-sources.json"
+          updated=$(cat "$sources")
+          for repo in $(jq -r '.[].repo' "$sources"); do
+            tag=$(gh release view -R "$repo" --json tagName -q .tagName)
+            if [ -z "$tag" ]; then
+              echo "::error::No release found for $repo"
+              exit 1
+            fi
+            echo "$repo -> $tag"
+            updated=$(jq --arg repo "$repo" --arg tag "$tag" 'map(if .repo == $repo then .tag = $tag else . end)' <<< "$updated")
+          done
+          printf '%s\n' "$updated" > "$sources"
+
+      # A non-zero exit (a source missing or empty, bad data files) fails the job, with no PR.
+      # Absolute paths: `dotnet run` starts in the project folder.
+      - name: Regenerate the catalog
+        if: steps.open.outputs.skip == 'false'
+        run: |
+          dotnet run --project PrintLogApi.Tools --configuration Release -- printer-catalog \
+            --previous "$PWD/$CATALOG_DIR/printer-catalog.json" \
+            --out "$PWD/$CATALOG_DIR/printer-catalog.json" \
+            --summary "$RUNNER_TEMP/catalog-summary.md" \
+            --work "$RUNNER_TEMP"
+
+      - name: Check for changes
+        if: steps.open.outputs.skip == 'false'
+        id: changes
+        run: |
+          if git diff --quiet -- "$CATALOG_DIR/printer-catalog.json"; then
+            echo "The catalog is unchanged; nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The golden models and the rest of the catalog tests. A failure does not stop the PR; it
+      # goes in the PR body, where the reviewer decides.
+      - name: Run the catalog tests
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set +e
+          dotnet test --solution PrintLogApi.sln --configuration Release \
+            --filter-namespace "PrintLogApi.IntegrationTests.PrinterCatalog" > "$RUNNER_TEMP/catalog-tests.log" 2>&1
+          code=$?
+          set -e
+          tail -n 15 "$RUNNER_TEMP/catalog-tests.log"
+          if [ "$code" -eq 0 ]; then
+            echo "Passed." > "$RUNNER_TEMP/catalog-test-result.md"
+          else
+            {
+              echo "**Failed** (exit code $code). Failing tests:"
+              echo
+              failing=$(grep -E '^\s*failed ' "$RUNNER_TEMP/catalog-tests.log" | sed -E 's/^\s*failed /- /' | sort -u | head -n 50 || true)
+              if [ -n "$failing" ]; then echo "$failing"; else echo "- (none listed, so probably a build error; see the workflow log)"; fi
+            } > "$RUNNER_TEMP/catalog-test-result.md"
+          fi
+
+      - name: Open the PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          HAS_REFRESH_TOKEN: ${{ secrets.CATALOG_REFRESH_TOKEN != '' }}
+        run: |
+          month=$(date -u +%Y-%m)
+          branch="${BRANCH_PREFIX}${month}"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            branch="${branch}-${GITHUB_RUN_NUMBER}"
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add "$CATALOG_DIR/catalog-sources.json" "$CATALOG_DIR/printer-catalog.json"
+          git commit -m "chore(catalog): refresh printer catalog ${month}"
+          git push origin "$branch"
+
+          {
+            echo "Monthly refresh of the printer catalog from the latest stable Cura and OrcaSlicer releases."
+            echo
+            echo "## Sources"
+            echo
+            jq -r '.sources[] | "- \(.repo) \(.tag) (commit \(.commit // "unknown"))"' "$CATALOG_DIR/printer-catalog.json"
+            echo
+            echo "## Changes"
+            echo
+            cat "$RUNNER_TEMP/catalog-summary.md"
+            echo "## Catalog tests"
+            echo
+            cat "$RUNNER_TEMP/catalog-test-result.md"
+            echo
+            echo "## Before merging"
+            echo
+            if [ "$HAS_REFRESH_TOKEN" != 'true' ]; then
+              echo "- This PR was opened with GITHUB_TOKEN, so CI does not run on its own. To run CI, close and reopen the PR or push a commit to the branch."
+            fi
+            echo "- Review the Retired and Hidden sections. A retired model still resolves by id, but nobody can pick it for a new printer."
+            echo "- Nothing here merges automatically."
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          # GITHUB_TOKEN can push but not open a PR until the repository allows it. Delete the
+          # pushed branch on failure, so the next run does not find a stale one, and say why.
+          if ! gh pr create --base main --head "$branch" \
+            --title "chore(catalog): refresh printer catalog ${month}" \
+            --body-file "$RUNNER_TEMP/pr-body.md"; then
+            git push origin --delete "$branch" || echo "::warning::Could not delete the branch $branch; delete it by hand."
+            echo "::error::Could not open the PR. If GITHUB_TOKEN may not create pull requests here, turn on Settings → Actions → General → Allow GitHub Actions to create and approve pull requests, or give the workflow a PAT or GitHub App token secret."
+            exit 1
+          fi

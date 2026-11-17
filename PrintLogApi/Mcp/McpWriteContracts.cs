@@ -27,7 +27,8 @@ public sealed record MaterialUsageInput(
     McpMeasurementSource? EstimatedSource = null, double? EstimatedAmount = null,
     string? Notes = null);
 
-public sealed record MaterialRemaining(Guid MaterialId, double RemainingGrams);
+/// <summary>Grams left on a spool a print used; null when the spool is not tracked (#230).</summary>
+public sealed record MaterialRemaining(Guid MaterialId, double? RemainingGrams);
 
 public sealed record CreatePrintResult(
     PrintDetailResult Print, bool WasReplayed, IReadOnlyList<MaterialRemaining> MaterialRemaining);
@@ -54,7 +55,8 @@ public sealed record MaterialWriteResult(
 /// </summary>
 public sealed record ProjectWriteResult(
     Guid ProjectId, string Name, string? Reference, string? Description, string? Url,
-    string Status, string ViewStatus);
+    string Status, string ViewStatus,
+    DateOnly StartDate, DateOnly? FinishDate);
 
 public sealed record CreateProjectResult(ProjectWriteResult Project, bool WasReplayed);
 
@@ -66,8 +68,13 @@ public sealed record FeedbackWriteResult(Guid FeedbackId, string Type, string No
 
 public sealed record CreateFeedbackResult(FeedbackWriteResult Feedback, bool WasReplayed);
 
+/// <summary>
+/// StartDate and FinishDate are RESOLVED values — a manual override when one is set, otherwise
+/// derived from the project's prints. FinishDate is null for a project with no dated prints.
+/// </summary>
 public sealed record ProjectListItem(
-    Guid Id, string Name, string? Reference, string Status, string ViewStatus);
+    Guid Id, string Name, string? Reference, string Status, string ViewStatus,
+    DateOnly StartDate, DateOnly? FinishDate);
 
 /// <summary>
 /// Caller-supplied material attributes for create_material / update_material. Every property is
@@ -176,6 +183,9 @@ public sealed record PrinterAttributesInput
     public double? WattageW { get; init; }
     public bool? IsActive { get; init; }
 
+    /// <summary>Catalog model id (create only). Canonicalized to the stored id by the service before hashing.</summary>
+    public string? CatalogModelId { get; init; }
+
     /// <summary>
     /// Trims every string. Call this ONCE in the service, BEFORE both fingerprinting and
     /// persistence: the fingerprint decides whether two calls are the same request, so anything
@@ -189,6 +199,8 @@ public sealed record PrinterAttributesInput
         Name = Name?.Trim(),
         Description = Description?.Trim(),
         CategoryNickname = CategoryNickname?.Trim(),
+        // Blank means omitted, so "" cannot defeat the lookup or fork the fingerprint.
+        CatalogModelId = string.IsNullOrWhiteSpace(CatalogModelId) ? null : CatalogModelId.Trim(),
     };
 }
 

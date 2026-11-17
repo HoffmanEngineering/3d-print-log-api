@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using PrintLogApi.Enums;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Services;
 using static PrintLogApi.Models.Filament;
 
@@ -9,6 +10,12 @@ public class FilamentDetailDto
 {
     [Required]
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// The user's own number for this spool (1, 2, 3…), which Spoolman clients use as its id.
+    /// Read-only: assigned on create, never reused, and ignored on PUT.
+    /// </summary>
+    public int? SpoolNumber { get; set; }
 
     /// <summary>
     /// Common name for the roll of filament.
@@ -175,12 +182,44 @@ public class FilamentDetailDto
     [Range(0.0, 1.0)]
     public double? MaterialRefreshRatio { get; set; }
 
+    /// <summary>
+    /// Amounts added to (positive) or removed from (negative) the spool outside of prints.
+    /// Always a list in responses.
+    /// On PUT, the list replaces the spool's adjustments, and an empty list removes them all;
+    /// leave it out (or null) to keep them, which is what clients that never send adjustments do.
+    /// </summary>
     public ICollection<FilamentAdjustmentDto>? FilamentAdjustments { get; set; }
 
     public ColorPatternType ColorPattern { get; set; } = ColorPatternType.Solid;
     public FilamentFinishType FinishType { get; set; } = FilamentFinishType.Standard;
     public List<string> Colors { get; set; } = new();
     public List<FilamentEffect> Effects { get; set; } = new();
+
+    /// <summary>
+    /// RFID or NFC tag UIDs on this spool, as uppercase hex without separators (<c>04A23F11</c>),
+    /// in order. Always a list in responses.
+    /// On PUT, any case and separators are accepted and the list replaces the spool's tags;
+    /// leave it out (or null) to keep them, which is what clients that predate tags do. A UID
+    /// already on another of the user's spools is a 409 naming that spool.
+    /// </summary>
+    public List<string>? TagUids { get; set; }
+
+    /// <summary>
+    /// Decoded tag readings to keep with the spool's tags, matched to <c>TagUids</c> by UID. A
+    /// reading for a UID that is not in <c>TagUids</c> is ignored. When a spool is updated, a
+    /// tag's stored reading is replaced only when a new one is sent for it.
+    /// </summary>
+    public List<TagReadingInputDto>? TagReadings { get; set; }
+
+    /// <summary>
+    /// Response-only: the spool's tags with their last decoded reading, ordered by UID. Inbound
+    /// it is ignored. A reading whose stored JSON cannot be read comes back null.
+    /// </summary>
+    public List<FilamentTagDetailDto>? TagDetails { get; set; }
+
+    /// <summary>The catalog entry the spool was created from. Response-only: a PUT never changes it.</summary>
+    public string? CatalogEntryId { get; set; }
+
 
     /// <summary>
     /// Response-only, populated by <c>FilamentService.HydrateDetailImageUrlsAsync</c>.

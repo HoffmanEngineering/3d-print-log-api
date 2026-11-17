@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
+using PrintLogApi.Services;
 
 namespace PrintLogApi.Profiles;
 
@@ -31,18 +32,22 @@ public class ProjectProfile : Profile
                     p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0)))
+            // In memory (see ResolveDates below), so the shared per-print rule runs as compiled
+            // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
-                opt => opt.MapFrom(src => src.Prints!
-                    .SelectMany(p => p.FilamentUsage!)
-                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
-                        ? (long)pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
-                            ? (long)pf.EstimatedAmountMg.Value : 0L)))
+                opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
+            .ForMember(dest => dest.TotalFilamentVolumeMl,
+                opt => opt.MapFrom(src => TotalFilamentVolumeMl(src)))
             .ForMember(dest => dest.DefaultImageId,
                 opt => opt.MapFrom(src => src.Images!
                     .Where(i => i.IsDefault)
                     .Select(i => i.Id)
-                    .FirstOrDefault()));
+                    .FirstOrDefault()))
+            // Resolved in AfterMap, not MapFrom: the rules live in ProjectDateResolver and
+            // must stay identical across every read path.
+            .ForMember(dest => dest.StartDate, opt => opt.Ignore())
+            .ForMember(dest => dest.FinishDate, opt => opt.Ignore())
+            .AfterMap((src, dest) => ResolveDates(src, dest));
 
         CreateMap<Project, ProjectDetailDto>()
             .ForMember(dest => dest.CreatedDate,
@@ -65,17 +70,60 @@ public class ProjectProfile : Profile
                     p.EstimatedPrintTimeInSeconds.HasValue && p.EstimatedPrintTimeInSeconds > 0
                         ? p.EstimatedPrintTimeInSeconds.Value
                         : 0)))
+            // In memory (see ResolveDates below), so the shared per-print rule runs as compiled
+            // code; ProjectService loads each row's Filament so a length or volume converts.
             .ForMember(dest => dest.TotalFilamentWeightMg,
-                opt => opt.MapFrom(src => src.Prints!
-                    .SelectMany(p => p.FilamentUsage!)
-                    .Sum(pf => pf.AmountMg.HasValue && pf.AmountMg > 0
-                        ? (long)pf.AmountMg.Value
-                        : pf.EstimatedAmountMg.HasValue && pf.EstimatedAmountMg > 0
-                            ? (long)pf.EstimatedAmountMg.Value : 0L)))
+                opt => opt.MapFrom(src => TotalFilamentWeightMg(src)))
+            .ForMember(dest => dest.TotalFilamentVolumeMl,
+                opt => opt.MapFrom(src => TotalFilamentVolumeMl(src)))
             .ForMember(dest => dest.Images,
-                opt => opt.MapFrom(src => src.Images!.OrderBy(i => i.DisplayOrder)));
+                opt => opt.MapFrom(src => src.Images!.OrderBy(i => i.DisplayOrder)))
+            // Resolved in AfterMap, not MapFrom: the rules live in ProjectDateResolver and
+            // must stay identical across every read path.
+            .ForMember(dest => dest.StartDate, opt => opt.Ignore())
+            .ForMember(dest => dest.FinishDate, opt => opt.Ignore())
+            .AfterMap((src, dest) => ResolveDates(src, dest));
 
         CreateMap<ProjectImage, ProjectImageDto>()
             .ForMember(dest => dest.Url, opt => opt.Ignore()); // URL resolved at request time
+    }
+
+    /// <summary>
+    /// Each print's usage rows resolved and rounded by <see cref="PrintMetrics.RowsMg"/>, summed.
+    /// Zero when the prints were not loaded.
+    /// </summary>
+    private static long TotalFilamentWeightMg(Project project) =>
+        project.Prints?.Sum(p => PrintMetrics.RowsMg(p.FilamentUsage)) ?? 0L;
+
+    /// <summary>
+    /// The project's resin in milliliters (#294): every print's rows by
+    /// <see cref="PrintMetrics.RowsMl"/>, rounded once on the total. Zero when the prints were not loaded.
+    /// </summary>
+    private static double TotalFilamentVolumeMl(Project project) =>
+        PrintMetrics.RowsMl(project.Prints?.SelectMany(p => p.FilamentUsage ?? Enumerable.Empty<PrintFilament>()));
+
+    /// <summary>
+    /// The single resolution site for all four REST project read paths. Every project path
+    /// materializes the entity before mapping (there is no ProjectTo on projects), so calling
+    /// into ProjectDateResolver here runs in memory and never reaches a database provider.
+    /// </summary>
+    /// <remarks>
+    /// A null Prints collection means the caller did not Include them. That resolves to the
+    /// creation-date fallback rather than throwing, which is correct for paths that legitimately
+    /// have no prints loaded.
+    /// </remarks>
+    private static void ResolveDates(Models.Project src, IProjectDates dest)
+    {
+        var prints = src.Prints?.Select(p => new ProjectDateResolver.PrintDates(
+                p.StartDate, p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds))
+            ?? Enumerable.Empty<ProjectDateResolver.PrintDates>();
+
+        var (start, finish) = ProjectDateResolver.Resolve(
+            src.StartDateOverride, src.FinishDateOverride, src.CreatedDate, prints);
+
+        dest.StartDate = start;
+        dest.FinishDate = finish;
+        dest.StartDateOverride = src.StartDateOverride;
+        dest.FinishDateOverride = src.FinishDateOverride;
     }
 }

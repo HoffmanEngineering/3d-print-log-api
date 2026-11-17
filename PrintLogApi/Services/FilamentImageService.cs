@@ -8,6 +8,7 @@ public class FilamentImageService(
     PrintLogContext context,
     IBlobStorageService blobStorage,
     IImageProcessingService imageProcessing,
+    IMediaStorageQuotaService quota,
     IFilamentService filamentService) : IFilamentImageService
 {
     public async Task<FilamentImage> AddImageAsync(
@@ -22,10 +23,11 @@ public class FilamentImageService(
         // Decode BEFORE touching storage: an invalid upload must not create blobs.
         var processed = await imageProcessing.ProcessAsync(content, ct);
 
-        // Account-wide byte quota, matching FileAttachmentService. A per-filament cap
-        // alone bounds nothing, because nothing caps how many filaments a user creates.
+        // Account-wide byte quota. A per-filament cap alone bounds nothing, because nothing
+        // caps how many filaments a user creates. The calculation lives in one service so
+        // enforcement and the usage figure the user is shown cannot drift apart.
         var newBytes = processed.Original.LongLength + (processed.Thumbnail?.LongLength ?? 0);
-        await EnsureAccountStorageQuotaAsync(userId, newBytes, ct);
+        await quota.EnsureCapacityAsync(userId, newBytes, ct);
 
         // SqlServerRetryingExecutionStrategy forbids user-initiated transactions unless they run
         // inside an execution strategy, so the whole tx is the retriable unit. The integration
@@ -53,7 +55,7 @@ public class FilamentImageService(
                     throw new ArgumentException($"Maximum of {maxImages} images per filament allowed");
 
                 var originalFile = await UploadAndRecordAsync(
-                    processed.Original, ".jpg", userId, uploadedBlobNames, ct);
+                    processed.Original, ImageContentTypes.ExtensionFor(processed.ContentType), userId, uploadedBlobNames, ct);
                 var thumbnailFile = processed.Thumbnail is null
                     ? null
                     : await UploadAndRecordAsync(
@@ -266,24 +268,5 @@ public class FilamentImageService(
         };
         context.Files.Add(file);
         return file;
-    }
-
-    /// <summary>
-    /// Filament images join the same account-wide byte accounting as print attachments:
-    /// a per-filament count cap bounds nothing on its own, because nothing caps how many
-    /// filaments a user may create.
-    /// </summary>
-    private async Task EnsureAccountStorageQuotaAsync(long userId, long newBytes, CancellationToken ct)
-    {
-        var attachmentBytes = await context.PrintAttachments
-            .Where(pa => pa.CreatedById == userId)
-            .SumAsync(pa => (long?)pa.File.Size, ct) ?? 0L;
-
-        var imageBytes = await context.FilamentImages
-            .Where(fi => fi.CreatedById == userId)
-            .SumAsync(fi => (long?)fi.File.Size + (fi.ThumbnailFile != null ? fi.ThumbnailFile.Size : 0L), ct) ?? 0L;
-
-        if (attachmentBytes + imageBytes + newBytes > SubscriptionLimits.ProMaxFileStorageBytes)
-            throw new BadRequestException("Storage quota exceeded. Delete files to free up space.");
     }
 }

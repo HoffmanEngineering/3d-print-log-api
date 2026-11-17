@@ -20,6 +20,16 @@ public class Filament : TimestampEntity
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// The owner's own short number for this spool: 1, 2, 3… per user (#174). Spoolman clients
+    /// address spools by integer id, and a user can write it on a label or type it into
+    /// <c>SET_ACTIVE_SPOOL ID=12</c>. Assigned on create from <see cref="User.LastSpoolNumber"/>,
+    /// never reused after a delete, and never settable by a client. Null only for a spool the
+    /// previous app version created while the migration that added it was running; the next
+    /// lookup by number numbers it.
+    /// </summary>
+    public int? SpoolNumber { get; set; }
+
     [Required]
     public string MaterialCategoryNickname { get; set; } = null!;
 
@@ -161,4 +171,12 @@ public class Filament : TimestampEntity
     public ICollection<PrinterFilament>? PrinterFilaments { get; set; }
     // Nagivation Element to PrintFilament
     public ICollection<FilamentAdjustment>? FilamentAdjustments { get; set; }
+    /// <summary>The catalog product this spool was matched to from a tag reading.</summary>
+    [MaxLength(200)]
+    public string? CatalogEntryId { get; set; }
+    [ForeignKey("CatalogEntryId")]
+    public FilamentCatalogEntry? CatalogEntry { get; set; }
+
+    /// <summary>RFID/NFC tags on this spool (#147).</summary>
+    public ICollection<FilamentTag> Tags { get; set; } = new List<FilamentTag>();
 }

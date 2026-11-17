@@ -185,4 +185,239 @@ public class ImageProcessingServiceTests
             System.Text.Encoding.ASCII.GetString(result.Original),
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Gif_IsRejectedForUploads()
+    {
+        await using var gif = Fixture("legacy-animated.gif");
+
+        var ex = await Assert.ThrowsAsync<InvalidImageException>(
+            () => _service.ProcessAsync(gif, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Unsupported image format", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LegacyFormats_AcceptBmp_AndReportTheSourceType()
+    {
+        using var bmp = Bmp24(50, 40);
+
+        var result = await _service.ProcessAsync(
+            bmp, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/jpeg", result.ContentType);
+        Assert.Equal("image/bmp", result.SourceContentType);
+        Assert.Equal(50, result.Width);
+        Assert.Equal(40, result.Height);
+        Assert.NotNull(result.Thumbnail);
+    }
+
+    [Fact]
+    public async Task LegacyFormats_TakeTheFirstFrameOfAnAnimatedGif()
+    {
+        // Two frames: red, then blue.
+        await using var gif = Fixture("legacy-animated.gif");
+
+        var result = await _service.ProcessAsync(
+            gif, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/gif", result.SourceContentType);
+        Assert.Equal(64, result.Width);
+        Assert.Equal(48, result.Height);
+        using var decoded = SKBitmap.Decode(result.Original);
+        var pixel = decoded.GetPixel(32, 24);
+        Assert.True(pixel.Red > 200 && pixel.Blue < 60, $"expected the red first frame, got {pixel}");
+    }
+
+    [Fact]
+    public async Task UploadOptions_ReportTheSourceType()
+    {
+        using var png = Encode(100, 50, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", result.SourceContentType);
+    }
+
+    [Fact]
+    public async Task PrintUploads_AddASocialJpeg_ScaledTo1200OnTheLongEdge()
+    {
+        using var png = Encode(3000, 1500, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result.Social);
+        using var codec = SKCodec.Create(new MemoryStream(result.Social!));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec!.EncodedFormat);
+        Assert.Equal(1200, codec.Info.Width);
+        Assert.Equal(600, codec.Info.Height);
+        Assert.Equal(1200, result.SocialWidth);
+        Assert.Equal(600, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task PrintUploads_DoNotUpscaleASmallImageIntoASocialImage()
+    {
+        using var png = Encode(640, 480, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        using var codec = SKCodec.Create(new MemoryStream(result.Social!));
+        Assert.Equal(640, codec!.Info.Width);
+        Assert.Equal(480, codec.Info.Height);
+        Assert.Equal(640, result.SocialWidth);
+        Assert.Equal(480, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task PrintUploads_SocialImageFollowsTheAppliedOrientation()
+    {
+        await using var input = Fixture("exif-orientation-6.jpg");
+
+        var result = await _service.ProcessAsync(
+            input, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.Equal(50, result.SocialWidth);
+        Assert.Equal(100, result.SocialHeight);
+    }
+
+    [Fact]
+    public async Task DefaultUploads_ProduceNoSocialImage()
+    {
+        // Printer and material images go through the default options and never use one.
+        using var png = Encode(3000, 1500, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        Assert.Null(result.Social);
+        Assert.Null(result.SocialWidth);
+        Assert.Null(result.SocialHeight);
+    }
+
+    /// <summary>
+    /// A slicer-style render: a red square on a fully transparent background, as a PNG with an
+    /// alpha channel.
+    /// </summary>
+    private static MemoryStream TransparentRender(int width = 200, int height = 100)
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+            using var paint = new SKPaint { Color = SKColors.Red };
+            canvas.DrawRect(width / 4f, height / 4f, width / 2f, height / 2f, paint);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return new MemoryStream(data.ToArray());
+    }
+
+    [Fact]
+    public async Task TransparentPng_KeepsItsAlpha_AsAPngOriginal()
+    {
+        using var png = TransparentRender();
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", result.ContentType);
+        using var codec = SKCodec.Create(new MemoryStream(result.Original));
+        Assert.Equal(SKEncodedImageFormat.Png, codec!.EncodedFormat);
+        using var decoded = SKBitmap.Decode(result.Original);
+        Assert.Equal(200, decoded.Width);
+        Assert.Equal(100, decoded.Height);
+        Assert.Equal(0, decoded.GetPixel(2, 2).Alpha);
+        var center = decoded.GetPixel(100, 50);
+        Assert.Equal(255, center.Alpha);
+        Assert.True(center.Red > 200 && center.Green < 40, $"expected red, got {center}");
+    }
+
+    [Fact]
+    public async Task TransparentPng_ThumbnailKeepsItsAlpha()
+    {
+        using var png = TransparentRender(1000, 500);
+
+        var result = await _service.ProcessAsync(png, TestContext.Current.CancellationToken);
+
+        using var thumb = SKBitmap.Decode(result.Thumbnail!);
+        Assert.Equal(0, thumb.GetPixel(2, 2).Alpha);
+    }
+
+    [Fact]
+    public async Task OneTranslucentPixel_IsEnoughToKeepThePng()
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(64, 64, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+        bitmap.Erase(SKColors.CornflowerBlue);
+        bitmap.SetPixel(63, 63, new SKColor(10, 20, 30, 254));
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+
+        var result = await _service.ProcessAsync(new MemoryStream(data.ToArray()), TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", result.ContentType);
+    }
+
+    [Fact]
+    public async Task OpaquePngWithAnAlphaChannel_StaysJpeg()
+    {
+        // An RGBA PNG whose every pixel is opaque: the alpha channel alone is not a reason to
+        // keep a PNG, which would be a far bigger file for a photo.
+        using var bitmap = new SKBitmap(new SKImageInfo(300, 200, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+        bitmap.Erase(SKColors.CornflowerBlue);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        using (var inputCodec = SKCodec.Create(new MemoryStream(data.ToArray())))
+            Assert.NotEqual(SKAlphaType.Opaque, inputCodec!.Info.AlphaType); // the premise
+
+        var result = await _service.ProcessAsync(
+            new MemoryStream(data.ToArray()), ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/jpeg", result.ContentType);
+        using var codec = SKCodec.Create(new MemoryStream(result.Original));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec!.EncodedFormat);
+    }
+
+    [Fact]
+    public async Task TransparentPng_SocialImageIsAJpegOnWhite()
+    {
+        using var png = TransparentRender(2400, 1200);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.PrintUploads, TestContext.Current.CancellationToken);
+
+        using var codec = SKCodec.Create(new MemoryStream(result.Social!));
+        Assert.Equal(SKEncodedImageFormat.Jpeg, codec!.EncodedFormat);
+        using var social = SKBitmap.Decode(result.Social!);
+        Assert.Equal(1200, social.Width);
+        var corner = social.GetPixel(5, 5);
+        Assert.True(corner.Red > 245 && corner.Green > 245 && corner.Blue > 245, $"expected white, got {corner}");
+        var center = social.GetPixel(600, 300);
+        Assert.True(center.Red > 200 && center.Green < 40 && center.Blue < 40, $"expected red, got {center}");
+    }
+
+    [Fact]
+    public async Task TransparentPng_InTheBackfill_IsAlsoKeptAsPng()
+    {
+        using var png = TransparentRender();
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", result.ContentType);
+        Assert.Equal("image/png", result.SourceContentType);
+        Assert.NotNull(result.Social);
+    }
+
+    [Fact]
+    public async Task LegacyBackfill_AlsoProducesASocialImage()
+    {
+        using var png = Encode(2400, 1800, SKEncodedImageFormat.Png);
+
+        var result = await _service.ProcessAsync(
+            png, ImageProcessingOptions.LegacyBackfill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1200, result.SocialWidth);
+        Assert.Equal(900, result.SocialHeight);
+    }
 }

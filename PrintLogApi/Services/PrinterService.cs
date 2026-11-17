@@ -1,21 +1,167 @@
 ﻿using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
+using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Printer;
+using PrintLogApi.PrinterCatalog;
+using PrintLogApi.Profiles;
 
 namespace PrintLogApi.Services;
 
 public class PrinterService(
     PrintLogContext context,
     TelemetryClient telemetry,
-    ICacheVersionService cacheVersionService) : IPrinterService
+    IBlobStorageService blobStorage,
+    ILogger<PrinterService> logger,
+    ICacheVersionService cacheVersionService,
+    Spoolman.ISpoolmanCredentialCache spoolmanCredentials,
+    TimeProvider timeProvider) : IPrinterService
 {
     /// <summary>
     /// The category a printer gets when none is named. Shared with PrintersController so the web
     /// and MCP create paths cannot drift onto different defaults.
     /// </summary>
     public const string DefaultPrinterCategoryNickname = "FFF";
+
+    // Bucketed expiry: repeated signing within a window returns a byte-identical URL, which
+    // is what lets the browser image cache hit at all. Max-age is strictly less than the
+    // bucket so a cached response cannot outlive the signature that fetched it.
+    private static readonly TimeSpan SasBucket = TimeSpan.FromHours(6);
+    private static readonly TimeSpan SasCacheMaxAge = TimeSpan.FromHours(5);
+
+    /// <summary>
+    /// The per-tier image cap. There is no IsProAsync helper anywhere in this codebase; the
+    /// established test is this direct query, and wrapping it in a new service method would
+    /// only create a second definition of "is Pro."
+    /// </summary>
+    public async Task<int> GetMaxImagesPerPrinter(long userId)
+    {
+        var subscription = await context.Subscriptions
+            .Where(s => s.UserId == userId)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
+
+        return subscription?.Status == SubscriptionStatus.Active
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
+    }
+
+    /// <summary>
+    /// Signs the full image set for one printer detail response. Explicit and
+    /// post-materialization, never a projection: SAS signing cannot run inside ProjectTo.
+    /// </summary>
+    public async Task HydrateDetailImageUrlsAsync(
+        PrinterDetailDto detail, CancellationToken ct = default)
+    {
+        if (detail.Id is not { } printerId) return;
+
+        var images = await context.PrinterImages
+            .AsNoTracking()
+            .Where(pi => pi.PrinterId == printerId)
+            // (DisplayOrder, Id): two concurrent uploads may share a DisplayOrder, so
+            // ordering on it alone is not deterministic.
+            .OrderBy(pi => pi.DisplayOrder).ThenBy(pi => pi.Id)
+            .Select(pi => new
+            {
+                pi.Id,
+                pi.IsDefault,
+                pi.DisplayOrder,
+                pi.ContentType,
+                OriginalPath = pi.File.Path,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null
+            })
+            .ToListAsync(ct);
+
+        // The filtered unique index enforces AT MOST one default, never at least one. A
+        // delete interleaved with an add can leave a non-empty set with none; heal it on
+        // read rather than serializing those transactions.
+        var defaultId = images.FirstOrDefault(i => i.IsDefault)?.Id ?? images.FirstOrDefault()?.Id;
+
+        var hydrated = new List<PrinterImageDto>(images.Count);
+        foreach (var image in images)
+        {
+            var dto = new PrinterImageDto
+            {
+                Id = image.Id,
+                IsDefault = image.Id == defaultId,
+                DisplayOrder = image.DisplayOrder
+            };
+
+            dto.Url = await SignImageOrNullAsync(image.OriginalPath, image.ContentType, printerId, ct);
+
+            // The thumbnail is WebP; the original is whatever the decode produced. Signing an
+            // original as "image/webp" would set a response content type the bytes contradict.
+            dto.ThumbnailUrl = image.ThumbnailPath is null
+                ? dto.Url
+                : await SignImageOrNullAsync(image.ThumbnailPath, "image/webp", printerId, ct);
+
+            hydrated.Add(dto);
+        }
+
+        detail.Images = hydrated;
+    }
+
+    /// <summary>
+    /// Signs one just-uploaded image into its response DTO. The upload response would
+    /// otherwise carry no usable URL.
+    /// </summary>
+    public async Task<PrinterImageDto> HydrateImageDtoAsync(
+        PrinterImage image, CancellationToken ct = default)
+    {
+        // The File rows were just written by PrinterImageService inside this same scope, so
+        // read them back rather than assuming the navigations were loaded.
+        var paths = await context.PrinterImages
+            .AsNoTracking()
+            .Where(pi => pi.Id == image.Id)
+            .Select(pi => new
+            {
+                OriginalPath = pi.File.Path,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var dto = new PrinterImageDto
+        {
+            Id = image.Id,
+            IsDefault = image.IsDefault,
+            DisplayOrder = image.DisplayOrder
+        };
+
+        if (paths is null) return dto;
+
+        dto.Url = await SignImageOrNullAsync(paths.OriginalPath, image.ContentType, image.PrinterId, ct);
+        dto.ThumbnailUrl = paths.ThumbnailPath is null
+            ? dto.Url
+            : await SignImageOrNullAsync(paths.ThumbnailPath, "image/webp", image.PrinterId, ct);
+
+        return dto;
+    }
+
+    /// <summary>
+    /// Signs one blob path, or returns null if signing fails. Public because the printer
+    /// summary endpoint signs AFTER its HybridCache read, outside this service.
+    /// </summary>
+    public async Task<string?> SignImageOrNullAsync(
+        string? path, string contentType, long printerId, CancellationToken ct = default)
+    {
+        if (path is null) return null;
+
+        try
+        {
+            return (await blobStorage.GenerateSasInlineUrlAsync(
+                BlobContainers.PrinterImages, Path.GetFileName(path),
+                contentType, SasBucket, SasCacheMaxAge)).ToString();
+        }
+        catch (Exception ex)
+        {
+            // Each URL is signed independently so one unsignable blob costs one image,
+            // not the whole response.
+            logger.LogWarning(ex, "Failed to sign printer image URL for {PrinterId}", printerId);
+            return null;
+        }
+    }
 
     public async Task<Printer?> getPrinterById(long printerId)
     {
@@ -36,8 +182,9 @@ public class PrinterService(
     /// </summary>
     /// <param name="printerId"></param>
     /// <param name="loadedFilamentIds"></param>
+    /// <param name="fillPrintingRows">The printer page's save: see <see cref="IPrinterService.setLoadedFilament"/>.</param>
     /// <returns></returns>
-    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds)
+    public async Task setLoadedFilament(long printerId, IEnumerable<Guid> loadedFilamentIds, bool fillPrintingRows = false)
     {
         var printer = await getPrinterById(printerId);
 
@@ -61,7 +208,15 @@ public class PrinterService(
 
         // Add any new filament to the list
         var newFilament = loadedFilamentIds
-            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId));
+            .Where(loadedFilamentId => !currentlyLoadedFilament.Any(f => f.FilamentId == loadedFilamentId))
+            .Where(id => id != default)
+            .ToList();
+
+        // One spool on a one-tool printer can only be the one feeding it.
+        if (fillPrintingRows && printer.SlotCount <= 1 && newFilament.Count == 1)
+        {
+            await LinkPrintingRows(printer, 0, newFilament[0]);
+        }
 
         foreach (var filamentId in newFilament)
         {
@@ -94,6 +249,94 @@ public class PrinterService(
             filament.UnloadedDateTime = modifiedTime;
         }
 
+    }
+
+    public async Task LoadSlot(Printer printer, int slot, Guid filamentId, string? slotLabel)
+    {
+        // Local time, matching setLoadedFilament: these columns already hold DateTimeOffset.Now
+        // values, and mixing in UTC would make rows either side of a deploy mean different things.
+        var now = DateTimeOffset.Now;
+
+        var displaced = await context.PrinterFilament
+            .Where(pf => pf.FilamentId == filamentId || (pf.PrinterId == printer.Id && pf.Slot == slot))
+            .ToListAsync();
+
+        // The bridge reasserts every slot when it reconnects; that is not a reload.
+        var current = displaced.FirstOrDefault(pf =>
+            pf.PrinterId == printer.Id && pf.Slot == slot && pf.FilamentId == filamentId);
+
+        foreach (var row in displaced.Where(pf => pf != current))
+        {
+            row.UnloadedDateTime = now;
+        }
+
+        if (current != null)
+        {
+            current.SlotLabel = slotLabel ?? current.SlotLabel;
+            return;
+        }
+
+        // Only a spool newly loaded: the bridge reasserting a slot on reconnecting isn't the
+        // user loading one, and must not refill a row they left without a spool.
+        await LinkPrintingRows(printer, slot, filamentId);
+
+        context.PrinterFilament.Add(new PrinterFilament
+        {
+            PrinterId = printer.Id,
+            FilamentId = filamentId,
+            Slot = slot,
+            SlotLabel = slotLabel,
+            LoadedDateTime = now,
+        });
+    }
+
+    /// <summary>
+    /// Links <paramref name="filamentId"/> to the row with no spool on <paramref name="slot"/> of
+    /// the newest print still printing on <paramref name="printer"/>. On a printer with one slot
+    /// or fewer a row with no slot is slot 0's, and is stamped so.
+    /// </summary>
+    private async Task LinkPrintingRows(Printer printer, int slot, Guid filamentId)
+    {
+        // The newest print still printing is the one feeding: an older one left Printing (never
+        // finished) would be charged a spool it never used.
+        var printId = await context.Prints
+            .Where(p => p.PrinterId == printer.Id && p.Status == Print.PrintStatus.Printing)
+            .OrderByDescending(p => p.StartDate)
+            .ThenByDescending(p => p.Id)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+        if (printId == null)
+        {
+            return;
+        }
+
+        var singleTool = printer.SlotCount <= 1 && slot == 0;
+        var rows = await context.PrintFilament
+            .Where(pf => pf.FilamentId == null
+                && pf.PrintId == printId
+                && (pf.Slot == slot || (singleTool && pf.Slot == null)))
+            .ToListAsync();
+
+        foreach (var row in rows
+            .GroupBy(r => r.PrintId)
+            .Select(g => g.OrderBy(r => r.Slot is null).ThenBy(r => r.Id).First()))
+        {
+            row.FilamentId = filamentId;
+            row.Slot ??= slot;
+        }
+    }
+
+    public async Task UnloadSlot(Printer printer, int slot)
+    {
+        var now = DateTimeOffset.Now;
+        var rows = await context.PrinterFilament
+            .Where(pf => pf.PrinterId == printer.Id && pf.Slot == slot)
+            .ToListAsync();
+
+        foreach (var row in rows)
+        {
+            row.UnloadedDateTime = now;
+        }
     }
 
     /// <summary>
@@ -130,9 +373,98 @@ public class PrinterService(
             context.PrinterMaintenance.RemoveRange(maintenanceEntries);
         }
 
+        // Images, their File rows and their blobs. Ordering is load-bearing: the
+        // PrinterImage -> File FKs are Restrict, so the image rows must go before the files,
+        // and both before the printer. Without this the delete would FAIL on the Restrict FK
+        // rather than orphan anything - broken either way.
+        var images = await context.PrinterImages
+            .Include(pi => pi.File)
+            .Include(pi => pi.ThumbnailFile)
+            .Where(pi => pi.PrinterId == printerId)
+            .ToListAsync();
+
+        var blobNames = images
+            .SelectMany(pi => new[] { pi.File?.Path, pi.ThumbnailFile?.Path })
+            .Where(path => !string.IsNullOrEmpty(path))
+            .Select(path => Path.GetFileName(path)!)
+            .ToList();
+
+        foreach (var image in images)
+        {
+            context.PrinterImages.Remove(image);
+            if (image.File is not null) context.Files.Remove(image.File);
+            if (image.ThumbnailFile is not null) context.Files.Remove(image.ThumbnailFile);
+        }
+
+        // Loaded so ClientSetNull unbinds them: the database FK does not set null (see
+        // PrintLogContext), and the connection outlives the printer until the user deletes it.
+        await context.Connections.Where(c => c.PrinterId == printerId).LoadAsync();
+
+        // A bridge stops watching a printer that no longer exists (printlog-bridge#100): its
+        // entries go, and each bridge's desired list gets a new version. The FK has no database
+        // cascade (see PrintLogContext).
+        var bridgeEntries = await context.BridgePrinters.Where(p => p.PrinterId == printerId).ToListAsync();
+        context.BridgePrinters.RemoveRange(bridgeEntries);
+        var bridgeIds = bridgeEntries.Select(e => e.BridgeId).Distinct().ToList();
+        foreach (var bridge in await context.Bridges.Where(b => bridgeIds.Contains(b.Id)).ToListAsync())
+        {
+            bridge.DesiredRevision = Guid.NewGuid();
+        }
+
+        // Spoolman connections (#175) are revoked as well as unbound: the credential was for this
+        // printer, and a printer that no longer exists must not keep reading the user's spools.
+        // Loaded for the same ClientSetNull reason as above.
+        var revokedAt = DateTime.UtcNow;
+        var spoolmanConnections = await context.SpoolmanConnections.Where(c => c.PrinterId == printerId).ToListAsync();
+        foreach (var spoolman in spoolmanConnections)
+        {
+            spoolman.RevokedAt ??= revokedAt;
+        }
+
         context.Printers.Remove(printer);
 
-        await context.SaveChangesAsync();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await context.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 2 && ex.Entries.All(e => e.Entity is BridgePrinter))
+            {
+                // A bridge check-in rewrote an entry's credential issues (its concurrency stamp)
+                // meanwhile. The entry is being deleted either way: take the stored stamp and save again.
+                foreach (var entry in ex.Entries)
+                {
+                    if (await entry.GetDatabaseValuesAsync() is { } stored)
+                    {
+                        entry.OriginalValues.SetValues(stored);
+                    }
+                    else
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+        }
+
+        // After commit, so a request racing the delete cannot re-cache the "valid" lookup.
+        await spoolmanCredentials.InvalidateAsync(spoolmanConnections.Select(c => c.SecretHash));
+
+        // Blobs LAST, so a failed save leaves an orphaned blob rather than a row pointing at
+        // destroyed bytes. Failures here are logged and swallowed for the same reason: the
+        // database is already consistent and the printer is gone.
+        foreach (var name in blobNames)
+        {
+            try
+            {
+                await blobStorage.DeleteBlobAsync(BlobContainers.PrinterImages, name);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete printer image blob {BlobName}; continuing", name);
+            }
+        }
 
         telemetry.TrackEvent("PrinterDelete");
 
@@ -178,6 +510,8 @@ public class PrinterService(
     public async Task<PrinterDetailResult> GetPrinterForMcp(
         long userId, long printerId, CancellationToken ct)
     {
+        // The REST printer reads and the spool list apply the same rule.
+        var counts = SpoolOwnership.LoadedRowCounts;
         var row = await context.Printers.AsNoTracking()
             .Where(p => p.Id == printerId && p.UserId == userId) // creator-only; no existence oracle
             .Select(p => new
@@ -200,22 +534,28 @@ public class PrinterService(
                 p.BeamDiameter,
                 p.ScreenResolutionXPixels,
                 p.ScreenResolutionYPixels,
+                p.SlotCount,
+                p.CatalogModelId,
 
                 // "Loaded" means CURRENTLY loaded. PrinterFilament keeps historical rows, so
                 // without the UnloadedDateTime filter every spool ever mounted would be reported
                 // as loaded now.
-                LoadedCount = p.LoadedFilaments!.Count(pf =>
-                    pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId),
+                LoadedCount = p.LoadedFilaments!.AsQueryable().Where(counts).Count(pf =>
+                    pf.UnloadedDateTime == null),
 
                 // A corrupt row can reference another user's spool. Its material, colour and
                 // remaining weight all live on that foreign row, so a redacted entry would carry
                 // no usable information - exclude it, but count it so the omission is visible.
-                ExcludedCount = p.LoadedFilaments!.Count(pf =>
-                    pf.UnloadedDateTime == null && pf.Filament.CreatedById != userId),
+                ExcludedCount = p.LoadedFilaments!.Count(pf => pf.UnloadedDateTime == null)
+                    - p.LoadedFilaments!.AsQueryable().Where(counts).Count(pf => pf.UnloadedDateTime == null),
 
-                Loaded = p.LoadedFilaments!
-                    .Where(pf => pf.UnloadedDateTime == null && pf.Filament.CreatedById == userId)
-                    .OrderByDescending(pf => pf.LoadedDateTime)
+                Loaded = p.LoadedFilaments!.AsQueryable().Where(counts)
+                    .Where(pf => pf.UnloadedDateTime == null)
+                    // Slot order, so "what is in T2" reads straight off the list; spools with no
+                    // slot follow, newest first as before.
+                    .OrderBy(pf => pf.Slot == null)
+                    .ThenBy(pf => pf.Slot)
+                    .ThenByDescending(pf => pf.LoadedDateTime)
                     .ThenBy(pf => pf.Id)
                     .Select(pf => new
                     {
@@ -226,17 +566,10 @@ public class PrinterService(
                         Color = pf.Filament.ColorName,
                         pf.Filament.DiameterMm,
 
-                        // Same remaining-weight expression AutoMapper uses for FilamentSummaryDto:
-                        // initial weight, minus usage (actual, falling back to estimate), plus
-                        // adjustments.
-                        RemainingMg = (pf.Filament.InitialNominalWeightMg ?? 0)
-                            - pf.Filament.PrintFilaments!.Sum(u =>
-                                u.AmountMg.HasValue && u.AmountMg > 0 ? (long)u.AmountMg
-                                : u.EstimatedAmountMg.HasValue && u.EstimatedAmountMg > 0 ? (long)u.EstimatedAmountMg
-                                : 0L)
-                            + pf.Filament.FilamentAdjustments!.Sum(adj => adj.AmountMg),
 
                         pf.LoadedDateTime,
+                        pf.Slot,
+                        pf.SlotLabel,
                     })
                     // Capped in SQL, not after materialization: LoadedCount above already
                     // reports the true total, so there is no reason to pull every row back.
@@ -250,10 +583,20 @@ public class PrinterService(
             throw McpToolException.NotFound("Printer not found.");
         }
 
+        // Remaining comes from the shared figure get_material_inventory also reports, so the two
+        // tools cannot disagree about a spool, and an untracked spool is null in both (#230). It
+        // needs the spool's own usage and adjustments, which the nested projection above cannot
+        // reuse, so it is one more query for at most MaxLoadedFilaments rows.
+        var loadedIds = row.Loaded.Select(f => f.FilamentId).Distinct().ToList();
+        var remainingById = await context.Filaments.AsNoTracking()
+            .Where(f => loadedIds.Contains(f.Id))
+            .Select(ExpressionSplice.With((Filament f, long? remainingMg) => new { f.Id, RemainingMg = remainingMg }, FilamentProfile.RemainingMg))
+            .ToDictionaryAsync(f => f.Id, f => f.RemainingMg, ct);
+
         var loaded = row.Loaded
             .Select(f => new LoadedFilament(
                 f.FilamentId, f.Name, f.Brand, f.Material, f.Color, f.DiameterMm,
-                McpUnits.MgToGrams(f.RemainingMg), f.LoadedDateTime))
+                McpUnits.MgToGramsOrNull(remainingById.GetValueOrDefault(f.FilamentId)), f.LoadedDateTime, f.Slot, f.SlotLabel))
             .ToList();
 
         // Named arguments deliberately: this record has 22 fields, many of them double? or
@@ -283,7 +626,9 @@ public class PrinterService(
             FilamentDiameterMm: row.FilamentDiameter,
             BeamDiameterMm: row.BeamDiameter,
             ScreenResolutionXPixels: row.ScreenResolutionXPixels,
-            ScreenResolutionYPixels: row.ScreenResolutionYPixels);
+            ScreenResolutionYPixels: row.ScreenResolutionYPixels,
+            SlotCount: row.SlotCount,
+            CatalogModelId: row.CatalogModelId);
     }
 
     /// <summary>
@@ -307,6 +652,26 @@ public class PrinterService(
                 $"'{requested}' is not a known printer category. Valid categories: {string.Join(", ", known)}.");
         }
         return category;
+    }
+
+    /// <summary>
+    /// Finds the catalog model a new printer points at. Unknown, hidden and retired ids are all
+    /// rejected, matching the website's create. The match is case-insensitive and the stored
+    /// (canonical) id is what the caller gets back.
+    /// </summary>
+    private async Task<PrinterModel> RequireCatalogModel(string catalogModelId, CancellationToken ct)
+    {
+        // ToLower rather than ==, so the match is case-insensitive on any provider.
+        var lowered = catalogModelId.ToLowerInvariant();
+        var model = await context.PrinterModels.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id.ToLower() == lowered, ct);
+        if (model is null || model.Hidden || model.Retired)
+        {
+            throw McpToolException.InvalidArguments(
+                $"catalogModelId '{catalogModelId}' is not a printer in the catalog. " +
+                "If you can call the REST API, find an id with GET /api/PrinterModels?search=<name>; otherwise omit it.");
+        }
+        return model;
     }
 
     private static void RequireCreateFields(PrinterAttributesInput input)
@@ -366,7 +731,14 @@ public class PrinterService(
             }
         }
 
-        var category = await RequirePrinterCategory(input.CategoryNickname, ct);
+        // Resolve the catalog model only after the replay lookup: the fingerprint hashes the id the
+        // caller sent (trimmed, lowercased), so a retry replays even if the model has since been
+        // hidden or retired. The canonical stored id is used only for persisting.
+        PrinterModel? catalogModel = null;
+        if (input.CatalogModelId is not null)
+        {
+            catalogModel = await RequireCatalogModel(input.CatalogModelId, ct);
+        }
 
         var printer = new Printer
         {
@@ -375,8 +747,9 @@ public class PrinterService(
             Model = input.Model,
             Name = input.Name,
             Description = input.Description,
-            Category = category,
-            CategoryNickname = category.Nickname,
+            CategoryNickname = input.CategoryNickname,
+            CatalogModelId = catalogModel?.Id,
+            CreatedAt = timeProvider.GetUtcNow(),
             NozzleDiameter = input.NozzleDiameterMm,
             FilamentDiameter = input.FilamentDiameterMm,
             BeamDiameter = input.BeamDiameterMm,
@@ -395,6 +768,22 @@ public class PrinterService(
             // No LoadedFilaments, deliberately: an empty collection here would still be an
             // assertion about loaded state. Leaving it unset says nothing at all.
         };
+
+        // Specs the caller left out come from the catalog; a value they gave always wins.
+        // create_printer takes no slot count, so it is always omitted and the model's applies.
+        if (catalogModel is not null)
+        {
+            PrinterCatalogDefaults.ApplyOnCreate(printer, catalogModel, requestedSlotCount: null);
+        }
+
+        // A category the caller named must exist (rejected otherwise). One taken from the model's
+        // technology is a default, so a missing category falls back to FFF instead of failing.
+        var category = input.CategoryNickname is null && printer.CategoryNickname is { } derived
+            ? await context.PrinterCategories.FirstOrDefaultAsync(c => c.Nickname == derived, ct)
+                ?? await RequirePrinterCategory(null, ct)
+            : await RequirePrinterCategory(input.CategoryNickname, ct);
+        printer.Category = category;
+        printer.CategoryNickname = category.Nickname;
 
         if (idempotencyKey == null)
         {

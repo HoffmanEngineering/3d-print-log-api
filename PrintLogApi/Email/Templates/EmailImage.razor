@@ -1,0 +1,30 @@
+@* Every image an email shows. The tag is written out by hand because Blazor renders alt="" as a
+   bare `alt`, which HTML4-era parsers (Outlook's Word engine among them) can read as alt="alt";
+   decorative images need an explicit empty alt. Width and height are always set, so the layout
+   holds while images are blocked or still loading. *@
+@using System.Text.Encodings.Web
+@((MarkupString)Tag)
+
+@code {
+    [Parameter, EditorRequired] public string Src { get; set; } = "";
+
+    /// <summary>Empty for decorative images whose meaning is already in nearby text.</summary>
+    [Parameter] public string Alt { get; set; } = "";
+
+    [Parameter, EditorRequired] public int Width { get; set; }
+
+    [Parameter, EditorRequired] public int Height { get; set; }
+
+    /// <summary>Extra inline style; border, width and height are always added.</summary>
+    [Parameter] public string Style { get; set; } = "";
+
+    private string Tag
+    {
+        get
+        {
+            var e = HtmlEncoder.Default;
+            var style = $"border:0;width:{Width}px;height:{Height}px;{Style}";
+            return $"<img src=\"{e.Encode(Src)}\" alt=\"{e.Encode(Alt)}\" width=\"{Width}\" height=\"{Height}\" style=\"{e.Encode(style)}\">";
+        }
+    }
+}

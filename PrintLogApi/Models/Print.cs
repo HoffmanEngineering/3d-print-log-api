@@ -66,7 +66,9 @@ public class Print : TimestampEntity
     public bool AllowFileDownloads { get; set; }
 
     /// <summary>
-    /// The SHA1 file hash of the gcode file this print was created from.
+    /// The identity of the G-code file this print was created from: OctoPrint's SHA-1 of it, or
+    /// a connector's own 20-byte identity for it (printlog-bridge#40). See
+    /// <see cref="Services.PrintFileHashes"/>. Only comparable between one user's prints.
     /// </summary>
     [MaxLength(20)]
     [MinLength(20)]
@@ -88,4 +90,39 @@ public class Print : TimestampEntity
 
     public Guid? ProjectId { get; set; }
     public Project? Project { get; set; }
+
+    /// <summary>How the print reached the API. Server-set; see <see cref="PrintSource"/>.</summary>
+    public PrintSource Source { get; set; }
+
+    /// <summary>
+    /// The normalized slicer key (<c>SlicerNames</c>) for prints logged through the slicer
+    /// plugin or uploader, otherwise null.
+    /// </summary>
+    [MaxLength(32)]
+    public string? Slicer { get; set; }
+
+    /// <summary>The slicer version as the plugin reported it.</summary>
+    [MaxLength(50)]
+    public string? SlicerVersion { get; set; }
+
+    /// <summary>
+    /// The system a connector logged this print from (<c>moonraker</c>, <c>octoprint</c>,
+    /// <c>mcp</c>…). Set once at creation (or by a claim, #165), never edited, with one exception:
+    /// a printer moved to another bridge mid-job hands its open print to the new bridge's job
+    /// (<c>BridgePrintGuard</c>, printlog-bridge#103). Unique with <see cref="ExternalId"/> per
+    /// user, which is what makes a connector's retried create return the same print.
+    /// </summary>
+    [MaxLength(50)]
+    public string? ExternalSource { get; set; }
+
+    /// <summary>The job's identity in <see cref="ExternalSource"/>. See there.</summary>
+    [MaxLength(200)]
+    public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// The connection that logged this print, if any. Nulled when the connection is deleted: the
+    /// print is the user's record and outlives the connector that wrote it.
+    /// </summary>
+    public Guid? ConnectionId { get; set; }
+    public Connection? Connection { get; set; }
 }

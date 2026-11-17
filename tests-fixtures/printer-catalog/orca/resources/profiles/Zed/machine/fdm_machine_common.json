@@ -1,0 +1,15 @@
+{
+    "type": "machine",
+    "name": "fdm_machine_common",
+    "from": "system",
+    "instantiation": "false",
+    "printer_technology": "FFF",
+    "nozzle_diameter": [
+        "0.4"
+    ],
+    "filament_diameter": [
+        "1.75"
+    ],
+    "printable_height": "200",
+    "machine_start_gcode": "G28 ; zed start"
+}

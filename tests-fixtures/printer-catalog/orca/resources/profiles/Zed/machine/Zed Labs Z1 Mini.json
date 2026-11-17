@@ -1,0 +1,7 @@
+{
+    "type": "machine_model",
+    "name": "Zed Labs Z1 Mini",
+    "nozzle_diameter": "0.2",
+    "family": "Zed",
+    "machine_tech": "FFF"
+}

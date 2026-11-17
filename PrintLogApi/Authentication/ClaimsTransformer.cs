@@ -1,12 +1,17 @@
-﻿using System.Security.Claims;
+﻿using System.Globalization;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Hybrid;
 using PrintLogApi.Caching;
+using PrintLogApi.Email;
 using PrintLogApi.Users;
 
 namespace PrintLogApi.Authentication;
 
-public sealed class ClaimsTransformer(HybridCache cache, CachedComputation computation) : IClaimsTransformation
+public sealed class ClaimsTransformer(HybridCache cache, CachedComputation computation, TelemetryClient telemetry) : IClaimsTransformation
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -72,6 +77,60 @@ public sealed class ClaimsTransformer(HybridCache cache, CachedComputation compu
 
         existingClaimsIdentity.AddClaim(new Claim(ClaimTypes.NameIdentifier, localUserId.ToString()));
 
+        await SyncEmailAsync(existingClaimsIdentity, authUserId, localUserId);
+
         return principal;
+    }
+
+    /// <summary>The (address, verified) pair last written for a user, and the issue time of the token it came from.</summary>
+    internal sealed record EmailSyncMark(string Fingerprint, long IssuedAt);
+
+    private static readonly HybridCacheEntryOptions ReadOnly = new()
+    {
+        Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite,
+    };
+
+    /// <summary>
+    /// Keeps Users.Email in step with the address Auth0 puts in the token. The cache remembers,
+    /// per user, the pair last written and the <c>iat</c> of the token that carried it, so an
+    /// unchanged pair costs a cache hit and no database round trip, a changed one syncs on the
+    /// next request, and an older token still in use on another device (or a change reverted
+    /// within the day) can never overwrite what a newer token wrote.
+    /// </summary>
+    private async Task SyncEmailAsync(ClaimsIdentity identity, string authUserId, long localUserId)
+    {
+        var email = identity.FindFirst(EmailClaims.Email)?.Value;
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        var verified = bool.TryParse(identity.FindFirst(EmailClaims.EmailVerified)?.Value, out var v) && v;
+        var issuedAt = long.TryParse(identity.FindFirst("iat")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var iat) ? iat : 0;
+
+        // Hashed so the address never appears in the cache, which can surface in logs.
+        var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{email}|{verified}")));
+        var key = $"email-sync:{authUserId}";
+
+        try
+        {
+            var last = await cache.GetOrCreateAsync<EmailSyncMark?>(key, static _ => ValueTask.FromResult<EmailSyncMark?>(null), ReadOnly);
+            if (last is not null && (last.Fingerprint == fingerprint || last.IssuedAt > issuedAt))
+            {
+                return;
+            }
+
+            await computation.RunAsync(async (services, token) =>
+                await services.GetRequiredService<IUserEmailSyncService>().SyncAsync(localUserId, email, verified, token),
+                CancellationToken.None);
+            await cache.SetAsync(key, new EmailSyncMark(fingerprint, issuedAt), CacheOptions);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Email is a side channel: a failed sync must never fail the request it rode in on.
+            // Nothing is cached on failure, so the next request retries.
+            telemetry.TrackEvent("EmailSync_Failed", new Dictionary<string, string> { ["Error"] = ex.GetType().Name });
+            telemetry.TrackException(ex);
+        }
     }
 }

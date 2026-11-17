@@ -54,23 +54,38 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
+      # Scripts from the migration *before the first unapplied one*, not from after the last
+      # applied one. Applied migrations are not necessarily a prefix of the id-ordered list: a PR
+      # that branches early can merge after a sibling, leaving a pending migration with a LOWER id
+      # than migrations already in the database (#106 merged after #107/#108 did exactly this).
+      # The old "last applied" query then picked an id past the pending one and produced an empty
+      # script -- so the production approval gate showed a reviewer nothing while the efbundle,
+      # which applies all pending migrations regardless of order, was about to add two columns.
+      # --idempotent guards each statement, so re-including already-applied migrations in the
+      # range is safe.
       - name: Generate migration SQL script
         run: |
           MIGRATIONS_JSON=$(dotnet tool run dotnet-ef migrations list --project PrintLogApi \
             --connection "$DB_CONNECTION_STRING_MIGRATIONS_READER" \
             --json --no-build --configuration Release 2>&1) || true
           echo "Raw migrations output: $MIGRATIONS_JSON"
-          LAST_MIGRATION=$(echo "$MIGRATIONS_JSON" \
-            | sed -n '/^\[/,$p' \
-            | jq -r '[.[] | select(.applied == true)] | last | .id // empty' \
-            2>/dev/null || true)
-          echo "Last applied migration: $LAST_MIGRATION"
-          if [ -z "$LAST_MIGRATION" ]; then
-            echo "ERROR: Could not determine last applied migration" >&2
+          MIGRATIONS=$(echo "$MIGRATIONS_JSON" | sed -n '/^\[/,$p')
+          COUNT=$(echo "$MIGRATIONS" | jq -r 'length' 2>/dev/null || true)
+          if [ -z "$COUNT" ] || [ "$COUNT" = "0" ]; then
+            echo "ERROR: Could not read the migration list from the database" >&2
             exit 1
           fi
-          dotnet tool run dotnet-ef migrations script "$LAST_MIGRATION" --project PrintLogApi \
-            --output migrations.sql --idempotent --no-build --configuration Release
+          # "0" is EF's marker for "before the first migration".
+          FROM=$(echo "$MIGRATIONS" | jq -r '
+            (map(.applied) | index(false)) as $i
+            | if $i == null then "none" elif $i == 0 then "0" else .[$i - 1].id end')
+          echo "Pending migrations start after: $FROM"
+          if [ "$FROM" = "none" ]; then
+            echo "-- No pending migrations." > migrations.sql
+          else
+            dotnet tool run dotnet-ef migrations script "$FROM" --project PrintLogApi \
+              --output migrations.sql --idempotent --no-build --configuration Release
+          fi
         env:
           DB_CONNECTION_STRING_MIGRATIONS_READER: ${{ secrets.DB_CONNECTION_STRING_MIGRATIONS_READER }}
 
@@ -112,23 +127,74 @@ jobs:
           name: app
           path: ./publish
 
+      # Command Timeout raises SqlClient's 30s default for the bundle only; the app keeps it.
+      # v1.12.0's AddAchievements failed here when CREATE INDEX on Prints ran past 30s. The
+      # bundle takes no timeout option, and EF sets one on its commands only when the context is
+      # configured with it, so the connection-string keyword is what reaches each migration
+      # statement (checked: the bundle logs CommandTimeout='900' for every migration command).
+      # Keep it bounded: a migration that ALTERs a table holds its schema lock until commit, so
+      # this is also the longest the live app can be blocked on that table.
       - name: Run migrations
         run: |
           chmod +x ./migrations-bundle/efbundle
-          ./migrations-bundle/efbundle --connection "$DB_CONNECTION_STRING"
+          ./migrations-bundle/efbundle --connection "$DB_CONNECTION_STRING;Command Timeout=900"
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 
+      # OneDeploy (POST /api/publish?type=zip) with the publish profile. What makes this safe is
+      # an app setting, not anything in this step: with WEBSITE_RUN_FROM_PACKAGE=1 on the App
+      # Service, Kudu stores the zip under /home/data/SitePackages, points packagename.txt at it
+      # and restarts, and the new process mounts the zip read-only as /home/site/wwwroot. Without
+      # it Kudu extracts the zip over wwwroot while the old process is still loading assemblies
+      # from it, which is what produced the BadImageFormatException bursts and HTTP 500s on every
+      # deploy through Nov 2026 (#309). See AGENTS.md, Deployment.
+      #
+      # restart is the API's default; it is spelled out because run-from-package depends on it
+      # (the new package is only mounted by a restart). Do NOT add `type: zip`: in v3 a valid
+      # `type` skips the step that zips a folder, so `package: ./publish` would be sent as-is.
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ./publish
+          restart: true
+
+      # The deploy action returns once Kudu reports the deployment done, which is not the same as
+      # the new process serving. /health/ready probes SQL Server too, so a release that starts but
+      # cannot reach its database fails here. It answers 200 for Healthy and Degraded (push
+      # unconfigured is Degraded on purpose) and 503 for Unhealthy.
+      #
+      # Three consecutive passes, not one: right after the restart the front end can still route a
+      # request or two to the old process, or to a new one that is about to fail. publish-release
+      # and publish-mcp-registry both need this job, so neither announces a version that is not
+      # serving.
+      - name: Wait for the API to serve
+        env:
+          READY_URL: https://api.3dprintlog.com/health/ready
+        run: |
+          deadline=$((SECONDS + 300))
+          passes=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status=$(curl -sS -o ready.json -w '%{http_code}' --max-time 20 "$READY_URL") || status=000
+            if [ "$status" = "200" ]; then
+              passes=$((passes + 1))
+              echo "Pass $passes/3: HTTP 200 $(cat ready.json)"
+              if [ "$passes" -ge 3 ]; then
+                exit 0
+              fi
+            else
+              passes=0
+              echo "Not ready yet: HTTP $status"
+            fi
+            sleep 10
+          done
+          echo "::error::$READY_URL did not answer 200 three times in a row within 5 minutes of the deploy."
+          exit 1
 
   # Separate job so `contents: write` is scoped to publishing alone, and it runs only
-  # after a successful deploy -- the Releases feed should never announce a version that
-  # is not actually live.
+  # after a successful deploy, including its "Wait for the API to serve" step -- the
+  # Releases feed should never announce a version that is not actually live.
   #
   # Unlike the UI repo, there is no hand-written per-version prose here to extract, so
   # --generate-notes is the right source: squash-merged PR titles on this repo are
@@ -148,3 +214,95 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+
+  # Publishes server.json to the official MCP Registry (#128; runbook in
+  # docs/mcp-registry-listing.md). Off until the owner sets the repository variable
+  # MCP_REGISTRY_PUBLISH to 'true', so merging this job changes nothing on its own.
+  #
+  # After deploy, for the same reason as publish-release: the listing must never describe a
+  # server that is not live yet.
+  #
+  # Auth is DNS, not GitHub OIDC. `login github-oidc` only grants io.github.<owner>/*; the
+  # com.3dprintlog namespace is proved by an Ed25519 key whose public half is a TXT record on the
+  # 3dprintlog.com apex. That key can publish (and overwrite) anything under com.3dprintlog/*, so
+  # it is an environment secret on 'mcp-registry', which the runbook restricts to v* tags and puts
+  # behind a required reviewer. No id-token permission: nothing here uses OIDC.
+  #
+  # Registry versions are immutable, and server.json's version tracks the listing, not the API
+  # release. So most releases find their version already published and skip; a release fails only
+  # when server.json changed without a version bump, which would otherwise be silently dropped.
+  publish-mcp-registry:
+    needs: deploy
+    if: vars.MCP_REGISTRY_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: mcp-registry
+    permissions:
+      contents: read
+
+    env:
+      REGISTRY_URL: https://registry.modelcontextprotocol.io
+      # Pinned with its checksum from the release's registry_<version>_checksums.txt. To upgrade,
+      # change both from https://github.com/modelcontextprotocol/registry/releases.
+      MCP_PUBLISHER_VERSION: 1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Decide whether this version needs publishing
+        id: check
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          URL="$REGISTRY_URL/v0.1/servers/${NAME//\//%2F}/versions/$VERSION"
+          STATUS=$(curl -sS -o published.json -w '%{http_code}' "$URL")
+          case "$STATUS" in
+            404)
+              echo "$NAME $VERSION is not in the registry yet; publishing."
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            200)
+              if diff <(jq -S '.server' published.json) <(jq -S '.' server.json); then
+                echo "$NAME $VERSION is already published and unchanged; nothing to do."
+                echo "publish=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::server.json differs from the published $NAME $VERSION. Registry versions are immutable: bump 'version' in server.json (and MCP_SERVER_VERSION in the UI's scripts/discovery-lib.mjs)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unexpected HTTP $STATUS from $URL"
+              exit 1
+              ;;
+          esac
+
+      - name: Install mcp-publisher
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          ARCHIVE="mcp-publisher_linux_amd64.tar.gz"
+          curl -fsSL -o "$ARCHIVE" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/${ARCHIVE}"
+          echo "${MCP_PUBLISHER_SHA256}  ${ARCHIVE}" | sha256sum --check --strict
+          tar xzf "$ARCHIVE" mcp-publisher
+
+      - name: Publish to the MCP Registry
+        if: steps.check.outputs.publish == 'true'
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MCP_REGISTRY_PRIVATE_KEY" ]; then
+            echo "::error::MCP_REGISTRY_PRIVATE_KEY is not set on the mcp-registry environment."
+            exit 1
+          fi
+          ./mcp-publisher login dns --domain 3dprintlog.com --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+          ./mcp-publisher publish
+          ./mcp-publisher logout
+
+      - name: Verify the listing
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          curl -fsS "$REGISTRY_URL/v0.1/servers/${NAME//\//%2F}/versions/$VERSION" | jq -e --arg v "$VERSION" '.server.version == $v'

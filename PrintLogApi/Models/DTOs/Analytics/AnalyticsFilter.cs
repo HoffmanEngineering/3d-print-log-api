@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using PrintLogApi.Services;
 
 // Inside this namespace the bare name `Print` binds to the sibling DTO namespace
 // PrintLogApi.Models.DTOs.Print, not to the entity. Alias it so PrintStatus resolves.
@@ -124,21 +125,8 @@ public class AnalyticsFilter
     /// <summary>
     /// Resolves an IANA id, falling back to the Windows id on hosts without ICU IANA support.
     /// </summary>
-    public bool TryResolveTimeZone([MaybeNullWhen(false)] out TimeZoneInfo zone)
-    {
-        zone = null;
-        if (string.IsNullOrWhiteSpace(TimeZone)) return false;
-        try { zone = TimeZoneInfo.FindSystemTimeZoneById(TimeZone); return true; }
-        catch (TimeZoneNotFoundException) { }
-        catch (InvalidTimeZoneException) { return false; }
-
-        if (TimeZoneInfo.TryConvertIanaIdToWindowsId(TimeZone, out var windowsId))
-        {
-            try { zone = TimeZoneInfo.FindSystemTimeZoneById(windowsId); return true; }
-            catch (TimeZoneNotFoundException) { }
-        }
-        return false;
-    }
+    public bool TryResolveTimeZone([MaybeNullWhen(false)] out TimeZoneInfo zone) =>
+        TimeZoneResolver.TryResolve(TimeZone, out zone);
 
     public AnalyticsGranularity ResolveGranularity()
     {

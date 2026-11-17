@@ -42,4 +42,16 @@ public class PrinterDetailDto
     public bool? HasHeatedChamber { get; set; }
 
     public double? WattageW { get; set; }
+
+    /// <summary>How many filament positions the printer has. 1 for a single-tool printer.</summary>
+    public int SlotCount { get; set; }
+
+    /// <summary>
+    /// Photos of this printer, ordered by display order. Hydrated explicitly after
+    /// materialization and never projected: SAS signing cannot run inside ProjectTo.
+    /// </summary>
+    public IList<PrinterImageDto>? Images { get; set; }
+
+    /// <summary>Id of the printer catalog model this printer was picked from, if any.</summary>
+    public string? CatalogModelId { get; set; }
 }

@@ -3,6 +3,11 @@
 Working document for getting the PrintLog MCP server (`https://api.3dprintlog.com/mcp`) listed
 wherever agents and their users look for MCP servers. Research current as of **2026-07-29**.
 
+> **The exact steps for the official MCP Registry, the Claude Connectors Directory and the ChatGPT
+> plugin directory now live in [`mcp-registry-listing.md`](mcp-registry-listing.md)** (#128), which
+> supersedes the Tier 1 sections below where they differ: the registry publish is automated, the
+> Anthropic portal no longer needs a Team plan, and ChatGPT needs domain verification.
+
 Server facts every submission needs:
 
 | Field | Value |
@@ -39,9 +44,10 @@ serves no submission asset itself.
 
 ## Progress checklist
 
-- [x] **Tool annotations** — every tool advertises a `title` plus `readOnlyHint`/`destructiveHint`.
-      Pinned by `ToolSchemaTests.EveryTool_AdvertisesATitle` and
-      `EveryTool_DeclaresReadOnlyOrDestructiveIntent`, so a new tool added with a bare
+- [x] **Tool annotations** — every tool advertises a `title` plus explicit
+      `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` (OpenAI requires all of
+      them on read tools too). Pinned by `ToolSchemaTests.EveryTool_AdvertisesATitle`,
+      `EveryTool_StatesEveryBehaviorHintExplicitly` and `EveryTool_HintsAreConsistent`, so a new tool added with a bare
       `[McpServerTool]` fails the build rather than silently disqualifying the server.
 - [x] **`server.json`** drafted at the repo root.
 - [x] **Public docs page** — already shipped at **https://3dprintlog.com/docs/mcp**
@@ -71,7 +77,8 @@ serves no submission asset itself.
       directories want.
 - [ ] **Reviewer test account** with a populated print history, printers, and filament inventory.
       Needs a real Auth0 account and seeded data — see "What I can't do" below.
-- [ ] Official MCP Registry publish
+- [ ] Official MCP Registry publish — automated, waiting on the owner steps in
+      `mcp-registry-listing.md`
 - [ ] Anthropic Connectors Directory
 - [ ] ChatGPT plugin directory
 - [ ] Tier-2 directories
@@ -110,7 +117,8 @@ reverse-DNS namespace reads as first-party and isn't tied to a personal GitHub a
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.3dprintlog/printlog",
   "title": "3D Print Log",
-  "description": "Track 3D prints, printers, filament inventory, and projects on 3dprintlog.com. …",
+  "description": "Log and query your 3D prints, printers, filament inventory, and projects on 3dprintlog.com.",
+  "websiteUrl": "https://www.3dprintlog.com/docs/mcp",
   "repository": {
     "url": "https://github.com/HoffmanEngineering/3d-print-log-api",
     "source": "github"
@@ -129,8 +137,10 @@ Notes on the shape:
   Streamable-HTTP only.
 - No `headers` entry: auth is OAuth, not an API key, so clients discover it via the 401 challenge
   and `/.well-known/oauth-protected-resource`.
-- `version` is the *server* version, independent of the API's assembly version. Bump it on each
-  re-publish.
+- `description` is capped at **100 characters** by the registry schema; the longer copy goes in
+  the directory listings.
+- `version` is the *listing* version, independent of the API's version. See "Versioning" in
+  `mcp-registry-listing.md`.
 
 Install the CLI (Windows):
 

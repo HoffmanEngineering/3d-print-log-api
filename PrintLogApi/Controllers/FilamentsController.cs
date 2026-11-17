@@ -3,13 +3,17 @@ using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PrintLogApi.Authentication.Devices;
 using PrintLogApi.Enums;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
+using PrintLogApi.Mcp;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Filament;
+using PrintLogApi.Models.DTOs.SpoolTags;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Services;
+using PrintLogApi.SpoolTags;
 
 namespace PrintLogApi.Controllers;
 
@@ -25,6 +29,7 @@ public class FilamentsController(
     IFilamentImageService filamentImageService,
     PrintLogContext context,
     IBlobStorageService blobStorageService,
+    TagReadService tagReadService,
     TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>
@@ -34,8 +39,12 @@ public class FilamentsController(
     private const int MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
-    /// Gets a Paged Result of filament summaries for the current user.
+    /// List the current user's filaments, paged.
     /// </summary>
+    /// <remarks>
+    /// These are the user's filament spools, which the web app calls *materials*. Use a filament's
+    /// `id` in a print's `filamentUsage` to record what the print consumed. Weights are in milligrams.
+    /// </remarks>
     /// <param name="pagingRequest">The paging request information.</param>
     /// <param name="sortRequest">The Column and Direction to sort the results for.</param>
     /// <param name="searchText">Search filament's name/description/brand for text.</param>
@@ -87,6 +96,123 @@ public class FilamentsController(
 
 
     /// <summary>
+    /// Find the current user's spool carrying an RFID or NFC tag.
+    /// </summary>
+    /// <remarks>
+    /// The UID is matched in any case and with any separators, so `04:A2:3f:11` and `04A23F11`
+    /// find the same spool. Inactive spools are included. Another user's tag is a 404.
+    /// </remarks>
+    /// <param name="uid">The tag UID, as hex bytes.</param>
+    /// <response code="200">The spool carrying the tag.</response>
+    /// <response code="400">The UID is not hex bytes.</response>
+    /// <response code="404">None of the user's spools carries the tag.</response>
+    [DeviceAccess(DeviceScopes.FilamentsRead)]
+    [HttpGet("by-tag/{uid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FilamentDetailDto>> GetFilamentByTag(string uid)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        Filament? filament;
+        try
+        {
+            filament = await filamentService.GetFilamentByTag(userId.Value, uid);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (filament is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<FilamentDetailDto>(filament);
+        await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+        return dto;
+    }
+
+    /// <summary>
+    /// Resolve a raw RFID or NFC tag read to one of the current user's spools.
+    /// </summary>
+    /// <remarks>
+    /// Send the tag's UID and, when the reader could dump it, its memory. A UID the user has
+    /// linked answers `linked` with the spool, and refreshes what the app stored from the tag.
+    /// Any other tag answers `unknown`: the decoded `reading` (null for a blank or unrecognized
+    /// tag), the closest `catalogMatch`, and the user's own materials that fit it as `suggestions`.
+    /// A `hint` of `hold-still` means the read was incomplete and worth repeating. Unrecognized
+    /// dumps are kept for 90 days, without any account data, so new formats can be added.
+    /// </remarks>
+    /// <param name="request">The tag UID, the NFC technologies it reported, and its memory.</param>
+    /// <response code="200">The tag resolved to a spool, or to a reading with suggestions.</response>
+    /// <response code="400">The UID is not hex bytes, or the memory is malformed.</response>
+    /// <response code="413">The request body is over 16 KB.</response>
+    [HttpPost("tag-reads")]
+    [RequestSizeLimit(16_384)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<ActionResult<TagReadResponse>> ResolveTagRead([FromBody] TagReadRequest request)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return await tagReadService.ResolveAsync(userId.Value, request, HttpContext.RequestAborted);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>
+    /// Find the current user's spool by its spool number.
+    /// </summary>
+    /// <remarks>
+    /// Every spool has a short number of its own (1, 2, 3…), unique among the user's spools and
+    /// never reused after a delete, so a number written on a label always means the same spool.
+    /// Spoolman-compatible clients use it as the spool id. Inactive spools are included. Another
+    /// user's number is a 404.
+    /// </remarks>
+    /// <param name="spoolNumber">The spool number.</param>
+    /// <response code="200">The spool with that number.</response>
+    /// <response code="404">None of the user's spools has that number.</response>
+    [DeviceAccess(DeviceScopes.FilamentsRead)]
+    [HttpGet("by-number/{spoolNumber:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FilamentDetailDto>> GetFilamentBySpoolNumber(int spoolNumber)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var filament = await filamentService.GetFilamentBySpoolNumber(userId.Value, spoolNumber, HttpContext.RequestAborted);
+        if (filament is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<FilamentDetailDto>(filament);
+        await filamentService.HydrateDetailImageUrlsAsync(dto, HttpContext.RequestAborted);
+        return dto;
+    }
+
+    /// <summary>
     /// Returns detailed information for a filament roll by ID.
     /// </summary>
     /// <param name="id">The GUID of the filament.</param>
@@ -122,8 +248,12 @@ public class FilamentsController(
     }
 
     /// <summary>
-    /// Update an existing filament with new information.
+    /// Replace a filament's details.
     /// </summary>
+    /// <remarks>
+    /// Replaces the whole filament rather than patching it: read it with `GET /api/Filaments/{id}`,
+    /// change the fields you need, and send the whole object back.
+    /// </remarks>
     /// <param name="id">The GUID of the filament to update.</param>
     /// <param name="filamentDto">The updated filament details.</param>
     /// <returns>The updated filament.</returns>
@@ -132,10 +262,12 @@ public class FilamentsController(
     /// <response code="401">Returned if the request is not authenticated.</response>
     /// <response code="403">Returned if the current user tries to update a filament which is not theirs.</response>
     /// <response code="404">Returned if a filament with the specified ID is not found.</response>
+    /// <response code="409">A tag UID is already on another of the user's spools. The body names it.</response>
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> PutFilament(Guid id, FilamentDetailDto filamentDto)
     {
         if (id != filamentDto.Id)
@@ -174,18 +306,34 @@ public class FilamentsController(
         {
             return NotFound();
         }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (TagUidConflictException ex)
+        {
+            return TagConflict(ex);
+        }
     }
 
     /// <summary>
     ///     Create a new Filament for the current user.
     /// </summary>
+    /// <remarks>
+    /// `source` says how the starting amount was measured: `1` Weight, `2` Length or `3` Volume. The
+    /// other two are derived from it where the density and diameter allow. Weights are in milligrams.
+    /// </remarks>
     /// <param name="filamentDto">The dto containing all of the details for the filament to create.</param>
     /// <returns>The filament detail DTO that was created.</returns>
     /// <response code="201">The filament detail DTO that was created.</response>
+    /// <response code="400">A tag UID is not hex bytes, or there are too many.</response>
     /// <response code="401">Returned if the request is not authenticated.</response>
+    /// <response code="409">A tag UID is already on another of the user's spools. The body names it.</response>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<FilamentDetailDto>> PostFilament(AddFilamentDto filamentDto)
     {
         var userId = User.GetUserId();
@@ -195,7 +343,19 @@ public class FilamentsController(
             return Unauthorized();
         }
 
-        var newFilament = await filamentService.AddFilament(filamentDto, userId.Value);
+        Filament newFilament;
+        try
+        {
+            newFilament = await filamentService.AddFilament(filamentDto, userId.Value);
+        }
+        catch (BadRequestException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (TagUidConflictException ex)
+        {
+            return TagConflict(ex);
+        }
 
 
         return CreatedAtAction("GetFilament", new { id = newFilament.Id }, mapper.Map<Filament, FilamentDetailDto>(newFilament));
@@ -237,6 +397,130 @@ public class FilamentsController(
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Correct how much of a spool remains by applying a signed delta.
+    /// </summary>
+    /// <remarks>
+    /// Wraps the same logic as the MCP `adjust_material_remaining` tool. The result cannot go below
+    /// zero or above the spool's original capacity, and a spool with no starting amount cannot be
+    /// adjusted. `delta` must be finite, non-zero and at most 2,000,000 in magnitude (g / mm / ml).
+    /// `beforeGrams` and `afterGrams` are grams whatever unit `delta` is in.
+    /// </remarks>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The unit, signed delta and optional note.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="200">The remaining weight before and after, in grams.</response>
+    /// <response code="400">Unknown source, zero or non-finite delta, a delta over 2,000,000 in magnitude, a length or volume delta on a spool without the density or diameter needed to convert it, untracked spool, or an out-of-range result.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
+    [HttpPost("{id:guid}/adjustments")]
+    [ProducesResponseType<AdjustFilamentRemainingResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AdjustRemaining(Guid id, [FromBody] AdjustFilamentRemainingDto dto, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        McpMeasurementSource source;
+        switch (dto.Source?.Trim().ToLowerInvariant())
+        {
+            case "weight": source = McpMeasurementSource.Weight; break;
+            case "length": source = McpMeasurementSource.Length; break;
+            case "volume": source = McpMeasurementSource.Volume; break;
+            default:
+                return CodedProblem(StatusCodes.Status400BadRequest, "source must be one of: weight, length, volume.", "invalid_adjustment");
+        }
+
+        if (!double.IsFinite(dto.Delta) || dto.Delta == 0)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "delta must be a finite, non-zero number.", "invalid_adjustment");
+        }
+
+        if (dto.Notes is { Length: > 1000 })
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "notes must be at most 1000 characters.", "invalid_adjustment");
+        }
+
+        try
+        {
+            var result = await filamentService.AdjustMaterialRemainingForMcp(userId.Value, id, source, dto.Delta, dto.Notes, ct);
+            return Ok(new AdjustFilamentRemainingResultDto { BeforeGrams = result.BeforeGrams, AfterGrams = result.AfterGrams });
+        }
+        catch (McpToolException ex) when (ex.Code is "not_found" or "invalid_arguments")
+        {
+            return ToProblem(ex);
+        }
+    }
+
+    /// <summary>
+    /// Activate or retire a spool.
+    /// </summary>
+    /// <param name="id">The ID of the filament.</param>
+    /// <param name="dto">The new active flag.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="204">The flag was set.</response>
+    /// <response code="400">isActive is missing. Problem details with code invalid_request.</response>
+    /// <response code="404">The spool does not exist or belongs to someone else. Carries a problem-details body.</response>
+    [HttpPut("{id:guid}/active")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetActive(Guid id, [FromBody] SetFilamentActiveDto dto, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (dto.IsActive is null)
+        {
+            return CodedProblem(StatusCodes.Status400BadRequest, "isActive is required.", "invalid_request");
+        }
+
+        try
+        {
+            await filamentService.SetMaterialActiveForMcp(userId.Value, id, dto.IsActive.Value, ct);
+            return NoContent();
+        }
+        catch (McpToolException ex) when (ex.Code is "not_found" or "invalid_arguments")
+        {
+            return ToProblem(ex);
+        }
+    }
+
+    /// <summary>
+    /// Maps the MCP service's outcomes to problem details with a machine-readable `code`. A
+    /// missing and a foreign spool are both 404 `material_not_found`: the Home Assistant client
+    /// tells that apart from an unmatched route (also a 404 problem body) by the code.
+    /// Callers catch only the `not_found` and `invalid_arguments` codes, so any other one surfaces
+    /// as a server error instead of a misleading 400.
+    /// </summary>
+    private ObjectResult ToProblem(McpToolException ex)
+    {
+        if (ex.Code == "not_found")
+        {
+            return CodedProblem(StatusCodes.Status404NotFound, ex.Message, "material_not_found");
+        }
+
+        var code = ex.SubCode is "material_untracked" or "adjustment_out_of_range" ? ex.SubCode : "invalid_adjustment";
+        return CodedProblem(StatusCodes.Status400BadRequest, ex.Message, code);
+    }
+
+    private ObjectResult CodedProblem(int status, string detail, string code)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, statusCode: status, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 
     /// <summary>
@@ -453,5 +737,27 @@ public class FilamentsController(
             return NoContent();
         }
         catch (DoesNotExistException) { return NotFound(); }
+    }
+
+    /// <summary>
+    /// The 409 for a tag already on another spool (#147). ProblemDetails like the rest of the
+    /// API's errors, with the holding spool as extension members so a client can name and link it.
+    /// </summary>
+    private ObjectResult TagConflict(TagUidConflictException ex)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(
+            HttpContext,
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Tag already assigned",
+            detail: ex.Message);
+        problem.Extensions["tagUid"] = ex.TagUid;
+        problem.Extensions["filamentId"] = ex.FilamentId;
+        problem.Extensions["filamentDisplayName"] = ex.FilamentDisplayName;
+
+        return new ObjectResult(problem)
+        {
+            StatusCode = StatusCodes.Status409Conflict,
+            ContentTypes = { "application/problem+json" },
+        };
     }
 }

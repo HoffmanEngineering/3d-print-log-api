@@ -1,0 +1,32 @@
+{
+    "name": "Zed",
+    "version": "01.00.00.00",
+    "force_update": "0",
+    "description": "Zed configurations",
+    "machine_model_list": [
+        {
+            "name": "Zed Labs Z1",
+            "sub_path": "machine/Zed Labs Z1.json"
+        },
+        {
+            "name": "Zed Labs Z1 Mini",
+            "sub_path": "machine/Zed Labs Z1 Mini.json"
+        }
+    ],
+    "process_list": [],
+    "filament_list": [],
+    "machine_list": [
+        {
+            "name": "fdm_machine_common",
+            "sub_path": "machine/fdm_machine_common.json"
+        },
+        {
+            "name": "Zed Labs Z1 0.4 nozzle",
+            "sub_path": "machine/Zed Labs Z1 0.4 nozzle.json"
+        },
+        {
+            "name": "Zed Labs Z1 Mini 0.2 nozzle",
+            "sub_path": "machine/Zed Labs Z1 Mini 0.2 nozzle.json"
+        }
+    ]
+}

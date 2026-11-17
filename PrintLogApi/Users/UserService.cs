@@ -1,11 +1,13 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using System.Globalization;
+using Microsoft.ApplicationInsights;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
 
 namespace PrintLogApi.Users;
 
-public class UserService(PrintLogContext context) : IUserService
+public class UserService(PrintLogContext context, TelemetryClient telemetry, TimeProvider timeProvider) : IUserService
 {
     public User? GetLocalUserByAuthUserId(string authUserId)
     {
@@ -66,7 +68,8 @@ public class UserService(PrintLogContext context) : IUserService
         var newUser = new User
         {
             OAuthUserId = authUserId,
-            ViewStatus = User.ProfileViewStatus.Public
+            ViewStatus = User.ProfileViewStatus.Public,
+            CreatedDate = timeProvider.GetUtcNow(),
         };
 
         context.Users.Add(newUser);
@@ -74,6 +77,14 @@ public class UserService(PrintLogContext context) : IUserService
         try
         {
             await context.SaveChangesAsync();
+            // Only on the insert that won. The constraint-violation branch below returns a
+            // user a concurrent request already created — and already counted.
+            var separator = authUserId.IndexOf('|', StringComparison.Ordinal);
+            telemetry.TrackEvent("UserSignedUp", new Dictionary<string, string>
+            {
+                ["UserId"] = newUser.Id.ToString(CultureInfo.InvariantCulture),
+                ["identityProvider"] = separator > 0 ? authUserId[..separator] : "unknown",
+            });
         }
         catch (DbUpdateException dbUpdateEx)
         {

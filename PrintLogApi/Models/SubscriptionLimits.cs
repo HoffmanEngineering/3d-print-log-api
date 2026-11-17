@@ -5,15 +5,29 @@
 /// </summary>
 public static class SubscriptionLimits
 {
-    public const int FreeMaxImagesPerPrint = 5;
-    public const int ProMaxImagesPerPrint = 20;
-
-    public const int FreeMaxImagesPerFilament = 3;
-    public const int ProMaxImagesPerFilament = 10;
+    /// <summary>
+    /// Images per print, per filament, per printer and per project share one pair of limits. They
+    /// diverged historically (filament shipped at 3/10); unified upward so no user's images are
+    /// stranded. Projects had no cap until it joined this pair: a project already past it keeps
+    /// its images and only stops accepting new ones.
+    /// </summary>
+    public const int FreeMaxImages = 5;
+    public const int ProMaxImages = 20;
 
     public const int FreeMaxFilesPerPrint = 0;
     public const int ProMaxFilesPerPrint = 5;
 
+    /// <summary>
+    /// File-attachment byte allowance. Applies to attachments ONLY - image uploads are measured
+    /// against <see cref="ProMaxFileStorageBytes"/> regardless of tier.
+    /// </summary>
     public const long FreeMaxFileStorageBytes = 0L;
     public const long ProMaxFileStorageBytes = 50L * 1024 * 1024 * 1024; // 50 GB
+
+    /// <summary>
+    /// Webhook subscriptions (#235). Checked when one is created; a downgrade keeps the ones that
+    /// exist, which cost next to nothing, and only blocks new ones.
+    /// </summary>
+    public const int FreeMaxWebhooks = 1;
+    public const int ProMaxWebhooks = 10;
 }

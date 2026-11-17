@@ -41,7 +41,9 @@ The frontend lives at [HoffmanEngineering/3d-print-log-ui](https://github.com/Ho
 
 ## Infrastructure
 
-The production environment runs on Azure (App Service, SQL Server, Blob Storage). Infrastructure is manually managed — there is no Terraform or IaC setup.
+The production environment runs on Azure (App Service, SQL Server, Blob Storage). That part is manually managed. Email is the exception: Amazon SES, its DNS and the event webhook topic are defined in Terraform in [HoffmanEngineering/3d-print-log-infra](https://github.com/HoffmanEngineering/3d-print-log-infra).
+
+Email is configured through the `Email` section (`PrintLogApi/Email/EmailOptions.cs` lists every key and default; the example appsettings files show the shape). It is off by default: nothing is sent until `Email:Enabled` is true. [`docs/email-runbook.md`](docs/email-runbook.md) covers dry runs, going live, key rotation and the single-instance requirement, and [`docs/email-metrics.md`](docs/email-metrics.md) the holdout measurements.
 
 If your contribution requires infrastructure changes (new environment variables, Azure resource configuration, etc.), call this out explicitly in your PR description so the maintainer can coordinate the changes before the code ships.
 
@@ -50,6 +52,23 @@ If your contribution requires infrastructure changes (new environment variables,
 Usage questions are best asked in [**3D Print Log Discussions**](https://github.com/HoffmanEngineering/3d-print-log-ui/discussions/categories/q-a). That board is the front door for the whole project — the web app, this repository, and both slicer plugins — so you do not have to work out which repository your question belongs to, and answers stay searchable for whoever asks next.
 
 Bug reports and feature requests still belong in this repository's issues.
+
+## Use It With an AI Agent
+
+The API hosts an [MCP server](https://www.3dprintlog.com/docs/mcp) at `https://api.3dprintlog.com/mcp`,
+and this repo publishes an agent skill that teaches an agent to use it well:
+[`skills/3d-print-log`](skills/3d-print-log/SKILL.md).
+
+```bash
+# The skill, for any agent the skills CLI supports
+npx skills add HoffmanEngineering/3d-print-log-api
+
+# The skill and the MCP server together, as a Claude Code plugin
+claude plugin marketplace add HoffmanEngineering/3d-print-log-api
+claude plugin install 3d-print-log@3d-print-log
+```
+
+The repo root is also an [Agent Plugins](https://agent-plugins.org) package (`plugin.json` and `mcp.json`).
 
 ## Support Development
 

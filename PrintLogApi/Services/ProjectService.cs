@@ -10,7 +10,9 @@ public class ProjectService(
     PrintLogContext context,
     IMapper mapper,
     IBlobStorageService blobStorageService,
-    ICacheVersionService cacheVersionService) : IProjectService
+    ICacheVersionService cacheVersionService,
+    IImageProcessingService imageProcessing,
+    IProcessedImageWriter imageWriter) : IProjectService
 {
     public async Task<Mcp.McpPage<Mcp.ProjectListItem>> ListProjectsForMcp(
         long userId, int page, int pageSize, string? search, Project.ProjectStatus? status, System.Threading.CancellationToken ct)
@@ -18,9 +20,12 @@ public class ProjectService(
         var query = context.Projects.AsNoTracking().Where(p => p.CreatedById == userId);
         if (!string.IsNullOrWhiteSpace(search))
         {
+            // Contains, as the REST search below uses: it escapes %, _ and [ so the search is
+            // matched as text. EF.Functions.Like would treat them as wildcards.
+            var trimmed = search.Trim();
             query = query.Where(p =>
-                EF.Functions.Like(p.Name, $"%{search}%") ||
-                (p.Reference != null && EF.Functions.Like(p.Reference, $"%{search}%")));
+                p.Name.Contains(trimmed) ||
+                (p.Reference != null && p.Reference.Contains(trimmed)));
         }
         if (status.HasValue)
         {
@@ -28,14 +33,64 @@ public class ProjectService(
         }
 
         var total = await query.CountAsync(ct);
-        var items = await query
+        var pageRows = await query
             .OrderByDescending(p => p.UpdatedDate)
             .ThenBy(p => p.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(p => new Mcp.ProjectListItem(
-                p.Id, p.Name, p.Reference, p.Status.ToString(), p.ViewStatus.ToString()))
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Reference,
+                p.Status,
+                p.ViewStatus,
+                p.CreatedDate,
+                p.StartDateOverride,
+                p.FinishDateOverride,
+            })
             .ToListAsync(ct);
+
+        // This is the one project path whose projection IS translated to SQL, so the resolver
+        // cannot be called inside the Select above. Materialize the page first, then fetch the
+        // print dates for just those ids — scoped to the page so the endpoint stays
+        // page-bounded rather than loading every print in the account.
+        var pageIds = pageRows.Select(r => r.Id).ToList();
+        var dateRows = pageIds.Count == 0
+            ? []
+            : await context.Prints
+                .Where(pr => pr.ProjectId != null && pageIds.Contains(pr.ProjectId.Value))
+                .Select(pr => new
+                {
+                    pr.ProjectId,
+                    pr.StartDate,
+                    pr.PrintTimeInSeconds,
+                    pr.EstimatedPrintTimeInSeconds,
+                })
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+        var printsByProject = dateRows
+            .Where(r => r.ProjectId.HasValue)
+            .GroupBy(r => r.ProjectId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(r => new ProjectDateResolver.PrintDates(
+                    r.StartDate, r.PrintTimeInSeconds, r.EstimatedPrintTimeInSeconds)).ToList());
+
+        var items = pageRows.Select(r =>
+        {
+            var (start, finish) = ProjectDateResolver.Resolve(
+                r.StartDateOverride,
+                r.FinishDateOverride,
+                r.CreatedDate,
+                printsByProject.TryGetValue(r.Id, out var prints)
+                    ? prints
+                    : Enumerable.Empty<ProjectDateResolver.PrintDates>());
+
+            return new Mcp.ProjectListItem(
+                r.Id, r.Name, r.Reference, r.Status.ToString(), r.ViewStatus.ToString(), start, finish);
+        }).ToList();
 
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling(total / (double)pageSize) : 0;
         return new Mcp.McpPage<Mcp.ProjectListItem>(items, page, pageSize, total, totalPages);
@@ -43,7 +98,8 @@ public class ProjectService(
 
     public async Task<Mcp.CreateProjectResult> CreateProjectForMcp(
         long userId, string name, string? reference, string? description, string? url,
-        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string? idempotencyKey,
+        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, string? idempotencyKey,
         System.Threading.CancellationToken ct)
     {
         const string toolName = "create_project";
@@ -53,12 +109,29 @@ public class ProjectService(
         if (idempotencyKey != null)
         {
             fingerprint = Mcp.McpRequestFingerprint.ComputeCreateProject(
-                name, reference, description, url, status, viewStatus);
+                name, reference, description, url, status, viewStatus, startDate, finishDate);
             var replay = await FindIdempotentProject(userId, toolName, idempotencyKey, fingerprint, ct);
             if (replay != null)
             {
                 return replay;
             }
+        }
+
+        // Validated AFTER the replay lookup, deliberately. A create with a finish override and
+        // no start override resolves its start from "now", so the same arguments drift out of
+        // validity once the clock passes that date. Validating first meant a legitimate retry
+        // of an already-created project failed as invalid instead of replaying — losing the
+        // retry safety the idempotency key exists to provide.
+        //
+        // DateTime.UtcNow rather than project.CreatedDate: CreatedDate is stamped by the
+        // SaveChanges override, so before the save it is still 0001-01-01.
+        try
+        {
+            ValidateProjectDates(startDate, finishDate, DateTime.UtcNow, null);
+        }
+        catch (BadRequestException ex)
+        {
+            throw Mcp.McpToolException.InvalidArguments(ex.Message);
         }
 
         var project = new Project
@@ -70,6 +143,8 @@ public class ProjectService(
             Url = url,
             Status = status,
             ViewStatus = viewStatus,
+            StartDateOverride = startDate,
+            FinishDateOverride = finishDate,
             CreatedById = userId,
             UpdatedById = userId,
         };
@@ -102,7 +177,7 @@ public class ProjectService(
         }
 
         cacheVersionService.InvalidateUserCache(userId);
-        return new Mcp.CreateProjectResult(Describe(project), WasReplayed: false);
+        return new Mcp.CreateProjectResult(await DescribeAsync(project, ct), WasReplayed: false);
     }
 
     /// <summary>
@@ -159,7 +234,7 @@ public class ProjectService(
             throw Mcp.McpToolException.NotFound("The prior result for this idempotency key no longer exists.");
         }
 
-        return new Mcp.CreateProjectResult(Describe(project), WasReplayed: true);
+        return new Mcp.CreateProjectResult(await DescribeAsync(project, ct), WasReplayed: true);
     }
 
     private static string? RequireIdempotencyKey(string? key)
@@ -179,14 +254,52 @@ public class ProjectService(
         return trimmed;
     }
 
-    private static Mcp.ProjectWriteResult Describe(Project p) => new(
-        p.Id, p.Name, p.Reference, p.Description, p.Url, p.Status.ToString(), p.ViewStatus.ToString());
+    /// <summary>
+    /// Echoes a project including its RESOLVED dates.
+    /// </summary>
+    /// <remarks>
+    /// Async because none of the MCP paths load prints — create builds the entity by hand,
+    /// update and replay both query Projects alone. Resolving without them would silently
+    /// report the creation-date fallback for a project that has dated prints, so this fetches
+    /// the three date columns for one project rather than letting the caller forget.
+    /// </remarks>
+    private async Task<Mcp.ProjectWriteResult> DescribeAsync(
+        Project p, System.Threading.CancellationToken ct)
+    {
+        var printRows = await context.Prints
+            .Where(pr => pr.ProjectId == p.Id)
+            .Select(pr => new
+            {
+                pr.StartDate,
+                pr.PrintTimeInSeconds,
+                pr.EstimatedPrintTimeInSeconds,
+            })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var (start, finish) = ProjectDateResolver.Resolve(
+            p.StartDateOverride,
+            p.FinishDateOverride,
+            p.CreatedDate,
+            printRows.Select(r => new ProjectDateResolver.PrintDates(
+                r.StartDate, r.PrintTimeInSeconds, r.EstimatedPrintTimeInSeconds)));
+
+        return new Mcp.ProjectWriteResult(
+            p.Id, p.Name, p.Reference, p.Description, p.Url,
+            p.Status.ToString(), p.ViewStatus.ToString(), start, finish);
+    }
 
     public async Task<Mcp.ProjectWriteResult> UpdateProjectForMcp(
         long userId, Guid id, string? name, string? reference, string? description, string? url,
-        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, System.Threading.CancellationToken ct)
+        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, bool clearStartDate, bool clearFinishDate,
+        System.Threading.CancellationToken ct)
     {
-        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
+        // Include the prints: the validation below and the echo both need them, and this tool
+        // is the one place a caller can pin a finish date without ever seeing the derived start.
+        var project = await context.Projects
+            .Include(p => p.Prints!)
+            .FirstOrDefaultAsync(p => p.Id == id && p.CreatedById == userId, ct);
         if (project == null)
         {
             throw Mcp.McpToolException.NotFound("Project not found.");
@@ -197,10 +310,29 @@ public class ProjectService(
         if (url != null) project.Url = url;
         if (status.HasValue) project.Status = status.Value;
         if (viewStatus.HasValue) project.ViewStatus = viewStatus.Value;
+
+        // Patch-style: a null date means "leave alone". Clearing is its own explicit channel,
+        // which is why the tool rejects a date and its clear flag arriving together.
+        if (clearStartDate) project.StartDateOverride = null;
+        else if (startDate.HasValue) project.StartDateOverride = startDate;
+
+        if (clearFinishDate) project.FinishDateOverride = null;
+        else if (finishDate.HasValue) project.FinishDateOverride = finishDate;
+
+        try
+        {
+            ValidateProjectDates(
+                project.StartDateOverride, project.FinishDateOverride, project.CreatedDate, project.Prints);
+        }
+        catch (BadRequestException ex)
+        {
+            throw Mcp.McpToolException.InvalidArguments(ex.Message);
+        }
+
         project.UpdatedById = userId;
         await context.SaveChangesAsync(ct);
         cacheVersionService.InvalidateUserCache(userId);
-        return Describe(project);
+        return await DescribeAsync(project, ct);
     }
 
     public async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(
@@ -212,6 +344,7 @@ public class ProjectService(
             .Include(p => p.Images!)
             .Include(p => p.Prints!)
                 .ThenInclude(pr => pr.FilamentUsage!)
+                    .ThenInclude(pf => pf.Filament)
             .AsSplitQuery()
             .AsNoTracking();
 
@@ -245,12 +378,30 @@ public class ProjectService(
                 .ThenInclude(i => i.File)
             .Include(p => p.Prints!)
                 .ThenInclude(pr => pr.FilamentUsage!)
+                    .ThenInclude(pf => pf.Filament)
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == id);
     }
 
+    public async Task<List<Guid>> GetPublicProjectIdsAsync(CancellationToken cancellationToken = default)
+    {
+        return await context.Projects
+            .AsNoTracking()
+            .Where(p => p.ViewStatus == Project.PubliclyListedViewStatus)
+            .OrderBy(p => p.Id)
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<Project> CreateProjectAsync(AddProjectDto dto, long userId)
     {
+        // DateTime.UtcNow, not project.CreatedDate: CreatedDate is stamped by the SaveChanges
+        // override in PrintLogContext, so before the save it is still default(DateTime) —
+        // 0001-01-01. Validating against that would let every past-dated finish override
+        // through, and the row would be inverted the instant it was persisted.
+        // Validating before Add/SaveChanges also means a rejected create writes nothing.
+        ValidateProjectDates(dto.StartDateOverride, dto.FinishDateOverride, DateTime.UtcNow, null);
+
         var project = mapper.Map<Project>(dto);
         project.Id = Guid.NewGuid();
         project.CreatedById = userId;
@@ -265,9 +416,17 @@ public class ProjectService(
 
     public async Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId)
     {
-        var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        // Include the prints on the EXISTING query rather than adding a second one: the
+        // validation below needs them, and without the include project.Prints is null, so a
+        // finish override before the derived start would silently pass.
+        var project = await context.Projects
+            .Include(p => p.Prints!)
+            .FirstOrDefaultAsync(p => p.Id == id);
         if (project == null)
             throw new DoesNotExistException();
+
+        ValidateProjectDates(
+            dto.StartDateOverride, dto.FinishDateOverride, project.CreatedDate, project.Prints);
 
         mapper.Map(dto, project);
         project.UpdatedById = userId;
@@ -283,6 +442,11 @@ public class ProjectService(
             .Include(p => p.Prints!)
             .Include(p => p.Images!)
                 .ThenInclude(img => img.File)
+            .Include(p => p.Images!)
+                .ThenInclude(img => img.ThumbnailFile)
+            .Include(p => p.Images!)
+                .ThenInclude(img => img.SocialFile)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (project == null)
@@ -300,57 +464,115 @@ public class ProjectService(
             }
         }
 
-        foreach (var image in project.Images!)
-        {
-            if (image.File != null)
-                await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
-        }
+        var files = project.Images!.SelectMany(ImageFiles).ToList();
+        var blobNames = BlobNames(files);
 
         context.ProjectImages.RemoveRange(project.Images!);
+        context.Files.RemoveRange(files);
         context.Projects.Remove(project);
         await context.SaveChangesAsync();
+
+        // Blobs last: a failed save then leaves an orphaned blob rather than a row pointing at
+        // deleted bytes.
+        foreach (var name in blobNames)
+            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, name);
     }
+
+    /// <summary>The original and every derivative of an image, whichever are loaded and set.</summary>
+    private static IEnumerable<Models.File> ImageFiles(ProjectImage image)
+        => new[] { image.File, image.ThumbnailFile, image.SocialFile }.OfType<Models.File>();
+
+    private static List<string> BlobNames(IEnumerable<Models.File> files)
+        => files
+            .Select(f => Path.GetFileName(f.Path))
+            .OfType<string>()
+            .Where(name => name.Length > 0)
+            .ToList();
 
     public async Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId)
     {
         var project = await context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
         if (project == null) throw new DoesNotExistException();
 
-        var blobName = $"{Guid.NewGuid()}{System.IO.Path.GetExtension(file.FileName)}";
-        using var stream = file.OpenReadStream();
-        await blobStorageService.UploadAsync(BlobContainers.ProjectImages, blobName, stream);
+        // The per-project cap, checked before decoding and before anything reaches storage. A
+        // project already past it (one made before the cap, or by a Pro user who later lapsed)
+        // keeps its images; it only stops taking new ones until it is below the cap again.
+        var maxImages = await GetMaxImagesPerProject(userId);
+        var imageCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+        if (imageCount >= maxImages)
+            throw new BadRequestException($"Maximum of {maxImages} images per project allowed");
 
-        var fileEntity = new Models.File { Path = blobName, Size = file.Length, CreatedById = userId, UpdatedById = userId };
-        context.Files.Add(fileEntity);
-        await context.SaveChangesAsync();
-
-        var existingCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
-        var image = new ProjectImage
+        // Decode and re-encode BEFORE touching storage: an upload that is not a supported image
+        // throws InvalidImageException here and creates no blobs.
+        ProcessedImage processed;
+        await using (var stream = file.OpenReadStream())
         {
-            ProjectId = projectId,
-            FileId = fileEntity.Id,
-            IsDefault = existingCount == 0,
-            DisplayOrder = existingCount,
-            CreatedById = userId,
-            UpdatedById = userId
-        };
-        context.ProjectImages.Add(image);
-        await context.SaveChangesAsync();
-        return image;
+            processed = await imageProcessing.ProcessAsync(stream, ImageProcessingOptions.PrintUploads);
+        }
+
+        var uploadedBlobNames = new List<string>();
+        try
+        {
+            var files = await imageWriter.WriteAsync(
+                BlobContainers.ProjectImages, processed, userId, uploadedBlobNames);
+
+            var existingCount = await context.ProjectImages.CountAsync(pi => pi.ProjectId == projectId);
+            var image = new ProjectImage
+            {
+                ProjectId = projectId,
+                IsDefault = existingCount == 0,
+                DisplayOrder = existingCount,
+                CreatedById = userId,
+                UpdatedById = userId
+            };
+            files.ApplyTo(image, processed);
+            context.ProjectImages.Add(image);
+            await context.SaveChangesAsync();
+            return image;
+        }
+        catch
+        {
+            // The blobs are not covered by the save, so a failed save would orphan them.
+            await imageWriter.DeleteBlobsQuietlyAsync(BlobContainers.ProjectImages, uploadedBlobNames);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The per-tier image cap, shared with prints, printers and filaments. The same direct query
+    /// as <see cref="PrintService.GetMaxImagesPerPrint"/>: there is no IsPro helper to call.
+    /// </summary>
+    public async Task<int> GetMaxImagesPerProject(long userId)
+    {
+        var subscription = await context.Subscriptions
+            .Where(s => s.UserId == userId)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
+
+        return subscription?.Status == SubscriptionStatus.Active
+            ? SubscriptionLimits.ProMaxImages
+            : SubscriptionLimits.FreeMaxImages;
     }
 
     public async Task DeleteImageAsync(Guid projectId, int imageId, long userId)
     {
         var image = await context.ProjectImages
             .Include(pi => pi.File)
+            .Include(pi => pi.ThumbnailFile)
+            .Include(pi => pi.SocialFile)
             .FirstOrDefaultAsync(pi => pi.ProjectId == projectId && pi.Id == imageId);
         if (image == null) throw new DoesNotExistException();
 
-        if (image.File != null)
-            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, Path.GetFileName(image.File.Path!));
+        var files = ImageFiles(image).ToList();
+        var blobNames = BlobNames(files);
 
         context.ProjectImages.Remove(image);
+        context.Files.RemoveRange(files);
         await context.SaveChangesAsync();
+
+        // Blobs last, as in DeleteProjectAsync.
+        foreach (var name in blobNames)
+            await blobStorageService.DeleteBlobAsync(BlobContainers.ProjectImages, name);
     }
 
     public async Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId)
@@ -382,26 +604,58 @@ public class ProjectService(
         await context.SaveChangesAsync();
     }
 
-    public async Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId)
+    public async Task<StoredImageRef?> GetImageRefAsync(
+        Guid projectId, int imageId, long? userId, bool thumbnail, CancellationToken ct = default)
     {
         var data = await context.ProjectImages
             .Where(pi => pi.ProjectId == projectId && pi.Id == imageId)
             .Select(pi => new
             {
-                pi.File.Path,
+                OriginalPath = pi.File.Path,
+                pi.ContentType,
+                ThumbnailPath = pi.ThumbnailFile != null ? pi.ThumbnailFile.Path : null,
                 ProjectViewStatus = pi.Project.ViewStatus,
                 ProjectCreatedById = pi.Project.CreatedById,
             })
             .AsNoTracking()
-            .SingleOrDefaultAsync();
+            .SingleOrDefaultAsync(ct);
 
         if (data == null) return null;
 
-        if (data.ProjectViewStatus == Project.ProjectViewStatus.Private &&
-            (!userId.HasValue || userId.Value != data.ProjectCreatedById))
+        var isPrivate = !Project.IsViewableByNonOwner(data.ProjectViewStatus);
+        if (isPrivate && (!userId.HasValue || userId.Value != data.ProjectCreatedById))
             return null;
 
-        var blobName = Path.GetFileName(data.Path!);
-        return await blobStorageService.DownloadAsync(BlobContainers.ProjectImages, blobName);
+        return thumbnail
+            ? StoredImageRef.ThumbnailOrOriginal(
+                data.ThumbnailPath, data.OriginalPath, data.ContentType, sharedCacheable: !isPrivate)
+            : new StoredImageRef(data.OriginalPath, data.ContentType, SharedCacheable: !isPrivate);
+    }
+
+    /// <summary>
+    /// Rejects a write whose RESOLVED interval is inverted, not merely one carrying two
+    /// conflicting overrides — a finish-only override landing before the derived start is just
+    /// as wrong, and is detectable here because the prints are loaded.
+    /// </summary>
+    /// <remarks>
+    /// The invariant is deliberately NOT maintained afterward: editing an unrelated print can
+    /// invert a stored interval later, and failing that print edit to protect a project's
+    /// display date would be the worse outcome.
+    /// </remarks>
+    private static void ValidateProjectDates(
+        DateOnly? startOverride,
+        DateOnly? finishOverride,
+        DateTime createdDate,
+        IEnumerable<Print>? prints)
+    {
+        var (start, finish) = ProjectDateResolver.Resolve(
+            startOverride,
+            finishOverride,
+            createdDate,
+            (prints ?? []).Select(p => new ProjectDateResolver.PrintDates(
+                p.StartDate, p.PrintTimeInSeconds, p.EstimatedPrintTimeInSeconds)));
+
+        if (finish.HasValue && finish.Value < start)
+            throw new BadRequestException("A project's finish date cannot be before its start date.");
     }
 }

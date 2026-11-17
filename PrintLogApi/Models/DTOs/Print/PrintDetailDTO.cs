@@ -52,4 +52,16 @@ public class PrintDetailDTO
     public ICollection<PrintImageDto>? Images { get; set; }
 
     public ICollection<CommentDetailDto>? Comments { get; set; }
+
+    /// <summary>The connector that logged this print, if any. Read-only; shown to the creator only.</summary>
+    public string? ExternalSource { get; set; }
+
+    /// <summary>The job's id in <see cref="ExternalSource"/>. Read-only; shown to the creator only.</summary>
+    public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// The display name of the connection that logged this print, for "Logged automatically by …".
+    /// Null when no connection logged it or it has been deleted. Shown to the creator only.
+    /// </summary>
+    public string? ConnectionDisplayName { get; set; }
 }

@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrintLogApi.Exceptions;
@@ -14,7 +15,7 @@ namespace PrintLogApi.Controllers;
 [Route("api/connected-agents")]
 [ApiController]
 [Authorize]
-public class ConnectedAgentsController(IAuth0Service auth0Service) : ControllerBase
+public class ConnectedAgentsController(IAuth0Service auth0Service, TelemetryClient telemetry) : ControllerBase
 {
     /// <summary>Gets the current user's connected AI agents.</summary>
     [HttpGet]
@@ -43,6 +44,7 @@ public class ConnectedAgentsController(IAuth0Service auth0Service) : ControllerB
         try
         {
             await auth0Service.RevokeMcpGrant(authUserId, grantId, ct);
+            telemetry.TrackEvent("ConnectedAgentRevoked");
             return NoContent();
         }
         catch (NotFoundException)

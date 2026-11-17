@@ -21,7 +21,8 @@ public interface IProjectService
     /// </summary>
     Task<CreateProjectResult> CreateProjectForMcp(
         long userId, string name, string? reference, string? description, string? url,
-        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus, string? idempotencyKey,
+        Project.ProjectStatus status, Project.ProjectViewStatus viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, string? idempotencyKey,
         CancellationToken ct);
 
     /// <summary>
@@ -30,16 +31,38 @@ public interface IProjectService
     /// </summary>
     Task<ProjectWriteResult> UpdateProjectForMcp(
         long userId, Guid id, string? name, string? reference, string? description, string? url,
-        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus, CancellationToken ct);
+        Project.ProjectStatus? status, Project.ProjectViewStatus? viewStatus,
+        DateOnly? startDate, DateOnly? finishDate, bool clearStartDate, bool clearFinishDate,
+        CancellationToken ct);
 
     Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(int pageNumber, int pageSize, long userId, string? search = null, Project.ProjectStatus? status = null, string sortBy = "updatedDate");
     Task<Project?> GetProjectByIdAsync(Guid id);
+
+    /// <summary>
+    /// Ids of every project whose view status is <see cref="Project.PubliclyListedViewStatus"/>,
+    /// ordered by id. Unpaginated: it feeds the sitemap.
+    /// </summary>
+    Task<List<Guid>> GetPublicProjectIdsAsync(CancellationToken cancellationToken = default);
     Task<Project> CreateProjectAsync(AddProjectDto dto, long userId);
     Task<Project> UpdateProjectAsync(Guid id, PutProjectDto dto, long userId);
     Task DeleteProjectAsync(Guid id, bool deletePrints, long userId);
+    /// <exception cref="Exceptions.InvalidImageException">The file is not a supported image.</exception>
+    /// <exception cref="Exceptions.BadRequestException">
+    /// The project already has <see cref="GetMaxImagesPerProject"/> images or more.
+    /// </exception>
     Task<ProjectImage> AddImageAsync(Guid projectId, IFormFile file, long userId);
+
+    /// <summary>Images allowed per project: the same cap as prints, printers and filaments.</summary>
+    Task<int> GetMaxImagesPerProject(long userId);
     Task DeleteImageAsync(Guid projectId, int imageId, long userId);
     Task ReorderImagesAsync(Guid projectId, IList<int> orderedImageIds, long userId);
     Task SetDefaultImageAsync(Guid projectId, int imageId, long userId);
-    Task<(Stream stream, string fileName)?> GetImageAsync(Guid projectId, int imageId, long? userId);
+
+    /// <summary>
+    /// The blob to serve for a project image (its thumbnail when <paramref name="thumbnail"/> and
+    /// it has one), or null when the image does not exist or the caller may not see it: a private
+    /// project's images are its owner's only, and look missing to everyone else.
+    /// </summary>
+    Task<StoredImageRef?> GetImageRefAsync(
+        Guid projectId, int imageId, long? userId, bool thumbnail, CancellationToken ct = default);
 }

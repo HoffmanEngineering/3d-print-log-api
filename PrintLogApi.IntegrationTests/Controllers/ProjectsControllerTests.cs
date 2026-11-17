@@ -1,9 +1,11 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Project;
 using PrintLogApi.Services;
 using Xunit;
+using static PrintLogApi.IntegrationTests.Support.ProjectDateSeedHelpers;
 
 namespace PrintLogApi.IntegrationTests.Controllers;
 
@@ -184,7 +186,8 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var project = await CreateProject("Blob Image Deletion Test");
         var imageId = await UploadImage(project.Id);
-        Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
+        // The original, its thumbnail and its social image.
+        Assert.Equal(initialBlobCount + 3, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}/images/{imageId}");
         var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
@@ -201,7 +204,8 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var project = await CreateProject("Blob Project Deletion Test");
         await UploadImage(project.Id);
-        Assert.Equal(initialBlobCount + 1, blobService.Blobs.Count);
+        // The original, its thumbnail and its social image.
+        Assert.Equal(initialBlobCount + 3, blobService.Blobs.Count);
 
         var deleteReq = AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{project.Id}");
         var deleteResp = await _client.SendAsync(deleteReq, TestContext.Current.CancellationToken);
@@ -307,5 +311,422 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
         var getReq = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects/{project.Id}");
         var getResp = await _client.SendAsync(getReq, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getResp.StatusCode);
+    }
+
+    // ---------------------------------------------------------------------
+    // Project start / finish dates
+    // ---------------------------------------------------------------------
+
+    private static long TestUserId => IntegrationTestSeeder.TestUserId;
+
+    private async Task<ProjectDetailDto> GetProjectDetailAsync(Guid id)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Get, $"/api/Projects/{id}");
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>(
+            cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task<PagedList<ProjectSummaryDto>> GetProjectSummariesAsync(string search)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Get,
+            $"/api/Projects?PageNumber=1&PageSize=50&search={Uri.EscapeDataString(search)}");
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<PagedList<ProjectSummaryDto>>(
+            cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Builds a PUT body from the project's CURRENT state. Tests must never hand-build a
+    /// partial PUT: PUT is a full replace, and omitting a field silently clears it. That is
+    /// the exact hazard this feature has to guard against.
+    /// </summary>
+    private async Task<PutProjectDto> BuildPutDtoAsync(Guid id)
+    {
+        var current = await GetProjectDetailAsync(id);
+        return new PutProjectDto
+        {
+            Id = current.Id,
+            Name = current.Name,
+            Reference = current.Reference,
+            Description = current.Description,
+            Url = current.Url,
+            Status = current.Status,
+            ViewStatus = current.ViewStatus,
+            StartDateOverride = current.StartDateOverride,
+            FinishDateOverride = current.FinishDateOverride,
+        };
+    }
+
+    private async Task<ProjectDetailDto> PutProjectAsync(Guid id, PutProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Put, $"/api/Projects/{id}");
+        req.Content = JsonContent.Create(dto);
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>(
+            cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task<ProjectDetailDto> PostProjectAsync(AddProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+        req.Content = JsonContent.Create(dto);
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>(
+            cancellationToken: TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task MoveEarliestPrintStartAsync(Guid projectId, DateTimeOffset newStart)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+        var print = context.Prints
+            .Where(p => p.ProjectId == projectId && p.StartDate != null)
+            .OrderBy(p => p.Id)
+            .First();
+        print.StartDate = newStart;
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetProjectById_DerivesDatesFromPrints()
+    {
+        var name = $"derive-{Guid.NewGuid():N}";
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, name);
+
+        var detail = await GetProjectDetailAsync(projectId);
+
+        Assert.Equal(new DateOnly(2026, 3, 2), detail.StartDate);
+        Assert.Equal(new DateOnly(2026, 3, 6), detail.FinishDate);
+        Assert.Null(detail.StartDateOverride);
+        Assert.Null(detail.FinishDateOverride);
+    }
+
+    [Fact]
+    public async Task GetProjectById_UndatedPrints_FallsBackToCreatedDate()
+    {
+        var projectId = await SeedProjectWithUndatedPrintsAsync(
+            _factory, TestUserId, $"undated-{Guid.NewGuid():N}");
+
+        var detail = await GetProjectDetailAsync(projectId);
+
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), detail.StartDate);
+        Assert.Null(detail.FinishDate);
+    }
+
+    [Fact]
+    public async Task PutProject_SetsAndEchoesStartOverride_LeavingFinishAutomatic()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"set-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 1, 1);
+        var body = await PutProjectAsync(projectId, dto);
+
+        Assert.Equal(new DateOnly(2026, 1, 1), body.StartDate);
+        Assert.Equal(new DateOnly(2026, 1, 1), body.StartDateOverride);
+        Assert.Equal(new DateOnly(2026, 3, 6), body.FinishDate);
+        Assert.Null(body.FinishDateOverride);
+    }
+
+    [Fact]
+    public async Task PutProject_SetsBothOverrides()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"both-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 1, 1);
+        dto.FinishDateOverride = new DateOnly(2026, 12, 31);
+        var body = await PutProjectAsync(projectId, dto);
+
+        Assert.Equal(new DateOnly(2026, 1, 1), body.StartDate);
+        Assert.Equal(new DateOnly(2026, 12, 31), body.FinishDate);
+    }
+
+    [Fact]
+    public async Task PutProject_NullOverrideClearsBackToAutomatic()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"clear-{Guid.NewGuid():N}");
+
+        var set = await BuildPutDtoAsync(projectId);
+        set.StartDateOverride = new DateOnly(2026, 1, 1);
+        await PutProjectAsync(projectId, set);
+
+        var clear = await BuildPutDtoAsync(projectId);
+        clear.StartDateOverride = null;
+        var body = await PutProjectAsync(projectId, clear);
+
+        Assert.Null(body.StartDateOverride);
+        Assert.Equal(new DateOnly(2026, 3, 2), body.StartDate);
+    }
+
+    [Fact]
+    public async Task PostProject_ReturnsResolvedDatesForAProjectWithNoPrints()
+    {
+        var dto = new AddProjectDto
+        {
+            Name = $"fresh-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+        };
+
+        var body = await PostProjectAsync(dto);
+
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), body.StartDate);
+        Assert.Null(body.FinishDate);
+    }
+
+    [Fact]
+    public async Task PostProject_AcceptsOverridesAtCreation()
+    {
+        var dto = new AddProjectDto
+        {
+            Name = $"fresh-pinned-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            StartDateOverride = new DateOnly(2026, 2, 1),
+            FinishDateOverride = new DateOnly(2026, 2, 20),
+        };
+
+        var body = await PostProjectAsync(dto);
+
+        Assert.Equal(new DateOnly(2026, 2, 1), body.StartDate);
+        Assert.Equal(new DateOnly(2026, 2, 20), body.FinishDate);
+        Assert.Equal(new DateOnly(2026, 2, 1), body.StartDateOverride);
+    }
+
+    [Fact]
+    public async Task GetProjectSummaries_IncludeResolvedDates()
+    {
+        var name = $"summary-{Guid.NewGuid():N}";
+        await SeedProjectWithPrintsAsync(_factory, TestUserId, name);
+
+        // The test database is shared: filter by the unique name, never call Single() on the page.
+        var page = await GetProjectSummariesAsync(search: name);
+        var summary = Assert.Single(page.Items!, i => i.Name == name);
+
+        Assert.Equal(new DateOnly(2026, 3, 2), summary.StartDate);
+        Assert.Equal(new DateOnly(2026, 3, 6), summary.FinishDate);
+    }
+
+    [Fact]
+    public async Task RecomputesAfterAPrintStartDateChanges()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"recompute-{Guid.NewGuid():N}");
+        Assert.Equal(new DateOnly(2026, 3, 2), (await GetProjectDetailAsync(projectId)).StartDate);
+
+        await MoveEarliestPrintStartAsync(projectId, DateTimeOffset.Parse("2026-02-01T10:00:00Z"));
+
+        // Dates are computed on read, so one representative path proves recomputation for all of them.
+        Assert.Equal(new DateOnly(2026, 2, 1), (await GetProjectDetailAsync(projectId)).StartDate);
+    }
+
+    // ---------------------------------------------------------------------
+    // Inverted-interval validation
+    // ---------------------------------------------------------------------
+
+    private async Task<HttpResponseMessage> PutProjectRawAsync(Guid id, PutProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Put, $"/api/Projects/{id}");
+        req.Content = JsonContent.Create(dto);
+        return await _client.SendAsync(req, TestContext.Current.CancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> PostProjectRawAsync(AddProjectDto dto)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+        req.Content = JsonContent.Create(dto);
+        return await _client.SendAsync(req, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task PutProject_RejectsInvertedOverridePair()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"inv-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 5, 1);
+        dto.FinishDateOverride = new DateOnly(2026, 4, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutProject_RejectsFinishOverrideBeforeDerivedStart()
+    {
+        // Prints start 2026-03-02. A finish-only override in January is inverted on arrival,
+        // even though only one override is present.
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"fin-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.FinishDateOverride = new DateOnly(2026, 1, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutProject_AllowsStartOverrideBeforeDerivedFinish()
+    {
+        var projectId = await SeedProjectWithPrintsAsync(_factory, TestUserId, $"ok-{Guid.NewGuid():N}");
+
+        var dto = await BuildPutDtoAsync(projectId);
+        dto.StartDateOverride = new DateOnly(2026, 1, 1);
+
+        var response = await PutProjectRawAsync(projectId, dto);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectsInvertedOverridePair()
+    {
+        var dto = new AddProjectDto
+        {
+            Name = $"post-inv-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            StartDateOverride = new DateOnly(2026, 5, 1),
+            FinishDateOverride = new DateOnly(2026, 4, 1),
+        };
+
+        var response = await PostProjectRawAsync(dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectsFinishOverrideBeforeToday()
+    {
+        // A brand-new project has no prints, so its derived start is TODAY. A finish override in
+        // the past is inverted the moment it is created — and this only passes if validation uses
+        // the timestamp the row is about to receive, not the unstamped default of 0001-01-01.
+        var dto = new AddProjectDto
+        {
+            Name = $"post-past-{Guid.NewGuid():N}",
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            FinishDateOverride = new DateOnly(2020, 1, 1),
+        };
+
+        var response = await PostProjectRawAsync(dto);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostProject_RejectingInvertedDates_PersistsNothing()
+    {
+        var name = $"post-rollback-{Guid.NewGuid():N}";
+        var dto = new AddProjectDto
+        {
+            Name = name,
+            Status = Models.Project.ProjectStatus.InProgress,
+            ViewStatus = Models.Project.ProjectViewStatus.Private,
+            StartDateOverride = new DateOnly(2026, 5, 1),
+            FinishDateOverride = new DateOnly(2026, 4, 1),
+        };
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostProjectRawAsync(dto)).StatusCode);
+
+        // A rejected create must not leave a half-written row behind.
+        var page = await GetProjectSummariesAsync(search: name);
+        Assert.DoesNotContain(page.Items!, i => i.Name == name);
+    }
+
+    // ---------------------------------------------------------------------
+    // GET public (sitemap enumeration, #18)
+    // ---------------------------------------------------------------------
+
+    private async Task<Guid> CreateProjectWithViewStatusAsync(string name, Project.ProjectViewStatus viewStatus)
+    {
+        var req = AuthenticatedRequest(HttpMethod.Post, "/api/Projects");
+        req.Content = JsonContent.Create(new AddProjectDto
+        {
+            Name = name,
+            Status = Project.ProjectStatus.InProgress,
+            ViewStatus = viewStatus,
+        });
+        var resp = await _client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        return (await resp.Content.ReadFromJsonAsync<ProjectDetailDto>(cancellationToken: TestContext.Current.CancellationToken))!.Id;
+    }
+
+    private Task<List<Guid>?> GetPublicProjectIdsAnonymouslyAsync() =>
+        _client.GetFromJsonAsync<List<Guid>>("/api/Projects/public", TestContext.Current.CancellationToken);
+
+    [Fact]
+    public void PubliclyListedViewStatus_IsOneTheDetailRouteServesToNonOwners()
+    {
+        Assert.True(Project.IsViewableByNonOwner(Project.PubliclyListedViewStatus));
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_IsAnonymous_AndIsNotCapturedByTheIdRoute()
+    {
+        // Before #18 "public" was bound as the {id} Guid and failed with 400.
+        var response = await _client.GetAsync("/api/Projects/public", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.StartsWith("[", body);
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_ListsPublicProjects_AndOmitsUnlistedPrivateAndDeletedOnes()
+    {
+        var publicId = await CreateProjectWithViewStatusAsync("Sitemap Public Project", Project.ProjectViewStatus.Public);
+        var unlistedId = await CreateProjectWithViewStatusAsync("Sitemap Unlisted Project", Project.ProjectViewStatus.Unlisted);
+        var privateId = await CreateProjectWithViewStatusAsync("Sitemap Private Project", Project.ProjectViewStatus.Private);
+        var deletedId = await CreateProjectWithViewStatusAsync("Sitemap Deleted Project", Project.ProjectViewStatus.Public);
+        var deleteResp = await _client.SendAsync(
+            AuthenticatedRequest(HttpMethod.Delete, $"/api/Projects/{deletedId}"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deleteResp.StatusCode);
+
+        var ids = (await GetPublicProjectIdsAnonymouslyAsync())!;
+
+        Assert.Contains(publicId, ids);
+        // Unlisted is reachable anonymously by direct link but is, by definition, not listed —
+        // the same line /api/Prints/public and /api/Users/public draw.
+        Assert.DoesNotContain(unlistedId, ids);
+        Assert.DoesNotContain(privateId, ids);
+        Assert.DoesNotContain(deletedId, ids);
+        Assert.Equal(ids.Count, ids.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_EveryListedId_IsFetchableAnonymously()
+    {
+        await CreateProjectWithViewStatusAsync("Sitemap Fetchable Project", Project.ProjectViewStatus.Public);
+
+        var ids = (await GetPublicProjectIdsAnonymouslyAsync())!;
+
+        Assert.NotEmpty(ids);
+        foreach (var id in ids)
+        {
+            var detail = await _client.GetAsync($"/api/Projects/{id}", TestContext.Current.CancellationToken);
+            Assert.True(detail.StatusCode == HttpStatusCode.OK, $"Listed project {id} returned {(int)detail.StatusCode} anonymously.");
+        }
+    }
+
+    [Fact]
+    public async Task GetPublicProjectIds_AProjectMadePrivate_DropsOutOfTheList_AndItsDetailIsNoLongerAnonymous()
+    {
+        var id = await CreateProjectWithViewStatusAsync("Sitemap Made Private Project", Project.ProjectViewStatus.Public);
+        Assert.Contains(id, (await GetPublicProjectIdsAnonymouslyAsync())!);
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            await context.Projects
+                .Where(p => p.Id == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.ViewStatus, Project.ProjectViewStatus.Private), TestContext.Current.CancellationToken);
+        }
+
+        Assert.DoesNotContain(id, (await GetPublicProjectIdsAnonymouslyAsync())!);
+        var detail = await _client.GetAsync($"/api/Projects/{id}", TestContext.Current.CancellationToken);
+        Assert.NotEqual(HttpStatusCode.OK, detail.StatusCode);
     }
 }

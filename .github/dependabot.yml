@@ -14,11 +14,19 @@ version: 2
 #   - PrintLogApi/Dockerfile. Add a `docker` ecosystem entry if that is wanted; note it only affects
 #     local docker-compose, since deploy.yml publishes rather than building the image.
 
+# Every entry waits five days before proposing a new version. Compromised releases
+# (the 2025 npm worms, for one) are usually pulled within hours to a day, and
+# patch/minor bumps are auto-merged once CI is green in the repos that run
+# dependabot-auto-merge.yml, so without a delay a malicious patch release is exactly
+# what would pass CI and merge itself. Security updates ignore the cooldown.
+
 updates:
   - package-ecosystem: nuget
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5
 
     groups:
@@ -59,6 +67,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.Extensions.*"
         update-types: ["version-update:semver-major"]
+      # Transitive security pins (#61). These exist only to lift a package the scaffolding tooling
+      # pulls in past an advisory, held on the 6.x line that tooling was built against. A 7.x bump
+      # here is not a fix anyone asked for.
+      - dependency-name: "NuGet.Packaging"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "NuGet.Protocol"
+        update-types: ["version-update:semver-major"]
 
   # Catches pinned action versions going stale, including any security advisory against an action
   # that runs with repository secrets -- deploy.yml passes production database credentials to steps
@@ -67,4 +82,6 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5

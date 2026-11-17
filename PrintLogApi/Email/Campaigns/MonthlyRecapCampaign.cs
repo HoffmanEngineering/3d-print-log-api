@@ -1,0 +1,295 @@
+﻿using System.Globalization;
+using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using PrintLogApi.Achievements;
+using PrintLogApi.Email.Templates;
+using PrintLogApi.Models;
+using PrintLogApi.Models.DTOs.Analytics;
+using PrintLogApi.Services.Analytics;
+
+namespace PrintLogApi.Email.Campaigns;
+
+/// <summary>
+/// "Your November in prints": the previous calendar month, in the user's own zone, sent at
+/// <see cref="EmailOptions.LocalSendHour"/> on the 1st (spec §7.3). Only users who logged at
+/// least one print that month get one.
+///
+/// The month is measured on <c>Print.StartDate</c> by the analytics overview service, the same
+/// numbers the analytics page shows for that month.
+/// </summary>
+public sealed class MonthlyRecapCampaign(
+    PrintLogContext db,
+    IAnalyticsService analytics,
+    IEmailTemplateRenderer renderer,
+    IEmailFooterFactory footers,
+    EmailLinkBuilder links,
+    EmailAssets assets,
+    IOptions<EmailOptions> options) : IEmailCampaign
+{
+    public const string CampaignName = "monthly-recap";
+    private const string KeyFormat = "yyyy-MM";
+    private const string FooterReason = "You're receiving this because monthly recaps are on for your 3D Print Log account.";
+
+    /// <summary>Wider than any zone's offset from UTC (+14h / -12h), so a UTC window padded by it holds every zone's local month.</summary>
+    private static readonly TimeSpan ZonePadding = TimeSpan.FromHours(14);
+
+    /// <summary>The furthest any zone's clock runs ahead of UTC (+14:00, Line Islands).</summary>
+    private static readonly TimeSpan MaxAheadOfUtc = TimeSpan.FromHours(14);
+
+    /// <summary>The furthest any zone's clock runs behind UTC (-12:00, Etc/GMT+12).</summary>
+    private static readonly TimeSpan MaxBehindUtc = TimeSpan.FromHours(12);
+
+    private static readonly TimeSpan LifetimeSpan = TimeSpan.FromDays(5);
+
+    public string Name => CampaignName;
+
+    public int PreferenceSettingTypeId => EmailSettingTypes.MonthlyRecap;
+
+    public bool CountsTowardFrequencyCap => true;
+
+    public bool ExemptFromFrequencyCap => false;
+
+    public TimeSpan Lifetime => LifetimeSpan;
+
+    public async Task<IReadOnlyList<DueEmail>> FindDueAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var settings = options.Value;
+        var nowUtc = now.UtcDateTime;
+
+        // Somewhere in the world it is already tomorrow or still yesterday, so the month that
+        // just ended differs by zone. Every candidate is "the month before" one of these dates.
+        // A month whose send window is closed for every zone is dropped before any query, which
+        // is every tick outside the first days of a month (see SendWindow).
+        var months = new[] { -1, 0, 1 }
+            .Select(d => DateOnly.FromDateTime(nowUtc.AddDays(d)))
+            .Select(d => new DateOnly(d.Year, d.Month, 1).AddMonths(-1))
+            .Distinct()
+            .Where(month => CanBeDue(month, now, settings.LocalSendHour, settings.EvaluatorInterval))
+            .ToList();
+
+        var due = new List<DueEmail>();
+        foreach (var month in months)
+        {
+            var candidates = await UsersWithPrintsAsync(month, ct);
+            if (candidates.Count == 0)
+            {
+                continue;
+            }
+
+            var zones = await EmailUserZones.LoadAsync(db, candidates.Keys, ct);
+            foreach (var (userId, printed) in candidates)
+            {
+                var zone = EmailTimeZones.For(zones.GetValueOrDefault(userId), settings.DefaultTimeZone);
+                var localToday = EmailTimeZones.LocalDate(now, zone);
+                var thisMonth = new DateOnly(localToday.Year, localToday.Month, 1);
+                if (thisMonth.AddMonths(-1) != month)
+                {
+                    continue;
+                }
+
+                var (from, to) = LocalMonth(month, zone);
+                if (!printed(from, to))
+                {
+                    continue;
+                }
+
+                var sendAfter = EmailTimeZones.AtLocal(thisMonth, settings.LocalSendHour, zone);
+                if (sendAfter <= now + settings.EvaluatorInterval && sendAfter + Lifetime > now)
+                {
+                    due.Add(new DueEmail(userId, PeriodKey(month), sendAfter));
+                }
+            }
+        }
+
+        return due;
+    }
+
+    /// <summary>
+    /// The UTC instants at which some zone can be due for <paramref name="month"/>'s recap:
+    /// <c>[Opens, Closes)</c>. The superset of what <see cref="FindDueAsync"/> can return, so a
+    /// tick outside it skips the month without a query.
+    ///
+    /// A user is due when <c>sendAfter - interval &lt;= now &lt; sendAfter + Lifetime</c>, where
+    /// <c>sendAfter</c> is <paramref name="localSendHour"/>:00 on the 1st of the next month in the
+    /// user's zone. That local time is <c>M + hour</c> as a wall clock, with <c>M</c> the 1st at
+    /// 00:00, and every zone's offset lies in [-12h, +14h], so <c>sendAfter</c> lies in
+    /// <c>[M + hour - 14h, M + hour + 12h]</c> as a UTC instant. <see cref="EmailTimeZones.AtLocal"/>
+    /// moves a time in a spring-forward gap one hour later, but only into the offset after the
+    /// gap, so it stays inside that range; <c>MonthlyRecapSendWindowTests</c> checks it for every
+    /// zone this host knows.
+    /// </summary>
+    internal static (DateTimeOffset Opens, DateTimeOffset Closes) SendWindow(DateOnly month, int localSendHour, TimeSpan evaluatorInterval)
+    {
+        var sendDay = new DateTimeOffset(month.AddMonths(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).AddHours(localSendHour);
+        return (sendDay - MaxAheadOfUtc - evaluatorInterval, sendDay + MaxBehindUtc + LifetimeSpan);
+    }
+
+    internal static bool CanBeDue(DateOnly month, DateTimeOffset now, int localSendHour, TimeSpan evaluatorInterval)
+    {
+        var (opens, closes) = SendWindow(month, localSendHour, evaluatorInterval);
+        return now >= opens && now < closes;
+    }
+
+    private static string PeriodKey(DateOnly month) => month.ToString(KeyFormat, CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Users with a print in <paramref name="month"/> for some zone, each with a test for "a print
+    /// in this exact local window". One pass over the padded month: a print well inside it counts
+    /// for every zone, so it comes back as its user alone (a null date, deduplicated); only a
+    /// print in the two padded edges needs its date.
+    ///
+    /// Users already queued for this month are left out. The evaluator would drop them anyway
+    /// (its unique key is the same user, campaign and period key), and after the first tick of
+    /// their zone that is everyone, so this keeps the zone lookup and the evaluator's existence
+    /// queries to the users not yet queued.
+    /// </summary>
+    private async Task<Dictionary<long, Func<DateTimeOffset, DateTimeOffset, bool>>> UsersWithPrintsAsync(DateOnly month, CancellationToken ct)
+    {
+        var start = new DateTimeOffset(month.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var end = start.AddMonths(1);
+        var coreStart = start + ZonePadding;
+        var coreEnd = end - ZonePadding;
+        var outerStart = start - ZonePadding;
+        var outerEnd = end + ZonePadding;
+        var key = PeriodKey(month);
+
+        var rows = await db.Prints.AsNoTracking()
+            .Where(p => p.StartDate >= outerStart && p.StartDate < outerEnd)
+            .Where(p => !db.EmailOutbox.Any(o => o.UserId == p.CreatedById && o.Campaign == CampaignName && o.PeriodKey == key))
+            .Select(p => new
+            {
+                p.CreatedById,
+                EdgeDate = p.StartDate >= coreStart && p.StartDate < coreEnd ? null : p.StartDate,
+            })
+            .Distinct()
+            .ToListAsync(ct);
+
+        var result = new Dictionary<long, Func<DateTimeOffset, DateTimeOffset, bool>>();
+        foreach (var row in rows.Where(r => r.EdgeDate is null))
+        {
+            result[row.CreatedById] = static (_, _) => true;
+        }
+
+        foreach (var group in rows.Where(r => r.EdgeDate is not null).GroupBy(r => r.CreatedById).Where(g => !result.ContainsKey(g.Key)))
+        {
+            var dates = group.Select(r => r.EdgeDate!.Value).ToList();
+            result[group.Key] = (from, to) => dates.Exists(d => d >= from && d < to);
+        }
+
+        return result;
+    }
+
+    private static (DateTimeOffset From, DateTimeOffset To) LocalMonth(DateOnly month, TimeZoneInfo zone)
+        => (EmailTimeZones.AtLocal(month, 0, zone), EmailTimeZones.AtLocal(month.AddMonths(1), 0, zone));
+
+    public async Task<RenderedEmail?> RenderAsync(EmailOutbox row, CancellationToken ct)
+    {
+        if (!DateOnly.TryParseExact(row.PeriodKey + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month))
+        {
+            return null;
+        }
+
+        var user = await db.Users.AsNoTracking().Where(u => u.Id == row.UserId).Select(u => new { u.DisplayName }).SingleOrDefaultAsync(ct);
+        if (user is null)
+        {
+            return null;
+        }
+
+        var settings = options.Value;
+        var zone = EmailTimeZones.For(await EmailUserZones.LoadAsync(db, row.UserId, ct), settings.DefaultTimeZone);
+
+        // Two plain month queries rather than ComparePrevious: the overview's previous window is
+        // the same number of days, which for a month is not the calendar month before it.
+        var current = await OverviewAsync(row.UserId, month, zone, ct);
+        var printCount = (int)Math.Round(current.Tiles.PrintCount.Value ?? 0);
+        if (printCount == 0)
+        {
+            return null;
+        }
+
+        var previous = await OverviewAsync(row.UserId, month.AddMonths(-1), zone, ct);
+        var tiles = current.Tiles;
+        var hours = (tiles.PrintTimeSeconds.Value ?? 0) / 3600;
+        var previousCount = previous.Tiles.PrintCount.Value ?? 0;
+        var previousHours = (previous.Tiles.PrintTimeSeconds.Value ?? 0) / 3600;
+
+        var (monthStartUtc, monthEndUtc) = LocalMonth(month, zone);
+        var startUtc = monthStartUtc.UtcDateTime;
+        var endUtc = monthEndUtc.UtcDateTime;
+        var badges = (await db.UserAchievements.AsNoTracking()
+                .Where(a => a.UserId == row.UserId && a.UnlockedAt >= startUtc && a.UnlockedAt < endUtc)
+                .Select(a => new { a.AchievementKey, a.Tier, a.UnlockedAt })
+                .ToListAsync(ct))
+            // A key no longer in the catalog has no title to show, and a raw key is worse than
+            // nothing, so it is skipped. Retired definitions stay in the catalog and still resolve.
+            .Select(a => (Definition: AchievementCatalog.Find(a.AchievementKey), a.Tier, a.UnlockedAt))
+            .Where(a => a.Definition is not null && a.Tier >= 1
+                && a.Tier <= AchievementCatalog.TierNames.Count && a.Tier <= a.Definition.Thresholds.Count)
+            // Each achievement once, at the best tier reached this month: six tiers of one family
+            // is one achievement worth showing. Tiered families lead, highest tier first, then
+            // one-time badges; earlier unlocks first within each, then key, so ties are stable.
+            .GroupBy(a => a.Definition!.Key)
+            .Select(g => g.MaxBy(a => a.Tier))
+            .OrderBy(a => a.Definition!.Thresholds.Count == 1)
+            .ThenByDescending(a => a.Tier)
+            .ThenBy(a => a.UnlockedAt)
+            .ThenBy(a => a.Definition!.Key, StringComparer.Ordinal)
+            .Select(a => new RecapBadge(
+                a.Definition!.Title,
+                // The app names no tier for a one-time badge; its art is the category color.
+                a.Definition.Thresholds.Count == 1 ? null : AchievementCatalog.TierNames[a.Tier - 1],
+                assets.Badge(BadgeImage.FileName(a.Definition, a.Tier))))
+            .ToList();
+        var isPro = await db.Subscriptions.AnyAsync(s => s.UserId == row.UserId && s.Status == SubscriptionStatus.Active, ct);
+
+        string Link(string path) => links.Web(path, CampaignName, row.PeriodKey);
+        var highlights = current.Highlights;
+
+        var model = new MonthlyRecapModel(
+            Name: user.DisplayName,
+            MonthName: MonthName(month),
+            PreviousMonthName: MonthName(month.AddMonths(-1)),
+            PrintCount: printCount,
+            SuccessRatePercent: tiles.SuccessRatePercent.Value,
+            PrintHours: hours,
+            FilamentGrams: tiles.FilamentGrams.Value ?? 0,
+            Cost: tiles.TotalCost.Value is { } cost and > 0
+                ? $"{cost.ToString("N2", CultureInfo.InvariantCulture)} {tiles.TotalCost.Currency}".Trim()
+                : null,
+            PrintCountChangePercent: ChangePercent(printCount, previousCount),
+            PrintHoursChangePercent: ChangePercent(hours, previousHours),
+            MostUsedPrinter: Blank(highlights.MostUsedPrinter?.Label),
+            MostUsedMaterial: Blank(highlights.MostUsedMaterial?.Label),
+            LongestPrint: Longest(highlights.LongestPrint),
+            Badges: badges.Take(MonthlyRecapTemplates.MaxBadges).ToList(),
+            MoreBadgeCount: Math.Max(0, badges.Count - MonthlyRecapTemplates.MaxBadges),
+            AchievementsUrl: Link("/achievements"),
+            Tip: await RecapTips.ForAsync(db, row.UserId, Link, ct),
+            StatsUrl: Link("/analytics"));
+
+        var (footer, _) = footers.Create(row.UserId, PreferenceSettingTypeId, FooterReason, isPro ? SupporterLine.Thanks : SupporterLine.Ask);
+        var (html, text) = await MonthlyRecapTemplates.RenderAsync(renderer, model, footer);
+        var exposure = new JsonObject { ["month"] = row.PeriodKey, ["printCount"] = printCount };
+
+        return new RenderedEmail(MonthlyRecapTemplates.Subject(model), html, text, PreferenceSettingTypeId, exposure);
+    }
+
+    private Task<OverviewResponse> OverviewAsync(long userId, DateOnly month, TimeZoneInfo zone, CancellationToken ct)
+    {
+        var (from, to) = LocalMonth(month, zone);
+        return analytics.GetOverview(userId, new AnalyticsFilter { FromDate = from, ToDate = to, TimeZone = zone.Id }, ct);
+    }
+
+    private static string MonthName(DateOnly month) => month.ToString("MMMM", CultureInfo.InvariantCulture);
+
+    private static int? ChangePercent(double current, double previous)
+        => previous > 0 ? (int)Math.Round((current - previous) / previous * 100, MidpointRounding.AwayFromZero) : null;
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string? Longest(HighlightRef? longest)
+        => Blank(longest?.Label) is { } title && longest!.Value is { } seconds and > 0
+            ? $"{title} ({EmailFormat.Hours(seconds / 3600)})"
+            : Blank(longest?.Label);
+}

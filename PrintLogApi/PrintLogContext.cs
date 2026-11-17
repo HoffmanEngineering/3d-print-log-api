@@ -17,6 +17,8 @@ public class PrintLogContext : DbContext
     public DbSet<CuraSetting> CuraSettings { get; set; }
 
     public DbSet<Printer> Printers { get; set; }
+    public DbSet<PrinterModel> PrinterModels { get; set; } = null!;
+    public DbSet<PrinterCatalogVersion> PrinterCatalogVersions { get; set; } = null!;
 
     public DbSet<PrinterCategory> PrinterCategories { get; set; }
 
@@ -31,6 +33,11 @@ public class PrintLogContext : DbContext
     public DbSet<Filament> Filaments { get; set; }
 
     public DbSet<FilamentAdjustment> FilamentAdjustments { get; set; }
+
+    public DbSet<FilamentTag> FilamentTags { get; set; } = null!;
+    public DbSet<FilamentCatalogEntry> FilamentCatalogEntries { get; set; } = null!;
+    public DbSet<FilamentCatalogSku> FilamentCatalogSkus { get; set; } = null!;
+    public DbSet<TagReadFailure> TagReadFailures { get; set; } = null!;
 
     public DbSet<MaterialCategory> MaterialCategories { get; set; }
 
@@ -51,12 +58,28 @@ public class PrintLogContext : DbContext
 
     public DbSet<FilamentImage> FilamentImages { get; set; } = null!;
 
+    public DbSet<PrinterImage> PrinterImages { get; set; } = null!;
+
     public DbSet<Feedback> Feedback { get; set; }
 
     public DbSet<UserApiKey> UserApiKeys { get; set; }
 
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<DeviceToken> DeviceTokens { get; set; }
+    public DbSet<DeviceGrant> DeviceGrants { get; set; }
+    public DbSet<PairingTokenUse> PairingTokenUses { get; set; }
+    public DbSet<Connection> Connections { get; set; }
+    public DbSet<Bridge> Bridges { get; set; }
+    public DbSet<BridgeDiscoveredPrinter> BridgeDiscoveredPrinters { get; set; }
+    public DbSet<BridgeIgnoredPrinter> BridgeIgnoredPrinters { get; set; }
+    public DbSet<BridgePrinter> BridgePrinters { get; set; }
+    public DbSet<BridgePrinterSecret> BridgePrinterSecrets { get; set; }
+    public DbSet<BridgeSharedJob> BridgeSharedJobs { get; set; }
+    public DbSet<SpoolmanConnection> SpoolmanConnections { get; set; }
+    public DbSet<SpoolmanNetworkSighting> SpoolmanNetworkSightings { get; set; }
+    public DbSet<SpoolmanFairUseAlert> SpoolmanFairUseAlerts { get; set; }
+    public DbSet<SpoolmanUsage> SpoolmanUsages { get; set; }
+    public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
 
     public DbSet<UserSettingType> UserSettingTypes { get; set; }
 
@@ -65,6 +88,12 @@ public class PrintLogContext : DbContext
     public DbSet<Subscription> Subscriptions { get; set; }
 
     public DbSet<McpIdempotencyRecord> McpIdempotencyRecords { get; set; }
+
+    public DbSet<UserAchievement> UserAchievements { get; set; }
+
+    public DbSet<EmailOutbox> EmailOutbox { get; set; } = null!;
+
+    public DbSet<EmailSuppression> EmailSuppressions { get; set; } = null!;
 
     public static int fnNaturalSort(string sortKey)
         => throw new NotSupportedException();
@@ -85,7 +114,21 @@ public class PrintLogContext : DbContext
             new UserSettingType() { Id = 11, Name = "Prints_LastSelectedWireMeasureType", Description = "The last selected wire measure type on the print." },
             new UserSettingType() { Id = 14, Name = "Prints_PreferredFilamentDisplayUnit", Description = "The user's preferred unit for displaying filament usage (1=Weight, 2=Length, 3=Volume)." },
             new UserSettingType() { Id = 15, Name = "Push_PrintCompleted", Description = "Send a push notification to the user's devices when a print completes." },
-            new UserSettingType() { Id = 16, Name = "Push_PrintFailed", Description = "Send a push notification to the user's devices when a print fails." }
+            new UserSettingType() { Id = 16, Name = "Push_PrintFailed", Description = "Send a push notification to the user's devices when a print fails." },
+            new UserSettingType() { Id = 17, Name = "Achievements_ShowOnProfile", Description = "Show the user's achievements on their public profile (true/false)." },
+            new UserSettingType() { Id = 18, Name = "Achievements_Celebrations", Description = "How new achievements are celebrated (on/quiet/off)." },
+            new UserSettingType() { Id = 19, Name = "Achievements_DismissedHint", Description = "The achievement hint the user dismissed, as key:tier." },
+            new UserSettingType() { Id = 20, Name = "General_TimeZone", Description = "The user's IANA time zone, used for daily and weekly streaks." },
+            new UserSettingType() { Id = 21, Name = "Push_Achievement", Description = "Send a push notification to the user's devices when they earn an achievement." },
+            new UserSettingType() { Id = 22, Name = "Email_All", Description = "Master switch for all non-required email (true/false; absent means on)." },
+            new UserSettingType() { Id = 23, Name = "Email_Onboarding", Description = "Send the onboarding email series (true/false; absent means on)." },
+            new UserSettingType() { Id = 24, Name = "Email_MonthlyRecap", Description = "Send the monthly recap email (true/false; absent means on)." },
+            new UserSettingType() { Id = 25, Name = "Email_PrinterSilent", Description = "Email when a connected printer stops reporting (true/false; absent means on)." },
+            new UserSettingType() { Id = 26, Name = "Email_NoticeSeenAt", Description = "When the user dismissed the in-app email notice (ISO 8601)." },
+            new UserSettingType() { Id = 27, Name = "ReleaseNotes_LastShownVersion", Description = "The newest web app version whose release notes the What's New dialog has shown the user." },
+            new UserSettingType() { Id = 28, Name = "ReleaseNotes_LastViewedVersion", Description = "The web app version that was current when the user last opened the release notes page." },
+            new UserSettingType() { Id = 29, Name = "Onboarding_WelcomeFinishedAt", Description = "When the user finished or skipped the new-user welcome flow (ISO 8601)." },
+            new UserSettingType() { Id = 30, Name = "Onboarding_ChecklistDismissedAt", Description = "When the user dismissed the Getting Started checklist (ISO 8601)." }
             );
 
         var filamentCategory = new MaterialCategory()
@@ -389,6 +432,28 @@ public class PrintLogContext : DbContext
 
         modelBuilder.Entity<User>().HasIndex(u => u.OAuthUserId).IsUnique();
 
+        // Not unique: Auth0 permits the same address on more than one connection.
+        modelBuilder.Entity<User>().HasIndex(u => u.Email);
+        modelBuilder.Entity<User>().Property(u => u.Email).HasMaxLength(320);
+
+        // The unique key is the duplicate-send guard; see EmailOutbox.
+        modelBuilder.Entity<EmailOutbox>()
+            .HasIndex(o => new { o.UserId, o.Campaign, o.PeriodKey })
+            .IsUnique();
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.Status, o.NextAttemptAt });
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.UserId, o.SentAt });
+        // The dispatcher's sent-today count for the daily cap (Status = Sent AND SentAt >= today).
+        // Without it that count read every Sent row ever, on every tick (api#309).
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => new { o.Status, o.SentAt });
+        modelBuilder.Entity<EmailOutbox>().HasIndex(o => o.ProviderMessageId);
+        modelBuilder.Entity<EmailOutbox>()
+            .HasOne(o => o.User)
+            .WithMany()
+            .HasForeignKey(o => o.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EmailSuppression>().HasIndex(s => s.EmailHash).IsUnique();
+
         // One preference row per user per setting type. CreateUserSetting reads with
         // SingleOrDefaultAsync, so a duplicate pair makes that setting permanently uncreatable
         // for the account — and push delivery now reads this table.
@@ -402,6 +467,229 @@ public class PrintLogContext : DbContext
             .HasIndex(dt => dt.Token)
             .IsUnique();
 
+        // Device grants (#148). The token hash is what every device-authenticated request looks
+        // up. (UserId, DeviceId) is the re-pair key: pairing the same device again rotates the
+        // token on its row instead of adding one. The FK cascades from Users and is the only path
+        // there, so no 1785; UserDeletionService also deletes them explicitly.
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => g.TokenHash)
+            .IsUnique();
+
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => new { g.UserId, g.DeviceId })
+            .IsUnique();
+
+        // Spent pairing tokens: the unique key is what refuses a second exchange, on any
+        // instance; ExpiresAt is what the cleanup on each pairing deletes by.
+        modelBuilder.Entity<PairingTokenUse>()
+            .HasIndex(u => u.TokenKeyHash)
+            .IsUnique();
+
+        modelBuilder.Entity<PairingTokenUse>()
+            .HasIndex(u => u.ExpiresAt);
+
+        // A re-pair's replaced token, looked up only when the current-token lookup misses.
+        modelBuilder.Entity<DeviceGrant>()
+            .HasIndex(g => g.PreviousTokenHash);
+
+        modelBuilder.Entity<DeviceGrant>()
+            .HasOne(g => g.User)
+            .WithMany()
+            .HasForeignKey(g => g.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Connections (#149). The agent upserts by its own instance id, so the pair is the key a
+        // racing first heartbeat collides on. Scoped per user: re-pairing a bridge to another
+        // account must not reach into the first account's row.
+        modelBuilder.Entity<Connection>()
+            .HasIndex(c => new { c.UserId, c.InstanceId })
+            .IsUnique();
+
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Neither of these may cascade or set null in the database: Printers and Prints already
+        // cascade from Users, so a second path from Users to Connections or back to Prints is
+        // SQL Server error 1785. ClientSetNull nulls tracked rows; ConnectionService and
+        // PrinterService null the rest explicitly before deleting.
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.Printer)
+            .WithMany()
+            .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Bridges (printlog-bridge#100, #103). A bridge shares its device grant's key and goes
+        // with it: Users -> DeviceGrants -> Bridges is the only cascade path into Bridges, and
+        // Bridges -> (discovered, ignored, desired printers) the only one into each of those.
+        modelBuilder.Entity<Bridge>()
+            .HasOne(b => b.Grant)
+            .WithOne()
+            .HasForeignKey<Bridge>(b => b.Id)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BridgeDiscoveredPrinter>()
+            .HasIndex(d => new { d.BridgeId, d.IdentityKey })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeDiscoveredPrinter>()
+            .HasOne(d => d.Bridge)
+            .WithMany(b => b.DiscoveredPrinters)
+            .HasForeignKey(d => d.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BridgeIgnoredPrinter>()
+            .HasIndex(i => new { i.BridgeId, i.IdentityKey })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeIgnoredPrinter>()
+            .HasOne(i => i.Bridge)
+            .WithMany()
+            .HasForeignKey(i => i.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One entry per 3D Print Log printer across all bridges (a printer belongs to one user,
+        // and two watchers would log every print twice), and one per identity on a bridge.
+        // BridgeService also refuses the same stable identity on another of the user's bridges.
+        modelBuilder.Entity<BridgePrinter>()
+            .HasIndex(p => p.PrinterId)
+            .IsUnique();
+
+        modelBuilder.Entity<BridgePrinter>()
+            .HasIndex(p => new { p.BridgeId, p.IdentityKey })
+            .IsUnique()
+            .HasFilter("[IdentityKey] IS NOT NULL");
+
+        modelBuilder.Entity<BridgePrinter>()
+            .HasOne(p => p.Bridge)
+            .WithMany(b => b.Printers)
+            .HasForeignKey(p => p.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // No database cascade: Printers cascade from Users, and so (through the grant) do
+        // Bridges, so a second path is SQL Server error 1785. PrinterService removes the entries
+        // before deleting a printer, and UserDeletionService deletes bridges before printers.
+        modelBuilder.Entity<BridgePrinter>()
+            .HasOne(p => p.Printer)
+            .WithMany()
+            .HasForeignKey(p => p.PrinterId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        // Sealed LAN credentials (story 14): one per entry and field, going with the entry, so
+        // disconnect, printer delete and revoke (grant -> bridge -> entries) all take them. The
+        // only cascade path into the table.
+        modelBuilder.Entity<BridgePrinterSecret>()
+            .HasIndex(s => new { s.BridgePrinterId, s.Field })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgePrinterSecret>()
+            .HasOne(s => s.BridgePrinter)
+            .WithMany(p => p.Secrets)
+            .HasForeignKey(s => s.BridgePrinterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Jobs a bridge reported for a printer bound to another, once each (story 15a): it goes
+        // with the bridge, the only cascade path into the table.
+        modelBuilder.Entity<BridgeSharedJob>()
+            .HasIndex(j => new { j.BridgeId, j.ExternalSource, j.ExternalId })
+            .IsUnique();
+
+        modelBuilder.Entity<BridgeSharedJob>()
+            .HasOne(j => j.Bridge)
+            .WithMany()
+            .HasForeignKey(j => j.BridgeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Not a database cascade or set-null either (Users -> Connections and Users -> DeviceGrants
+        // -> Bridges are two paths). Revoking a grant nulls it first, in the same transaction.
+        modelBuilder.Entity<Connection>()
+            .HasOne(c => c.Bridge)
+            .WithMany()
+            .HasForeignKey(c => c.BridgeId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Spoolman connections (#175). The secret hash is the lookup key every authenticated
+        // request uses, so it is unique and indexed.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => c.SecretHash)
+            .IsUnique();
+
+        // At most one unrevoked (active or paused) connection per printer. Reconnecting revokes
+        // the old one in the same transaction before inserting the new one.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => c.PrinterId)
+            .IsUnique()
+            .HasFilter("[PrinterId] IS NOT NULL AND [RevokedAt] IS NULL");
+
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasIndex(c => new { c.UserId, c.CreatedDate });
+
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Not a database cascade or set-null, for the reason given for Connection.Printer above:
+        // Printers already cascade from Users, so a second path is SQL Server error 1785.
+        // PrinterService revokes and unbinds these explicitly before deleting a printer.
+        modelBuilder.Entity<SpoolmanConnection>()
+            .HasOne(c => c.Printer)
+            .WithMany()
+            .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
+        // Webhook subscriptions (#235). Users is the only cascade path into this table, so SQL
+        // Server's multiple-cascade-path rule (1785) does not apply.
+        modelBuilder.Entity<WebhookSubscription>()
+            .HasIndex(w => new { w.UserId, w.CreatedDate });
+
+        modelBuilder.Entity<WebhookSubscription>()
+            .HasOne(w => w.User)
+            .WithMany()
+            .HasForeignKey(w => w.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SpoolmanNetworkSighting>()
+            .HasIndex(s => new { s.UserId, s.NetworkHash })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanNetworkSighting>()
+            .HasOne(s => s.User)
+            .WithMany()
+            .HasForeignKey(s => s.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SpoolmanFairUseAlert>()
+            .HasIndex(a => new { a.UserId, a.Signal })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanFairUseAlert>()
+            .HasOne(a => a.User)
+            .WithMany()
+            .HasForeignKey(a => a.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One row per (print, spool): reports increment it, and the index is what makes two
+        // racing first reports end as one row (the loser retries as an increment).
+        modelBuilder.Entity<SpoolmanUsage>()
+            .HasIndex(u => new { u.PrintId, u.FilamentId })
+            .IsUnique();
+
+        modelBuilder.Entity<SpoolmanUsage>()
+            .HasOne(u => u.Print)
+            .WithMany()
+            .HasForeignKey(u => u.PrintId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Print>()
+            .HasOne(p => p.Connection)
+            .WithMany()
+            .HasForeignKey(p => p.ConnectionId)
+            .OnDelete(DeleteBehavior.ClientSetNull);
+
         modelBuilder.Entity<UserSetting>()
             .HasIndex(us => new { us.UserId, us.UserSettingTypeId })
             .IsUnique()
@@ -411,9 +699,48 @@ public class PrintLogContext : DbContext
             .Property(c => c._Settings)
             .HasColumnName("Settings");
 
+        // A connector's settings for a print (#164): one record per print, replaced on a resend.
+        // Filtered, because every plugin-posted record has no print.
+        modelBuilder.Entity<CuraSetting>()
+            .HasOne(c => c.Print)
+            .WithMany()
+            .HasForeignKey(c => c.PrintId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.PrintId)
+            .IsUnique()
+            .HasFilter("[PrintId] IS NOT NULL");
+
+        // Backs the cascade from Prints. Production's optimizer would not use the filtered index
+        // above for it and scanned the whole table (51 GB) on every print delete, which timed out.
+        // The migration creates it online and only if missing, so it can be created by hand first.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.PrintId, "IX_CuraSettings_PrintId_ForeignKey");
+
+        // The retention sweep's lookup (CuraSettingsRetentionJob): uploader records, oldest first.
+        // Filtered to the rows it may delete, so connector records never enter it.
+        modelBuilder.Entity<CuraSetting>()
+            .HasIndex(c => c.CreatedDate, "IX_CuraSettings_Unlinked_CreatedDate")
+            .HasFilter("[PrintId] IS NULL");
+
         modelBuilder.Entity<Filament>()
             .Property(f => f.MaterialCategoryNickname)
             .HasDefaultValue("filament");
+
+        // A spool number is unique per owner (#174). Filtered, because a spool the previous app
+        // version created during the migration window has none until it is next looked up.
+        modelBuilder.Entity<Filament>()
+            .HasIndex(f => new { f.CreatedById, f.SpoolNumber })
+            .IsUnique()
+            .HasFilter("[SpoolNumber] IS NOT NULL");
+
+        // Declared explicitly, or EF drops it as redundant with the index above, whose leading
+        // column it is. It is not redundant: that index is filtered, so SQL Server cannot use it
+        // for the plain "this user's filaments" seek every list and summary query starts with.
+        modelBuilder.Entity<Filament>()
+            .HasIndex(f => f.CreatedById)
+            .HasDatabaseName("IX_Filaments_CreatedById");
 
         // Only every query for currently-loaded filament.
         modelBuilder.Entity<PrinterFilament>()
@@ -550,6 +877,77 @@ public class PrintLogContext : DbContext
             .HasDatabaseName("IX_PrintImages_PrintId_Default")
             .HasFilter("[IsDefault] = 1");
 
+        // Restrict, not Cascade, as for printer images: the delete paths remove the derivative
+        // File rows explicitly so their blobs go with them.
+        modelBuilder.Entity<PrintImage>(entity =>
+        {
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.SocialFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.SocialFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Tag UIDs (#147). One physical tag is one spool, per user: two accounts may each have
+        // scanned the same tag, so the index is not global. The race between two requests
+        // assigning one UID lands here, and FilamentService reports it as the same 409.
+        modelBuilder.Entity<FilamentTag>(entity =>
+        {
+            entity.HasIndex(t => new { t.UserId, t.Uid }).IsUnique();
+
+            entity.HasOne(t => t.Filament)
+                .WithMany(f => f.Tags)
+                .HasForeignKey(t => t.FilamentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction, not Cascade: Filaments already cascade from Users, so a second path from
+            // Users to FilamentTags is SQL Server error 1785. UserDeletionService deletes tags
+            // explicitly before the filaments.
+            entity.HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Filament catalog and tag reading. Catalog entries are only ever soft-deleted, so every
+        // reference to one is Restrict.
+        modelBuilder.Entity<FilamentCatalogEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.Manufacturer, e.Material });
+        });
+
+        modelBuilder.Entity<Filament>()
+            .HasOne(f => f.CatalogEntry)
+            .WithMany()
+            .HasForeignKey(f => f.CatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<FilamentCatalogSku>(entity =>
+        {
+            entity.HasIndex(s => new { s.Format, s.Sku, s.UserId }).IsUnique();
+            entity.HasIndex(s => new { s.Format, s.Sku });
+
+            entity.HasOne(s => s.CatalogEntry)
+                .WithMany()
+                .HasForeignKey(s => s.CatalogEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Cascade is the only path from Users to this table, so SQL Server accepts it.
+            entity.HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TagReadFailure>(entity =>
+        {
+            entity.HasIndex(f => f.CreatedAt);
+        });
+
         modelBuilder.Entity<FilamentImage>(entity =>
         {
             // Exactly one default per filament, enforced by the database rather than by
@@ -579,6 +977,54 @@ public class PrintLogContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<PrinterImage>(entity =>
+        {
+            // Exactly one default per printer, enforced by the database rather than by
+            // convention: two concurrent "first" uploads would otherwise both win.
+            entity.HasIndex(pi => pi.PrinterId)
+                .HasFilter("[IsDefault] = 1")
+                .IsUnique()
+                .HasDatabaseName("IX_PrinterImages_PrinterId_IsDefault");
+
+            entity.HasIndex(pi => new { pi.PrinterId, pi.DisplayOrder });
+
+            entity.HasOne(pi => pi.Printer)
+                .WithMany()
+                .HasForeignKey(pi => pi.PrinterId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict, not Cascade: the service removes File rows explicitly so the
+            // blobs go with them. A cascade would delete the row and orphan the blob.
+            entity.HasOne(pi => pi.File)
+                .WithMany()
+                .HasForeignKey(pi => pi.FileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // The existing Printer covering index is led by Id, which does not serve the
+        // "every printer this user owns" shape that the image queries and the thumbnail
+        // map endpoint both use.
+        modelBuilder.Entity<Printer>()
+            .HasIndex(p => new { p.UserId, p.IsActive })
+            .HasDatabaseName("IX_Printers_UserId_IsActive");
+
+        // Printer catalog. Models are only ever retired, never deleted, so a printer's reference
+        // is NoAction rather than SetNull: a removal that orphaned printers should fail loudly.
+        modelBuilder.Entity<Printer>(entity =>
+        {
+            entity.HasOne(p => p.CatalogModel)
+                .WithMany()
+                .HasForeignKey(p => p.CatalogModelId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasIndex(p => p.CatalogModelId);
+        });
+
         modelBuilder.Entity<ProjectImage>()
             .HasIndex(pi => pi.ProjectId)
             .IncludeProperties(pi => new
@@ -591,6 +1037,20 @@ public class PrintLogContext : DbContext
                 pi.CreatedById
             })
             .HasDatabaseName("IX_ProjectImages_ProjectId");
+
+        // See PrintImage above.
+        modelBuilder.Entity<ProjectImage>(entity =>
+        {
+            entity.HasOne(pi => pi.ThumbnailFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.ThumbnailFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pi => pi.SocialFile)
+                .WithMany()
+                .HasForeignKey(pi => pi.SocialFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<Project>()
             .HasIndex(p => new { p.CreatedById, p.CreatedDate })
@@ -606,12 +1066,69 @@ public class PrintLogContext : DbContext
             .HasIndex(p => p.ProjectId)
             .HasDatabaseName("IX_Prints_ProjectId");
 
+        // The public print index (PublicPrintIndexCache): Id and UpdatedDate of every public
+        // print, in Id order. Without it that read scanned the whole of the wide Prints table
+        // and took over a minute on the production database (api#309). Id rides along as the
+        // clustered key.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => p.ViewStatus)
+            .IncludeProperties(p => p.UpdatedDate)
+            .HasDatabaseName("IX_Prints_ViewStatus");
+
+        // Connector idempotency (#144): one print per (user, source, external id). The unique
+        // index is the concurrency guard; a racing duplicate create fails here and is replayed.
+        // The filter is required on SQL Server, where a unique index otherwise admits only one
+        // row whose key columns are all NULL, i.e. one ordinary print per user.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => new { p.CreatedById, p.ExternalSource, p.ExternalId })
+            .IsUnique()
+            .HasFilter("[ExternalSource] IS NOT NULL AND [ExternalId] IS NOT NULL")
+            .HasDatabaseName("IX_Prints_User_ExternalSource_ExternalId");
+
         // MCP write idempotency: one created entity per (user, tool, key). The unique index is
         // the concurrency guard — a racing duplicate call fails here and is replayed.
         modelBuilder.Entity<McpIdempotencyRecord>()
             .HasIndex(r => new { r.UserId, r.ToolName, r.IdempotencyKey })
             .IsUnique()
             .HasDatabaseName("IX_McpIdempotencyRecords_User_Tool_Key");
+
+        // Achievements: one row per tier earned. The unique index is what makes concurrent
+        // evaluation passes safe; the evaluator retries once on a conflict. No FK to the
+        // triggering print: next to the User cascade it would be a second cascade path (1785).
+        modelBuilder.Entity<UserAchievement>()
+            .HasIndex(a => new { a.UserId, a.AchievementKey, a.Tier })
+            .IsUnique()
+            .HasDatabaseName("IX_UserAchievements_User_Key_Tier");
+
+        modelBuilder.Entity<UserAchievement>()
+            .HasIndex(a => new { a.AchievementKey, a.Tier })
+            .HasDatabaseName("IX_UserAchievements_Key_Tier");
+
+        modelBuilder.Entity<UserAchievement>()
+            .HasOne(a => a.User)
+            .WithMany()
+            .HasForeignKey(a => a.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Covers the achievement metrics' one read of a user's prints (EvaluationContext's
+        // PrintRow projection): every column it selects is here, so the read never touches the
+        // clustered index. This is the FK's convention index widened with INCLUDE columns, not a
+        // second index on the same key.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => p.CreatedById)
+            .IncludeProperties(p => new
+            {
+                p.Source,
+                p.Slicer,
+                p.Status,
+                p.StartDate,
+                p.CreatedDate,
+                p.PrintTimeInSeconds,
+                p.EstimatedPrintTimeInSeconds,
+                p.FilamentUsageMg,
+                p.EstimatedFilamentUsageMg,
+                p.ViewStatus,
+            });
 
         modelBuilder.Entity<PrinterMaintenance>().HasIndex(pm => pm.CreatedById).IncludeProperties(pm => new { pm.Date, pm.CreatedDate });
 
@@ -620,10 +1137,14 @@ public class PrintLogContext : DbContext
             .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedDate })
             .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedDate");
 
+        // Serves both unread counts the web app polls every 30 s (total and achievements) from
+        // unread rows only, with no key lookup for Type. It replaced IX_Notifications_UserId_UnreadCount
+        // ((UserId) INCLUDE (IsRead)), which the index above already covered and which lacked Type
+        // (api#309). The filter must match what NotificationService.Unread compiles to.
         modelBuilder.Entity<Notification>()
-            .HasIndex(n => n.UserId)
-            .IncludeProperties(n => n.IsRead)
-            .HasDatabaseName("IX_Notifications_UserId_UnreadCount");
+            .HasIndex(n => new { n.UserId, n.Type })
+            .HasFilter(Services.NotificationService.UnreadFilter)
+            .HasDatabaseName("IX_Notifications_UserId_Type_Unread");
 
         modelBuilder.Entity<Subscription>()
             .HasIndex(s => s.UserId)
@@ -678,19 +1199,51 @@ public class PrintLogContext : DbContext
     private void UpdateTimestamps()
     {
         var entries = ChangeTracker
-        .Entries()
-        .Where(e => e.Entity is TimestampEntity && (
-                e.State == EntityState.Added
-                || e.State == EntityState.Modified));
+            .Entries()
+            .Where(e => e.Entity is TimestampEntity)
+            .ToList();
+
+        // Rows being replaced by another instance with the same key, by entity type and key.
+        Dictionary<EntityRowKey, DateTime>? replacedCreatedDates = null;
 
         foreach (var entityEntry in entries)
         {
             var saveDateTime = DateTime.UtcNow;
-            ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
 
             if (entityEntry.State == EntityState.Added)
             {
+                ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
                 ((TimestampEntity)entityEntry.Entity).CreatedDate = saveDateTime;
+            }
+            else if (entityEntry.State == EntityState.Modified)
+            {
+                ((TimestampEntity)entityEntry.Entity).UpdatedDate = saveDateTime;
+
+                // An update never changes when a row was created (#256). Update paths map a
+                // client DTO over the loaded entity, and a client that leaves createdDate out
+                // (the web app re-sends a spool's adjustments that way) would otherwise write
+                // 0001-01-01 over it. To backdate a row on purpose, use ExecuteUpdate.
+                //
+                // AutoMapper replaces a child collection's items with new instances, so the
+                // loaded row is often not this entry: EF marks the loaded instance Deleted and
+                // turns this one, which has the same key, into an update of that row. This
+                // entry's original value is then the client's, only the Deleted twin carries
+                // the stored date, and EF writes the column whether or not it is marked
+                // modified. So the stored date goes into both the original and the current
+                // value: clearing IsModified alone would revert to the client's 0001-01-01.
+                replacedCreatedDates ??= EntityRowKey.IndexFirst(entries
+                    .Where(e => e.State == EntityState.Deleted)
+                    .Select(e => (EntityRowKey.Of(e), (DateTime)e.Property(nameof(TimestampEntity.CreatedDate)).OriginalValue!)));
+
+                var createdDate = entityEntry.Property(nameof(TimestampEntity.CreatedDate));
+                if (replacedCreatedDates.TryGetValue(EntityRowKey.Of(entityEntry), out var stored))
+                {
+                    createdDate.OriginalValue = stored;
+                }
+
+                // Reverts the current value to the original, which also keeps the response
+                // mapped from this entity honest.
+                createdDate.IsModified = false;
             }
         }
     }

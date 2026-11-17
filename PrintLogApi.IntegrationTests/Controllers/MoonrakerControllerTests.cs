@@ -205,6 +205,28 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
+    public async Task MoonrakerWebhook_RecordsMoonraker()
+    {
+        var filename = UniqueFileName("records_source_test");
+        var messageDto = new PrintEventMessageDto
+        {
+            EventName = "started",
+            Filename = filename,
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            FilamentUsed = 0,
+            PrintDuration = 0,
+            TotalDuration = 0
+        };
+
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var print = FindPrintByFileNameInDb(filename)!;
+        Assert.Equal(PrintSource.Moonraker, print.Source);
+        Assert.Null(print.Slicer);
+    }
+
+    [Fact]
     public async Task Webhook_Started_CreatesNewPrint()
     {
         // Arrange
@@ -369,6 +391,31 @@ public class MoonrakerControllerTests : IClassFixture<CustomWebApplicationFactor
         {
             await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
         });
+    }
+
+    /// <summary>
+    /// A printer_id that names no printer (deleted, or a typo in moonraker.conf) is a 404. It was a
+    /// NullReferenceException and a 500 (#57, #309), 61 of them in production, which told the user
+    /// nothing and paged as a server fault.
+    /// </summary>
+    [Fact]
+    public async Task Webhook_Started_WithUnknownPrinter_ReturnsNotFound()
+    {
+        var filename = UniqueFileName("unknown_printer_test");
+        var messageDto = new PrintEventMessageDto
+        {
+            EventName = "started",
+            Filename = filename,
+            PrinterId = long.MaxValue,
+            FilamentUsed = 0,
+            PrintDuration = 0,
+            TotalDuration = 0
+        };
+
+        var response = await _httpClient.SendAsync(CreateAuthenticatedWebhookRequest(messageDto), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Null(FindPrintByFileNameInDb(Path.GetFileName(filename)));
     }
 
     [Fact]

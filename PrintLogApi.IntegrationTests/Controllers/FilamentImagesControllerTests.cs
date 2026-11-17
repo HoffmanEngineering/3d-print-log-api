@@ -176,7 +176,7 @@ public class FilamentImagesControllerTests(CustomWebApplicationFactory factory)
         // exception-to-status mapping, so an uncaught one is a 500, not a 400.
         var filamentId = await CreateFilamentAsync(TestContext.Current.CancellationToken);
 
-        for (var i = 0; i < SubscriptionLimits.FreeMaxImagesPerFilament; i++)
+        for (var i = 0; i < SubscriptionLimits.FreeMaxImages; i++)
             await UploadAsync(filamentId, TestContext.Current.CancellationToken);
 
         var req = AuthenticatedRequest(HttpMethod.Post, $"/api/Filaments/{filamentId}/images");

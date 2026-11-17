@@ -8,11 +8,14 @@ namespace PrintLogApi.Services;
 
 public class FileAttachmentService(
     PrintLogContext context,
+    IMediaStorageQuotaService quota,
     IBlobStorageService blobStorageService) : IFileAttachmentService
 {
     private const string AttachmentContainer = "printattachments";
     private const long MaxFileSizeBytes = 200L * 1024 * 1024; // 200MB
-    private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj" };
+    // Model files, and an MP4 video: the print's timelapse, which printlog-bridge attaches from
+    // moonraker-timelapse (printlog-bridge#42).
+    private static readonly string[] AllowedExtensions = { ".gcode", ".stl", ".3mf", ".obj", ".mp4" };
 
     public async Task<GetUploadUrlResponse> GetUploadUrlAsync(long printId, long userId, GetUploadUrlRequest request)
     {
@@ -47,17 +50,41 @@ public class FileAttachmentService(
 
         await AssertProAsync(userId);
 
-        // Parse container and blob name from the blobPath (format: "printattachments/123/guid.ext")
-        var parts = request.BlobPath!.Split('/', 2);
-        if (parts.Length != 2 || parts[0] != AttachmentContainer)
-            throw new BadRequestException("Invalid blob path.");
+        // The client wrote the blob itself through a SAS URL, which can bound neither its size nor
+        // stop it being confirmed twice, so nothing in the request is taken on trust. The path must
+        // be one GetUploadUrlAsync issues for THIS print ("printattachments/{printId}/{guid}{ext}"),
+        // the file name must carry that same allowed extension, and the size recorded is the
+        // blob's own. None of these failures deletes the blob: a path that fails them may be
+        // another print's file, or one already attached.
+        var blobName = ParseIssuedBlobName(printId, request.BlobPath);
+        AssertAllowedExtension(request.FileName);
+        if (!string.Equals(GetExtension(request.FileName), GetExtension(blobName), StringComparison.OrdinalIgnoreCase))
+            throw new BadRequestException("The file name's type does not match the uploaded file.");
+
+        if (await context.Files.AnyAsync(f => f.Path == request.BlobPath))
+            throw new BadRequestException("This file has already been attached.");
+
+        var sizeBytes = await blobStorageService.GetBlobLengthAsync(AttachmentContainer, blobName)
+            ?? throw new BadRequestException("The file was not uploaded.");
+
+        // The blob is this print's, issued by upload-url and attached to nothing, so one that
+        // breaks a limit is deleted rather than left to count against nothing.
+        try
+        {
+            await AssertFileQuotaAsync(printId, userId, sizeBytes);
+        }
+        catch (BadRequestException)
+        {
+            await blobStorageService.DeleteBlobAsync(AttachmentContainer, blobName);
+            throw;
+        }
 
         var fileId = Guid.NewGuid();
         var file = new FileModel
         {
             Id = fileId,
             Path = request.BlobPath,
-            Size = request.SizeBytes,
+            Size = sizeBytes,
             CreatedById = userId,
             UpdatedById = userId,
         };
@@ -186,10 +213,10 @@ public class FileAttachmentService(
         if (fileCount >= SubscriptionLimits.ProMaxFilesPerPrint)
             throw new BadRequestException($"Maximum of {SubscriptionLimits.ProMaxFilesPerPrint} files per print allowed.");
 
-        // Per-user storage quota
-        var usedBytes = await context.PrintAttachments
-            .Where(pa => pa.CreatedById == userId)
-            .SumAsync(pa => (long?)pa.File.Size) ?? 0L;
+        // Per-user storage quota. The per-print FILE COUNT ceiling above is
+        // attachment-specific and stays here; the byte figure comes from the shared
+        // calculator so it matches what the user is shown and what images are held to.
+        var usedBytes = await quota.GetUsedBytesAsync(userId);
 
         if (usedBytes + newFileSizeBytes > SubscriptionLimits.ProMaxFileStorageBytes)
             throw new BadRequestException("Storage quota exceeded. Delete files to free up space.");
@@ -197,6 +224,29 @@ public class FileAttachmentService(
         // Per-file size limit (also validated client-side and in the DTO range attribute)
         if (newFileSizeBytes > MaxFileSizeBytes)
             throw new BadRequestException("File size exceeds the 200MB limit.");
+    }
+
+    /// <summary>
+    /// The blob name (within the container) of a path GetUploadUrlAsync issued for this print:
+    /// "printattachments/{printId}/{guid}{ext}", the GUID in its default form and the extension
+    /// an allowed one, in whatever case the uploaded file name used. Anything else is a 400.
+    /// </summary>
+    private static string ParseIssuedBlobName(long printId, string? blobPath)
+    {
+        var prefix = $"{AttachmentContainer}/{printId}/";
+        if (blobPath is null || !blobPath.StartsWith(prefix, StringComparison.Ordinal))
+            throw new BadRequestException("Invalid blob path.");
+
+        var name = blobPath[prefix.Length..];
+        var ext = GetExtension(name);
+        // Length too: Guid parsing forgives surrounding whitespace, which the issued name never has.
+        if (ext.Length == 0
+            || name.Length - ext.Length != 36
+            || !Array.Exists(AllowedExtensions, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase))
+            || !Guid.TryParseExact(name[..^ext.Length], "D", out _))
+            throw new BadRequestException("Invalid blob path.");
+
+        return $"{printId}/{name}";
     }
 
     private static void AssertAllowedExtension(string? fileName)

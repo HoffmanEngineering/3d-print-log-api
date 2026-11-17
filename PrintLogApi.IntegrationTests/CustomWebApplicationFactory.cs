@@ -1,13 +1,25 @@
 ﻿using System.Security.Claims;
+using Microsoft.ApplicationInsights.Channel;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using PrintLogApi.Achievements.Triggers;
+using PrintLogApi.Email.Outbox;
 using PrintLogApi.IntegrationTests.Mcp;
+using PrintLogApi.IntegrationTests.Mcp.Docs;
+using PrintLogApi.IntegrationTests.SpoolTags;
+using PrintLogApi.IntegrationTests.Telemetry;
+using PrintLogApi.PrinterCatalog;
+using PrintLogApi.PrinterCatalog.Generation;
 using PrintLogApi.Services;
+using PrintLogApi.SpoolTags;
+using PrintLogApi.SpoolTags.Catalog;
 
 namespace PrintLogApi.IntegrationTests;
 
@@ -19,12 +31,22 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
 {
     private SqliteConnection _connection;
     private bool _seeded = false;
+    private bool _catalogSeeded;
+
+    private static readonly Lazy<CatalogFile> EmbeddedPrinterCatalog = new(PrinterCatalogFileLoader.LoadEmbedded);
+
+    /// <summary>
+    /// The real embedded printer catalog every host is seeded with, parsed once per test run rather
+    /// than once per host.
+    /// </summary>
+    public static CatalogFile PrinterCatalog => EmbeddedPrinterCatalog.Value;
 
     public CustomWebApplicationFactory()
     {
         // Create and open the connection early - it must stay open for the entire test lifetime
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
+        SqliteSearchCollation.Register(_connection);
     }
 
     /// <summary>The address feedback notifications are sent to under test.</summary>
@@ -33,8 +55,36 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     /// <summary>The recording email sender, for asserting on notifications the app sent.</summary>
     public RecordingEmailSender EmailSender => (RecordingEmailSender)Services.GetRequiredService<IEmailSender>();
 
+    /// <summary>
+    /// The docs site the MCP docs surface reads from. Every host gets it, so no test can reach
+    /// www.3dprintlog.com; unconfigured paths 404 like the real site.
+    /// </summary>
+    public DocsSiteStub DocsSite { get; } = new();
+
+    /// <summary>
+    /// GitHub, where the latest agent release is read from (printlog-bridge#39). Every host gets
+    /// it, so no test reaches api.github.com; unseeded, every read 404s and no connection reports
+    /// a latest version.
+    /// </summary>
+    public DocsSiteStub GitHub { get; } = new();
+
+    /// <summary>
+    /// SpoolmanDB, where the filament catalog is imported from. Every host gets it, so no test
+    /// reaches donkie.github.io; unseeded, every request 404s.
+    /// </summary>
+    public SpoolmanDbStub SpoolmanDb { get; } = new();
+
     /// <summary>The stub Auth0 service, for controlling the account-email lookup.</summary>
     public TestAuth0Service Auth0 => (TestAuth0Service)Services.GetRequiredService<IAuth0Service>();
+
+    /// <summary>
+    /// Whether to re-enable telemetry for capture. Off, the host behaves exactly as Startup
+    /// configures it for this environment — which is what the test of that behaviour needs.
+    /// </summary>
+    protected virtual bool CaptureTelemetry => true;
+
+    /// <summary>Everything the app would have sent to Application Insights.</summary>
+    public RecordingTelemetryChannel Telemetry => (RecordingTelemetryChannel)Services.GetRequiredService<ITelemetryChannel>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -76,6 +126,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             services.AddDbContext<PrintLogContext>((sp, options) =>
             {
                 options.UseSqlite(_connection);
+                // Same hooks as Startup; without them no test would exercise achievement triggers.
+                options.AddAchievementInterceptors(sp);
                 options.ConfigureWarnings(warnings =>
                     warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
             });
@@ -87,6 +139,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
                 services.Remove(blobDescriptor);
             }
             services.AddSingleton<IBlobStorageService, InMemoryBlobStorageService>();
+
+            // The real processor, behind a switch that can drop the thumbnail. Defaults to
+            // pure passthrough, so every other test sees the production behavior.
+            var imageDescriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(IImageProcessingService));
+            if (imageDescriptor != null)
+            {
+                services.Remove(imageDescriptor);
+            }
+            services.AddSingleton<ImageProcessingService>();
+            services.AddSingleton<IImageProcessingService>(sp =>
+                new ControllableImageProcessingService(sp.GetRequiredService<ImageProcessingService>()));
 
             var auth0Descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IAuth0Service));
             if (auth0Descriptor != null)
@@ -101,6 +165,47 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
                 services.Remove(emailDescriptor);
             }
             services.AddSingleton<IEmailSender, RecordingEmailSender>();
+
+            // The email workers would tick on their own timers mid-test. Tests drive
+            // CampaignEvaluator / EmailDispatcher directly with a pinned clock instead. The same goes
+            // for the spool tag maintenance worker, the slicer settings retention job and the
+            // pending user deletion job (PendingUserDeletionJobTests drives RunOnceAsync). The printer
+            // catalog seeder is replaced by the synchronous seed in PrepareDatabase, so every test
+            // starts with the catalog in place.
+            foreach (var worker in services.Where(d => d.ServiceType == typeof(IHostedService)
+                && (d.ImplementationType == typeof(CampaignEvaluatorService) || d.ImplementationType == typeof(EmailDispatcherService)
+                    || d.ImplementationType == typeof(SpoolTagMaintenanceService)
+                    || d.ImplementationType == typeof(global::PrintLogApi.Services.SlicerSettings.CuraSettingsRetentionJob)
+                    || d.ImplementationType == typeof(global::PrintLogApi.Services.UserDeletion.PendingUserDeletionJob)
+                    || d.ImplementationType == typeof(PrinterCatalogSeeder)
+                    || d.ImplementationType == typeof(PrinterPopularityJob))).ToList())
+            {
+                services.Remove(worker);
+            }
+
+            // Startup switches telemetry off in this environment so test runs stop reaching the
+            // production resource. Switch it back on here, pointed at an in-memory channel, so
+            // the events an endpoint emits can be asserted on. Adaptive sampling is disabled
+            // for the same reason: it would drop events non-deterministically under a burst.
+            services.RemoveAll<ITelemetryChannel>();
+            services.AddSingleton<ITelemetryChannel, RecordingTelemetryChannel>();
+            services.Configure<Microsoft.ApplicationInsights.AspNetCore.Extensions.ApplicationInsightsServiceOptions>(
+                o => o.EnableAdaptiveSampling = false);
+            if (CaptureTelemetry)
+            {
+                // Configure, not PostConfigure: the SDK supplies its own IOptions<TelemetryConfiguration>
+                // that runs the IConfigureOptions chain and nothing else, so a PostConfigure here
+                // is silently ignored. Registration order puts this after Startup's Configure.
+                services.Configure<TelemetryConfiguration>(c => c.DisableTelemetry = false);
+            }
+
+            // The docs surface fetches the site's Markdown twins. Point it at the stub instead.
+            services.AddHttpClient(PrintLogApi.Mcp.Docs.DocsCatalog.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => DocsSite.CreateHandler());
+            services.AddHttpClient(SpoolmanDbClient.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => SpoolmanDb.CreateHandler());
+            services.AddHttpClient(PrintLogApi.Services.AgentReleases.AgentReleaseCatalog.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => GitHub.CreateHandler());
 
             // Add test authentication scheme
             services.AddAuthentication(options =>
@@ -119,6 +224,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
             services.PostConfigure<JwtBearerOptions>(
                 "McpBearer",
                 o => ConfigureLocalJwt(o, TestJwt.McpAudience));
+            services.PostConfigure<JwtBearerOptions>(
+                PrintLogApi.Authentication.Devices.DevicePairingAuthentication.Scheme,
+                o => ConfigureLocalJwt(o, TestJwt.DeviceAudience));
 
             // Map the MCP auth probe endpoint (test-only) guarded by the McpAccess policy.
             services.AddSingleton<IStartupFilter, McpAuthProbeStartupFilter>();
@@ -180,20 +288,84 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
     {
         var host = base.CreateHost(builder);
 
-        // Seed the database using the actual host's service provider
+        // Seed the database using the actual host's service provider. WithWebHostBuilder children
+        // share this database (and run this method), so the database is prepared once, by
+        // whichever host is built first.
         if (!_seeded)
         {
             using (var scope = host.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                db.Database.EnsureCreated();
-                IntegrationTestSeeder.Seed(db);
+                PrepareDatabase(scope.ServiceProvider.GetRequiredService<PrintLogContext>());
             }
             _seeded = true;
         }
 
+        // Every host has its own index singleton, so each one is built, child or parent.
+        if (_catalogSeeded)
+        {
+            using var scope = host.Services.CreateScope();
+            RebuildPrinterCatalogIndex(scope.ServiceProvider);
+        }
+
         return host;
     }
+
+    /// <summary>Creates and seeds the schema once, when the host first starts. A host on another provider overrides it.</summary>
+    protected virtual void PrepareDatabase(PrintLogContext db)
+    {
+        CopyCatalogTemplate(db);
+        IntegrationTestSeeder.Seed(db);
+        _catalogSeeded = true;
+    }
+
+    /// <summary>
+    /// Creates the schema with the real printer catalog already seeded, by copying a template
+    /// database. The template is created and seeded through <see cref="PrinterCatalogSeeder.SeedAsync"/>
+    /// once per test run. Seeding 930 models into every host's database took the full suite from
+    /// about 45 s to 57 s; copying the finished template (which also replaces each host's
+    /// EnsureCreated) brought it to about 36 s.
+    /// </summary>
+    private static void CopyCatalogTemplate(PrintLogContext db)
+    {
+        var target = (SqliteConnection)db.Database.GetDbConnection();
+        db.Database.OpenConnection();
+        try
+        {
+            lock (CatalogTemplate)
+            {
+                CatalogTemplate.Value.BackupDatabase(target);
+            }
+        }
+        finally
+        {
+            db.Database.CloseConnection();
+        }
+    }
+
+    private static readonly Lazy<SqliteConnection> CatalogTemplate = new(() =>
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        SqliteSearchCollation.Register(connection);
+        var options = new DbContextOptionsBuilder<PrintLogContext>()
+            .UseSqlite(connection)
+            .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
+        using var db = new PrintLogContext(options);
+        db.Database.EnsureCreated();
+        PrinterCatalogSeeder.SeedAsync(db, PrinterCatalog, new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero), CancellationToken.None)
+            .GetAwaiter().GetResult();
+        return connection;
+    });
+
+    /// <summary>
+    /// Builds a host's catalog index from its table, as the startup seeder does after seeding. Runs
+    /// for every host once the base <see cref="PrepareDatabase"/> has seeded the catalog; a host that
+    /// prepares its own database without it gets an empty index.
+    /// </summary>
+    private static void RebuildPrinterCatalogIndex(IServiceProvider services) =>
+        services.GetRequiredService<IPrinterCatalogIndex>().Rebuild(
+            services.GetRequiredService<PrintLogContext>().PrinterModels.AsNoTracking().ToList());
 
     protected override void Dispose(bool disposing)
     {
@@ -218,6 +390,71 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Startup>
         /// client disconnect or the 30s HttpClient timeout arrives in.
         /// </summary>
         public bool ThrowCancelledOnGetUserEmail { get; set; }
+
+        /// <summary>What <see cref="GetEmailStatus"/> returns. Null mimics an empty Auth0 body.</summary>
+        public Auth0EmailStatus? EmailStatus { get; set; }
+
+        /// <summary>When set, <see cref="GetEmailStatus"/> throws.</summary>
+        public bool ThrowOnEmailStatus { get; set; }
+
+        /// <summary>Number of <see cref="GetEmailStatus"/> calls so far.</summary>
+        public int EmailStatusCalls { get; set; }
+
+        /// <summary>
+        /// Runs inside <see cref="GetEmailStatus"/> before it answers, so a test can throw a
+        /// timeout's <see cref="TaskCanceledException"/> or cancel the caller's token mid-call.
+        /// </summary>
+        public Action? OnEmailStatus { get; set; }
+
+        /// <summary>User ids passed to <see cref="SendVerificationEmail"/>.</summary>
+        public List<string> VerificationEmailsSent { get; } = new();
+
+        /// <summary>When set, <see cref="SendVerificationEmail"/> throws Auth0ApiException.</summary>
+        public bool ThrowOnSendVerification { get; set; }
+
+        /// <summary>Runs inside <see cref="SendVerificationEmail"/> before it records the send.</summary>
+        public Action? OnSendVerification { get; set; }
+
+        /// <summary>The Auth0 profile picture per oauth user id. A missing id means no picture.</summary>
+        public System.Collections.Concurrent.ConcurrentDictionary<string, string> UserPictures { get; } = new();
+
+        /// <summary>Oauth user ids whose <see cref="GetUserPicture"/> throws Auth0ApiException.</summary>
+        public System.Collections.Concurrent.ConcurrentDictionary<string, bool> FailUserPicture { get; } = new();
+
+        /// <summary>Number of <see cref="GetUserPicture"/> calls so far.</summary>
+        public int UserPictureCalls;
+
+        public Task<string?> GetUserPicture(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            Interlocked.Increment(ref UserPictureCalls);
+            if (FailUserPicture.ContainsKey(oauthUserId))
+            {
+                throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
+            }
+            return Task.FromResult(UserPictures.TryGetValue(oauthUserId, out var picture) ? picture : null);
+        }
+
+        public Task<Auth0EmailStatus?> GetEmailStatus(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            EmailStatusCalls++;
+            OnEmailStatus?.Invoke();
+            if (ThrowOnEmailStatus)
+            {
+                throw new InvalidOperationException("Simulated Auth0 email status failure.");
+            }
+            return Task.FromResult(EmailStatus);
+        }
+
+        public Task SendVerificationEmail(string oauthUserId, System.Threading.CancellationToken ct)
+        {
+            if (ThrowOnSendVerification)
+            {
+                throw new PrintLogApi.Exceptions.Auth0ApiException("Simulated Auth0 failure.");
+            }
+            OnSendVerification?.Invoke();
+            VerificationEmailsSent.Add(oauthUserId);
+            return Task.CompletedTask;
+        }
 
         public Task DeleteUser(string? oauthUserId)
         {

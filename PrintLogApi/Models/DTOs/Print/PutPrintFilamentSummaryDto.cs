@@ -15,6 +15,9 @@ public class PutPrintFilamentSummaryDto
     /// </summary>
     public Guid? FilamentId { get; set; }
 
+    /// <summary>The printer slot (tool) the material was fed from, if known.</summary>
+    public int? Slot { get; set; }
+
     /// <summary>
     /// The estimated weight of filament used in milligrams.
     /// </summary>
@@ -36,7 +39,7 @@ public class PutPrintFilamentSummaryDto
     public double? LengthInM { get; set; }
 
     /// <summary>
-    /// The estimated length of filament used in meters.
+    /// The estimated volume of filament used in milliliters.
     /// </summary>
     public double? EstimatedVolumeMl { get; set; }
 
@@ -68,6 +71,13 @@ public class PutPrintFilamentSummaryDto
     /// The source of truth for the actual sections
     /// </summary>
     public SourceMeasurement? Source { get; set; }
+
+    /// <summary>
+    /// True when the actual figures are the slicer's estimate rather than a measurement, as from a
+    /// printer that reports only the estimate. Accuracy analytics leave such a row out. Defaults to
+    /// false (measured). Every row is replaced, so send it back to keep it.
+    /// </summary>
+    public bool ActualIsEstimate { get; set; }
 
     /// <summary>
     /// Any notes for this filament usage.

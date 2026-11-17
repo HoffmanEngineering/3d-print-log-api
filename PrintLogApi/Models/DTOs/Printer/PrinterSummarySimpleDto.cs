@@ -18,9 +18,22 @@ public class PrinterSummarySimpleDto
 
     public bool IsActive { get; set; }
 
+    /// <summary>Id of the printer catalog model this printer was picked from, if any.</summary>
+    public string? CatalogModelId { get; set; }
+
     public double? WattageW { get; set; }
+
+    /// <summary>How many filament positions the printer has. 1 for a single-tool printer.</summary>
+    public int SlotCount { get; set; }
 
     public PrinterCategoryDto? Category { get; set; }
 
     public ICollection<PrinterFilamentForSummaryDto>? LoadedFilaments { get; set; }
+
+    /// <summary>
+    /// Signed thumbnail URL for this printer's default photo. Populated per-request, AFTER
+    /// the cache read - a signed URL cached for the entry's lifetime would outlive its
+    /// signature.
+    /// </summary>
+    public string? DefaultImageThumbnailUrl { get; set; }
 }

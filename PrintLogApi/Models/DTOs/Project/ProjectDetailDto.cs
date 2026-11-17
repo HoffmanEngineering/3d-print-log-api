@@ -2,7 +2,7 @@
 
 namespace PrintLogApi.Models.DTOs.Project;
 
-public class ProjectDetailDto
+public class ProjectDetailDto : IProjectDates
 {
     public Guid Id { get; set; }
     public string? Name { get; set; }
@@ -17,5 +17,23 @@ public class ProjectDetailDto
     public int TotalPrintTimeInSeconds { get; set; }
     public int TotalEstimatedPrintTimeInSeconds { get; set; }
     public long TotalFilamentWeightMg { get; set; }
+
+    /// <summary>
+    /// Resin used, in milliliters (#294): only usage recorded as a volume, summed by the same
+    /// actual-else-estimate rule as the gram total. Beside TotalFilamentWeightMg, never added to it.
+    /// </summary>
+    public double TotalFilamentVolumeMl { get; set; }
     public IList<ProjectImageDto>? Images { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly StartDate { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? FinishDate { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? StartDateOverride { get; set; }
+
+    /// <inheritdoc />
+    public DateOnly? FinishDateOverride { get; set; }
 }
