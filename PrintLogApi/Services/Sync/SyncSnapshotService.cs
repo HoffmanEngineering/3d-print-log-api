@@ -50,7 +50,7 @@ public interface ISyncSnapshotService
 }
 
 /// <summary>
-/// Builds the integration snapshot (#234). See AGENTS.md, "Integration polling". Four cache
+/// Builds the integration snapshot (#234). See docs/agents/integration-polling.md. Four cache
 /// entries, all keyed on the user's version GUID so any write replaces them:
 /// <list type="bullet">
 /// <item><b>core</b> (<see cref="CoreKey"/>, 15 min): printers and spools, with a hash of their

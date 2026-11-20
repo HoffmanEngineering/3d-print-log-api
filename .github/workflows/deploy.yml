@@ -151,7 +151,7 @@ jobs:
       # and restarts, and the new process mounts the zip read-only as /home/site/wwwroot. Without
       # it Kudu extracts the zip over wwwroot while the old process is still loading assemblies
       # from it, which is what produced the BadImageFormatException bursts and HTTP 500s on every
-      # deploy through Nov 2026 (#309). See AGENTS.md, Deployment.
+      # deploy through Nov 2026 (#309). See docs/agents/deployment.md.
       #
       # restart is the API's default; it is spelled out because run-from-package depends on it
       # (the new package is only mounted by a restart). Do NOT add `type: zip`: in v3 a valid

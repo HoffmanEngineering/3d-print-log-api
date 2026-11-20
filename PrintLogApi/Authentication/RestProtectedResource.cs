@@ -14,7 +14,7 @@ namespace PrintLogApi.Authentication;
 /// (<c>Auth0:ApiIdentifier</c>) and the default bearer scheme rejects an MCP-audience token, so
 /// pointing a REST 401 there would send an agent off to fetch a token the REST API then refuses.
 /// This document names the REST audience and no scopes, because REST checks audience only (see
-/// the OpenAPI notes in AGENTS.md). Leave the root document alone: MCP clients fall back to it.</para>
+/// the OpenAPI notes in docs/agents/api-contract.md). Leave the root document alone: MCP clients fall back to it.</para>
 ///
 /// <para><b>Why a response hook, not <c>JwtBearerEvents.OnChallenge</c>.</b> A REST 401 comes
 /// from three places: the bearer challenge, <c>ApiKeyMiddleware</c> rejecting a key (which
