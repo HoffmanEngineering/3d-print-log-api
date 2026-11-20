@@ -378,14 +378,20 @@ public class SubscriptionService : ISubscriptionService
 
     private async Task HandleSubscriptionUpdated(Event stripeEvent)
     {
-        var stripeSubscription = stripeEvent.Data.Object as Stripe.Subscription;
-        if (stripeSubscription == null) return;
+        var eventSubscription = stripeEvent.Data.Object as Stripe.Subscription;
+        if (eventSubscription == null) return;
 
         var subscription = await _context.Subscriptions
-            .Where(s => s.StripeSubscriptionId == stripeSubscription.Id)
+            .Where(s => s.StripeSubscriptionId == eventSubscription.Id)
             .SingleOrDefaultAsync();
 
         if (subscription == null) return;
+
+        // The subscription's live state, not the event's snapshot, for the same reason as
+        // checkout.session.completed: Stripe does not order or deduplicate deliveries, so an
+        // "active" snapshot can be processed after customer.subscription.deleted, and nothing
+        // afterwards would take Pro back.
+        var stripeSubscription = await new Stripe.SubscriptionService().GetAsync(eventSubscription.Id);
 
         var stripeItem = stripeSubscription.Items.Data.FirstOrDefault();
         var priceId = stripeItem?.Price.Id;

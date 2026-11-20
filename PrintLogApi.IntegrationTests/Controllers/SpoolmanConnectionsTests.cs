@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using PrintLogApi.IntegrationTests.Billing;
 using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Spoolman;
 using PrintLogApi.Services;
@@ -21,6 +22,7 @@ namespace PrintLogApi.IntegrationTests.Controllers;
 /// Each test arranges a fresh user: tier rules and fair-use counts are per user, and the
 /// fixture's database is shared with every sibling.
 /// </summary>
+[Collection(StripeClientCollection.Name)]
 public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) : IClassFixture<SpoolmanConnectionsTests.Factory>
 {
     public const string AdminAddress = "spoolman-admin@example.test";
@@ -884,10 +886,13 @@ public class SpoolmanConnectionsTests(SpoolmanConnectionsTests.Factory factory) 
 
     /// <summary>
     /// Posts a Stripe subscription event signed the way Stripe signs them, through the real
-    /// webhook endpoint, so the downgrade is applied by the path production takes.
+    /// webhook endpoint, so the downgrade is applied by the path production takes. Stripe itself
+    /// is faked: <c>customer.subscription.updated</c> re-reads the subscription's live status.
     /// </summary>
     private async Task PostStripeEventAsync(string type, User user, string status)
     {
+        var fake = new FakeStripe { SubscriptionJson = id => FakeStripe.SubscriptionObjectJson(id, status) };
+        using var _ = fake.Install();
         var json = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
