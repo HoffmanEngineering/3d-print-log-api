@@ -32,8 +32,14 @@ it the same way. Verification email is Auth0's, not ours; the welcome email is q
 only to fill the add-print form; the print keeps nothing that points back to one. A connector's
 (#164) is linked by `PrintId` and holds parsed settings, no image.
 `CuraSettingsRetentionJob` deletes the first kind once `CuraSettingsRetention:RetentionDays` (7)
-old, daily, in batches of `BatchSize` (200) with `BatchPause` (2 s) between them, oldest first
-through the filtered index `IX_CuraSettings_Unlinked_CreatedDate`. **It never deletes a record with
+old, in batches of `BatchSize` (50) with `BatchPause` (5 s) between them, oldest first
+through the filtered index `IX_CuraSettings_Unlinked_CreatedDate`. A run stops after
+`MaxRunDuration` (30 min) or at the first failed batch; if expired records are left either way, the
+next run is `BacklogRetryInterval` (1 h) later, otherwise `RunInterval` (1 day). That is what clears
+a backlog: the first version used 200-row batches (14 to 28 s each on S0, against SqlClient's 30 s
+timeout), stopped at the first timeout and waited a day, and deleted 3,600 of 554,000 rows in two
+days. The first run waits ten minutes after start, apart from `PrinterPopularityJob`'s five; the two
+timed out together. **It never deletes a record with
 a `PrintId`**: keep the literal `PrintId IS NULL` in `Expired`, which is also what matches the
 index's filter (`CuraSettingsRetentionSqlServerTranslationTests`). A form opened from an older
 upload gets a 404 from `GET /api/Cura/settings`, and a print created with an expired id still
