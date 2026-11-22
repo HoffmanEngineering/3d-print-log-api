@@ -16,10 +16,15 @@ namespace PrintLogApi.Services.SlicerSettings;
 /// and are never touched: they are still read, and they hold no image.
 /// </para>
 /// <para>
-/// Batched, oldest first, with a pause between batches: the first run after deploy clears years
-/// of backlog, and one large DELETE would hold the S0 database's log allowance for hours. The
-/// first tick waits five minutes so a cold start is not slowed. A failed tick is logged and the
-/// loop carries on; the next one resumes where it stopped.
+/// Batched, oldest first, with a pause between batches: one large DELETE would hold the S0
+/// database's log allowance for hours. A run stops at
+/// <see cref="CuraSettingsRetentionOptions.MaxRunDuration"/> or at the first failed batch, and
+/// either way the next run comes after
+/// <see cref="CuraSettingsRetentionOptions.BacklogRetryInterval"/> (an hour) instead of a day, so
+/// a backlog (554,000 rows when this shipped) is cleared in hourly slices and a timeout costs an
+/// hour, not a day. The first run waits ten minutes so a cold start is not slowed, and so it does
+/// not start together with <c>PrinterPopularityJob</c> (five minutes): on S0 the two timed out
+/// together.
 /// </para>
 /// </summary>
 public sealed class CuraSettingsRetentionJob(
@@ -28,11 +33,12 @@ public sealed class CuraSettingsRetentionJob(
     TimeProvider timeProvider,
     ILogger<CuraSettingsRetentionJob> logger) : BackgroundService
 {
-    private static readonly TimeSpan InitialDelay = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan InitialDelay = TimeSpan.FromMinutes(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled)
+        var settings = options.Value;
+        if (!settings.Enabled)
         {
             return;
         }
@@ -40,61 +46,81 @@ public sealed class CuraSettingsRetentionJob(
         try
         {
             await Task.Delay(InitialDelay, timeProvider, stoppingToken);
-            using var timer = new PeriodicTimer(options.Value.RunInterval, timeProvider);
-            do
+            while (true)
             {
-                try
-                {
-                    await RunOnceAsync(timeProvider.GetUtcNow(), stoppingToken);
-                }
-                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-                {
-                    logger.LogError(ex, "Slicer settings retention failed");
-                }
+                var result = await RunOnceAsync(timeProvider.GetUtcNow(), stoppingToken);
+                await Task.Delay(NextRunDelay(result, settings), timeProvider, stoppingToken);
             }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
     }
 
-    /// <summary>Deletes every expired uploader record, batch by batch, and returns how many.</summary>
-    internal async Task<int> RunOnceAsync(DateTimeOffset now, CancellationToken ct)
+    /// <summary>How long to wait after a run: an hour while expired records are left, else a day.</summary>
+    internal static TimeSpan NextRunDelay(RetentionRunResult result, CuraSettingsRetentionOptions settings) =>
+        result.BacklogRemains ? settings.BacklogRetryInterval : settings.RunInterval;
+
+    /// <summary>
+    /// Deletes expired uploader records, batch by batch, until none is left, the run reaches
+    /// <see cref="CuraSettingsRetentionOptions.MaxRunDuration"/>, or a batch fails. A failure is
+    /// logged here and never thrown (cancellation is), so the caller only has to schedule the next run.
+    /// </summary>
+    internal async Task<RetentionRunResult> RunOnceAsync(DateTimeOffset now, CancellationToken ct)
     {
         var settings = options.Value;
         var cutoff = now.AddDays(-settings.RetentionDays);
+        var started = timeProvider.GetTimestamp();
         var total = 0;
+        var backlogRemains = false;
 
-        while (true)
+        try
         {
-            int deleted;
-            // A scope per batch, so a long backlog run never holds one context (or its
-            // connection) for hours.
-            await using (var scope = scopeFactory.CreateAsyncScope())
+            while (true)
             {
-                var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
-                deleted = await Expired(context, cutoff, settings.BatchSize).ExecuteDeleteAsync(ct);
-            }
+                int deleted;
+                // A scope per batch, so a long backlog run never holds one context (or its
+                // connection) for hours.
+                await using (var scope = scopeFactory.CreateAsyncScope())
+                {
+                    var context = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+                    deleted = await Expired(context, cutoff, settings.BatchSize).ExecuteDeleteAsync(ct);
+                }
 
-            total += deleted;
-            if (deleted < settings.BatchSize)
-            {
-                break;
-            }
+                total += deleted;
+                if (deleted < settings.BatchSize)
+                {
+                    break;
+                }
 
-            if (settings.BatchPause > TimeSpan.Zero)
-            {
-                await Task.Delay(settings.BatchPause, timeProvider, ct);
+                if (timeProvider.GetElapsedTime(started) >= settings.MaxRunDuration)
+                {
+                    backlogRemains = true;
+                    break;
+                }
+
+                if (settings.BatchPause > TimeSpan.Zero)
+                {
+                    await Task.Delay(settings.BatchPause, timeProvider, ct);
+                }
             }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "Slicer settings retention failed after deleting {Count} records older than {Cutoff:O}; retrying in {Retry}",
+                total, cutoff, settings.BacklogRetryInterval);
+            return new RetentionRunResult(total, BacklogRemains: true);
         }
 
         if (total > 0)
         {
-            logger.LogInformation("Deleted {Count} slicer uploader settings records older than {Cutoff:O}", total, cutoff);
+            logger.LogInformation(
+                "Deleted {Count} slicer uploader settings records older than {Cutoff:O}; backlog remains: {BacklogRemains}",
+                total, cutoff, backlogRemains);
         }
 
-        return total;
+        return new RetentionRunResult(total, backlogRemains);
     }
 
     /// <summary>
@@ -109,3 +135,6 @@ public sealed class CuraSettingsRetentionJob(
             .OrderBy(c => c.CreatedDate)
             .Take(batchSize);
 }
+
+/// <summary>What one retention run did: how many records it deleted, and whether expired ones are left.</summary>
+internal readonly record struct RetentionRunResult(int Deleted, bool BacklogRemains);

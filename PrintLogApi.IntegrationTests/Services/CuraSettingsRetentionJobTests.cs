@@ -18,11 +18,22 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private CuraSettingsRetentionJob Job(int batchSize = 200) => new(
-        factory.Services.GetRequiredService<IServiceScopeFactory>(),
-        Options.Create(new CuraSettingsRetentionOptions { BatchSize = batchSize, BatchPause = TimeSpan.Zero }),
+    private CuraSettingsRetentionJob Job(int batchSize = 200, TimeSpan? maxRunDuration = null, IServiceScopeFactory? scopeFactory = null) => new(
+        scopeFactory ?? factory.Services.GetRequiredService<IServiceScopeFactory>(),
+        Options.Create(new CuraSettingsRetentionOptions
+        {
+            BatchSize = batchSize,
+            BatchPause = TimeSpan.Zero,
+            MaxRunDuration = maxRunDuration ?? TimeSpan.FromHours(1),
+        }),
         TimeProvider.System,
         NullLogger<CuraSettingsRetentionJob>.Instance);
+
+    /// <summary>Fails every batch the way a SQL timeout or a dropped connection would.</summary>
+    private sealed class FailingScopeFactory : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => throw new InvalidOperationException("Execution Timeout Expired.");
+    }
 
     private static CuraSetting Record(string tag, DateTimeOffset createdDate, long? printId = null) => new()
     {
@@ -70,10 +81,47 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
     {
         await Seed(Enumerable.Range(0, 5).Select(i => Record($"batch:{i}", Now.AddDays(-10 - i))).ToArray());
 
-        var deleted = await Job(batchSize: 2).RunOnceAsync(Now, TestContext.Current.CancellationToken);
+        var result = await Job(batchSize: 2).RunOnceAsync(Now, TestContext.Current.CancellationToken);
 
-        Assert.Equal(5, deleted);
+        Assert.Equal(5, result.Deleted);
+        Assert.False(result.BacklogRemains);
         Assert.Empty(await Remaining("batch:"));
+    }
+
+    [Fact]
+    public async Task RunOnce_StopsAtMaxRunDuration_AndReportsTheBacklog()
+    {
+        await Seed(Enumerable.Range(0, 5).Select(i => Record($"capped:{i}", Now.AddDays(-10 - i))).ToArray());
+
+        // A zero cap is reached after the first batch, which is always deleted.
+        var result = await Job(batchSize: 2, maxRunDuration: TimeSpan.Zero)
+            .RunOnceAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Deleted);
+        Assert.True(result.BacklogRemains);
+        // Oldest first: the two oldest (-14 and -13 days) went.
+        Assert.Equal(["capped:0", "capped:1", "capped:2"], await Remaining("capped:"));
+    }
+
+    [Fact]
+    public async Task RunOnce_WhenABatchFails_LogsInsteadOfThrowing_AndReportsTheBacklog()
+    {
+        var result = await Job(scopeFactory: new FailingScopeFactory())
+            .RunOnceAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, result.Deleted);
+        Assert.True(result.BacklogRemains);
+    }
+
+    [Fact]
+    public void NextRunDelay_IsTheBacklogRetryWhileRecordsAreLeft_ElseTheDailyInterval()
+    {
+        var settings = new CuraSettingsRetentionOptions();
+
+        Assert.Equal(TimeSpan.FromHours(1),
+            CuraSettingsRetentionJob.NextRunDelay(new RetentionRunResult(50, BacklogRemains: true), settings));
+        Assert.Equal(TimeSpan.FromDays(1),
+            CuraSettingsRetentionJob.NextRunDelay(new RetentionRunResult(3, BacklogRemains: false), settings));
     }
 
     [Fact]
