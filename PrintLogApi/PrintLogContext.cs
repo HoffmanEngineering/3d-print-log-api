@@ -819,6 +819,22 @@ public class PrintLogContext : DbContext
             .IncludeProperties(p => new { p.Id, p.Title, p.Status, p.PrinterId, p.EstimatedPrintTimeInSeconds, p.PrintTimeInSeconds })
             .HasDatabaseName("IX_Prints_Summary");
 
+        // Prints on a printer by start: PrinterPopularityJob's "printed since the cutoff" check and
+        // LinkPrintingRows' newest print still printing. Leads with PrinterId, so it replaces the
+        // foreign key's own index. Built online by the QueryStoreIndexes migration.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => new { p.PrinterId, p.StartDate })
+            .IncludeProperties(p => new { p.Status })
+            .HasDatabaseName("IX_Prints_PrinterId_StartDate");
+
+        // A narrow copy of what lookups by id read: a spool's usage-row ownership check
+        // (SpoolOwnership.UsageRowCounts) and the Spoolman use dates. The clustered index carries
+        // Notes in row, so each lookup there is a page of its own on S0.
+        modelBuilder.Entity<Print>()
+            .HasIndex(p => p.Id)
+            .IncludeProperties(p => new { p.CreatedById, p.PrinterId, p.StartDate, p.CreatedDate })
+            .HasDatabaseName("IX_Prints_Id_Covering");
+
         modelBuilder.Entity<PrintFilament>().HasIndex(pf => pf.PrintId).IncludeProperties(pf => new
         {
             pf.FilamentId,

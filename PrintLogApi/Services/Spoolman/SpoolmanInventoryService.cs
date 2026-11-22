@@ -141,21 +141,26 @@ public sealed class SpoolmanInventoryService(
     /// (<c>PrintLogContext</c>'s converter), so there two starts in different offsets less than
     /// the difference between those offsets apart can compare the wrong way round. No test
     /// depends on that, and none should.</para>
+    ///
+    /// <para>Explicit joins, grouped by the spool's own (non-nullable) id. Grouping the nullable
+    /// <c>PrintFilament.FilamentId</c> through the <c>Print</c> navigation made EF write each
+    /// aggregate as a correlated subquery that read every print in the database
+    /// (<c>SpoolmanUseDatesTranslationTests</c>).</para>
     /// </summary>
     internal static IQueryable<UseDatesRow> UseDatesQuery(PrintLogContext db, long userId) =>
-        db.PrintFilament
-            .AsNoTracking()
-            .Where(pf => pf.Filament != null && pf.Filament.CreatedById == userId && pf.Filament.MaterialCategoryNickname == FilamentCategory)
-            .Select(pf => new { pf.FilamentId, pf.Print.StartDate, pf.Print.CreatedDate })
-            .GroupBy(u => u.FilamentId)
-            .Select(g => new UseDatesRow
-            {
-                FilamentId = g.Key,
-                FirstStart = g.Min(u => u.StartDate),
-                LastStart = g.Max(u => u.StartDate),
-                FirstUndated = g.Min(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
-                LastUndated = g.Max(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
-            });
+        from pf in db.PrintFilament.AsNoTracking()
+        join f in db.Filaments on pf.FilamentId equals (Guid?)f.Id
+        join p in db.Prints on pf.PrintId equals p.Id
+        where f.CreatedById == userId && f.MaterialCategoryNickname == FilamentCategory
+        group new { p.StartDate, p.CreatedDate } by f.Id into g
+        select new UseDatesRow
+        {
+            FilamentId = g.Key,
+            FirstStart = g.Min(u => u.StartDate),
+            LastStart = g.Max(u => u.StartDate),
+            FirstUndated = g.Min(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
+            LastUndated = g.Max(u => u.StartDate == null ? (DateTime?)u.CreatedDate : null),
+        };
 
     /// <summary>One spool's use dates, as <see cref="UseDatesQuery"/> aggregates them.</summary>
     internal sealed class UseDatesRow

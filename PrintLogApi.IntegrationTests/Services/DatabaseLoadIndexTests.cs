@@ -81,4 +81,40 @@ public class DatabaseLoadIndexTests
         Assert.Equal(["ViewStatus"], Columns(index));
         Assert.Equal(["UpdatedDate"], index.GetIncludeProperties());
     }
+
+    /// <summary>
+    /// <c>PrinterPopularityJob.OwnerCounts</c> asks, per active printer, whether it has a print
+    /// started since the cutoff. With only <c>(PrinterId)</c> to seek, SQL Server range-scanned the
+    /// StartDate index once per printer, and every daily run hit the 30 s timeout. The same index
+    /// serves <c>PrinterService.LinkPrintingRows</c> (newest print still printing on a printer).
+    /// It replaces the plain foreign-key index, which it leads with.
+    /// </summary>
+    [Fact]
+    public void PrinterActivity_HasAnIndexOnPrinterThenStartDate_CoveringStatus()
+    {
+        using var context = SqlServerContext();
+
+        var index = Index(context, typeof(Print), "IX_Prints_PrinterId_StartDate");
+        Assert.Equal(["PrinterId", "StartDate"], Columns(index));
+        Assert.Equal(["Status"], index.GetIncludeProperties());
+
+        var names = Model(context).FindEntityType(typeof(Print))!.GetIndexes().Select(i => i.GetDatabaseName()).ToList();
+        Assert.DoesNotContain("IX_Prints_PrinterId", names);
+    }
+
+    /// <summary>
+    /// A spool's remaining weight checks each usage row's print for its creator and printer
+    /// (<c>SpoolOwnership.UsageRowCounts</c>), and the Spoolman use dates read each print's dates.
+    /// Through the clustered index each of those is a read of a wide row (Notes is stored in
+    /// row), thousands per filament list on S0. This narrow copy stays in memory.
+    /// </summary>
+    [Fact]
+    public void PrintLookupsById_HaveANarrowCoveringIndex()
+    {
+        using var context = SqlServerContext();
+
+        var index = Index(context, typeof(Print), "IX_Prints_Id_Covering");
+        Assert.Equal(["Id"], Columns(index));
+        Assert.Equal(["CreatedById", "PrinterId", "StartDate", "CreatedDate"], index.GetIncludeProperties());
+    }
 }

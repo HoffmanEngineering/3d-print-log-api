@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Services.Spoolman;
 using Xunit;
 
@@ -26,7 +27,8 @@ public class SpoolmanUseDatesTranslationTests
         var sql = SpoolmanInventoryService.UseDatesQuery(context, 42).ToQueryString();
 
         // Aliases are EF's to choose; the columns and aggregates are what matter.
-        Assert.Matches(@"GROUP BY \[\w+\]\.\[FilamentId\]", sql);
+        // Grouped by the spool's own id: the joined Filaments row, never the nullable usage column.
+        Assert.Matches(@"GROUP BY \[f\w*\]\.\[Id\]\s*$", sql);
         // SQL Server compares datetimeoffset by its UTC instant, which is what the in-memory
         // version compared, so the earliest and latest starts are the same rows.
         Assert.Matches(@"MIN\(\[\w+\]\.\[StartDate\]\)", sql);
@@ -36,5 +38,24 @@ public class SpoolmanUseDatesTranslationTests
         Assert.Matches(@"MAX\(CASE\s+WHEN \[\w+\]\.\[StartDate\] IS NULL THEN \[\w+\]\.\[CreatedDate\]", sql);
         // One row per spool, not one per usage row: nothing outside the aggregates but the key.
         Assert.DoesNotMatch(@"SELECT\s+\[\w+\]\.\[StartDate\]", sql);
+    }
+
+    /// <summary>
+    /// One pass over the usage rows. Grouping on the nullable <c>FilamentId</c> through the
+    /// <c>Print</c> navigation made EF write each aggregate as its own correlated subquery, and
+    /// none of the four filtered <c>Prints</c> by user, so each read all of
+    /// <c>IX_Prints_CreatedById</c>: 2.5 s and 20,000 reads a call in production, the database's
+    /// largest CPU consumer (Query Store, Nov 2026).
+    /// </summary>
+    [Fact]
+    public void UseDates_ReadTheUsageRowsAndPrintsOnce()
+    {
+        using var context = SqlServerContext();
+
+        var sql = SpoolmanInventoryService.UseDatesQuery(context, 42).ToQueryString();
+
+        Assert.Single(Regex.Matches(sql, @"\[PrintFilament\] AS"));
+        Assert.Single(Regex.Matches(sql, @"\[Prints\] AS"));
+        Assert.Single(Regex.Matches(sql, @"\[Filaments\] AS"));
     }
 }

@@ -17,7 +17,7 @@ namespace PrintLogApi.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -1758,7 +1758,10 @@ namespace PrintLogApi.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedById"), new[] { "Source", "Slicer", "Status", "StartDate", "CreatedDate", "PrintTimeInSeconds", "EstimatedPrintTimeInSeconds", "FilamentUsageMg", "EstimatedFilamentUsageMg", "ViewStatus" });
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_Prints_Id_Covering");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Id"), new[] { "CreatedById", "PrinterId", "StartDate", "CreatedDate" });
 
                     b.HasIndex("ProjectId")
                         .HasDatabaseName("IX_Prints_ProjectId");
@@ -1769,6 +1772,11 @@ namespace PrintLogApi.Migrations
                         .HasDatabaseName("IX_Prints_ViewStatus");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("ViewStatus"), new[] { "UpdatedDate" });
+
+                    b.HasIndex("PrinterId", "StartDate")
+                        .HasDatabaseName("IX_Prints_PrinterId_StartDate");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PrinterId", "StartDate"), new[] { "Status" });
 
                     b.HasIndex("CreatedById", "ExternalSource", "ExternalId")
                         .IsUnique()
