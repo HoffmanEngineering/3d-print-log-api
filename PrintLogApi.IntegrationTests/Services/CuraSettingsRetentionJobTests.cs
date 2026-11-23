@@ -65,6 +65,9 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
     [Fact]
     public async Task RunOnce_DeletesUnlinkedRecordsPastSevenDays_AndKeepsNewerAndLinkedOnes()
     {
+        // Starting the host runs the seeder. Read TestPrintId only after that: when this is the
+        // first test to touch the factory it is still 0, and the linked record fails its key.
+        _ = factory.Services;
         await Seed(
             Record("keep-a:old", Now.AddDays(-8)),
             Record("keep-a:edge", Now.AddDays(-7).AddMinutes(1)),
@@ -83,7 +86,9 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
 
         var result = await Job(batchSize: 2).RunOnceAsync(Now, TestContext.Current.CancellationToken);
 
-        Assert.Equal(5, result.Deleted);
+        // At least this test's five: a sibling may leave expired records of its own behind (the
+        // max-duration test does on purpose), and this run clears those too.
+        Assert.True(result.Deleted >= 5, $"deleted {result.Deleted}");
         Assert.False(result.BacklogRemains);
         Assert.Empty(await Remaining("batch:"));
     }
@@ -91,7 +96,9 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
     [Fact]
     public async Task RunOnce_StopsAtMaxRunDuration_AndReportsTheBacklog()
     {
-        await Seed(Enumerable.Range(0, 5).Select(i => Record($"capped:{i}", Now.AddDays(-10 - i))).ToArray());
+        // Far older than any sibling's records, so this test's are the oldest in the shared database
+        // whichever tests ran before it.
+        await Seed(Enumerable.Range(0, 5).Select(i => Record($"capped:{i}", Now.AddDays(-1000 - i))).ToArray());
 
         // A zero cap is reached after the first batch, which is always deleted.
         var result = await Job(batchSize: 2, maxRunDuration: TimeSpan.Zero)
@@ -99,7 +106,7 @@ public class CuraSettingsRetentionJobTests(CustomWebApplicationFactory factory) 
 
         Assert.Equal(2, result.Deleted);
         Assert.True(result.BacklogRemains);
-        // Oldest first: the two oldest (-14 and -13 days) went.
+        // Oldest first: the two oldest (-1004 and -1003 days) went.
         Assert.Equal(["capped:0", "capped:1", "capped:2"], await Remaining("capped:"));
     }
 

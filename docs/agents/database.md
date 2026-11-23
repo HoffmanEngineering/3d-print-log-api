@@ -15,6 +15,16 @@ A **filtered index** is used only by queries whose predicate is the filter as a 
 and the index is ignored. Pin the shape as `DatabaseLoadIndexTests` does. A session writing to a
 table with a filtered index needs `QUOTED_IDENTIFIER ON` (SqlClient's default; `sqlcmd` needs `-I`).
 
+`Prints` rows are wide (`Notes` is `nvarchar(max)` stored in row), so on S0 every lookup into its
+clustered index costs a page read. A query that touches many prints for a few columns should be
+served by a narrow index: `IX_Prints_Id_Covering` (creator, printer and dates by id) and
+`IX_Prints_PrinterId_StartDate` exist for that (`QueryStoreIndexes`, from a Query Store review).
+Azure automatic tuning has `CREATE_INDEX` on in production, so indexes named `nci_wi_*` /
+`nci_msft_*` exist there that are not in the model; drop one in a migration with `IF EXISTS`, never
+assume the model lists everything production has. Group aggregates by a non-nullable key over
+explicit joins: grouping a nullable foreign key through a navigation made EF write one correlated
+subquery per aggregate (`SpoolmanUseDatesTranslationTests`).
+
 ### The email dispatcher polls every 2 minutes
 
 `EmailDispatcherService` runs about five statements per tick even with nothing due, and at 30 s
