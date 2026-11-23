@@ -50,7 +50,9 @@ public class UsersController(
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
 
     /// <summary>
-    /// Get the user summary for the specified user id. 
+    /// Get the user summary for the specified user id. Follows the profile's visibility, as
+    /// <see cref="GetUserDetails"/> does: a Private or Friends profile answers 403 to anyone but
+    /// its owner. The print page shows no byline when this fails (#66).
     /// </summary>
     /// <param name="id">The ID of the user to retrieve.</param>
     /// <returns></returns>
@@ -60,7 +62,6 @@ public class UsersController(
     {
         var user = await context.Users
             .Where(u => u.Id == id)
-            .ProjectTo<UserSummaryDto>(mapper.ConfigurationProvider)
             .AsNoTracking()
             .SingleOrDefaultAsync();
 
@@ -69,7 +70,12 @@ public class UsersController(
             return NotFound();
         }
 
-        return user;
+        if (!await CanViewUserProfile(user))
+        {
+            return Forbid();
+        }
+
+        return mapper.Map<UserSummaryDto>(user);
     }
 
     /// <summary>

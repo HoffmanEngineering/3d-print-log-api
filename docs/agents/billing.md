@@ -31,6 +31,12 @@ Checkout, the billing portal and the inbound webhook: `Controllers/SubscriptionC
   nor deduplicates deliveries, so the event can arrive after the subscription was canceled, and
   nothing afterwards would correct a hard-coded Active. Only `active` and `trialing` map to Active;
   any other or unknown status maps to one that grants nothing.
+- **`customer.subscription.updated` re-reads the subscription too** (`GET /v1/subscriptions/{id}`)
+  and ignores the event's snapshot. An "active" snapshot retried, delivered late or resent after
+  `customer.subscription.deleted` used to restore Pro for good. It looks up the local row first, so
+  an event for a subscription the API never stored costs no Stripe call. A test that posts this
+  event must install `FakeStripe` and join `StripeClientCollection`, as `SpoolmanConnectionsTests`
+  does.
 - **The webhook body is capped at 1 MiB** (`MaxWebhookBodyBytes`): it is read before its signature
   can be checked, on an anonymous route exempt from rate limiting. TestServer does not enforce
   request size limits, so `StripeWebhookTests` pins the endpoint metadata instead.

@@ -74,6 +74,8 @@ public class StripeWebhookTests(CustomWebApplicationFactory factory) : IClassFix
     [Fact]
     public async Task SubscriptionUpdated_ToActive_GrantsPro()
     {
+        var fake = new FakeStripe { SubscriptionJson = id => FakeStripe.SubscriptionObjectJson(id, "active") };
+        using var _ = fake.Install();
         var user = await StripeTestData.UserAsync(factory, SubscriptionStatus.Canceled);
         var json = StripeTestData.EventJson("customer.subscription.updated", SubscriptionObject(user, "active"));
 
@@ -160,6 +162,69 @@ public class StripeWebhookTests(CustomWebApplicationFactory factory) : IClassFix
 
         Assert.Equal(SubscriptionStatus.Active, (await StripeTestData.SubscriptionAsync(factory, user.Id))!.Status);
         Assert.Equal(1, await StripeTestData.NotificationCountAsync(factory, user.Id, NotificationType.SubscriptionActivated));
+    }
+
+    #endregion
+
+    #region customer.subscription.updated reads the subscription's live status
+
+    /// <summary>
+    /// Stripe neither orders nor deduplicates deliveries. An <c>updated</c> event that says
+    /// "active", processed after the subscription was deleted (a retry, a late delivery or a
+    /// manual resend), must not grant Pro again: a deleted subscription sends nothing afterwards
+    /// that would take it back.
+    /// </summary>
+    [Fact]
+    public async Task SubscriptionUpdated_ProcessedAfterDeleted_DoesNotRestorePro()
+    {
+        var fake = new FakeStripe { SubscriptionJson = id => FakeStripe.SubscriptionObjectJson(id, "canceled") };
+        using var _ = fake.Install();
+        var user = await StripeTestData.UserAsync(factory, SubscriptionStatus.Active);
+        var deleted = StripeTestData.EventJson("customer.subscription.deleted", SubscriptionObject(user, "canceled"));
+        var lateUpdate = StripeTestData.EventJson("customer.subscription.updated", SubscriptionObject(user, "active"));
+
+        await AssertOk(await _client.SendAsync(Webhook(deleted, StripeTestData.Sign(WebhookSecret, deleted)), Ct));
+        await AssertOk(await _client.SendAsync(Webhook(lateUpdate, StripeTestData.Sign(WebhookSecret, lateUpdate)), Ct));
+
+        Assert.Equal(SubscriptionStatus.Canceled, (await StripeTestData.SubscriptionAsync(factory, user.Id))!.Status);
+    }
+
+    [Theory]
+    [InlineData("canceled", SubscriptionStatus.Canceled)]
+    [InlineData("past_due", SubscriptionStatus.PastDue)]
+    [InlineData("incomplete_expired", SubscriptionStatus.None)]
+    public async Task SubscriptionUpdated_StoresTheLiveStatus_NotThePayloads(string liveStatus, SubscriptionStatus expected)
+    {
+        var fake = new FakeStripe { SubscriptionJson = id => FakeStripe.SubscriptionObjectJson(id, liveStatus) };
+        using var _ = fake.Install();
+        var user = await StripeTestData.UserAsync(factory, SubscriptionStatus.Canceled);
+        var json = StripeTestData.EventJson("customer.subscription.updated", SubscriptionObject(user, "active"));
+
+        await AssertOk(await _client.SendAsync(Webhook(json, StripeTestData.Sign(WebhookSecret, json)), Ct));
+
+        Assert.Contains(fake.Requests, r => r.Path == $"/v1/subscriptions/{StripeTestData.SubscriptionId(user)}");
+        Assert.Equal(expected, (await StripeTestData.SubscriptionAsync(factory, user.Id))!.Status);
+    }
+
+    /// <summary>An event for a subscription this API never stored costs no Stripe call.</summary>
+    [Fact]
+    public async Task SubscriptionUpdated_ForAnUnknownSubscription_DoesNotCallStripe()
+    {
+        var fake = new FakeStripe { SubscriptionJson = id => FakeStripe.SubscriptionObjectJson(id, "active") };
+        using var _ = fake.Install();
+        var json = StripeTestData.EventJson("customer.subscription.updated", new
+        {
+            id = "sub_nobody_has_this",
+            @object = "subscription",
+            customer = "cus_nobody",
+            status = "active",
+            cancel_at_period_end = false,
+            items = new { @object = "list", data = Array.Empty<object>() },
+        });
+
+        await AssertOk(await _client.SendAsync(Webhook(json, StripeTestData.Sign(WebhookSecret, json)), Ct));
+
+        Assert.Empty(fake.Requests);
     }
 
     #endregion
