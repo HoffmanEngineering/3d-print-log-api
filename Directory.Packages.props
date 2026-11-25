@@ -56,8 +56,8 @@
        the two halves speak a versioned protocol revision to each other - so they must be bumped
        together. That coupling is exactly what central package management is for. -->
   <ItemGroup>
-    <PackageVersion Include="ModelContextProtocol" Version="2.0.0" />
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.4.0" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
   </ItemGroup>
 
   <!-- Transitive security pins. Nothing references these directly; each entry exists only to lift a
