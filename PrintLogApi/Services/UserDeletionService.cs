@@ -298,6 +298,11 @@ public class UserDeletionService : IUserDeletionService
                 await _context.PrintFilament
                     .Where(pf => printIds.Contains(pf.PrintId))
                     .ExecuteDeleteAsync();
+
+                // The FK cascades too; deleted here so the step is explicit and safe to repeat.
+                await _context.PrintTimelineEvents
+                    .Where(e => printIds.Contains(e.PrintId))
+                    .ExecuteDeleteAsync();
             }
 
             // Delete PrintAttachments, their blobs, and their associated Files for user's prints

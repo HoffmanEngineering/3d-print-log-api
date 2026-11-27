@@ -1707,6 +1707,12 @@ namespace PrintLogApi.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("PausedSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("PausedSince")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<int?>("PrintTimeInSeconds")
                         .HasColumnType("int");
 
@@ -2015,6 +2021,50 @@ namespace PrintLogApi.Migrations
                     b.HasIndex("UpdatedById");
 
                     b.ToTable("PrintImages");
+                });
+
+            modelBuilder.Entity("PrintLogApi.Models.PrintTimelineEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("PrintId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrintId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("PrintTimelineEvents");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
@@ -3951,6 +4001,17 @@ namespace PrintLogApi.Migrations
                     b.Navigation("UpdatedBy");
                 });
 
+            modelBuilder.Entity("PrintLogApi.Models.PrintTimelineEvent", b =>
+                {
+                    b.HasOne("PrintLogApi.Models.Print", "Print")
+                        .WithMany("TimelineEvents")
+                        .HasForeignKey("PrintId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Print");
+                });
+
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
                 {
                     b.HasOne("PrintLogApi.Models.PrinterModel", "CatalogModel")
@@ -4331,6 +4392,8 @@ namespace PrintLogApi.Migrations
                     b.Navigation("FilamentUsage");
 
                     b.Navigation("Images");
+
+                    b.Navigation("TimelineEvents");
                 });
 
             modelBuilder.Entity("PrintLogApi.Models.Printer", b =>
