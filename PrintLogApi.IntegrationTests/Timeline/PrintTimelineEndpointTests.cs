@@ -1,7 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using PrintLogApi.Models;
 using PrintLogApi.Models.DTOs.Print;
 using Xunit;
 using static PrintLogApi.Models.Print;

@@ -97,7 +97,11 @@ public sealed class AccuracyAnalyticsService(PrintLogContext context, TimeProvid
                     : null,
                 p.StartDate,
                 EstimatedSeconds = p.EstimatedPrintTimeInSeconds ?? 0,
-                ActualSeconds = p.PrintTimeInSeconds ?? 0,
+                // Active time (api#343): a print's duration includes its pauses, which the
+                // slicer's estimate never accounts for.
+                ActualSeconds = p.PrintTimeInSeconds.HasValue && p.PausedSeconds.HasValue && p.PausedSeconds < p.PrintTimeInSeconds
+                    ? p.PrintTimeInSeconds.Value - p.PausedSeconds.Value
+                    : p.PrintTimeInSeconds ?? 0,
                 // The rows PLUS the "other filament" scalars. Those two columns are a
                 // genuine actual/estimate pair on the print itself (PrintProfile keeps them
                 // parallel for exactly this reason), so omitting them would silently shrink

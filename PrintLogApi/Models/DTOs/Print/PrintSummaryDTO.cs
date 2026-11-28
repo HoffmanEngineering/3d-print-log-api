@@ -55,4 +55,7 @@ public class PrintSummaryDTO
 
     /// <summary>The job's id in <see cref="ExternalSource"/>. Shown to the creator only.</summary>
     public string? ExternalId { get; set; }
+
+    /// <summary>When the open pause started, or null when not paused (api#343). Only meaningful while Printing.</summary>
+    public DateTimeOffset? PausedSince { get; set; }
 }

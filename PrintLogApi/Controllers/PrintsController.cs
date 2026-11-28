@@ -343,6 +343,7 @@ public class PrintsController(
             printDetailDto.ExternalSource = null;
             printDetailDto.ExternalId = null;
             printDetailDto.ConnectionDisplayName = null;
+            printDetailDto.PausedSeconds = null;
             PrintVisitorRedaction.RedactFilamentUsage(printDetailDto.FilamentUsage);
 
             if (printDetailDto.ProjectId is { } projectId)

@@ -73,6 +73,7 @@ public sealed record SyncConnection(string Kind, string Status)
 }
 
 /// <param name="EstimatedEndAt"><see cref="StartedAt"/> plus <see cref="EstimatedSeconds"/>, when both exist.</param>
+/// <param name="IsPaused">True while the print is paused (api#343); it stays the current print.</param>
 public sealed record SyncCurrentPrint(
     long Id,
     string? Title,
@@ -81,7 +82,8 @@ public sealed record SyncCurrentPrint(
     DateTimeOffset? EstimatedEndAt,
     string Source,
     string? Url,
-    IReadOnlyList<SyncPrintFilament> Filament);
+    IReadOnlyList<SyncPrintFilament> Filament,
+    bool IsPaused);
 
 /// <summary>One slot's estimate for a print in progress.</summary>
 /// <param name="Slot">The printer slot (tool) the material feeds from, or null when not recorded.</param>

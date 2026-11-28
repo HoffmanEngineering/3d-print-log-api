@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Models;
@@ -51,7 +51,10 @@ public class PrintTimelineLifecycleTests : IClassFixture<CustomWebApplicationFac
         await NotifyAsync(new PrintEventMessageDto { EventName = "started", Filename = file, PrinterId = IntegrationTestSeeder.TestPrinterId });
         await NotifyAsync(new PrintEventMessageDto
         {
-            EventName = "complete", Filename = file, PrinterId = IntegrationTestSeeder.TestPrinterId, TotalDuration = 60,
+            EventName = "complete",
+            Filename = file,
+            PrinterId = IntegrationTestSeeder.TestPrinterId,
+            TotalDuration = 60,
         });
 
         var printId = await PrintIdByFileAsync(file);

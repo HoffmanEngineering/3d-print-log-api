@@ -1,4 +1,4 @@
-using Microsoft.ApplicationInsights;
+﻿using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;

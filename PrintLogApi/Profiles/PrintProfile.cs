@@ -90,6 +90,9 @@ public class PrintProfile : Profile
             .ForMember(dest => dest.ProjectId, opt => opt.MapFrom(src => src.ProjectId));
 
         CreateMap<PrintDetailDTO, Print>()
+            // Server-owned (api#343): only the timeline moves them.
+            .ForMember(dest => dest.PausedSince, opt => opt.Ignore())
+            .ForMember(dest => dest.PausedSeconds, opt => opt.Ignore())
             .ForMember(dest => dest.Printer, opt => opt.Ignore())
             .ForMember(dest => dest.Images, opt => opt.Ignore())
             .ForMember(dest => dest.Comments, opt => opt.Ignore());

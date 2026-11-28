@@ -11,12 +11,12 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
-using PrintLogApi.Services.Timeline;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
 using PrintLogApi.Models.SortEnums;
 using PrintLogApi.Profiles;
+using PrintLogApi.Services.Timeline;
 using static PrintLogApi.Models.Print;
 using static PrintLogApi.Services.MeasurementUtilities;
 
@@ -300,6 +300,7 @@ public sealed class PrintService(
                 p.AllowComments,
                 p.AllowFileDownloads,
                 p.Notes,
+                p.PausedSeconds,
                 ProjectId = p.Project != null && p.Project.CreatedById == userId ? p.ProjectId : null,
                 ProjectName = p.Project != null && p.Project.CreatedById == userId ? p.Project.Name : null,
 
@@ -365,7 +366,23 @@ public sealed class PrintService(
             materialsUsed.Sum(m => m.Grams),
             FileName: row.FileName, Url: row.Url, ViewStatus: row.ViewStatus.ToString(),
             EstimatedDurationSeconds: row.EstimatedPrintTimeInSeconds,
-            AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads);
+            AllowComments: row.AllowComments, AllowFileDownloads: row.AllowFileDownloads,
+            PausedSeconds: row.PausedSeconds,
+            Timeline: await TimelineForMcp(printId, ct));
+    }
+
+    /// <summary>The print's timeline for the owner's MCP detail (api#343), oldest first.</summary>
+    private async Task<IReadOnlyList<PrintTimelineEntry>> TimelineForMcp(long printId, CancellationToken ct)
+    {
+        var rows = await context.PrintTimelineEvents.AsNoTracking()
+            .Where(e => e.PrintId == printId)
+            .ToListAsync(ct);
+        // In memory: SQLite cannot order by a DateTimeOffset, and a print has at most 200 rows.
+        return rows
+            .OrderBy(e => e.OccurredAt).ThenBy(e => e.Id)
+            .Select(Models.DTOs.Timeline.TimelineEventDto.From)
+            .Select(e => new PrintTimelineEntry(e.Type!, e.OccurredAt, e.EndedAt, e.Code, e.Message))
+            .ToList();
     }
 
     /// <summary>

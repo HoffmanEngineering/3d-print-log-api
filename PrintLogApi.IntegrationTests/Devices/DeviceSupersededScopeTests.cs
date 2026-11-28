@@ -25,6 +25,7 @@ public partial class DeviceSupersededScopeTests(CustomWebApplicationFactory fact
         "POST api/Prints/{id}/complete prints:write",
         "POST api/Prints/{id}/image prints:write",
         "POST api/Prints/{id}/slicer-settings prints:write",
+        "POST api/Prints/{id}/timeline prints:write",
         "PUT api/Connections/{instanceId} connections:write",
     };
 
