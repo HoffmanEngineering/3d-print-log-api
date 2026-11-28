@@ -15,7 +15,7 @@ public class MoonrakerNotifierHandler(
     IPrintEventService printEventService,
     TimeProvider clock) : IMoonrakerNotifierHandler
 {
-    private static readonly HashSet<string> PrintEvents = ["started", "cancelled", "error", "complete"];
+    private static readonly HashSet<string> PrintEvents = ["started", "cancelled", "error", "complete", "paused", "resumed"];
 
     public async Task HandleAsync(long userId, PrintEventMessageDto message)
     {
@@ -49,6 +49,11 @@ public class MoonrakerNotifierHandler(
                 case "complete":
                     telemetry.TrackEvent("Moonraker_Webhook_Completed");
                     await HandlePrintCompleted(message, userId);
+                    break;
+                case "paused":
+                case "resumed":
+                    telemetry.TrackEvent(message.EventName == "paused" ? "Moonraker_Webhook_Paused" : "Moonraker_Webhook_Resumed");
+                    await HandlePauseChanged(message, userId);
                     break;
                 default:
                     var properties = new Dictionary<string, string> { { "event", message.EventName! } };
@@ -141,6 +146,17 @@ public class MoonrakerNotifierHandler(
                     Notes: "Added by Moonraker"),
             ],
         });
+    }
+
+    /// <summary>
+    /// A pause or resume (api#343), on the notifier's own open print of the file on that printer.
+    /// The payload has no time, so the delivery is keyed on when it arrived.
+    /// </summary>
+    private Task HandlePauseChanged(PrintEventMessageDto data, long userId)
+    {
+        var key = $"{MoonrakerController.NotifierSource}:{data.EventName}:{clock.GetUtcNow().ToUnixTimeSeconds()}";
+        return printEventService.PauseChanged(
+            Finished(data, userId, PrintStatus.Success, 0), data.EventName == "paused", key, PrintSource.Moonraker);
     }
 
     private Task HandlePrintFailed(PrintEventMessageDto data, long userId)

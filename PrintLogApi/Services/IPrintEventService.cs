@@ -27,6 +27,13 @@ public interface IPrintEventService
     Task<bool> HasPrintToFinish(PrintFinishedEvent finished);
 
     /// <summary>
+    /// Applies a notifier or webhook pause or resume (api#343), received now, to the newest print
+    /// <paramref name="match"/> would finish (same matching as <see cref="Finished"/>). False when
+    /// there is none. <paramref name="key"/> identifies the delivery.
+    /// </summary>
+    Task<bool> PauseChanged(PrintFinishedEvent match, bool paused, string key, Models.PrintSource source);
+
+    /// <summary>
     /// True when the printer has a live bridge connection of <paramref name="kind"/>, so an event
     /// the printer's host software sent on its own (the Moonraker notifier for <c>moonraker</c>,
     /// the OctoPrint Webhooks plugin for <c>octoprint</c>) must be dropped: the bridge logs the

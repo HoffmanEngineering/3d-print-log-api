@@ -282,7 +282,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         var printerId = await CreatePrinterAsync();
         var instanceId = await RegisterBridgeAsync(printerId);
 
-        var body = System.IO.File.ReadAllText(FixturePath("moonraker-notifier-started.json")).Replace("\\\"started\\\"", "\\\"paused\\\"");
+        var body = System.IO.File.ReadAllText(FixturePath("moonraker-notifier-started.json")).Replace("\\\"started\\\"", "\\\"standby\\\"");
         await PostRawNotifierAsync(body, printerId, NewRun());
 
         Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
@@ -678,7 +678,7 @@ public class PrintEventPipelineTests : IClassFixture<CustomWebApplicationFactory
         var printerId = await CreatePrinterAsync();
         var instanceId = await RegisterBridgeAsync(printerId, kind: Connection.OctoPrintKind);
 
-        await PostOctoPrintAsync("octoprint-print-started.json", printerId, NewRun(), NewHash(), topic: "Print Paused");
+        await PostOctoPrintAsync("octoprint-print-started.json", printerId, NewRun(), NewHash(), topic: "User Action Needed");
 
         Assert.Equal(0, (await GetConnectionAsync(instanceId)).DroppedNotifierEventCount);
     }
