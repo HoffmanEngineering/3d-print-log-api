@@ -30,7 +30,8 @@ means the notifier and webhook start/finish pipeline.
   pause figure is taken: Klipper's `total_duration - print_duration` also counts warm-up.
 - **Who sees what.** `pausedSince` goes wherever the status does (detail, summaries, feed, sync
   `isPaused`); `pausedSeconds` and `GET /api/Prints/{id}/timeline` are the creator's only.
-- **Webhooks.** Moonraker `paused`/`resumed` and OctoPrint `Print Paused`/`Print Resumed` apply the
-  pause rules to the integration's own open print of that file on that printer, keyed on receipt
-  time (Moonraker) or `currentTime` (OctoPrint), and go through the live-bridge drop like start
-  and finish.
+- **Webhooks.** Moonraker `paused`/`resumed` apply the pause rules to the notifier's own open print
+  of that file on that printer, keyed on receipt time, and go through the live-bridge drop like
+  start and finish. OctoPrint's `Print Paused` stays unhandled on purpose: the Webhooks plugin
+  has no resume event (`on_event` in its `__init__.py`), so a pause from it would stay open until
+  the print ended. OctoPrint pauses come from the bridge's OctoPrint adapter.

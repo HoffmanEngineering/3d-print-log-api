@@ -55,33 +55,21 @@ public class WebhookPauseTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(1, await DroppedCountAsync(instanceId));
     }
 
+    // The OctoPrint Webhooks plugin sends "Print Paused" but has no event for a resume
+    // (octoprint_webhooks/__init__.py on_event), so a pause from it would stay open until the
+    // print ended. It is left unhandled; the bridge's OctoPrint adapter reports pauses instead.
     [Fact]
-    public async Task OctoPrintPausedAndResumed_RecordAClosedPauseOnTheWebhooksPrint()
+    public async Task OctoPrintPaused_OpensNoPause_SinceThePluginNeverSendsTheResume()
     {
         var printerId = await CreatePrinterAsync();
         var file = $"pause-{Guid.NewGuid():N}.gcode";
         await OctoPrintAsync("Print Started", printerId, file);
 
         await OctoPrintAsync("Print Paused", printerId, file);
-        Assert.NotNull((await PrintByFileAsync(file)).PausedSince);
 
-        await OctoPrintAsync("Print Resumed", printerId, file);
-        var resumed = await PrintByFileAsync(file);
-        Assert.Null(resumed.PausedSince);
-        var pause = Assert.Single(await RowsAsync(resumed.Id), r => r.Type == PrintTimelineEventType.Paused);
-        Assert.NotNull(pause.EndedAt);
-        Assert.Equal(PrintSource.OctoPrint, pause.Source);
-    }
-
-    [Fact]
-    public async Task OctoPrintPaused_WithALiveBridgeAndNoWebhookPrint_IsDroppedAndCounted()
-    {
-        var printerId = await CreatePrinterAsync();
-        var instanceId = await RegisterBridgeAsync(printerId, "octoprint");
-
-        await OctoPrintAsync("Print Paused", printerId, $"pause-{Guid.NewGuid():N}.gcode");
-
-        Assert.Equal(1, await DroppedCountAsync(instanceId));
+        var print = await PrintByFileAsync(file);
+        Assert.Null(print.PausedSince);
+        Assert.DoesNotContain(await RowsAsync(print.Id), r => r.Type == PrintTimelineEventType.Paused);
     }
 
     private async Task NotifyAsync(string eventName, long printerId, string file)

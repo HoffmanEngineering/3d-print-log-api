@@ -71,10 +71,16 @@ public class PrintTimeline(
         });
     }
 
-    public async Task ApplyAsync(long printId, IReadOnlyList<TimelineInput> inputs, PrintSource source, CancellationToken ct)
+    public Task ApplyAsync(long printId, IReadOnlyList<TimelineInput> inputs, PrintSource source, CancellationToken ct) =>
+        ApplyAsync(printId, inputs, source, retry: true, ct);
+
+    private async Task ApplyAsync(
+        long printId, IReadOnlyList<TimelineInput> inputs, PrintSource source, bool retry, CancellationToken ct)
     {
-        var print = await context.Prints.FirstOrDefaultAsync(p => p.Id == printId, ct)
+        // Untracked: its pause columns are written only if they are still what was read (Commit).
+        var print = await context.Prints.AsNoTracking().FirstOrDefaultAsync(p => p.Id == printId, ct)
             ?? throw new DoesNotExistException();
+        var (status, pausedSince, pausedSeconds) = (print.Status, print.PausedSince, print.PausedSeconds);
         var keys = await KeysAsync(context, printId, ct);
         var open = await OpenPauseAsync(context, print, ct);
         var now = clock.GetUtcNow();
@@ -124,9 +130,10 @@ public class PrintTimeline(
             return;
         }
 
+        bool committed;
         try
         {
-            await context.SaveChangesAsync(ct);
+            committed = await CommitAsync(print, status, pausedSince, pausedSeconds, ct);
         }
         catch (DbUpdateException ex)
         {
@@ -135,7 +142,47 @@ public class PrintTimeline(
             context.ChangeTracker.Clear();
             return;
         }
+        if (!committed)
+        {
+            // Another request paused, resumed or finished the print since it was read: apply these
+            // again to what it left (once; a key it recorded is skipped then).
+            context.ChangeTracker.Clear();
+            if (retry)
+            {
+                await ApplyAsync(printId, inputs, source, retry: false, ct);
+            }
+            return;
+        }
         cacheVersionService.InvalidateUserCache(print.CreatedById);
+    }
+
+    /// <summary>
+    /// Writes the print's pause columns only if its status and pause columns are still the ones read,
+    /// then the timeline rows, in one transaction. False, writing nothing, when they changed.
+    /// </summary>
+    private async Task<bool> CommitAsync(
+        Print print, PrintStatus status, DateTimeOffset? pausedSince, int? pausedSeconds, CancellationToken ct)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await context.Database.BeginTransactionAsync(ct);
+            var updated = await context.Prints
+                .Where(p => p.Id == print.Id
+                    && p.Status == status
+                    && p.PausedSince == pausedSince
+                    && p.PausedSeconds == pausedSeconds)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(p => p.PausedSince, print.PausedSince)
+                    .SetProperty(p => p.PausedSeconds, print.PausedSeconds), ct);
+            if (updated == 0)
+            {
+                return false;
+            }
+            await context.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return true;
+        });
     }
 
     /// <summary>
@@ -179,6 +226,16 @@ public class PrintTimeline(
         if (print.PausedSince is { } since)
         {
             ClosePause(print, await OpenPauseAsync(db, print, ct), finishedAt < since ? since : finishedAt);
+        }
+
+        // A pause that committed after this finish read the print has a row its PausedSince
+        // doesn't show: the end closes it too, so no pause outlives its print.
+        var orphans = await db.PrintTimelineEvents
+            .Where(e => e.PrintId == print.Id && e.Type == PrintTimelineEventType.Paused && e.EndedAt == null)
+            .ToListAsync(ct);
+        foreach (var orphan in orphans)
+        {
+            orphan.EndedAt = finishedAt < orphan.OccurredAt ? orphan.OccurredAt : finishedAt;
         }
     }
 

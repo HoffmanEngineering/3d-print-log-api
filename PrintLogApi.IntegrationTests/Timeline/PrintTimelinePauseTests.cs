@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PrintLogApi.Models;
 using PrintLogApi.Services.Timeline;
 using Xunit;
@@ -166,6 +168,108 @@ public class PrintTimelinePauseTests(CustomWebApplicationFactory factory) : ICla
         await ApplyAsync(printId, Resume(start.AddMinutes(11), "r1"));
 
         Assert.Equal(60, (await ReadPrintAsync(printId)).PausedSeconds);
+    }
+
+    // Built like PrintFinishRaceTests: an interceptor runs the competing request from another
+    // scope after this one has read the print and before it writes anything.
+
+    [Fact]
+    public async Task Pause_RacingAnotherPause_LeavesOneOpenPause()
+    {
+        var (printId, start) = await AddPrintAsync();
+        var race = Before("FROM \"PrintTimelineEvents\"", () => ApplyAsync(printId, Pause(start.AddMinutes(10), "other")));
+
+        await ApplyRacingAsync(race, printId, Pause(start.AddMinutes(11), "mine"));
+
+        Assert.True(race.Fired, "the competing pause never ran, so no race was tested");
+        var row = Assert.Single(await RowsAsync(printId));
+        Assert.Equal("other", row.Key);
+        Assert.Equal(start.AddMinutes(10), (await ReadPrintAsync(printId)).PausedSince);
+    }
+
+    [Fact]
+    public async Task Pause_RacingTheFinish_IsNotRecorded()
+    {
+        var (printId, start) = await AddPrintAsync();
+        var race = Before("FROM \"PrintTimelineEvents\"", () => FinishAsync(printId, start.AddMinutes(30)));
+
+        await ApplyRacingAsync(race, printId, Pause(start.AddMinutes(20), "late"));
+
+        Assert.True(race.Fired, "the competing finish never ran, so no race was tested");
+        var print = await ReadPrintAsync(printId);
+        Assert.Equal(PrintStatus.Success, print.Status);
+        Assert.Null(print.PausedSince);
+        Assert.DoesNotContain(await RowsAsync(printId), r => r.Type == PrintTimelineEventType.Paused);
+    }
+
+    [Fact]
+    public async Task Resume_RacingAnotherResume_AddsThePauseOnce()
+    {
+        var (printId, start) = await AddPrintAsync();
+        await ApplyAsync(printId, Pause(start.AddMinutes(10), "p1"));
+        var race = Before("FROM \"PrintTimelineEvents\"", () => ApplyAsync(printId, Resume(start.AddMinutes(16), "r1")));
+
+        await ApplyRacingAsync(race, printId, Resume(start.AddMinutes(17), "r2"));
+
+        Assert.True(race.Fired, "the competing resume never ran, so no race was tested");
+        var print = await ReadPrintAsync(printId);
+        Assert.Null(print.PausedSince);
+        Assert.Equal(6 * 60, print.PausedSeconds);
+        Assert.Equal(start.AddMinutes(16), Assert.Single(await RowsAsync(printId)).EndedAt);
+    }
+
+    [Fact]
+    public async Task Finish_ClosesAPauseRowItsStaleReadOfThePrintMissed()
+    {
+        // A pause committed after the finish read the print: the finish writes back the
+        // PausedSince it read (null), so the row itself is what tells it a pause is open.
+        var (printId, start) = await AddPrintAsync();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
+            db.PrintTimelineEvents.Add(new PrintTimelineEvent
+            {
+                PrintId = printId,
+                Type = PrintTimelineEventType.Paused,
+                OccurredAt = start.AddMinutes(10),
+                Source = PrintSource.ApiKey,
+                Key = "orphan",
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await FinishAsync(printId, start.AddMinutes(30));
+
+        var pause = Assert.Single(await RowsAsync(printId), r => r.Type == PrintTimelineEventType.Paused);
+        Assert.Equal(start.AddMinutes(30), pause.EndedAt);
+    }
+
+    private async Task ApplyRacingAsync(BeforeFirstReaderInterceptor race, long printId, params TimelineInput[] inputs)
+    {
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<DbContextOptions<PrintLogContext>>();
+        await using var db = new PrintLogContext(new DbContextOptionsBuilder<PrintLogContext>(options).AddInterceptors(race).Options);
+        await ActivatorUtilities.CreateInstance<PrintTimeline>(scope.ServiceProvider, db)
+            .ApplyAsync(printId, inputs, PrintSource.ApiKey, Ct);
+    }
+
+    private static BeforeFirstReaderInterceptor Before(string marker, Func<Task> before) => new(marker, before);
+
+    /// <summary>Runs <paramref name="before"/> once, just before the first query whose SQL contains <paramref name="marker"/>.</summary>
+    private sealed class BeforeFirstReaderInterceptor(string marker, Func<Task> before) : DbCommandInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (!Fired && command.CommandText.Contains(marker, StringComparison.Ordinal))
+            {
+                Fired = true;
+                await before();
+            }
+            return result;
+        }
     }
 
     private static TimelineInput Pause(DateTimeOffset at, string key) => new(TimelineInputType.Pause, at, key);

@@ -105,16 +105,6 @@ public class OctoprintController(
                     telemetry.TrackEvent("OctoPrint_Webhook_PrintDone");
                     await HandlePrintCompleted(data, userId.Value);
                     break;
-                case "Print Paused":
-                case "Print Resumed":
-                    telemetry.TrackEvent(data.Topic == "Print Paused" ? "OctoPrint_Webhook_Paused" : "OctoPrint_Webhook_Resumed");
-                    await printEventService.PauseChanged(
-                        Finished(data, userId.Value, PrintStatus.Success),
-                        data.Topic == "Print Paused",
-                        // currentTime is when OctoPrint sent the event; a redelivery carries the same.
-                        $"{WebhookSource}:{data.Topic}:{data.CurrentTime}",
-                        PrintSource.OctoPrint);
-                    break;
                 default:
                     var properties = new Dictionary<string, string> { { "Topic", data.Topic! } };
                     telemetry.TrackEvent("OctoPrint_Webhook_Unhandled", properties);
@@ -166,7 +156,7 @@ public class OctoprintController(
         return true;
     }
 
-    private static readonly HashSet<string> PrintTopics = ["Print Started", "Print Done", "Print Failed", "Error", "Print Paused", "Print Resumed"];
+    private static readonly HashSet<string> PrintTopics = ["Print Started", "Print Done", "Print Failed", "Error"];
 
     private bool isTestWebhook(OctoprintWebhookDto data)
     {
