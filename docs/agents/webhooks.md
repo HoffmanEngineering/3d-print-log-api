@@ -7,7 +7,7 @@ and `print.failed`. Code: `Webhooks/`, `Controllers/WebhooksController.cs`.
 
 - **Two choke points, and every print transition must go through one.** Finished and failed come
   from `PrintFinishNotifier.NotifyIfJustFinished` (#166); started from `PrintStartNotifier`, called
-  after the save on every path that creates a print in Printing or moves one into it. A new path
+  after the save on every path that creates a print in Printing or moves one into it. The same paths stage the timeline's Started and Finished entries (`docs/agents/timeline.md`). A new path
   that starts or finishes a print calls the matching notifier, or webhooks silently miss it.
 - **The URL path can be the receiver's secret** (a Home Assistant webhook id). Logs, notifications
   and telemetry carry the host only: `WebhookTelemetryRedactionInitializer` cuts the dependency to

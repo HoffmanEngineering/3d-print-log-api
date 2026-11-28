@@ -33,7 +33,7 @@ resin). `Connection.BridgeKinds` and `IsBridgeKind` are the list; add a new adap
 - **"Has a bridge" is not one question.** The Spoolman config block leaves out the notifier for a
   bridge of any kind. The event dedupe (`PrintEventService.LiveBridges`) matches one kind: the
   Moonraker notifier is dropped for a live `moonraker` bridge (#150), the OctoPrint Webhooks plugin
-  (`OctoprintController`: Print Started, Print Done, Print Failed, Error) for a live `octoprint`
+  (`OctoprintController`: Print Started, Print Done, Print Failed, Error, Print Paused, Print Resumed) for a live `octoprint`
   one (#291). Both count on the same `Connection.DroppedNotifierEventCount`, so `showNotifierNotice`
   on an `octoprint` connection means "turn off the Webhooks plugin" and the UI must word it by the
   connection's kind. Spoolman `/use` stays Moonraker-only, because it must agree with the notifier
