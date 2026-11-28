@@ -42,6 +42,13 @@ public class CompletePrintDto : IValidatableObject
     [MaxLength(MaxFilamentUsageRows)]
     public ICollection<CompletePrintFilamentUsageDto>? FilamentUsage { get; set; }
 
+    /// <summary>
+    /// Why the job failed, when the printer said (api#343): recorded on the print's timeline when
+    /// this completion moves it to Failed or Cancelled, ignored otherwise. The print's notes are
+    /// not touched.
+    /// </summary>
+    public CompletePrintFailureDto? Failure { get; set; }
+
     /// <summary>The statuses a job can end in.</summary>
     public static bool IsFinished(PrintStatus status) =>
         status is PrintStatus.Success or PrintStatus.Cancelled or PrintStatus.Failed or PrintStatus.PartialSuccess;
@@ -96,6 +103,18 @@ public class CompletePrintDto : IValidatableObject
                 [nameof(FilamentUsage)]);
         }
     }
+}
+
+/// <summary>The printer's reason a job failed, for <see cref="CompletePrintDto.Failure"/>.</summary>
+public class CompletePrintFailureDto
+{
+    /// <summary>A short code from the printer or connector, such as <c>klippy_shutdown</c> or <c>0x0300400C</c>.</summary>
+    [MaxLength(PrintTimelineEvent.MaxCodeLength)]
+    public string? Code { get; set; }
+
+    /// <summary>The reason in words, such as "Klipper shutdown".</summary>
+    [MaxLength(PrintTimelineEvent.MaxMessageLength)]
+    public string? Message { get; set; }
 }
 
 /// <summary>One material's actual usage for <see cref="CompletePrintDto"/>.</summary>

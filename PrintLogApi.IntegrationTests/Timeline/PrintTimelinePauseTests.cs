@@ -185,7 +185,7 @@ public class PrintTimelinePauseTests(CustomWebApplicationFactory factory) : ICla
         var db = scope.ServiceProvider.GetRequiredService<PrintLogContext>();
         var print = await db.Prints.SingleAsync(p => p.Id == printId, Ct);
         print.Status = PrintStatus.Success;
-        await scope.ServiceProvider.GetRequiredService<IPrintTimeline>().StageFinishAsync(print, at, failure: null, Ct);
+        await PrintTimeline.StageFinishAsync(db, print, at, failure: null, Ct);
         await db.SaveChangesAsync(Ct);
     }
 

@@ -11,6 +11,7 @@ using PrintLogApi.Exceptions;
 using PrintLogApi.Extensions;
 using PrintLogApi.Mcp;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Timeline;
 using PrintLogApi.Models.DTOs.Filament;
 using PrintLogApi.Models.DTOs.Print;
 using PrintLogApi.Models.DTOs.Printer;
@@ -722,6 +723,7 @@ public sealed class PrintService(
                 // A replay that finishes the print is a finish like /complete's, so it is claimed
                 // the same way (#199) and notifies exactly once: an overlapping finish that won
                 // the claim has already notified, and this one writes nothing.
+                await PrintTimeline.StageFinishAsync(context, existing, DateTimeOffset.UtcNow, failure: null, CancellationToken.None);
                 var claimed = await PrintFinishTransition.SaveIfStillUnfinished(context, existing, userId);
                 cacheVersionService.InvalidateUserCache(userId);
                 if (claimed)
@@ -735,6 +737,10 @@ public sealed class PrintService(
             }
             else
             {
+                if (previousStatus == PrintStatus.Pending && existing.Status == PrintStatus.Printing)
+                {
+                    PrintTimeline.StageStarted(existing, existing.StartDate ?? DateTimeOffset.UtcNow);
+                }
                 await context.SaveChangesAsync();
                 cacheVersionService.InvalidateUserCache(userId);
                 // A connector that created the print Pending and now reports it running (#235).
@@ -950,6 +956,10 @@ public sealed class PrintService(
             newPrint.ProjectId = newProject.Id;
         }
 
+        if (newPrint.Status == PrintStatus.Printing)
+        {
+            PrintTimeline.StageStarted(newPrint, newPrint.StartDate ?? DateTimeOffset.UtcNow);
+        }
         context.Prints.Add(newPrint);
         await context.SaveChangesAsync();
         printStartNotifier.NotifyIfJustStarted(newPrint, previousStatus: null);
@@ -1065,6 +1075,10 @@ public sealed class PrintService(
 
         await ApplyMcpPrintDefaults(newPrint, viewStatus, allowComments, allowFileDownloads, userId, ct);
         await UpdateFilamentUsageWeights(newPrint);
+        if (newPrint.Status == PrintStatus.Printing)
+        {
+            PrintTimeline.StageStarted(newPrint, newPrint.StartDate ?? DateTimeOffset.UtcNow);
+        }
 
         try
         {
@@ -1799,18 +1813,24 @@ public sealed class PrintService(
         {
             await context.SaveChangesAsync();
         }
-        else if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, userId))
+        else
         {
-            // An overlapping completion finished the print first (#199), and these tracked rows
-            // predate its usage. Run again against what it stored, as a later retry would: a
-            // replay of an already-finished print, which merges without adding a second row and
-            // does not notify.
-            context.ChangeTracker.Clear();
-            if (retryIfRaced)
+            // The timeline's Finished and Failure entries ride on the finish's own save (api#343).
+            var failure = dto.Failure is { } f ? new TimelineFailure(f.Code, f.Message) : null;
+            await PrintTimeline.StageFinishAsync(context, print, dto.EndedAt ?? DateTimeOffset.UtcNow, failure, CancellationToken.None);
+            if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, userId))
             {
-                return await CompletePrint(id, dto, userId, retryIfRaced: false);
+                // An overlapping completion finished the print first (#199), and these tracked rows
+                // predate its usage. Run again against what it stored, as a later retry would: a
+                // replay of an already-finished print, which merges without adding a second row and
+                // does not notify.
+                context.ChangeTracker.Clear();
+                if (retryIfRaced)
+                {
+                    return await CompletePrint(id, dto, userId, retryIfRaced: false);
+                }
+                throw new DbUpdateConcurrencyException("The print changed while it was being completed.");
             }
-            throw new DbUpdateConcurrencyException("The print changed while it was being completed.");
         }
 
         telemetry.TrackEvent("PrintComplete");
@@ -1819,6 +1839,7 @@ public sealed class PrintService(
 
         // Null-forgiven: the print was just saved, so the re-read always finds it.
         return (await GetPrintById(id))!;
+
     }
 
     public Task<AddPrintResult> ClaimPrint(long id, ClaimPrintDto dto, long userId) =>
@@ -1838,7 +1859,7 @@ public sealed class PrintService(
 
         var print = await context.Prints
             .Where(p => p.Id == id)
-            .Select(p => new { p.CreatedById, p.Status, p.ExternalSource, p.ExternalId })
+            .Select(p => new { p.CreatedById, p.Status, p.ExternalSource, p.ExternalId, p.Source })
             .FirstOrDefaultAsync()
             ?? throw new DoesNotExistException();
 
@@ -1925,6 +1946,7 @@ public sealed class PrintService(
             throw new PrintClaimConflictException("The print changed while it was being claimed.");
         }
 
+        await PrintTimeline.RecordClaimedAsync(context, id, print.Source, source, DateTimeOffset.UtcNow, CancellationToken.None);
         cacheVersionService.InvalidateUserCache(userId);
         telemetry.TrackEvent("PrintClaimed");
 

@@ -33,17 +33,6 @@ public interface IPrintTimeline
     /// minutes to now plus 5 minutes. Throws <see cref="DoesNotExistException"/> for no such print.
     /// </summary>
     Task ApplyAsync(long printId, IReadOnlyList<TimelineInput> inputs, PrintSource source, CancellationToken ct);
-
-    /// <summary>
-    /// Stages the Finished entry (and Failure, for a Failed or Cancelled print given one) on a
-    /// tracked print whose finished status is already assigned, and closes an open pause at
-    /// <paramref name="finishedAt"/>. Saves nothing: the caller's finish save carries it, so a
-    /// finish that loses its race drops these with its other tracked changes.
-    /// </summary>
-    Task StageFinishAsync(Print print, DateTimeOffset finishedAt, TimelineFailure? failure, CancellationToken ct);
-
-    /// <summary>Records that a connector claimed the print. Saves.</summary>
-    Task RecordClaimedAsync(long printId, string externalSource, CancellationToken ct);
 }
 
 public class PrintTimeline(
@@ -86,8 +75,8 @@ public class PrintTimeline(
     {
         var print = await context.Prints.FirstOrDefaultAsync(p => p.Id == printId, ct)
             ?? throw new DoesNotExistException();
-        var keys = await KeysAsync(printId, ct);
-        var open = await OpenPauseAsync(print, ct);
+        var keys = await KeysAsync(context, printId, ct);
+        var open = await OpenPauseAsync(context, print, ct);
         var now = clock.GetUtcNow();
         var changed = false;
 
@@ -149,10 +138,19 @@ public class PrintTimeline(
         cacheVersionService.InvalidateUserCache(print.CreatedById);
     }
 
-    public async Task StageFinishAsync(Print print, DateTimeOffset finishedAt, TimelineFailure? failure, CancellationToken ct)
+    /// <summary>
+    /// Stages the Finished entry (and Failure, for a Failed or Cancelled print given one) on a
+    /// print tracked by <paramref name="db"/> whose finished status is already assigned, and closes
+    /// an open pause at <paramref name="finishedAt"/>. Saves nothing: the caller's finish save
+    /// carries it, so a finish that loses its race (<see cref="PrintFinishTransition"/>) drops these
+    /// with its other tracked changes. Static, on the caller's context, for that reason. Call it
+    /// only for the move from unfinished to finished.
+    /// </summary>
+    public static async Task StageFinishAsync(
+        PrintLogContext db, Print print, DateTimeOffset finishedAt, TimelineFailure? failure, CancellationToken ct)
     {
-        var keys = await KeysAsync(print.Id, ct);
-        AddIfRoom(print, keys, new PrintTimelineEvent
+        var keys = await KeysAsync(db, print.Id, ct);
+        AddIfRoom(db, keys, new PrintTimelineEvent
         {
             PrintId = print.Id,
             Type = PrintTimelineEventType.Finished,
@@ -166,7 +164,7 @@ public class PrintTimeline(
             && failure is not null
             && (!string.IsNullOrWhiteSpace(failure.Code) || !string.IsNullOrWhiteSpace(failure.Message)))
         {
-            AddIfRoom(print, keys, new PrintTimelineEvent
+            AddIfRoom(db, keys, new PrintTimelineEvent
             {
                 PrintId = print.Id,
                 Type = PrintTimelineEventType.Failure,
@@ -180,24 +178,24 @@ public class PrintTimeline(
 
         if (print.PausedSince is { } since)
         {
-            ClosePause(print, await OpenPauseAsync(print, ct), finishedAt < since ? since : finishedAt);
+            ClosePause(print, await OpenPauseAsync(db, print, ct), finishedAt < since ? since : finishedAt);
         }
     }
 
-    public async Task RecordClaimedAsync(long printId, string externalSource, CancellationToken ct)
+    /// <summary>
+    /// Records that a connector claimed the print (once: a later claim finds the key), on
+    /// <paramref name="db"/>, and saves. A racing duplicate is ignored.
+    /// </summary>
+    public static async Task RecordClaimedAsync(
+        PrintLogContext db, long printId, PrintSource source, string externalSource, DateTimeOffset at, CancellationToken ct)
     {
-        var print = await context.Prints.FirstOrDefaultAsync(p => p.Id == printId, ct);
-        if (print is null)
-        {
-            return;
-        }
-        var keys = await KeysAsync(printId, ct);
-        if (!AddIfRoom(print, keys, new PrintTimelineEvent
+        var keys = await KeysAsync(db, printId, ct);
+        if (!AddIfRoom(db, keys, new PrintTimelineEvent
         {
             PrintId = printId,
             Type = PrintTimelineEventType.Claimed,
-            OccurredAt = clock.GetUtcNow(),
-            Source = print.Source,
+            OccurredAt = at,
+            Source = source,
             Code = Clip(externalSource, PrintTimelineEvent.MaxCodeLength),
             Key = ClaimedKey,
         }))
@@ -207,27 +205,22 @@ public class PrintTimeline(
 
         try
         {
-            await context.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException)
         {
-            logger.LogInformation(ex, "The claim of print {PrintId} was already on its timeline.", printId);
-            context.ChangeTracker.Clear();
+            db.ChangeTracker.Clear();
         }
     }
 
-    private bool AddIfRoom(Print print, HashSet<string> keys, PrintTimelineEvent entry)
+    /// <summary>Adds the entry unless its key is recorded or the print is at its cap.</summary>
+    private static bool AddIfRoom(PrintLogContext db, HashSet<string> keys, PrintTimelineEvent entry)
     {
-        if (keys.Contains(entry.Key))
+        if (keys.Contains(entry.Key) || keys.Count >= PrintTimelineEvent.MaxPerPrint)
         {
             return false;
         }
-        if (keys.Count >= PrintTimelineEvent.MaxPerPrint)
-        {
-            CapReached(print.Id);
-            return false;
-        }
-        context.PrintTimelineEvents.Add(entry);
+        db.PrintTimelineEvents.Add(entry);
         keys.Add(entry.Key);
         return true;
     }
@@ -248,16 +241,16 @@ public class PrintTimeline(
         print.PausedSince = null;
     }
 
-    private async Task<HashSet<string>> KeysAsync(long printId, CancellationToken ct) =>
-        (await context.PrintTimelineEvents
+    private static async Task<HashSet<string>> KeysAsync(PrintLogContext db, long printId, CancellationToken ct) =>
+        (await db.PrintTimelineEvents
             .Where(e => e.PrintId == printId)
             .Select(e => e.Key)
             .ToListAsync(ct)).ToHashSet();
 
-    private async Task<PrintTimelineEvent?> OpenPauseAsync(Print print, CancellationToken ct) =>
+    private static async Task<PrintTimelineEvent?> OpenPauseAsync(PrintLogContext db, Print print, CancellationToken ct) =>
         print.PausedSince is null
             ? null
-            : await context.PrintTimelineEvents
+            : await db.PrintTimelineEvents
                 .Where(e => e.PrintId == print.Id && e.Type == PrintTimelineEventType.Paused && e.EndedAt == null)
                 .OrderByDescending(e => e.Id)
                 .FirstOrDefaultAsync(ct);

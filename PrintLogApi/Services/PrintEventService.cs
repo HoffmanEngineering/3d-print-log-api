@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Timeline;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Services;
@@ -99,6 +100,7 @@ public class PrintEventService(
             await printService.UpdateFilamentUsageWeights(print);
         }
 
+        PrintTimeline.StageStarted(print, started.StartDate);
         context.Prints.Add(print);
 
         StoredSnapshot? snapshot = null;
@@ -280,6 +282,9 @@ public class PrintEventService(
                 }
             }
         }
+
+        // A notifier or webhook finish arrives as the job ends and carries no end time (api#343).
+        await PrintTimeline.StageFinishAsync(context, print, clock.GetUtcNow(), failure: null, CancellationToken.None);
 
         if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, finished.UserId))
         {
