@@ -310,7 +310,8 @@ public sealed class SyncSnapshotService(
                     ? new SyncCurrentPrint(c.Id, c.Title, c.StartDate, c.EstimatedSeconds,
                         c.StartDate.HasValue && c.EstimatedSeconds.HasValue ? c.StartDate.Value.AddSeconds(c.EstimatedSeconds.Value) : null,
                         SyncPrintSource.Name(c.Source), SyncPrintSource.Url(webBase, c.Id),
-                        estimatesByPrint.TryGetValue(c.Id, out var est) ? est : [])
+                        estimatesByPrint.TryGetValue(c.Id, out var est) ? est : [],
+                        IsPaused: c.PausedSince.HasValue)
                     : null,
                 LastFinishedPrint: p.LastFinished is { } f
                     ? new SyncFinishedPrint(f.Id, f.Title, StatusName(f.Status), f.StartDate,
@@ -384,6 +385,7 @@ public sealed class SyncSnapshotService(
                         EstimatedSeconds = pr.EstimatedPrintTimeInSeconds,
                         PrintSeconds = pr.PrintTimeInSeconds,
                         Source = pr.Source,
+                        PausedSince = pr.PausedSince,
                     })
                     .FirstOrDefault(),
                 LastFinished = db.Prints
@@ -513,6 +515,7 @@ public sealed class SyncSnapshotService(
         public int? EstimatedSeconds { get; init; }
         public int? PrintSeconds { get; init; }
         public PrintSource Source { get; init; }
+        public DateTimeOffset? PausedSince { get; init; }
     }
 
     internal sealed class SpoolRow

@@ -101,6 +101,12 @@ public class PrintFinishRaceTests(CustomWebApplicationFactory factory) : IClassF
         Assert.Equal(PrintStatus.Success, result.Status);
         Assert.Equal(600, result.PrintTimeInSeconds);
         Assert.Single(await NotificationsForPrintAsync(printId));
+        // The loser's staged timeline entry went with its cleared tracker (api#343).
+        using (var check = factory.Services.CreateScope())
+        {
+            Assert.Equal(1, await check.ServiceProvider.GetRequiredService<PrintLogContext>().PrintTimelineEvents
+                .CountAsync(e => e.PrintId == printId && e.Type == PrintTimelineEventType.Finished, Ct));
+        }
         var row = Assert.Single(await UsageRowsAsync(printId));
         Assert.Equal(IntegrationTestSeeder.TestFilamentId1, row.FilamentId);
         Assert.Equal(2, row.LengthInM);

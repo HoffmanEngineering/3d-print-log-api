@@ -52,6 +52,7 @@ public class PrintLogContext : DbContext
     public DbSet<PrintImage> PrintImages { get; set; }
 
     public DbSet<PrintAttachment> PrintAttachments { get; set; }
+    public DbSet<PrintTimelineEvent> PrintTimelineEvents { get; set; }
 
     public DbSet<Project> Projects { get; set; }
     public DbSet<ProjectImage> ProjectImages { get; set; }
@@ -682,6 +683,17 @@ public class PrintLogContext : DbContext
             .HasOne(u => u.Print)
             .WithMany()
             .HasForeignKey(u => u.PrintId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // A replayed event is recognised by its key; the index also serves "a print's timeline".
+        modelBuilder.Entity<PrintTimelineEvent>()
+            .HasIndex(e => new { e.PrintId, e.Key })
+            .IsUnique();
+
+        modelBuilder.Entity<PrintTimelineEvent>()
+            .HasOne(e => e.Print)
+            .WithMany(p => p.TimelineEvents)
+            .HasForeignKey(e => e.PrintId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Print>()

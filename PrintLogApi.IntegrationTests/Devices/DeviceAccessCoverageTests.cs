@@ -43,6 +43,8 @@ public partial class DeviceAccessCoverageTests(CustomWebApplicationFactory facto
         "POST api/Prints/{id}/complete prints:write",
         "POST api/Prints/{id}/image prints:write",
         "POST api/Prints/{id}/slicer-settings prints:write",
+        "POST api/Prints/{id}/timeline prints:write",
+        "GET api/Prints/{id}/timeline prints:read",
         "GET api/Prints/{id}/files prints:read",
         "POST api/Prints/{id}/files/upload-url files:write",
         "POST api/Prints/{id}/files/confirm files:write",

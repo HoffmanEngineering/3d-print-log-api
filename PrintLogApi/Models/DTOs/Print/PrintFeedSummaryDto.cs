@@ -34,4 +34,7 @@ public class PrintFeedSummaryDto
     public string? DefaultPrintImageThumbnailUrl => ImageUrls.PrintThumbnailOrNull(Id, DefaultPrintImageId);
 
     public int CommentCount { get; set; }
+
+    /// <summary>When the open pause started, or null when not paused (api#343). Only meaningful while Printing.</summary>
+    public DateTimeOffset? PausedSince { get; set; }
 }

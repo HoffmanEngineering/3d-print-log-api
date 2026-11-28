@@ -43,7 +43,19 @@ public sealed record PrintDetailResult(
     bool MaterialsUsedTruncated,
     double ReturnedMaterialsUsedGrams,
     string? FileName, string? Url, string ViewStatus,
-    int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads);
+    int? EstimatedDurationSeconds, bool AllowComments, bool AllowFileDownloads,
+    // api#343: seconds paused (null when it never paused; DurationSeconds includes them) and the
+    // print's timeline, oldest first.
+    int? PausedSeconds = null,
+    IReadOnlyList<PrintTimelineEntry>? Timeline = null);
+
+/// <summary>
+/// One entry in a print's timeline (api#343). <see cref="Type"/> is <c>started</c>,
+/// <c>finished</c>, <c>claimed</c>, <c>paused</c> or <c>failure</c>; <see cref="EndedAt"/> is a
+/// pause's resume, null while it is open.
+/// </summary>
+public sealed record PrintTimelineEntry(
+    string Type, DateTimeOffset OccurredAt, DateTimeOffset? EndedAt, string? Code, string? Message);
 
 /// <summary>
 /// One spool in the inventory. <see cref="RemainingGrams"/> is null for a spool with no tracked

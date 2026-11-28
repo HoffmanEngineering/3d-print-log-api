@@ -195,6 +195,7 @@ public class Startup
         services.AddTransient<IPrintEventService, PrintEventService>();
         services.AddTransient<IMoonrakerNotifierHandler, MoonrakerNotifierHandler>();
         services.AddTransient<IPrintFinishNotifier, PrintFinishNotifier>();
+        services.AddTransient<PrintLogApi.Services.Timeline.IPrintTimeline, PrintLogApi.Services.Timeline.PrintTimeline>();
         services.AddTransient<IPrintStartNotifier, PrintStartNotifier>();
         services.AddTransient<IPushDispatchService, PushDispatchService>();
         services.AddTransient<ISubscriptionService, SubscriptionService>();

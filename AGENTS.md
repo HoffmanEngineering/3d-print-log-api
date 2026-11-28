@@ -53,6 +53,8 @@ file for its topic, and in this file only if most tasks need it.
   `/api/Prints/claimable`).
 - `docs/agents/spoolman.md`: before changing the Spoolman-compatible API (`/spoolman/api/v1`).
 - `docs/agents/webhooks.md`: before changing outbound webhooks or any print state transition.
+- `docs/agents/timeline.md`: before changing the print timeline, pauses (`PausedSince`,
+  `PausedSeconds`) or any print state transition (api#343).
 - `docs/agents/billing.md`: before changing Stripe checkout, the billing portal or the Stripe
   webhook.
 - `docs/agents/public-images.md`: before changing image or thumbnail endpoints, social images, or

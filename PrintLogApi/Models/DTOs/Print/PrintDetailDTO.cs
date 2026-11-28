@@ -64,4 +64,17 @@ public class PrintDetailDTO
     /// Null when no connection logged it or it has been deleted. Shown to the creator only.
     /// </summary>
     public string? ConnectionDisplayName { get; set; }
+
+    /// <summary>
+    /// When the open pause started, or null when the print isn't paused (api#343). Only meaningful
+    /// while the status is Printing (2). Read-only.
+    /// </summary>
+    public DateTimeOffset? PausedSince { get; set; }
+
+    /// <summary>
+    /// Total seconds the print spent paused; null when it never paused. The print's duration
+    /// includes them, so its active time is printTimeInSeconds minus this. Shown to the creator
+    /// only. Read-only.
+    /// </summary>
+    public int? PausedSeconds { get; set; }
 }

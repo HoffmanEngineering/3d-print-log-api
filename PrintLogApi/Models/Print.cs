@@ -125,4 +125,16 @@ public class Print : TimestampEntity
     /// </summary>
     public Guid? ConnectionId { get; set; }
     public Connection? Connection { get; set; }
+
+    /// <summary>
+    /// When the open pause started, or null when the print isn't paused (api#343). Kept beside the
+    /// timeline's open <see cref="PrintTimelineEventType.Paused"/> row so lists and the sync
+    /// snapshot can show "Paused" without reading the timeline. Only meaningful while Printing.
+    /// </summary>
+    public DateTimeOffset? PausedSince { get; set; }
+
+    /// <summary>Total seconds of the print's closed pauses; null when it never paused.</summary>
+    public int? PausedSeconds { get; set; }
+
+    public ICollection<PrintTimelineEvent>? TimelineEvents { get; set; }
 }

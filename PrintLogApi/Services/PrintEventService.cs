@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PrintLogApi.Exceptions;
 using PrintLogApi.Models;
+using PrintLogApi.Services.Timeline;
 using static PrintLogApi.Models.Print;
 
 namespace PrintLogApi.Services;
@@ -14,6 +15,7 @@ public class PrintEventService(
     IImageProcessingService imageProcessing,
     IProcessedImageWriter imageWriter,
     ICacheVersionService cacheVersionService,
+    IPrintTimeline timeline,
     TimeProvider clock,
     ILogger<PrintEventService> logger) : IPrintEventService
 {
@@ -99,6 +101,7 @@ public class PrintEventService(
             await printService.UpdateFilamentUsageWeights(print);
         }
 
+        PrintTimeline.StageStarted(print, started.StartDate);
         context.Prints.Add(print);
 
         StoredSnapshot? snapshot = null;
@@ -146,6 +149,26 @@ public class PrintEventService(
         // CreatedDate, not StartDate: SQLite cannot compare a DateTimeOffset.
         var createdSince = clock.GetUtcNow().UtcDateTime - FinishForBridgeWithin;
         return await query.AnyAsync(p => p.CreatedDate > createdSince);
+    }
+
+    public async Task<bool> PauseChanged(PrintFinishedEvent match, bool paused, string key, PrintSource source)
+    {
+        if (MatchingPrints(match) is not { } query)
+        {
+            return false;
+        }
+        var printId = await query
+            .OrderByDescending(p => p.CreatedDate)
+            .Select(p => (long?)p.Id)
+            .FirstOrDefaultAsync();
+        if (printId is not { } id)
+        {
+            return false;
+        }
+
+        var input = new TimelineInput(paused ? TimelineInputType.Pause : TimelineInputType.Resume, clock.GetUtcNow(), key);
+        await timeline.ApplyAsync(id, [input], source, CancellationToken.None);
+        return true;
     }
 
     /// <summary>
@@ -280,6 +303,9 @@ public class PrintEventService(
                 }
             }
         }
+
+        // A notifier or webhook finish arrives as the job ends and carries no end time (api#343).
+        await PrintTimeline.StageFinishAsync(context, print, clock.GetUtcNow(), failure: null, CancellationToken.None);
 
         if (!await PrintFinishTransition.SaveIfStillUnfinished(context, print, finished.UserId))
         {
